@@ -361,6 +361,71 @@ export function deliveryGateRefusalOf(e: unknown): DeliveryGateRefusal | null {
   };
 }
 
+/** The Inference tab's launch refusing a bucket a prior run already published into: the
+ *  requested path, the document count and a fresh bucket name, or null when every variant to
+ *  the resolver's ceiling is taken (the agent's own remedy is the only way forward then). */
+export interface BucketHoldsDocumentsRefusal {
+  kind: "bucket_holds_documents";
+  message: string;
+  date: string | null;
+  requested_model_name: string;
+  requested_output_dir: string;
+  document_stem_count: number;
+  suggested_model_name: string | null;
+  suggested_output_dir: string | null;
+}
+
+/** The launch's other refusal: a job of this process already writing the same (dataset, model,
+ *  date), named so the breeder watches it instead of resolving past it into a second job. */
+export interface BucketInFlightRefusal {
+  kind: "bucket_in_flight";
+  message: string;
+  date: string | null;
+  requested_output_dir: string;
+  job_id: string;
+}
+
+export type BucketRefusal = BucketHoldsDocumentsRefusal | BucketInFlightRefusal;
+
+/**
+ * Either of the launch's own bucket refusals a thrown error carries, or null for every other
+ * failure (including the verdict-exhaustion 409, whose detail is a plain string).
+ *
+ * Read by kind off the parsed detail, the same dispatch `deliveryGateRefusalOf` uses for its own
+ * family, so a bucket refusal is never matched by a prose regex either.
+ */
+export function bucketRefusalOf(e: unknown): BucketRefusal | null {
+  if (!(e instanceof StructuredRefusalError)) return null;
+  const detail = e.detail;
+  const date = typeof detail.date === "string" ? detail.date : null;
+  const message = typeof detail.message === "string" ? detail.message : e.message;
+  if (detail.kind === "bucket_holds_documents") {
+    return {
+      kind: "bucket_holds_documents",
+      message,
+      date,
+      requested_model_name: String(detail.requested_model_name ?? ""),
+      requested_output_dir: String(detail.requested_output_dir ?? ""),
+      document_stem_count:
+        typeof detail.document_stem_count === "number" ? detail.document_stem_count : 0,
+      suggested_model_name:
+        typeof detail.suggested_model_name === "string" ? detail.suggested_model_name : null,
+      suggested_output_dir:
+        typeof detail.suggested_output_dir === "string" ? detail.suggested_output_dir : null,
+    };
+  }
+  if (detail.kind === "bucket_in_flight") {
+    return {
+      kind: "bucket_in_flight",
+      message,
+      date,
+      requested_output_dir: String(detail.requested_output_dir ?? ""),
+      job_id: String(detail.job_id ?? ""),
+    };
+  }
+  return null;
+}
+
 /** One trait's authoring statement, as the browser reads it. */
 export type TraitSpecStatementRecord = {
   trait: string;

@@ -2,7 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { api } from "@/api/client";
-import { inferenceApi, openInferenceStream, resultsApi, type InferenceJob } from "@/api/inference";
+import {
+  inferenceApi,
+  openInferenceStream,
+  resultsApi,
+  type BucketHoldsDocumentsRefusal,
+  type BucketInFlightRefusal,
+  type InferenceJob,
+} from "@/api/inference";
+import { StructuredRefusalError } from "@/api/http";
 import { useStore } from "@/store";
 import { InferenceTab } from "@/tabs/InferenceTab";
 
@@ -48,6 +56,49 @@ function mockTree(dates: string[]) {
     prediction_dirs: {},
     label_problem: null,
   });
+}
+
+function selectBaseline() {
+  fireEvent.change(screen.getByRole("combobox"), {
+    target: { value: "C:/proj/.tcip/models/baseline/best.pt" },
+  });
+}
+
+function documentsRefusal(
+  overrides: Partial<BucketHoldsDocumentsRefusal> = {},
+): StructuredRefusalError {
+  const detail: BucketHoldsDocumentsRefusal = {
+    kind: "bucket_holds_documents",
+    message: "prediction bucket 'baseline' already holds 1 prediction document(s).",
+    date: "2026-01-01",
+    requested_model_name: "baseline",
+    requested_output_dir: "C:/data/predictions/baseline/2026-01-01",
+    document_stem_count: 1,
+    suggested_model_name: "baseline@r2",
+    suggested_output_dir: "C:/data/predictions/baseline@r2/2026-01-01",
+    ...overrides,
+  };
+  return new StructuredRefusalError(
+    detail as unknown as Record<string, unknown>,
+    409,
+    detail.message,
+  );
+}
+
+function inFlightRefusal(overrides: Partial<BucketInFlightRefusal> = {}): StructuredRefusalError {
+  const detail: BucketInFlightRefusal = {
+    kind: "bucket_in_flight",
+    message: "job inf-live is already writing to C:/data/predictions/baseline/2026-01-01.",
+    date: "2026-01-01",
+    requested_output_dir: "C:/data/predictions/baseline/2026-01-01",
+    job_id: "inf-live",
+    ...overrides,
+  };
+  return new StructuredRefusalError(
+    detail as unknown as Record<string, unknown>,
+    409,
+    detail.message,
+  );
 }
 
 beforeEach(() => {
@@ -251,6 +302,281 @@ describe("InferenceTab job table", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("InferenceTab bucket refusals", () => {
+  beforeEach(() => {
+    mockTree(["2026-01-01"]);
+    vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
+      models: [{ name: "baseline", checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt" }],
+    });
+  });
+
+  async function launchOneRefused() {
+    render(<InferenceTab />);
+    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    selectBaseline();
+    fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-01" }));
+    fireEvent.click(screen.getByRole("button", { name: /launch inference/i }));
+  }
+
+  it("renders the requested path, the count and a date- and suggestion-named action, with no toast", async () => {
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(documentsRefusal());
+    await launchOneRefused();
+
+    expect(
+      await screen.findByText(
+        /C:\/data\/predictions\/baseline\/2026-01-01 already holds 1 prediction document/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Run into baseline@r2 instead for 2026-01-01" }),
+    ).toBeInTheDocument();
+    expect(useStore.getState().toasts).toHaveLength(0);
+  });
+
+  it("re-posts the suggested bucket from the entry's own action, clearing it on success", async () => {
+    const launchSpy = vi
+      .spyOn(inferenceApi, "launch")
+      .mockRejectedValueOnce(documentsRefusal())
+      .mockResolvedValueOnce({
+        status: "launched",
+        job_id: "inf-r2",
+        images_dir: "C:/data/images/2026-01-01",
+        output_dir: "C:/data/predictions/baseline@r2/2026-01-01",
+        bucket_redirected: false,
+        requested_output_dir: null,
+      });
+    await launchOneRefused();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Run into baseline@r2 instead for 2026-01-01" }),
+    );
+
+    await waitFor(() => expect(launchSpy).toHaveBeenCalledTimes(2));
+    expect(launchSpy.mock.calls[1][0]).toEqual(
+      expect.objectContaining({
+        checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt",
+        dataset_root: "C:/data",
+        model_name: "baseline@r2",
+        date: "2026-01-01",
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Run into baseline@r2 instead for 2026-01-01" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(await screen.findByText("inf-r2")).toBeInTheDocument();
+  });
+
+  it("replaces the entry with a fresh suggestion on a second refusal from its own action", async () => {
+    vi.spyOn(inferenceApi, "launch")
+      .mockRejectedValueOnce(documentsRefusal())
+      .mockRejectedValueOnce(
+        documentsRefusal({
+          requested_model_name: "baseline@r2",
+          requested_output_dir: "C:/data/predictions/baseline@r2/2026-01-01",
+          suggested_model_name: "baseline@r3",
+          suggested_output_dir: "C:/data/predictions/baseline@r3/2026-01-01",
+        }),
+      );
+    await launchOneRefused();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Run into baseline@r2 instead for 2026-01-01" }),
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "Run into baseline@r3 instead for 2026-01-01" }),
+    ).toBeInTheDocument();
+  });
+
+  it("removes the entry and toasts when its own action fails a different way", async () => {
+    vi.spyOn(inferenceApi, "launch")
+      .mockRejectedValueOnce(documentsRefusal())
+      .mockRejectedValueOnce(new Error("checkpoint not found"));
+    await launchOneRefused();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Run into baseline@r2 instead for 2026-01-01" }),
+    );
+
+    await waitFor(() => expect(useStore.getState().toasts).toHaveLength(1));
+    expect(useStore.getState().toasts[0].message).toContain("checkpoint not found");
+    expect(screen.queryByText("Refused launches")).not.toBeInTheDocument();
+  });
+
+  it("renders the agent's own remedy and no launch action when no fresh bucket exists", async () => {
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(
+      documentsRefusal({ suggested_model_name: null, suggested_output_dir: null }),
+    );
+    await launchOneRefused();
+
+    expect(await screen.findByText(/run_inference/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Run into/ })).not.toBeInTheDocument();
+  });
+
+  it("renders an in-flight refusal's job id and watches it", async () => {
+    vi.mocked(inferenceApi.listJobs).mockResolvedValue({
+      jobs: [job({ job_id: "inf-live", status: "running" })],
+    });
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(inFlightRefusal());
+    await launchOneRefused();
+
+    expect(await screen.findByText(/inf-live/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Watch job inf-live for 2026-01-01" }));
+    expect(await screen.findByText(/Status: running/)).toBeInTheDocument();
+  });
+
+  it("keeps one refused entry and one job row when one of two dates launches and the other refuses", async () => {
+    mockTree(["2026-01-01", "2026-01-08"]);
+    vi.spyOn(inferenceApi, "launch").mockImplementation((body) =>
+      body.date === "2026-01-01"
+        ? Promise.resolve({
+            status: "launched",
+            job_id: "inf-1",
+            images_dir: `C:/data/images/${body.date}`,
+            output_dir: `C:/data/predictions/${body.model_name}/${body.date}`,
+            bucket_redirected: false,
+            requested_output_dir: null,
+          })
+        : Promise.reject(documentsRefusal({ date: body.date ?? undefined })),
+    );
+
+    render(<InferenceTab />);
+    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    selectBaseline();
+    fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-01" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-08" }));
+    fireEvent.click(screen.getByRole("button", { name: /launch inference/i }));
+
+    expect(await screen.findByText("inf-1")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Run into baseline@r2 instead for 2026-01-08" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+  });
+
+  it("keeps two refused dates' controls distinguishable by accessible name", async () => {
+    mockTree(["2026-01-01", "2026-01-08"]);
+    vi.spyOn(inferenceApi, "launch").mockImplementation((body) =>
+      Promise.reject(documentsRefusal({ date: body.date ?? undefined })),
+    );
+
+    render(<InferenceTab />);
+    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    selectBaseline();
+    fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-01" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-08" }));
+    fireEvent.click(screen.getByRole("button", { name: /launch inference/i }));
+
+    expect(
+      await screen.findByRole("button", { name: "Run into baseline@r2 instead for 2026-01-01" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Run into baseline@r2 instead for 2026-01-08" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Dismiss refusal for 2026-01-01" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Dismiss refusal for 2026-01-08" }),
+    ).toBeInTheDocument();
+  });
+
+  it("removes the entry on Dismiss", async () => {
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(documentsRefusal());
+    await launchOneRefused();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Dismiss refusal for 2026-01-01" }));
+    expect(screen.queryByText("Refused launches")).not.toBeInTheDocument();
+  });
+
+  it("still toasts, and renders no entry, for a launch failure of another kind", async () => {
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(new Error("checkpoint not found: C:/x"));
+    await launchOneRefused();
+
+    await waitFor(() => expect(useStore.getState().toasts).toHaveLength(1));
+    expect(screen.queryByText("Refused launches")).not.toBeInTheDocument();
+  });
+
+  it("drops refused entries on a model change", async () => {
+    vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
+      models: [
+        { name: "baseline", checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt" },
+        { name: "other", checkpoint_path: "C:/proj/.tcip/models/other/best.pt" },
+      ],
+    });
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(documentsRefusal());
+    await launchOneRefused();
+    expect(await screen.findByText("Refused launches")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "C:/proj/.tcip/models/other/best.pt" },
+    });
+    expect(screen.queryByText("Refused launches")).not.toBeInTheDocument();
+  });
+
+  it("drops refused entries on a dataset change", async () => {
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(documentsRefusal());
+    await launchOneRefused();
+    expect(await screen.findByText("Refused launches")).toBeInTheDocument();
+
+    act(() => {
+      useStore.setState((s) => ({
+        gui: { ...s.gui, dataset: { ...s.gui.dataset, dataset_root: "C:/data2" } },
+      }));
+    });
+    expect(screen.queryByText("Refused launches")).not.toBeInTheDocument();
+  });
+
+  it("disables the launch button while onLaunch's loop is in flight", async () => {
+    let resolveLaunch: (value: {
+      status: string;
+      job_id: string;
+      images_dir: string;
+      output_dir: string;
+      bucket_redirected: boolean;
+      requested_output_dir: string | null;
+    }) => void = () => {};
+    vi.spyOn(inferenceApi, "launch").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveLaunch = resolve;
+        }),
+    );
+
+    render(<InferenceTab />);
+    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    selectBaseline();
+    fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-01" }));
+    const launchButton = screen.getByRole("button", { name: /launch inference/i });
+    fireEvent.click(launchButton);
+
+    await waitFor(() => expect(launchButton).toBeDisabled());
+    act(() =>
+      resolveLaunch({
+        status: "launched",
+        job_id: "inf-1",
+        images_dir: "C:/data/images/2026-01-01",
+        output_dir: "C:/data/predictions/baseline/2026-01-01",
+        bucket_redirected: false,
+        requested_output_dir: null,
+      }),
+    );
+    await waitFor(() => expect(launchButton).not.toBeDisabled());
+  });
+
+  it("announces the refused-launches list and labels it without a level-one heading", async () => {
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(documentsRefusal());
+    await launchOneRefused();
+
+    const list = await screen.findByRole("list");
+    expect(list).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByText("Refused launches").tagName).not.toBe("H1");
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 });
 
