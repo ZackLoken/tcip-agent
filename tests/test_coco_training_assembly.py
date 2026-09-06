@@ -957,7 +957,6 @@ def test_a_complete_under_an_unchanged_subject_trains(tmp_path):
 def test_a_partial_carrying_a_stale_stamp_still_trains(tmp_path):
     """A partial is not a human's assertion (it carries no Complete), so a stamp on it, however
     stale, never quarantines: the quarantine is over finished statuses only."""
-    from tcip_mcp import class_registry
     from tcip_mcp.class_registry import write_registry
     from tcip_mcp.pipelines.data.label_queries import trainable_stems
 
@@ -987,7 +986,6 @@ def test_a_partial_carrying_a_stale_stamp_still_trains(tmp_path):
 def test_a_stale_and_contradicted_negative_still_trains_by_content(tmp_path):
     """Real content contradicts a stored negative outright; staleness never overrides that, and
     the contradiction is still named for the caller to surface."""
-    from tcip_mcp import class_registry
     from tcip_mcp.class_registry import write_registry
     from tcip_mcp.pipelines.data.label_queries import trainable_stems
 
