@@ -225,7 +225,7 @@ export function AnnotateToolbar({
     const wasStale = staleMarks.includes(currentImage);
     setImageStatus(currentImage, newStatus);
     try {
-      await classesApi.setImageStatus(
+      const result = await classesApi.setImageStatus(
         dataset.project_root,
         currentImage,
         newStatus,
@@ -235,6 +235,18 @@ export function AnnotateToolbar({
         dataset.annotations_dir,
         useStore.getState().user || undefined,
       );
+      // The optimistic write above already cleared the mark; a stamp that did not land leaves
+      // this confirmation exactly as unverifiable against the current schema as before the write.
+      if (!result.digest_stamped) {
+        useStore.getState().markStale(currentImage);
+        useStore
+          .getState()
+          .pushToast(
+            `${currentImage}'s status was recorded, but its schema stamp did not land; it ` +
+              "still needs re-confirmation.",
+            "info",
+          );
+      }
     } catch (e) {
       // The optimistic write above cleared the mark; the confirmation it stood for never
       // reached the server, so the disagreement it named still holds.
@@ -503,7 +515,7 @@ export function AnnotateToolbar({
             <>
               <span
                 className="rounded bg-tcip-warn/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-tcip-warn"
-                title="The label file changed since this image was confirmed."
+                title="This subject's labeled content or attribute schema changed since this image was confirmed."
               >
                 Stale
               </span>

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import { classesApi } from "@/api/classes";
+import { classesApi, FINISHED_STATUSES } from "@/api/classes";
 import { reconcileImageStatuses } from "@/lib/imageStatus";
 import { useStore } from "@/store";
 
@@ -14,13 +14,16 @@ export interface ImageStatusHydrateParams {
 }
 
 /**
- * Loads the stored per-image status for the selected subject and reconciles it against what the
- * label files derive to now (`reconcileImageStatuses`). An unconfirmed name heals freely and is
- * written back through the bulk route; a confirmed name (complete/negative) whose derived token
- * now disagrees is never rewritten, only added to `staleMarks` for the breeder to re-confirm.
+ * Loads the stored per-image status for the selected subject and reconciles it against two
+ * independent staleness causes: what the label files derive to now (`reconcileImageStatuses`,
+ * content) and the status route's own `stale_definition` (the subject's attribute schema moved
+ * under a finished confirmation). An unconfirmed name heals freely and is written back through
+ * the bulk route; a confirmed name (complete/negative) stale by either cause is never rewritten,
+ * only added to `staleMarks` for the breeder to re-confirm.
  *
  * Runs once per dataset selection (this hook's own dependencies): a label file edited afterward,
- * in this session or by the agent, is not checked again until the next selection of this dataset.
+ * or a vocabulary changed in this same open session, is not checked again until the next
+ * selection of this dataset; the schema-change sweep's own toast is the signal until then.
  *
  * Skips entirely with no subject selected: nothing to scope image status to yet. Either way,
  * `staleMarks` is cleared first, so a mark left over from a previously selected dataset can never
@@ -48,9 +51,8 @@ export function useImageStatusHydrate({
           annotationsDir,
         );
         const stored = saved.statuses ?? {};
-        const confirmed = imageList.filter(
-          (name) => stored[name] === "complete" || stored[name] === "negative",
-        );
+        const confirmed = imageList.filter((name) => FINISHED_STATUSES.includes(stored[name]));
+        const digestStale = new Set(saved.stale_definition ?? []);
         const derivedRes = await classesApi.deriveImageStatus({
           project_root: projectRoot,
           annotations_dir: annotationsDir,
@@ -59,7 +61,14 @@ export function useImageStatusHydrate({
           complete_override: confirmed,
         });
         const derived = derivedRes.statuses ?? {};
-        const { writes, staleMarks } = reconcileImageStatuses(stored, derived, confirmed);
+        const { writes, staleMarks: contentStale } = reconcileImageStatuses(
+          stored,
+          derived,
+          confirmed,
+        );
+        const staleMarks = Array.from(
+          new Set([...contentStale, ...imageList.filter((name) => digestStale.has(name))]),
+        ).sort();
         if (cancelled) return;
         if (derivedRes.unreadable.length) {
           useStore

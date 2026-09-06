@@ -34,11 +34,16 @@ export type Registry = Record<string, SubjectDef>;
 // "unannotated" until that Complete, which is the whole negative-sample rail.
 export type ImageStatus = "complete" | "partial" | "negative" | "unannotated";
 
+// The two statuses a human's own confirmation ends on: the frontend's declaration of
+// dataset_layout.FINISHED_STATUSES, held equal to it by test_frontend_dataset_vocabulary.py.
+export const FINISHED_STATUSES: readonly ImageStatus[] = ["complete", "negative"];
+
 /** What a registry save's attribute-vocabulary change did to existing confirmations: for each
  *  affected subject, how many of its confirmations were stamped with the outgoing schema (so a
  *  later read tells them apart from ones made under the new vocabulary), how many of its
- *  confirmations (already stamped, by this write or an earlier one) now predate the vocabulary in
- *  effect, and a warning naming any the sweep itself could not complete. */
+ *  confirmations (already stamped, by this write or an earlier one, complete or negative alike)
+ *  now predate the vocabulary in effect and are quarantined from training until re-confirmed, and
+ *  a warning naming any the sweep itself could not complete. */
 export interface SchemaChangeSweep {
   newly_stamped: Record<string, number>;
   predating_vocabulary: Record<string, number>;
@@ -93,7 +98,7 @@ export const classesApi = {
     if (date) params.set("date", date);
     if (dataset_root) params.set("dataset_root", dataset_root);
     if (annotations_dir) params.set("annotations_dir", annotations_dir);
-    return getJson<{ statuses: Record<string, ImageStatus> }>(
+    return getJson<{ statuses: Record<string, ImageStatus>; stale_definition: string[] }>(
       `${ROUTES.getClassesImageStatus}?${params.toString()}`,
     );
   },
@@ -109,7 +114,7 @@ export const classesApi = {
     annotations_dir?: string | null,
     user?: string,
   ) =>
-    postJson<unknown>(ROUTES.postClassesImageStatus, {
+    postJson<{ status: string; digest_stamped: boolean }>(ROUTES.postClassesImageStatus, {
       project_root,
       image_name,
       status,
@@ -129,15 +134,11 @@ export const classesApi = {
     annotations_dir?: string | null,
     user?: string,
   ) =>
-    postJson<unknown>(ROUTES.postClassesImageStatusBulk, {
-      project_root,
-      statuses,
-      subject,
-      date,
-      dataset_root,
-      annotations_dir,
-      user,
-    }),
+    // digest_stamped names the statuses passed that were left unstamped, empty once every one lands.
+    postJson<{ status: string; n: number; digest_stamped: string[] }>(
+      ROUTES.postClassesImageStatusBulk,
+      { project_root, statuses, subject, date, dataset_root, annotations_dir, user },
+    ),
 
   deriveImageStatus: (body: {
     project_root: string;
