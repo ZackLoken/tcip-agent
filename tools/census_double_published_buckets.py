@@ -12,10 +12,10 @@ an earlier one, leaving documents the stamp does not vouch for. A validation rec
 line says whether the sealed content is still what is on disk. Nothing is repaired; every
 finding is printed with the path and the counts.
 
-A project whose own ``predictions/`` tree is not among the roots ``project_roots`` walks (never
-registered as a dataset, or registered alongside a different dataset elsewhere) has no record
-naming those buckets, so they are outside this census; the script prints a note when such a tree
-exists. Reading a stamp or a validation log goes through the storage seam, which binds the
+A project whose own ``predictions/`` tree is not among the roots ``project_roots`` walks (the
+project registered no dataset, or registered only a dataset elsewhere and never its own tree)
+has no record naming those buckets, so they are outside this census; the script prints a note
+when such a tree exists. Reading a stamp or a validation log goes through the storage seam, which binds the
 process's default backend and opens nothing that is not already a database.
 
 A bucket whose stamp decodes but carries no ``image_filenames`` mapping cannot be checked against
