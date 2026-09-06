@@ -1,4 +1,4 @@
-"""Tests for scripts/prove_test_fails_before.py's test_file resolution, run by subprocess
+"""Tests for tools/prove_test_fails_before.py's test_file resolution, run by subprocess
 against the repository's own history.
 
 Before this fix an absolute test_file path named the working checkout's file regardless of the
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-SCRIPT = REPO / "scripts" / "prove_test_fails_before.py"
+SCRIPT = REPO / "tools" / "prove_test_fails_before.py"
 TEST_FILE = REPO / "tests" / "test_orthomosaic_tools.py"
 KNOWN_GUARD = (
     "test_deliver_orthomosaic_plant_counts_refuses_a_registry_csv_rewritten_after_registration"
@@ -47,7 +47,7 @@ def test_the_same_guard_named_by_its_repo_relative_path_reports_guards():
 
 
 def test_a_path_outside_tests_is_refused_by_name():
-    outside = REPO / "scripts" / "prove_test_fails_before.py"
+    outside = REPO / "tools" / "prove_test_fails_before.py"
     result = subprocess.run(
         [sys.executable, str(SCRIPT), str(outside)],
         cwd=str(REPO), capture_output=True, text=True, timeout=60,
@@ -60,10 +60,10 @@ def test_a_path_outside_tests_is_refused_by_name():
 
 def test_a_relative_and_absolute_dotdot_path_outside_tests_are_both_refused():
     """A relative spelling that reads as inside tests/ before its ".." segments collapse
-    (tests/../scripts/x.py) must refuse the same way its absolute spelling does, not be
+    (tests/../tools/x.py) must refuse the same way its absolute spelling does, not be
     materialized as if it were a real tests/ path."""
-    relative = "tests/../scripts/prove_test_fails_before.py"
-    absolute = str(REPO / "tests" / ".." / "scripts" / "prove_test_fails_before.py")
+    relative = "tests/../tools/prove_test_fails_before.py"
+    absolute = str(REPO / "tests" / ".." / "tools" / "prove_test_fails_before.py")
     for spelling in (relative, absolute):
         result = subprocess.run(
             [sys.executable, str(SCRIPT), spelling],

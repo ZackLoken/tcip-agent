@@ -7,7 +7,7 @@ against the live CLI. Also confirms the fenced agent still starts (the settings 
 accepted). Run after any change to the fence.
 
 Usage (repo root, tcip-agent env):
-    python scripts/smoke_fence_e2e.py
+    python tools/smoke_fence_e2e.py
 
 Costs one trivial model turn.
 """

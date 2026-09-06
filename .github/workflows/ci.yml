@@ -119,12 +119,12 @@ jobs:
         # The adopter-facing map must not drift from the code: every module-table path exists,
         # and its import/imported-by counts match a freshly generated inventory.
         run: |
-          python scripts/build_module_inventory.py --out module-inventory.json
-          python scripts/check_architecture_doc.py --inventory-json module-inventory.json
+          python tools/build_module_inventory.py --out module-inventory.json
+          python tools/check_architecture_doc.py --inventory-json module-inventory.json
 
       - name: ARCHITECTURE.md citations match what they quote
         # Every citation that quotes a line must still find that line in the file it names.
-        run: python scripts/check_architecture_citations.py
+        run: python tools/check_architecture_citations.py
 
       - name: Run tests
         # TCIP_MIN_TESTS guards against the "missing dep silently skips ~15 files,

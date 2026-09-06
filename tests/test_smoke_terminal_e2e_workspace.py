@@ -1,4 +1,4 @@
-"""``scripts/smoke_terminal_e2e.py`` must never bind against the machine's own workspace: it
+"""``tools/smoke_terminal_e2e.py`` must never bind against the machine's own workspace: it
 sets ``TCIP_WORKSPACE`` to a workspace it is given before the served app's first request
 resolves anything, so a run against a developer's real projects never audits into one.
 """
@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = REPO_ROOT / "scripts" / "smoke_terminal_e2e.py"
+SCRIPT = REPO_ROOT / "tools" / "smoke_terminal_e2e.py"
 
 
 def _load():

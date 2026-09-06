@@ -33,7 +33,7 @@ Exit 0 when nothing failed, 1 otherwise (an oversized span counts as a failure).
 citations do not fail the run on their own; they are reported, and ``--strict`` promotes them to
 failures for a pass that means to leave the document exactly anchored. Defaults resolve
 ARCHITECTURE.md and the repo root relative to this script, so CI invokes it as
-`python scripts/check_architecture_citations.py`.
+`python tools/check_architecture_citations.py`.
 """
 
 from __future__ import annotations

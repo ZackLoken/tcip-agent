@@ -29,7 +29,7 @@ That load is tolerant by design (it drops a malformed record and answers with no
 the file will not read), which for a guardrail would mean passing on a registry that is broken, so
 `load_vocab` refuses an empty or shapeless vocabulary rather than checking against it.
 
-CLI: `python scripts/verify_skill_traits.py <skill.md> [crop_key]`, exit 0 clean, 1 unknown,
+CLI: `python tools/verify_skill_traits.py <skill.md> [crop_key]`, exit 0 clean, 1 unknown,
 2 unusable arguments or an unreadable vocabulary.
 """
 

@@ -19,7 +19,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 def _load_guardrail():
     spec = importlib.util.spec_from_file_location(
-        "verify_skill_traits", REPO / "scripts" / "verify_skill_traits.py"
+        "verify_skill_traits", REPO / "tools" / "verify_skill_traits.py"
     )
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
@@ -51,7 +51,7 @@ def test_skill_asserts_no_fabricated_traits(name: str, crop_key: str | None) -> 
     assert not unknown, (
         f"{name}: backticks trait-like tokens not in crops.yml and not allow-listed: "
         f"{unknown}. Either it's a fabricated trait (fix the document) or a real platform token "
-        "(add it to NON_TRAIT_ALLOW in scripts/verify_skill_traits.py)."
+        "(add it to NON_TRAIT_ALLOW in tools/verify_skill_traits.py)."
     )
 
 

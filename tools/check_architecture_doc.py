@@ -19,7 +19,7 @@ today paired with a pending decision, not a statement that is false now.
 Exit 0 when the tables match the tree, 1 when any named path is missing, any table row fails to
 parse, or (when an inventory JSON is supplied) any count or zero-importer drifts. Defaults resolve
 ARCHITECTURE.md and the repo root relative to this script, so CI invokes it as
-`python scripts/check_architecture_doc.py`.
+`python tools/check_architecture_doc.py`.
 """
 
 from __future__ import annotations

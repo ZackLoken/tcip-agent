@@ -1,4 +1,4 @@
-"""Tests for scripts/prove_test_fails_before.py's failure classification, run against a scratch
+"""Tests for tools/prove_test_fails_before.py's failure classification, run against a scratch
 git repository the test builds itself, so a baseline whose failure never reached the code under
 test is distinguished from one whose failure is the assertion the guard actually names.
 
@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-SCRIPT = REPO / "scripts" / "prove_test_fails_before.py"
+SCRIPT = REPO / "tools" / "prove_test_fails_before.py"
 SCRIPT_SOURCE = SCRIPT.read_text(encoding="utf-8")
 
 EXIT = {"GUARDS": 0, "VACUOUS": 1, "INDETERMINATE": 2, "REFUSED": 3}
@@ -37,9 +37,9 @@ def _scratch_repo(tmp_path: Path) -> Path:
     """A git repository holding nothing but the script under test, so it resolves its own
     ``REPO`` to this scratch tree rather than the real one."""
     repo = tmp_path / "scratch"
-    (repo / "scripts").mkdir(parents=True)
+    (repo / "tools").mkdir(parents=True)
     (repo / "tests").mkdir()
-    _write(repo / "scripts" / "prove_test_fails_before.py", SCRIPT_SOURCE)
+    _write(repo / "tools" / "prove_test_fails_before.py", SCRIPT_SOURCE)
     _git(repo, "init", "-q")
     _git(repo, "config", "user.email", "test@example.com")
     _git(repo, "config", "user.name", "Test")
@@ -54,7 +54,7 @@ def _commit_all(repo: Path, message: str) -> str:
 
 def _run(repo: Path, test_file: str, baseline: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(repo / "scripts" / "prove_test_fails_before.py"),
+        [sys.executable, str(repo / "tools" / "prove_test_fails_before.py"),
          test_file, "--baseline", baseline],
         cwd=str(repo), capture_output=True, text=True, timeout=120,
     )

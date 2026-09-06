@@ -2,16 +2,16 @@
 TypeScript source trees.
 
 Scope: packages/tcip-mcp/src, packages/tcip-annotation/src, packages/tcip-web/src,
-packages/tcip-store/src, scripts/ (all Python, parsed with the ast module), and
+packages/tcip-store/src, tools/ (all Python, parsed with the ast module), and
 packages/tcip-web/frontend/src (TypeScript, import statements extracted with a regex
 parser since no TS compiler is invoked here).
 
 Python import resolution: every .py file under the four package src/ roots gets a
 dotted module name (packages/tcip-mcp/src/tcip_mcp/tools/foo.py -> tcip_mcp.tools.foo;
-an __init__.py's dotted name is its containing package). scripts/ is not an installed
+an __init__.py's dotted name is its containing package). tools/ is not an installed
 package; its modules are indexed both under a bare stem (foo.py -> "foo", the name
-another script in scripts/ uses via `from foo import x` because scripts/ ends up on
-sys.path when a script is run directly) and under "scripts.foo" (the dotted form a
+another tool in tools/ uses via `from foo import x` because tools/ ends up on
+sys.path when a tool is run directly) and under "tools.foo" (the dotted form a
 module elsewhere in the repo would need). Both ast.Import and ast.ImportFrom
 (including relative imports, resolved against the importing module's own package) are
 walked; a `from pkg import name` is resolved to the submodule pkg.name when that
@@ -25,7 +25,7 @@ resolve against the importing file's directory; `@/...` resolves against
 packages/tcip-web/frontend/src (the alias in tsconfig.json / vite.config.ts). Bare
 package specifiers (react, zustand, ...) are external and dropped.
 
-Tracked at scripts/build_module_inventory.py so `check_architecture_doc.py` can run it
+Tracked at tools/build_module_inventory.py so `check_architecture_doc.py` can run it
 fresh and compare its counts against ARCHITECTURE.md's tables. Run from anywhere; the
 repo root is found by walking up from this file to the first ancestor containing a
 .git directory. Writes JSON to --out when given (with a markdown twin beside it), or
@@ -61,7 +61,7 @@ PY_PACKAGE_ROOTS = [
     REPO_ROOT / "packages" / "tcip-web" / "src",
     REPO_ROOT / "packages" / "tcip-store" / "src",
 ]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
+TOOLS_ROOT = REPO_ROOT / "tools"
 TS_ROOT = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
 
 TS_EXTENSIONS = (".ts", ".tsx")
@@ -129,15 +129,15 @@ def build_python_index():
             modules[relpath] = PyModule(f, dotted, is_init, label)
             dotted_index[dotted] = relpath
 
-    scripts_bare: dict[str, str] = {}
-    for f in iter_py_files(SCRIPTS_ROOT):
+    tools_bare: dict[str, str] = {}
+    for f in iter_py_files(TOOLS_ROOT):
         stem = f.stem
         relpath = rel(f)
-        modules[relpath] = PyModule(f, stem, False, "scripts")
-        scripts_bare[stem] = relpath
-        dotted_index[f"scripts.{stem}"] = relpath
+        modules[relpath] = PyModule(f, stem, False, "tools")
+        tools_bare[stem] = relpath
+        dotted_index[f"tools.{stem}"] = relpath
 
-    return modules, dotted_index, scripts_bare
+    return modules, dotted_index, tools_bare
 
 
 PY_HEADER_COMMENT_SKIP = re.compile(r"^#!|^#.*coding[:=]")
@@ -192,7 +192,7 @@ def resolve_from_import(
 
 
 def parse_python_imports(
-    pymod: PyModule, dotted_index: dict[str, str], scripts_bare: dict[str, str]
+    pymod: PyModule, dotted_index: dict[str, str], tools_bare: dict[str, str]
 ):
     try:
         source = pymod.path.read_text(encoding="utf-8")
@@ -209,7 +209,7 @@ def parse_python_imports(
 
     pymod.owns, pymod.owns_source = extract_py_owns(source, tree)
 
-    in_scripts = pymod.root_label == "scripts"
+    in_tools = pymod.root_label == "tools"
     self_parts = pymod.dotted.split(".")
     # a package's own __init__ counts as being inside that package for `.` resolution
     self_package_parts = self_parts if pymod.is_init else self_parts[:-1]
@@ -218,8 +218,8 @@ def parse_python_imports(
         if isinstance(node, ast.Import):
             for alias in node.names:
                 target = dotted_index.get(alias.name)
-                if target is None and in_scripts:
-                    target = scripts_bare.get(alias.name)
+                if target is None and in_tools:
+                    target = tools_bare.get(alias.name)
                 if target and target != rel(pymod.path):
                     pymod.imports.add(target)
         elif isinstance(node, ast.ImportFrom):
@@ -244,8 +244,8 @@ def parse_python_imports(
                     if target and target != rel(pymod.path):
                         pymod.imports.add(target)
                         resolved_any = True
-                if not resolved_any and in_scripts and node.module in scripts_bare:
-                    target = scripts_bare[node.module]
+                if not resolved_any and in_tools and node.module in tools_bare:
+                    target = tools_bare[node.module]
                     if target != rel(pymod.path):
                         pymod.imports.add(target)
 
@@ -350,9 +350,9 @@ def parse_ts_imports(tsmod: TsModule):
 
 
 def build_inventory() -> dict:
-    py_modules, dotted_index, scripts_bare = build_python_index()
+    py_modules, dotted_index, tools_bare = build_python_index()
     for pymod in py_modules.values():
-        parse_python_imports(pymod, dotted_index, scripts_bare)
+        parse_python_imports(pymod, dotted_index, tools_bare)
     for pymod in py_modules.values():
         for target in pymod.imports:
             if target in py_modules:
@@ -426,10 +426,10 @@ def render_markdown(out: dict) -> str:
     lines.append("# Module inventory and import graph")
     lines.append("")
     lines.append(
-        "Generated by `scripts/build_module_inventory.py`. Python imports are resolved by "
+        "Generated by `tools/build_module_inventory.py`. Python imports are resolved by "
         "parsing each file's AST (ast.Import / ast.ImportFrom, including relative imports) "
         "against a dotted-name index built from every .py file under the four package src/ "
-        "roots and scripts/. TypeScript imports are extracted with a regex parser over "
+        "roots and tools/. TypeScript imports are extracted with a regex parser over "
         "`import`/`export ... from` and dynamic `import()` specifiers, resolved against "
         "relative paths and the `@/` -> packages/tcip-web/frontend/src alias. Only "
         "specifiers that resolve to a file in this repo are recorded as edges; "

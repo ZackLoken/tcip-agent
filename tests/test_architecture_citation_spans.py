@@ -7,7 +7,7 @@ import pathlib
 import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-SCRIPT = REPO_ROOT / "scripts" / "check_architecture_citations.py"
+SCRIPT = REPO_ROOT / "tools" / "check_architecture_citations.py"
 
 
 def _load():

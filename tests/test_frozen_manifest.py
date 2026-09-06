@@ -1,6 +1,6 @@
 """frozen-formats.json is the shipped freeze commitment, held to the registry by this test.
 
-The manifest is generated from the store registry by scripts/generate_frozen_manifest.py and
+The manifest is generated from the store registry by tools/generate_frozen_manifest.py and
 committed; this test runs that same generator's --check in a fresh interpreter (one
 implementation of the derivation, and a clean registry: an in-process check would also see
 every throwaway store other tests registered in this worker) and refuses any drift, in both
@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
-_GENERATOR = _REPO / "scripts" / "generate_frozen_manifest.py"
+_GENERATOR = _REPO / "tools" / "generate_frozen_manifest.py"
 _MANIFEST = _REPO / "frozen-formats.json"
 
 

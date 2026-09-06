@@ -12,7 +12,7 @@
     drawing onto a default-format bitmap loses the source alpha and fills the margin black.
 
 .EXAMPLE
-    powershell -File scripts/generate_favicon.ps1 -Source "$HOME/Downloads/FullColorLogo_circleonly.png"
+    powershell -File tools/generate_favicon.ps1 -Source "$HOME/Downloads/FullColorLogo_circleonly.png"
 #>
 param(
     [string]$Source = "$HOME\Downloads\FullColorLogo_circleonly.png",

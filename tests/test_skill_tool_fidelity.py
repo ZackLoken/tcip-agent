@@ -23,7 +23,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 def _load_guardrail():
     spec = importlib.util.spec_from_file_location(
-        "verify_skill_tools", REPO / "scripts" / "verify_skill_tools.py"
+        "verify_skill_tools", REPO / "tools" / "verify_skill_tools.py"
     )
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
@@ -80,7 +80,7 @@ def test_fabricated_tool_names_skips_a_non_identifier_first_token(tmp_path):
         "## Tools\n\n"
         "| Tool | Purpose |\n"
         "|------|---------|\n"
-        "| logged `scripts/` script | not a tool name |\n",
+        "| logged `tools/` script | not a tool name |\n",
         encoding="utf-8",
     )
     assert guardrail.fabricated_tool_names([fixture]) == {}

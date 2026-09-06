@@ -13,7 +13,7 @@ Run it after adding, renaming, or re-describing a knowledge document; it rewrite
 generated file in place. `tests/test_harness_discovery_generated.py` fails when a checked-in
 generated file is not what the current knowledge documents produce.
 
-    python scripts/generate_harness_discovery.py
+    python tools/generate_harness_discovery.py
 """
 
 from __future__ import annotations

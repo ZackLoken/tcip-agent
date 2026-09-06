@@ -118,7 +118,7 @@ def test_no_mcp_tool_reaches_the_confirmation_writer() -> None:
     registry rather than a hand-kept list, so a tool added later is covered automatically."""
     writer = "confirm_trait_spec"
     listing = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts" / "list_tools.py")],
+        [sys.executable, str(REPO_ROOT / "tools" / "list_tools.py")],
         capture_output=True, text=True, cwd=REPO_ROOT, check=True,
     ).stdout
     registered = {line.strip() for line in listing.splitlines() if line.startswith("  ")}

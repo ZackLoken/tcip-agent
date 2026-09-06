@@ -8,7 +8,7 @@ tests/test_frozen_manifest.py regenerates the manifest in process and refuses an
 store added, dropped, reclassified or version-bumped without regenerating and committing this
 file fails the suite. Run from the repo root and commit the result:
 
-    python scripts/generate_frozen_manifest.py
+    python tools/generate_frozen_manifest.py
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ def main() -> int:
         )
         print(f"DRIFT: {MANIFEST_PATH.name} no longer matches the registry "
               f"({', '.join(drifted) or 'commitment text'}); regenerate with "
-              "python scripts/generate_frozen_manifest.py and commit the result with the "
+              "python tools/generate_frozen_manifest.py and commit the result with the "
               "change that moved the registry")
         return 1
     MANIFEST_PATH.write_text(

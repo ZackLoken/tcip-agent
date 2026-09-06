@@ -508,12 +508,12 @@ def test_a_delivery_door_still_runs_for_a_project_root_the_guard_admits(
 def test_no_mcp_tool_reaches_the_confirmation_writer() -> None:
     """The agent has a statement tool and no confirmation tool, checked against the live registry.
 
-    The registry comes from ``scripts/list_tools.py`` rather than a hand-kept list, so a tool added
+    The registry comes from ``tools/list_tools.py`` rather than a hand-kept list, so a tool added
     later is covered without this test being edited.
     """
     writer = "confirm_trait_operationalization"
     listing = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts" / "list_tools.py")],
+        [sys.executable, str(REPO_ROOT / "tools" / "list_tools.py")],
         capture_output=True, text=True, cwd=REPO_ROOT, check=True,
     ).stdout
     registered = {line.strip() for line in listing.splitlines() if line.startswith("  ")}
@@ -795,7 +795,7 @@ def test_no_mcp_tool_reaches_the_trait_spec_confirmation_writer() -> None:
     registry rather than a hand-kept list, so a tool added later is covered automatically."""
     writer = "confirm_trait_spec"
     listing = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts" / "list_tools.py")],
+        [sys.executable, str(REPO_ROOT / "tools" / "list_tools.py")],
         capture_output=True, text=True, cwd=REPO_ROOT, check=True,
     ).stdout
     registered = {line.strip() for line in listing.splitlines() if line.startswith("  ")}
