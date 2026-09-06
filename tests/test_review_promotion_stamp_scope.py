@@ -1,7 +1,9 @@
-"""``/api/review/validate_reference``'s writer-side scope rail: a promotion that merges into a
-bucket's own stamp is held to the same ``(subject, attribute)`` pair every other stamp write is,
-through ``update_sidecar``'s own rail rather than a second check in this route. A bucket a
-producer already stamped carries its pair forward through the promotion untouched.
+"""``/api/review/validate_reference``'s stamp reads: the route's one strict read of a bucket's
+``operating_point.json`` before its two early returns, then, before the review's operating point
+is resolved, the refusal for a bucket carrying no stamp at all and the writer-side scope rail a
+promotion that merges into an existing stamp is held to, through ``update_sidecar``'s own rail
+rather than a second check in this route. A bucket a producer already stamped carries its pair
+forward through the promotion untouched.
 
 A stamp lacking the pair, or one that will not decode, predates the writer rail: no live
 producer mints either shape, and ``/api/review/action`` itself now refuses to record a fresh
@@ -160,18 +162,6 @@ def test_promotion_over_a_neither_key_stamp_refuses_naming_the_repair_command(
 
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")
-@pytest.mark.xfail(
-    strict=True, reason=(
-        "design gap, not yet landed: the promotion route reads every bucket's stamp through the "
-        "non-strict read (routes/validation.py's `sidecars = {d: (read_operating_point_sidecar(d) "
-        "or {}) for d in bucket_dirs}`), which swallows an undecodable stamp's StoreError into "
-        "the bare-directory shape {} before resolve_operating_point_from_review's tiled "
-        "precondition ever runs; an untiled-and-thus-unresolvable {} makes that precondition "
-        "raise 'requires an explicit tiled=<bool>' first, so update_sidecar's own in-lock strict "
-        "read (the seam's real DecodeError) is never reached and the promotion 400s on the tiled "
-        "message instead of the seam's own decode error, whatever documents the bucket holds."
-    ),
-)
 def test_promotion_over_an_undecodable_stamp_returns_400_with_the_seams_message(
     client: TestClient, tmp_path: Path,
 ) -> None:
@@ -209,3 +199,102 @@ def test_promotion_over_an_already_stamped_bucket_carries_its_pair_forward(
     assert resp.status_code == 200, resp.text
     stamp = read_operating_point_sidecar(bucket)
     assert (stamp["subject"], stamp["attribute"]) == (SUBJECT, None)
+
+
+def _accept(client: TestClient, dataset_root: Path, img: Path, gt: Path, pred_path: str) -> None:
+    resp = client.post("/api/review/action", json={
+        "dataset_root": str(dataset_root), "image_name": img.name, "image_path": str(img),
+        "gt_path": str(gt), "pred_path": pred_path,
+        "det_type": "fp", "class_name": SUBJECT, "conf": 0.83, "iou": None,
+        "gt_idx": None, "pred_idx": 0, "bbox": list(BOX), "action": "accepted",
+        "user": "breeder",
+    })
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.usefixtures("seed_bud_trait_spec")
+def test_promotion_over_a_bare_bucket_refuses_before_any_stamp_is_written(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """A bucket no producer ever stamped (the staging door's own shape) is refused before the
+    review's operating point is resolved: no checkpoint, experiment or generation conf stands
+    behind it, and a staged bucket is reviewed through the accept path, never promoted."""
+    dataset_root = tmp_path / "data"
+    img = _image(dataset_root)
+    staged = _stage(dataset_root)
+    bucket = Path(prediction_dir(dataset_root, "detector", DATE))
+    assert read_operating_point_sidecar(bucket) is None  # genuinely bare: no producer ever stamped it
+
+    gt = dataset_root / "annotations" / DATE / f"{STEM}.json"
+    _accept(client, dataset_root, img, gt, staged["path"])
+
+    resp = client.post("/api/review/validate_reference", json={
+        "dataset_root": str(dataset_root), "trait": SUBJECT, "pred_dir": str(bucket),
+        "subject": SUBJECT})
+
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert "carries no operating_point.json stamp" in detail
+    assert "never promoted to a validation reference" in detail
+    assert read_operating_point_sidecar(bucket) is None  # refused before any stamp was written
+
+
+@pytest.mark.usefixtures("seed_bud_trait_spec")
+def test_promotion_reports_a_stamp_read_contention_as_retryable(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lock timeout at the promotion's own stamp read is retryable infrastructure, not a bad
+    request, the same posture the stamping block's own StoreBusy handling already takes. The
+    contention is injected because a real lock timeout is not constructible through one client."""
+    import tcip_mcp.pipelines.resolution as resolution_mod
+    from tcip_store.errors import StoreBusy
+
+    dataset_root = tmp_path / "data"
+    _image(dataset_root)
+    _stage(dataset_root)
+    bucket = Path(prediction_dir(dataset_root, "detector", DATE))
+    _write_stamp(bucket, _tiled_stamp())
+    _seed_accepted_verdict(dataset_root, bucket)
+    busy_key = sidecar_key(bucket, "operating_point")
+
+    def _busy(*args, **kwargs):
+        raise StoreBusy((busy_key,), busy_key, 5.0)
+
+    monkeypatch.setattr(resolution_mod, "read_operating_point_sidecar", _busy)
+    resp = client.post("/api/review/validate_reference", json={
+        "dataset_root": str(dataset_root), "trait": SUBJECT, "pred_dir": str(bucket),
+        "subject": SUBJECT})
+
+    assert resp.status_code == 503, resp.text
+
+
+@pytest.mark.usefixtures("seed_bud_trait_spec")
+def test_promotion_over_a_producer_written_stamp_promotes(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """The admitting case built through the platform's own producer (operating_point_stamp +
+    write_sidecar), not the raw seed the pre-rail fixtures above use for shapes no live producer
+    can write."""
+    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
+
+    dataset_root = tmp_path / "data"
+    _image(dataset_root)
+    _stage(dataset_root)
+    bucket = Path(prediction_dir(dataset_root, "detector", DATE))
+    stamp = operating_point_stamp(
+        {"tiled": {"value": False}, "conf": {"value": 0.25}},
+        validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
+        id_map={SUBJECT: 0}, subject=SUBJECT, attribute=None, trait=None, dataset_hash=None,
+        checkpoint=None, checkpoint_sha256="sha-detector", experiment_id=None, images_dir=None,
+        raster_path=None, produced_at=None,
+    )
+    write_sidecar(bucket, stamp)
+    _seed_accepted_verdict(dataset_root, bucket)
+
+    resp = client.post("/api/review/validate_reference", json={
+        "dataset_root": str(dataset_root), "trait": SUBJECT, "pred_dir": str(bucket),
+        "subject": SUBJECT})
+
+    assert resp.status_code == 200, resp.text
+    stamp_after = read_operating_point_sidecar(bucket)
+    assert (stamp_after["subject"], stamp_after["attribute"]) == (SUBJECT, None)
