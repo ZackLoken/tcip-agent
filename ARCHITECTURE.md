@@ -25,19 +25,19 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 5ab945aa.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 4526cdf9.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 5ab945aa has 424 modules across the six scanned roots (135387 total lines):
+HEAD 4526cdf9 has 424 modules across the six scanned roots (135440 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 134 | 60528 |
+| tcip-mcp | 134 | 60583 |
 | tcip-annotation | 12 | 4299 |
-| tcip-web | 39 | 13357 |
+| tcip-web | 39 | 13355 |
 | tcip-store | 13 | 5244 |
 | tcip-web-frontend | 209 | 47028 |
 | tools | 17 | 4931 |
@@ -204,7 +204,7 @@ under a covered root that no row names.
 | packages/tcip-annotation/src/tcip_annotation/__init__.py | Headless annotation library: canonical name-based per-image JSON labels + a single-file COCO. | 8 | 6 |
 | packages/tcip-annotation/src/tcip_annotation/annotation_engine.py | AnnotationEngine: Annotation CRUD, spatial index, undo/redo. | 2 | 1 |
 | packages/tcip-annotation/src/tcip_annotation/format_io.py | Annotation I/O for the two on-disk formats: the canonical per-image JSON and a single-file COCO. | 4 | 8 |
-| packages/tcip-annotation/src/tcip_annotation/json_io.py | Per-image JSON: the canonical on-disk label format (ground truth + predictions). | 3 | 46 |
+| packages/tcip-annotation/src/tcip_annotation/json_io.py | Per-image JSON: the canonical on-disk label format (ground truth + predictions). | 3 | 45 |
 | packages/tcip-annotation/src/tcip_annotation/mask_contours.py | Mask -> polygon rings: the one contour extractor behind every mask-derived shape. | 0 | 3 |
 | packages/tcip-annotation/src/tcip_annotation/matching.py | Geometry helpers and GT-vs-prediction matching engine. | 2 | 4 |
 | packages/tcip-annotation/src/tcip_annotation/review_engine.py | ReviewEngine: review logic, detection walk-through, accept/reject. | 5 | 7 |
@@ -273,7 +273,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/routes/terminal.py | Agent terminal routes: the HTTP/WS surface over :mod:`tcip_web.terminal`. | 2 | 5 |
 | packages/tcip-web/src/tcip_web/routes/training.py | Training routes: launchable configs, launch/relaunch, list runs, live metrics stream. | 14 | 2 |
 | packages/tcip-web/src/tcip_web/routes/tuning.py | HPO / Tuning routes: relaunch + cancel + list + per-trial visibility. | 11 | 2 |
-| packages/tcip-web/src/tcip_web/routes/validation.py | Validation routes: promote a completed review into a validation reference. | 8 | 1 |
+| packages/tcip-web/src/tcip_web/routes/validation.py | Validation routes: promote a completed review into a validation reference. | 7 | 1 |
 | packages/tcip-web/src/tcip_web/state.py | In-memory GUI state + debounced persistence to ``.tcip/state/gui.json``. | 2 | 6 |
 | packages/tcip-web/src/tcip_web/terminal.py | Embedded agent terminal: run the real Claude Code CLI in a PTY. | 3 | 3 |
 | packages/tcip-web/src/tcip_web/trust_boundary.py | The network trust boundary: which connections the backend serves and which names it answers to. | 0 | 2 |
@@ -817,8 +817,8 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `register_plant_registry` | `phenology_tools.py:31` | yes | Register a plant-locations CSV set under a name, so `build_plant_mapping` and |
 | `build_plant_mapping` | `phenology_tools.py:102` | yes | Assign each geolocated image to a plant, then persist the mapping under this project. |
-| `calibrate_classifier_operating_point` | `phenology_tools.py:530` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
-| `deliver_phenology_milestones` | `phenology_tools.py:671` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `calibrate_classifier_operating_point` | `phenology_tools.py:551` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
+| `deliver_phenology_milestones` | `phenology_tools.py:696` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (5 tools)
 
@@ -848,7 +848,7 @@ anything.
 |---|---|---|---|
 | `propose_annotations` | `proposal_tools.py:182` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
 | `segment_prompt` | `proposal_tools.py:498` | yes | Turn an interactive prompt (points, a box, or grid cells) into mask polygon rings, via an engine. |
-| `stage_proposals` | `proposal_tools.py:750` | yes | Stage model-/agent-proposed shapes as predictions for canvas review, the "show on canvas |
+| `stage_proposals` | `proposal_tools.py:752` | yes | Stage model-/agent-proposed shapes as predictions for canvas review, the "show on canvas |
 
 ### scale_tools.py (1 tool)
 
@@ -1250,7 +1250,7 @@ Readers: `tcip_annotation.json_io.read_annotations`,
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:1144`.
 
 A prediction record's `created_by` is one spelling, `resolution.prediction_producer`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1023`, so every checkpoint-backed writer
+`packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1027`, so every checkpoint-backed writer
 stamps the same `model:<checkpoint-stem>@<sha256-prefix>` producer identity rather than each door
 composing its own string.
 
@@ -1484,7 +1484,7 @@ dataset-scoped (`save_annotations`, `tools/annotation_tools.py:146`; `write_clas
 `tools/annotation_tools.py:512`; `redraw_calibration_holdout`, `tools/calibration_tools.py:25`;
 `materialize_review_dataset`, `tools/feedback_tools.py:167`; `run_inference`,
 `tools/inference_tools.py:278`; `register_dataset`, `tools/project_tools.py:189`;
-`propose_annotations`, `tools/proposal_tools.py:182`; `stage_proposals`, `tools/proposal_tools.py:750`)
+`propose_annotations`, `tools/proposal_tools.py:182`; `stage_proposals`, `tools/proposal_tools.py:752`)
 and two project-scoped
 (`state_trait_operationalization`, `tools/operationalization_tools.py:19`; `author_trait_spec`,
 `tools/trait_spec_authoring_tools.py:23`; `dataset_scope_of` admits a `project_root` argument the
@@ -1507,7 +1507,7 @@ Dataset-scoped: three GUI route writers passing the dataset root their own guard
 (`routes/annotate.py`'s `_audit_gui_write`, `routes/annotate.py:159`; `routes/classes.py`'s `_audit_dataset_write`,
 `routes/classes.py:63`, which `routes/inference.py`'s own prediction writer calls too (`_audit_dataset_write`, `routes/inference.py:391`);
 `routes/review.py`'s `_audit`, `routes/review.py:95`), `resolution.py`'s `record_delivery_binding_event`
-(`resolution.py:2298`, dataset-scoped when a
+(`resolution.py:2322`, dataset-scoped when a
 delivery's buckets share one dataset root, platform-scoped otherwise), and
 `calibration_tools.py`'s redraw event (`redraw_calibration_holdout_result`, `tools/calibration_tools.py:216`).
 Project-scoped: `routes/results.py`'s `_audit` (`routes/results.py:164`, its delivery and confirmation routes) and
@@ -1643,7 +1643,7 @@ are listed here with the rest rather than taking numbers of their own.
   all, or a `calibration_date` other than the run's own `split.json` `date`), each such case
   carrying its own `reason`; `unresolvable` marks
   the one case the ruling refuses rather than skips, a named manifest with no experiment record to
-  read a selection side from. `verify_stamp_binding` (`packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1808`) requires the five label-movement
+  read a selection side from. `verify_stamp_binding` (`packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1832`) requires the five label-movement
   keys present, `null` admitted, on an applicable row it would otherwise pass: an applicable,
   checked, no-leak row missing any of them floors, the same as a leak does, so a row earned before
   the keys existed cannot read as cleared. Read by `read_validations`, `experiments.py:1110`,
@@ -1803,12 +1803,12 @@ of the stamp filenames `tcip_annotation.json_io.SIDECAR_FILENAMES`
 (`packages/tcip-annotation/src/tcip_annotation/json_io.py:243`) names and every bucket
 enumeration excludes (format 17).
 
-Writer: `write_sidecar`, `resolution.py:907`, the one write, under the stamp's own lock;
-`update_sidecar`, `resolution.py:922`, is the one merge into an existing stamp, reading and writing inside
+Writer: `write_sidecar`, `resolution.py:911`, the one write, under the stamp's own lock;
+`update_sidecar`, `resolution.py:926`, is the one merge into an existing stamp, reading and writing inside
 one transaction so a promotion cannot drop what the producing run recorded. Both refuse, through
 one shared check (`_check_stamp_claim`, `resolution.py:813`), a stamp claiming validation with no
 well-formed `validated_by` or no trait, so a producer cannot omit what every reader compares.
-The stamp itself is built by `operating_point_stamp`, `resolution.py:957`, which requires every provenance
+The stamp itself is built by `operating_point_stamp`, `resolution.py:961`, which requires every provenance
 field of every producer, including the `validated_by` pointer with no default, and takes a
 producer's own extras through `**fields`. The producers are the raster
 export (stamped at `tools/inference_tools.py:1044`, written at `tools/inference_tools.py:1081`),
@@ -1820,13 +1820,13 @@ deliveries (`tools/phenology_tools.py:403,572`). The raster export also records 
 the raster the bucket was produced on, `raster_content_identity`, on every run of that regime,
 and `claim_scope_validated` when a trait triggered block calibration.
 
-Reader: `read_operating_point_sidecar`, `resolution.py:1087`, which never raises: an unreadable
+Reader: `read_operating_point_sidecar`, `resolution.py:1091`, which never raises: an unreadable
 stamp floors the dimension it describes to unvalidated at every reconciler rather than taking down
 a delivery gate. A stamp claiming validation is checked against the record it names by
-`verify_stamp_binding`, `resolution.py:1808`, called from inside every reconciler so no delivery door can
+`verify_stamp_binding`, `resolution.py:1832`, called from inside every reconciler so no delivery door can
 reach a validated result without it; a failed binding floors every dimension that stamp carries
 and the reason lands in the reconciler's `binding_notes`. The claim a stamp asserts is subset by
-`claim_payload`, `resolution.py:1260`, the one extractor the minting side and the reading side share. `routes/validation.py:407` merges the review promotion's own validation fields in
+`claim_payload`, `resolution.py:1284`, the one extractor the minting side and the reading side share. `routes/validation.py:407` merges the review promotion's own validation fields in
 through `update_sidecar`. `tools/orthomosaic_tools.py`'s `deliver_orthomosaic_plant_counts` reads
 `raster_content_identity` back and refuses a delivery whose supplied raster does not match it,
 content and georeferencing alike; a bucket recording no identity is refused rather than delivered.
@@ -2397,8 +2397,8 @@ Phase 3 verdict: single.
 ## S28. operating_point.json prediction-bucket sidecar
 
 Must agree: every writer stamps, and every consumer finds, the same provenance keys next to a bucket's predictions.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:957` (`def operating_point_stamp(`, the one stamp constructor, every field required of every producer; the stamp's whole key set is declared beside it as `STAMP_KEYS`, the constructor's own, plus `STAMP_EXTENSION_KEYS`, the producer-local additions each named for the producer that writes it; `write_sidecar`, `resolution.py:907`, and `update_sidecar`, `resolution.py:922`, are the only writers, both through `sidecar_key`, `resolution.py:696`, both refusing an unearned validation claim, and for this document refusing a top-level key outside that declared union: a fresh mint on its whole body, an update on the keys it introduces). A validated claim is earned in two phases beside the resolvers it selects among: `open_validation`, `resolution.py:1523`, runs the document's own resolver over the evidence and refuses a result that cleared no accepted reference, and `seal_validation`, `resolution.py:1662`, takes the covered buckets' content identity from the files as they landed, files the row through the experiment record's validations member, and returns the stamp body with its pointer merged in.
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1087` (`read_operating_point_sidecar`, the one reader, with `verify_stamp_binding`, `resolution.py:1808`, deciding inside every reconciler whether a claiming stamp is answered for). The producers are `tools/inference_tools.py:917` and `tools/inference_tools.py:1250` and `packages/tcip-web/src/tcip_web/routes/inference.py:322` (`operating_point_stamp(`); the review promotion merges into the stored stamp under its lock at `routes/validation.py:407`.
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:961` (`def operating_point_stamp(`, the one stamp constructor, every field required of every producer; the stamp's whole key set is declared beside it as `STAMP_KEYS`, the constructor's own, plus `STAMP_EXTENSION_KEYS`, the producer-local additions each named for the producer that writes it; `write_sidecar`, `resolution.py:911`, and `update_sidecar`, `resolution.py:926`, are the only writers, both through `sidecar_key`, `resolution.py:696`, both refusing an unearned validation claim, and for this document refusing a top-level key outside that declared union: a fresh mint on its whole body, an update on the keys it introduces). A validated claim is earned in two phases beside the resolvers it selects among: `open_validation`, `resolution.py:1547`, runs the document's own resolver over the evidence and refuses a result that cleared no accepted reference, and `seal_validation`, `resolution.py:1686`, takes the covered buckets' content identity from the files as they landed, files the row through the experiment record's validations member, and returns the stamp body with its pointer merged in.
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1091` (`read_operating_point_sidecar`, the one reader, with `verify_stamp_binding`, `resolution.py:1832`, deciding inside every reconciler whether a claiming stamp is answered for). The producers are `tools/inference_tools.py:917` and `tools/inference_tools.py:1250` and `packages/tcip-web/src/tcip_web/routes/inference.py:322` (`operating_point_stamp(`); the review promotion merges into the stored stamp under its lock at `routes/validation.py:407`.
 Phase 3 verdict: single.
 
 ## S29. Prediction-bucket immutability
@@ -2444,8 +2444,8 @@ Phase 3 verdict: single. One value is still spelled as a literal rather than bou
 ## S34. check_delivery_gate behind every delivery path
 
 Must agree: no delivered result ships an unvalidated parameter without an explicit acknowledgement.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:3057` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:3037`, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2942`, as the one derivation of what a deliverable's validity column carries).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2076` (`def delivered_tail(`, the one composition every delivered tail's validity columns route through, deriving `own_column` from which of `_DIMENSION_TO_COLUMN`'s columns a door's own column list carries, never a second list stating so). `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:341` and `pipelines/postprocessing/aggregation.py:592` (`delivered_tail(provenance, operating_point_recon["bindings"], gate,`, each delivery door composing its tail through it rather than stamping the column itself); `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:458` (`summary = {`, `export_detection_csv`'s own gate-and-reconciliation summary, `tools/inference_tools.py`'s `deliver_per_image_counts` sourcing its `tile_size_validated` response field from that returned summary's own stamp in both regimes that read a bucket, while `operating_point_validated` sources from the delivered tail's own floored cell above instead, neither response field re-deriving its column itself); and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:659` (`delivered_tail(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `deliver_phenology_milestones` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:3081` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:3061`, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2966`, as the one derivation of what a deliverable's validity column carries).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2100` (`def delivered_tail(`, the one composition every delivered tail's validity columns route through, deriving `own_column` from which of `_DIMENSION_TO_COLUMN`'s columns a door's own column list carries, never a second list stating so). `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:341` and `pipelines/postprocessing/aggregation.py:592` (`delivered_tail(provenance, operating_point_recon["bindings"], gate,`, each delivery door composing its tail through it rather than stamping the column itself); `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:458` (`summary = {`, `export_detection_csv`'s own gate-and-reconciliation summary, `tools/inference_tools.py`'s `deliver_per_image_counts` sourcing its `tile_size_validated` response field from that returned summary's own stamp in both regimes that read a bucket, while `operating_point_validated` sources from the delivered tail's own floored cell above instead, neither response field re-deriving its column itself); and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:659` (`delivered_tail(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `deliver_phenology_milestones` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
 Phase 3 verdict: single.
 
 ## S35. ResolvedParam validation firewall
