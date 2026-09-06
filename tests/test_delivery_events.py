@@ -42,7 +42,6 @@ def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_
         trait="bud_opening", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
-        operating_point_conf=0.4, operating_point_validated="held_out_annotations",
     )
     assert "error" not in res, res
 
@@ -89,7 +88,6 @@ def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(
             trait="bud_opening", mapping_name=mapping_name,
             predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
             output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
-            operating_point_conf=0.4, operating_point_validated="held_out_annotations",
         )
         assert "error" not in res, res
 

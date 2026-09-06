@@ -269,7 +269,6 @@ def test_a_trait_authored_and_confirmed_through_this_surface_delivers_end_to_end
         trait="bud_opening", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
-        operating_point_conf=0.4, operating_point_validated="held_out_annotations",
     )
 
     assert "error" not in res, res

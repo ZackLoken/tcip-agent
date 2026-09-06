@@ -717,10 +717,9 @@ def test_golden_deliver_phenology_milestones_requires_both_validated_flags(tmp_p
     assert not out_csv.exists()
 
 
-def test_golden_deliver_phenology_milestones_asserted_op_validity_floored_by_missing_sidecar(tmp_path: Path):
-    # An asserted validity string is floored by the on-disk sidecar's real (false) state:
-    # never trusted. The predictions are classified (a real id_map is on disk), but the sidecar's
-    # own conf.validated_against is "false"; a caller asserting "held_out_annotations" cannot override it.
+def test_golden_deliver_phenology_milestones_refuses_on_a_present_but_unvalidated_stamp(tmp_path: Path):
+    # An on-disk stamp refuses with no caller input at all: the sidecar's own conf.validated_against
+    # is "false". The genuinely missing-sidecar case is the requires_both_validated_flags test above.
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     mapping_name, d1, d2 = _pheno_setup(tmp_path, classified=True, op_validated=False)
@@ -730,8 +729,6 @@ def test_golden_deliver_phenology_milestones_asserted_op_validity_floored_by_mis
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        operating_point_conf=0.4,
-        operating_point_validated="held_out_annotations",  # asserted, but unbacked on disk
     )
     assert "error" in res
     assert res["operating_point_validated"] == "false"
@@ -752,8 +749,6 @@ def test_golden_deliver_phenology_milestones_delivers_when_both_validated(tmp_pa
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
-        operating_point_conf=0.4,
-        operating_point_validated="held_out_annotations",
     )
     assert "error" not in res, res
     assert res["positive_class_assessed"] is True

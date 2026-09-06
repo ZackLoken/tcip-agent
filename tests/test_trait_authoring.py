@@ -503,7 +503,6 @@ def test_deliver_phenology_milestones_derives_class_id_and_delivers(tmp_path: Pa
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
-        operating_point_validated="held_out_annotations",
     )
     # The positive class id resolves from the buckets' own recorded id_map; both dimensions are
     # validated, so this delivers.
@@ -524,7 +523,6 @@ def test_deliver_phenology_milestones_refuses_when_class_id_unresolvable(tmp_pat
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(tmp_path / "out.csv"),
-        operating_point_validated="held_out_annotations",
     )
     assert "error" in res
     assert not (tmp_path / "out.csv").exists()

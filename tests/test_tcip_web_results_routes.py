@@ -116,7 +116,7 @@ def _phenology_fixture(
     tmp_path: Path, *, validated: bool, images_per_plant: int = 1,
     fractions: tuple[float, ...] = (0.0, 0.10, 0.60, 1.0), id_map: dict | None = None,
     detections: int = 10, producing_experiment_id: str | None = "exp-1",
-    count_trait: str = "bud_opening",
+    count_trait: str = "bud_opening", confs: dict[str, float] | None = None,
 ) -> dict:
     """A mapping + per-date prediction buckets, written through the platform's own writers.
 
@@ -136,6 +136,9 @@ def _phenology_fixture(
     earned for, ``"bud_opening"`` by default (matching the delivered trait); a caller wanting a
     stamp/record earned for a different trait than the one the body delivers under passes it, the
     classifier stamp stays earned for ``"bud_opening"`` regardless, so only the count dimension mismatches.
+
+    ``confs`` maps a date string to the conf its own sidecar records, ``0.4`` for every date not
+    named; a caller proving the per-date joined cell states two dates apart.
     """
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
@@ -179,10 +182,12 @@ def _phenology_fixture(
                                 "accession_name": f"Acc{plant[-1]}", "distance_m": 1.0})
         sidecar: dict = {"id_map": id_map, "subject": "bud", "attribute": attribute}
         if validated:
+            conf_value = (confs or {}).get(date_str, 0.4)
             sidecar.update({
                 "validated": True,
                 "trait": count_trait,
-                "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
+                "operating_point": {"conf": {"value": conf_value,
+                                             "validated_against": "held_out_annotations"}},
                 "experiment_id": producing_experiment_id,
                 "checkpoint_sha256": checkpoint_sha256,
             })
@@ -738,6 +743,40 @@ def test_web_and_mcp_phenology_doors_agree_on_validity(client: TestClient, tmp_p
     assert "error" not in mcp_result, mcp_result
     assert mcp_result["operating_point_validated"] == web_validated["operating_point"]
     assert mcp_result["positive_state_classifier_validated"] == web_validated["classifier"]
+
+
+def test_web_and_mcp_export_csv_join_confs_the_same_way(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """Two validated dates calibrated apart deliver the identical joined operating_point_conf
+    cell through both doors, reading the same buckets: the web export route follows the shared
+    writer by construction, never a second, separately-derived cell."""
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+
+    body = _phenology_fixture(
+        tmp_path, validated=True, fractions=(0.5, 1.0), detections=4,
+        confs={"2026-02-11": 0.4, "2026-02-25": 0.6})
+
+    mcp_out = tmp_path / "mcp.csv"
+    mcp_result = deliver_phenology_milestones(
+        trait=body["trait"], mapping_name=body["mapping_name"],
+        predictions_by_date=body["predictions_by_date"], output_csv_path=str(mcp_out),
+        classifier_pred_dirs=list(body["predictions_by_date"].values()),
+    )
+    assert "error" not in mcp_result, mcp_result
+
+    resp = client.post("/api/results/export_csv",
+                       json={**body, "payload": "milestones", "filename": "web.csv"})
+    assert resp.status_code == 200, resp.text[:300]
+
+    import csv as _csv
+
+    with mcp_out.open(newline="", encoding="utf-8") as f:
+        mcp_rows = list(_csv.DictReader(f))
+    web_rows = list(_csv.DictReader(resp.text.splitlines()))
+    assert mcp_rows and web_rows
+    assert all(row["operating_point_conf"] == "0.4;0.6" for row in mcp_rows)
+    assert all(row["operating_point_conf"] == "0.4;0.6" for row in web_rows)
 
 
 def _rewrite_classifier_sidecars(body: dict, **overrides) -> None:
