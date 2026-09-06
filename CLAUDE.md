@@ -12,12 +12,11 @@ and their interfaces, the trait semantics, the scientific rails, the objective, 
 and then rely on the agent's own CV-scientist reasoning for a problem no one wrote a procedure
 for. It must not hand the agent recipes, prescribed pipelines, or "for trait X do Y". The test for
 every skill, tool, doc and code path: does it leave room to reason from facts, rails and a
-discoverable toolkit, or does it box the agent into a method? Boxing it in is the anti-pattern.
-Trait semantics stay defined: that is the expert's fact, not a method.
+discoverable toolkit, or does it box the agent into a method? Trait semantics stay defined.
 
 Only these are settled: `crops.yml` is the trait authority; PyTorch, TensorBoard and Ray Tune are
-the technology choices. Every other artifact may be changed or replaced, and citing one as a
-reason not to change it is the error.
+the technology choices. Every other artifact may be changed or replaced. Do not cite one as a
+reason not to change it.
 
 ## What this is
 
@@ -41,8 +40,7 @@ Codex also through the generated block in `AGENTS.md`; any other client reaches 
 
 ## Operating posture
 
-Your default failure is pushing through friction by guessing. In a scientific pipeline that
-silently corrupts results and compounds across sessions.
+Your default failure is pushing through friction by guessing.
 
 - Scope the project-data ritual before running it. Platform work skips `load_project_memory`,
   `inspect_project` and `doctor.py` entirely. Project work first confirms the active-project
@@ -68,9 +66,9 @@ silently corrupts results and compounds across sessions.
 
 ## Invariants that protect the science
 
-- Measurement integrity is the highest rule; a confident, precise, wrong phenotype is the worst
-  output. The domain expert defines each trait's measurement; you operationalize their
-  definition and never substitute your own (unclear: stop and ask). A delivered number requires
+- Measurement integrity is the highest rule. The domain expert defines each trait's
+  measurement; you operationalize their definition and never substitute your own (unclear:
+  stop and ask). A delivered number requires
   a breeder-confirmed operationalization per trait and delivery kind
   (`state_trait_operationalization`, confirmed in the Results tab), and the door refuses
   otherwise. Geometry measures dimensions on a validated mask with scale calibration; it never
@@ -122,10 +120,9 @@ silently corrupts results and compounds across sessions.
   paths, fallbacks or shims at runtime: existing dev state and the sample projects are conformed by
   one-off operator scripts. The manifest pins declarations only; an undeclared shape change inside
   version 1 is caught by producer-fed round trips and the review shape, not by the manifest.
-- Enumerate the consumers before deleting anything; an assertion with no new home was a fact.
-- When two code paths must agree, call one from the other; a second implementation of the
-  agreement drifts silently and is this repo's most repeated defect. A consistency check whose
-  two sides share an implementation proves nothing.
+- Enumerate the consumers before deleting anything.
+- When two code paths must agree, call one from the other. A consistency check whose two sides
+  share an implementation proves nothing.
 - A rail must admit valid work, not only reject invalid work: every refusal ships with a test
   proving a legitimate call still succeeds, constructed through the platform's own producer.
 - No silent fallback when required information is missing: require it or refuse, naming the real
@@ -164,7 +161,7 @@ endpoint is a trained model.
   `model_used`, `model_mismatch`, `effort_requested` and `response_source`. Cross-family
   verdicts are democratic: when two families agree against the adjudicator's own position,
   conform to them or take the split to the owner before landing; the outvoted side never
-  lands on the adjudicator's own authority, however grounded its reasoning reads.
+  lands on the adjudicator's own authority.
 - Worktrees: create by hand at a named revision (`git worktree add .claude/worktrees/<name> -b
   worktree-<name> <rev>`), launch the implementer without isolation, have it confirm the
   revision; foreground pytest one file at a time; the full suite is the director's gate, never run
@@ -188,10 +185,9 @@ endpoint is a trained model.
   and `pytest tests/ -n 4` on both backends with `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1` (the file
   leg under `TCIP_STORE_BACKEND=file`), on the tree you actually commit. After any change to a
   reader's contract, the full suite runs before the landed read. Never report a gate before its
-  slowest part finishes; green is "no detected breakage", never correctness. The 89 skips are
+  slowest part finishes; green is "no detected breakage", never correctness. The skips are
   gates, not work; the SAM and tile-geometry tests time out beside heavy load and pass alone.
-  Every CI break since the sqlite default has been a Windows assumption the local gates cannot
-  see; a test touching the filesystem outside `tmp_path` is the first reread.
+  A test touching the filesystem outside `tmp_path` is the first reread on a CI-only break.
 - The production mypy gate is the full one; only `tests` keeps grandfathered codes, in `mypy.ini`.
 - Commits: one concern each, in dependency order, LF endings, messages stating the standing
   constraint the change installs (no session narrative, report ids, batch numbers or dates).
