@@ -67,10 +67,9 @@ export function StatusBar() {
       ) : null}
       {activeTab === "annotate" && canvasMatchesDataset && (polyCount > 0 || boxCount > 0) && (
         <span className="tabular-nums">
-          {polyCount} polygons
-          <span className="mx-1.5 text-tcip-border">|</span>
-          {/* Detect boxes are derived from polygons when any exist, so the count tracks them live. */}
-          {polyCount > 0 ? polyCount : boxCount} boxes
+          {polyCount > 0 && `${polyCount} polygons`}
+          {polyCount > 0 && boxCount > 0 && <span className="mx-1.5 text-tcip-border">|</span>}
+          {boxCount > 0 && `${boxCount} boxes`}
         </span>
       )}
       {/* Points are counted on their own: they are not detection targets, so they never fold into
