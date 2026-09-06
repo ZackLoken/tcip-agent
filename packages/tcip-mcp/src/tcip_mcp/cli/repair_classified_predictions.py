@@ -1,10 +1,10 @@
-"""Conform a project's classified prediction buckets to the writer rail's shape: an
+"""Repair a project's classified prediction buckets into the writer rail's shape: an
 ``operating_point.json`` stamp carrying its ``(subject, attribute)`` pair, and per-image documents
 that carry the decoded value under ``attributes[attribute]`` with the object class in ``subject``,
 the shape ``write_predictions_json`` now writes and every reader now holds a bucket to.
 
-A logged operator command in the same shape as every conform this platform has run: bind, walk, one outcome
-line per unit, exit 2 on any refusal. Its units are prediction buckets. For each named project
+A logged operator command: bind, walk, one outcome line per unit, exit 2 on any refusal. Its
+units are prediction buckets. For each named project
 root, every registered dataset (``read_datasets``) is walked and, under each dataset's own
 prediction tree, every model directory and every directory one level below it that holds a stamp
 record or prediction documents is a bucket. ``list_dates`` is not used: it lists the buckets under
@@ -51,7 +51,7 @@ Per stamped bucket, in order:
    digest before and after. A refusal, a no-op ("already conformed", "no stamp"), or a ``--plan``
    preview writes no entry.
 
-For each dataset root walked, the script also reports, never rewrites, ground-truth records whose
+For each dataset root walked, this command also reports, never rewrites, ground-truth records whose
 ``subject`` is a key of a conformed bucket's ``id_map`` or a declared attribute value of the
 dataset's own registry: a legitimate subject of that name is possible, and only a person can tell
 one apart from an accept made through the Review tab before this platform recorded a scope.
@@ -100,7 +100,7 @@ TOOL_NAME = "repair_classified_predictions"
 
 
 def _looks_like_bucket(d: Path) -> bool:
-    """Whether ``d`` holds a stamp record or prediction documents: this script's own definition
+    """Whether ``d`` holds a stamp record or prediction documents: this command's own definition
     of a bucket, checked before a directory is treated as one."""
     if not d.is_dir():
         return False
@@ -111,15 +111,15 @@ def _looks_like_bucket(d: Path) -> bool:
 
 def bucket_dirs_under(dataset_root: Path) -> list[Path]:
     """Every bucket directory under ``dataset_root``'s own prediction tree, through the shared
-    walk (``tcip_mcp.dataset_layout.prediction_bucket_dirs``) so this script and every other
+    walk (``tcip_mcp.dataset_layout.prediction_bucket_dirs``) so this command and every other
     reader of the layout agree on what a bucket directory is.
 
     ``prediction_bucket_dirs`` admits every directory one level under a model directory
     regardless of its own name (it answers "where could a sidecar sit", not "is this a bucket
-    this script can act on"), so a dot-prefixed date directory reaches it; filtered back out here
-    by ``is_bucket_name``, since a hidden directory is never a bucket this script conforms.
+    this command can act on"), so a dot-prefixed date directory reaches it; filtered back out here
+    by ``is_bucket_name``, since a hidden directory is never a bucket this command repairs.
     ``_looks_like_bucket`` then keeps only a directory actually holding a stamp or prediction
-    documents, this script's own definition of a bucket.
+    documents, this command's own definition of a bucket.
     """
     root = prediction_root(dataset_root)
     if not root.is_dir():
@@ -361,7 +361,7 @@ def conform_bare_bucket(
 ) -> tuple[str, bool]:
     """Conform a bare directory (no stamp at all) named with ``--bucket``, paired with ``--like``.
 
-    A bare directory this script conforms holds a classified bucket's hand-split copy: records
+    A bare directory this command repairs holds a classified bucket's hand-split copy: records
     whose ``subject`` is the value, waiting to move under an attribute. ``--like`` must therefore
     name a classified bucket (its own attribute is not ``None``); a detector ``--like`` is refused
     by name, since a detector bucket's records already carry the object class in ``subject`` and
@@ -375,7 +375,7 @@ def conform_bare_bucket(
     if attribute is None:
         return (
             f"refused, --like {like_dir} is a detector bucket (its scope names no attribute): a "
-            "bare directory this script conforms holds a classified bucket's value-in-subject "
+            "bare directory this command repairs holds a classified bucket's value-in-subject "
             "records, which need a --like naming the attribute to move the value under", True,
         )
     unconformable = unconformable_records(bucket_dir, subject=subject, attribute=attribute,
@@ -413,7 +413,7 @@ def conform_bucket(
 
     if state.kind == "absent":
         if not is_bare_named:
-            return ("no stamp; not a bucket this script conforms", False, None, False)
+            return ("no stamp; not a bucket this command repairs", False, None, False)
         outcome, refused = conform_bare_bucket(bucket_dir, like_dir=like_dir, plan=plan)
         return (outcome, refused, None, not refused)
 

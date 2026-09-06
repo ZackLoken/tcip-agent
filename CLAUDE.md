@@ -32,11 +32,12 @@ thing; bottom of the stack), `packages/tcip-annotation/` (headless annotation an
 `packages/tcip-mcp/` (the MCP server, domain tools and composable ML; your primary surface),
 `packages/tcip-web/` (FastAPI plus Vite/React/TS/Konva; the breeder's only surface). `tools/`
 holds CI and development tooling, never a project-facing command; an operator command lives in
-its package's own `cli/` module, behind the `tcip` console command. Domain knowledge lives in `packages/tcip-mcp/src/tcip_mcp/knowledge/`
-as repo files, loaded before acting in its domain. Claude Code reaches it through the generated
-skills under `.claude/skills/`; Codex and Antigravity reach it under `.agents/skills/`, and
-Codex also through the generated block in `AGENTS.md`; any other client reaches it through the
-`serve_domain_knowledge` tool. A document is read in full by every route. The registered crops are
+its package's own `cli/` module, behind the `tcip` console command. Domain knowledge lives in
+`packages/tcip-mcp/src/tcip_mcp/knowledge/` as repo files, loaded before acting in its domain.
+Claude Code reaches it through the generated skills under `.claude/skills/`; Codex and Antigravity
+reach it under `.agents/skills/`, and Codex also through the generated block in `AGENTS.md`; any
+other client reaches it through the `serve_domain_knowledge` tool. A document is read in full by
+every route. The registered crops are
 `crops.yml`'s, six today.
 
 ## Operating posture
@@ -119,7 +120,8 @@ Your default failure is pushing through friction by guessing.
   into a versioned mapping. Unstable-by-design stores and interop formats (COCO, other tools'
   formats, browser APIs) stay outside the freeze and are never called legacy. Still no migration
   paths, fallbacks or shims at runtime: existing dev state and the sample projects are conformed by
-  one-off operator scripts. The manifest pins declarations only; an undeclared shape change inside
+  a format bump's own `cli/` command, shipped with the bump and deleted once every root that
+  needed it is conformed. The manifest pins declarations only; an undeclared shape change inside
   version 1 is caught by producer-fed round trips and the review shape, not by the manifest.
 - Enumerate the consumers before deleting anything; a deleted assertion's fact needs a new home.
 - When two code paths must agree, call one from the other. A consistency check whose two sides
