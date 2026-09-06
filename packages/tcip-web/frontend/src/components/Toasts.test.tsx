@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 
 import { Toasts } from "@/components/Toasts";
@@ -44,6 +44,54 @@ describe("Toasts live region politeness", () => {
     expect(alert).toHaveAttribute("aria-live", "assertive");
     const status = screen.getByRole("status");
     expect(status).toHaveAttribute("aria-live", "polite");
+  });
+});
+
+describe("Toasts channel replacement", () => {
+  it("replaces the standing toast on a channel under a fresh id, restarting its timer", () => {
+    vi.useFakeTimers();
+    try {
+      render(<Toasts />);
+      act(() => useStore.getState().pushToast("First refusal", "error", "cut"));
+      const firstId = useStore.getState().toasts[0].id;
+
+      act(() => vi.advanceTimersByTime(4000));
+      act(() => useStore.getState().pushToast("Second refusal", "error", "cut"));
+
+      const toasts = useStore.getState().toasts;
+      expect(toasts).toHaveLength(1);
+      expect(toasts[0].message).toBe("Second refusal");
+      expect(toasts[0].id).not.toBe(firstId);
+
+      // The replaced toast's own timer restarted: it survives past the first toast's original
+      // six-second deadline, dismissing only six seconds after the replacement landed.
+      act(() => vi.advanceTimersByTime(4000));
+      expect(useStore.getState().toasts).toHaveLength(1);
+      act(() => vi.advanceTimersByTime(2001));
+      expect(useStore.getState().toasts).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("carries the count over when an identical message repeats on the same channel", () => {
+    render(<Toasts />);
+    act(() => useStore.getState().pushToast("Refused", "error", "cut"));
+    act(() => useStore.getState().pushToast("Refused", "error", "cut"));
+    act(() => useStore.getState().pushToast("Refused", "error", "cut"));
+
+    expect(screen.getAllByText(/Refused/)).toHaveLength(1);
+    expect(screen.getByText(/\(×3\)/)).toBeInTheDocument();
+  });
+
+  it("leaves an unchannelled push behaving as today: identical text collapses, otherwise appends", () => {
+    render(<Toasts />);
+    act(() => useStore.getState().pushToast("Cancel failed: network error"));
+    act(() => useStore.getState().pushToast("Cancel failed: network error"));
+    act(() => useStore.getState().pushToast("Relaunch failed: network error"));
+
+    expect(useStore.getState().toasts).toHaveLength(2);
+    expect(screen.getByText(/\(×2\)/)).toBeInTheDocument();
   });
 });
 
