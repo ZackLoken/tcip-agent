@@ -517,10 +517,11 @@ def _stated_root_disagreement(dataset_root: str, candidates: dict[str, str]) -> 
 
     Only a positive disagreement refuses: a directory the dataset layout cannot place answers
     nothing, and a bespoke calibration over loose directories with a stated root is legitimate work
-    for the two detector doors this check otherwise serves alone. The classifier door additionally
-    requires, past this check, that a bare or map-less prediction bucket's ground truth resolve the
-    registry its own dataset root carries (``_classification_items``): a loose ground-truth
-    directory with no relation to the stated root refuses there even when this check alone does not.
+    for the other two calibration doors this check serves (``calibrate_scalar_operating_point``,
+    ``calibrate_physical_scale``). The classifier door additionally requires, past this check, that
+    a bare or map-less prediction bucket's ground truth resolve the registry its own dataset root
+    carries (``_classification_items``): a loose ground-truth directory with no relation to the
+    stated root refuses there even when this check alone does not.
 
     Two other modules (``scale_tools.py``, ``calibration_tools.py``) import this beside its own
     caller here, the same cross-module-consumer shape that moved ``calibrate_operating_point``/

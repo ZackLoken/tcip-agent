@@ -416,9 +416,11 @@ def stage_prediction_shapes(
     and the web route's own launch, the three publishers that opt into that guard, never call
     this function.
 
-    A bucket this door writes carries no stamp of its own: it is reviewed through the accept path
-    and is never promoted to a validation reference, which refuses a bucket with no stamp a
-    producer wrote.
+    This door writes no stamp of its own, so a bucket holding nothing but staged shapes carries
+    none, and the promotion path refuses it as a bucket with no stamp a producer wrote. A bucket a
+    producer already stamped (``run_inference``, say) keeps that producer's stamp: staging into it
+    only redirects when it carries review verdicts, so a stamped-but-unreviewed bucket can gain
+    staged shapes beside its own stamp.
 
     Returns the bucket actually written and the path.
     """
