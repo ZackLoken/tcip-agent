@@ -825,13 +825,9 @@ def deliver_phenology_milestones(
     )
 
     # The count operating point's validity is read from each prediction bucket's operating_point.json
-    # (stamped by run_inference), floored against any caller assertion, never trusted from the
-    # caller's string alone. A missing/unvalidated sidecar floors the whole curve to false.
-    recon = reconcile_operating_point_validity(
-        list(predictions_by_date.values()), trait=trait, asserted=operating_point_validated)
+    # (stamped by run_inference), with no caller floor to reconcile: this door takes no assertion.
+    recon = reconcile_operating_point_validity(list(predictions_by_date.values()), trait=trait)
     op_state = recon["validated"]
-    if operating_point_conf is None and recon["conf"] is not None:
-        operating_point_conf = recon["conf"]  # prefer the on-disk conf over a caller string
 
     # The tile scale is the second gating dimension of the same count operating point: a tile edge
     # with no real basis at all is as untrustworthy as an uncalibrated conf.
@@ -919,7 +915,7 @@ def deliver_phenology_milestones(
     cells = phenology.write_phenology_csv(
         "deliver_phenology_milestones", rows, Path(output_csv_path), spec,
         flags=flags, acknowledgement=None, basis=still_stated.basis,
-        operating_point_conf=operating_point_conf, producer=producer, bindings=recon["bindings"],
+        operating_point_confs=recon["confs"], producer=producer, bindings=recon["bindings"],
         pred_dirs=list(predictions_by_date.values()), project_root=platform_state_root(),
         plant_mapping=disclosure)
     # Per-milestone summary: report reached-counts for each milestone the spec actually declares.

@@ -37,6 +37,7 @@ deliver a curve built on unclassified or missing detections.
 from __future__ import annotations
 
 import csv
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -141,6 +142,8 @@ def phenology_csv_columns(spec) -> list[str]:
 # single owner of the tail, so every delivered shape (milestones, curves) carries the same chain
 # rather than each door listing its own.
 PROVENANCE_COLUMNS = [
+    # float, or one entry per delivered date (dates_delivered order) joined with ";" when the
+    # dates recorded different confs, blank for a date with no numeric conf.
     "operating_point_conf",
     "operating_point_validated",
     "positive_state_classifier_validated",
@@ -546,6 +549,21 @@ def phenology_delivery_flags(
     return flags
 
 
+def _operating_point_conf_cell(
+    pred_dirs: list[str], operating_point_confs: Mapping[str, float | None],
+) -> float | str | None:
+    """The delivered ``operating_point_conf`` cell: the single value every delivered bucket in
+    ``pred_dirs`` records, when they all record the same one, otherwise one entry per bucket in
+    ``pred_dirs`` order (the ``dates_delivered`` order), ``;``-joined, an empty entry for a bucket
+    with no numeric conf, so a multi-date delivery whose dates were calibrated apart still names
+    every date's conf instead of collapsing to a blank cell."""
+    values = [operating_point_confs.get(str(d)) for d in pred_dirs]
+    non_none = {v for v in values if v is not None}
+    if values and len(non_none) == 1 and all(v is not None for v in values):
+        return next(iter(non_none))
+    return ";".join("" if v is None else str(v) for v in values)
+
+
 def _write_phenology_delivery(
     door: str,
     rows: list[dict],
@@ -557,7 +575,7 @@ def _write_phenology_delivery(
     flags: dict[str, str | None],
     acknowledgement: Acknowledgement | None,
     basis: OperationalizationBasis | None,
-    operating_point_conf: float | None,
+    operating_point_confs: Mapping[str, float | None],
     producer: dict,
     bindings: dict,
     pred_dirs: list[str],
@@ -641,7 +659,7 @@ def _write_phenology_delivery(
     cells: dict = delivered_tail(
         {"producer_model_sha256": producer.get("sha256"),
          "producing_experiment_id": producer.get("experiment_id"),
-         "operating_point_conf": operating_point_conf,
+         "operating_point_conf": _operating_point_conf_cell(pred_dirs, operating_point_confs),
          "plant_mapping_sha256": plant_mapping["record_sha256"],
          "captures_unverified": ";".join(plant_mapping["captures_unverified"]),
          "plant_csvs_unverified": ";".join(plant_mapping["plant_csvs_unverified"]),
@@ -684,7 +702,7 @@ def write_phenology_csv(
     flags: dict[str, str | None],
     acknowledgement: Acknowledgement | None,
     basis: OperationalizationBasis | None,
-    operating_point_conf: float | None,
+    operating_point_confs: Mapping[str, float | None],
     producer: dict,
     bindings: dict,
     pred_dirs: list[str],
@@ -707,7 +725,7 @@ def write_phenology_csv(
         door, rows, out_path, spec, phenology_csv_columns(spec),
         include_majority_marker=True, flags=flags,
         acknowledgement=acknowledgement, basis=basis,
-        operating_point_conf=operating_point_conf, producer=producer, bindings=bindings,
+        operating_point_confs=operating_point_confs, producer=producer, bindings=bindings,
         pred_dirs=pred_dirs, project_root=project_root, plant_mapping=plant_mapping)
 
 
@@ -720,7 +738,7 @@ def write_phenology_curve_csv(
     flags: dict[str, str | None],
     acknowledgement: Acknowledgement | None,
     basis: OperationalizationBasis | None,
-    operating_point_conf: float | None,
+    operating_point_confs: Mapping[str, float | None],
     producer: dict,
     bindings: dict,
     pred_dirs: list[str],
@@ -739,5 +757,5 @@ def write_phenology_curve_csv(
         door, rows, out_path, spec, curve_csv_columns(),
         include_majority_marker=False, flags=flags,
         acknowledgement=acknowledgement, basis=basis,
-        operating_point_conf=operating_point_conf, producer=producer, bindings=bindings,
+        operating_point_confs=operating_point_confs, producer=producer, bindings=bindings,
         pred_dirs=pred_dirs, project_root=project_root, plant_mapping=plant_mapping)
