@@ -1,8 +1,8 @@
 # Stability
 
 What an adopter can build against today, independent of the 0.x version number (see
-VERSIONING.md). Everything below was checked against the tree, not assumed; everything not named
-here is free to change in any release while the shared version stays below `1.0.0`.
+VERSIONING.md); everything not named here is free to change in any release while the shared
+version stays below `1.0.0`.
 
 ## Persisted formats
 
@@ -15,16 +15,13 @@ and canvas records the GUI itself owns: `canvas_geometry`, `canvas_meta`, `view_
 `coverage_grid_zoom`, and `backend_port`, the runtime handshake state naming which port the web
 backend bound to) or a
 genuine interop format (`coco_documents`, other tools' formats); neither carries this commitment.
-Read `frozen-formats.json` itself for which store is which and its current ceiling; this document
-describes the commitment, not a copy of the list that will drift out of date beside the source of
-truth.
+Read `frozen-formats.json` itself for which store is which and its current ceiling.
 
 ## The MCP tool surface
 
 `python scripts/list_tools.py` prints the live tool registry; treat its output, not a number in
 this or any document, as the current list. Tools may be added in any release. A tool's removal or
-rename is announced in CHANGELOG.md. Never state a tool count in shipped prose, since it drifts
-as tools are added or renamed.
+rename is announced in CHANGELOG.md. Never state a tool count in shipped prose.
 
 ## The two storage backends
 
@@ -44,17 +41,14 @@ API is exactly what `packages/tcip-annotation/src/tcip_annotation/__init__.py`'s
 declares: the annotation state types, the canonical per-image JSON read/write path, the
 multi-format load/save dispatch, COCO interop, IoU matching, the mask-to-polygon-rings extractor,
 the SAM wrapper's `auto_mask` and grid-cell helpers, and the `AnnotationEngine`/`ReviewEngine`
-pair. A symbol this platform's own packages happen not to call today is not private on that
-account; `__all__` is the only boundary, not internal usage.
+pair. `__all__` is the only boundary.
 
 ## The general-capability scripts
 
 Every script listed under `scripts/README.md`'s General capabilities section is written to be
-reached for again, with its own docstring and `--help` as the usage contract. A script under that
-document's Pilot/incident-bound or One-off conforms sections carries no such commitment: the
-former was written for one past investigation, the latter for carrying one root's on-disk state
-onto a shape one specific past change now requires, and either can be rewritten or removed
-without notice.
+reached for again, with its own docstring and `--help` as the usage contract. A script under
+that document's Pilot/incident-bound or One-off conforms sections carries no such commitment and
+can be rewritten or removed without notice.
 
 ## Not stable
 

@@ -87,7 +87,7 @@ MCP tools HTTP POST to `POST /api/events/{panel}` on the backend, which broadcas
 events to any browser subscribed to `/ws/panel/{panel}`.
 
 Port discovery inside MCP tools: the workspace root's `.tcip/state/web_port.txt` (the port
-actually bound) > `TCIP_WEB_PORT` env (read only when no record parses) > 8765. Host
+bound) > `TCIP_WEB_PORT` env (read only when no record parses) > 8765. Host
 defaults to `127.0.0.1` unless `TCIP_WEB_HOST` is set.
 
 ## Keyboard map
@@ -96,20 +96,18 @@ defaults to `127.0.0.1` unless `TCIP_WEB_HOST` is set.
 
 ## Design & deployment decisions
 
-Conscious calls for this single-operator desktop GUI (recorded so they're not
-re-litigated):
+Calls made for this single-operator desktop GUI:
 
 - Dark-only theme. No light mode or theme toggle: the palette is the SI dark
-  tokens + `color-scheme: dark`. (The old inert `class="dark"` was removed; no
-  Tailwind `dark:` variants are used.)
+  tokens plus `color-scheme: dark`. No Tailwind `dark:` variants are used.
 - Accessibility bar. The core flows are keyboard-navigable (shortcut map above;
   focusable native controls). Full ARIA/screen-reader support is not targeted for
-  this local single-user tool; revisit if it's ever shipped to broader users.
+  this local single-user tool.
 - Touch / pen: not supported. The annotation canvas is mouse-only (wheel-zoom,
   middle-drag pan, click-to-draw). Field-tablet (touch/pen) annotation is a known
-  limitation and future work, not a regression.
-- Sourcemaps. The shipped `static/` bundle is built without sourcemaps (leaner
-  wheel). Use `npm run dev` (HMR + sourcemaps) to debug.
+  limitation and future work.
+- Sourcemaps. The shipped `static/` bundle is built without sourcemaps. Use
+  `npm run dev` (HMR + sourcemaps) to debug.
 - Trust boundary. A connection from this machine (a loopback address) is served with no auth;
   a connection through a network address is refused, whatever the bind, until the operator sets
   `TCIP_WEB_ALLOW_INSECURE=1`, because an exposed GUI hands a network client filesystem reads
