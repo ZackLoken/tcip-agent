@@ -443,12 +443,20 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
                 "the reference happens to carry."
             )
         _reg, vocabulary_map = resolve_registry_id_map(gt_dir, subject, attribute)
+        vocabulary_source = f"{gt_p}'s registry"
+        vocabulary_remedy = "declare it in the registry before calibrating against this split"
+    else:
+        vocabulary_source = f"{pred_p}'s recorded id_map"
+        vocabulary_remedy = (
+            "the bucket's id_map must carry the trait's positive value: publish the bucket with "
+            "a map that declares it, or calibrate against a bucket that does"
+        )
     vocabulary = set(vocabulary_map or {})
     if positive_value not in vocabulary:
         raise ValueError(
-            f"{gt_p}'s registry declares values {sorted(vocabulary)} for (subject={subject!r}, "
+            f"{vocabulary_source} declares values {sorted(vocabulary)} for (subject={subject!r}, "
             f"attribute={attribute!r}), which does not include the positive value "
-            f"{positive_value!r}: declare it in the registry before calibrating against this split."
+            f"{positive_value!r}: {vocabulary_remedy}."
         )
     # gt_dir/pred_dir may themselves be prediction buckets (a calibration/holdout split of one),
     # so both are walked through prediction_documents, their own sidecar stamps excluded.
