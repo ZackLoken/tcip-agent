@@ -28,18 +28,18 @@ its own. `pytest tests/` is the suite; it binds one storage backend per run (an 
 binds the database, `TCIP_STORE_BACKEND=file` the loose-file layout), so a change touching the
 storage seam runs it both ways. `ruff check .` and `mypy` are the lint and type gates. `python
 scripts/list_tools.py` is how you find the current MCP tool count and names; never hardcode a
-count in a doc, comment, or commit message, since it drifts as tools are added or renamed.
+count in a doc, comment, or commit message.
 `python scripts/gate_baseline.py --out <dir>` runs the same stages `.github/workflows/ci.yml`
 declares, so a local pass predicts CI. The frontend line is the frontend's own gate, run only
-when a frontend file changed. `python -m tcip_web` is how you confirm a change against the real
+when a frontend file changed. `python -m tcip_web` is how you confirm a change against the
 served app rather than tests alone. `export_store.py` and `adopt_store.py` move a root's records
 between the database and loose-file layouts; run them, not a hand-written script, whenever a
 change needs to inspect or convert a root's on-disk state.
 
 ## Rules a contributor meets
 
-- Tests construct their inputs through the platform's own producers (the real MCP tools, the
-  real pipeline functions), never a hand-built fixture standing in for one.
+- Tests construct their inputs through the platform's own producers (the MCP tools, the
+  pipeline functions), never a hand-built fixture standing in for one.
 - A test that guards a fix is shown failing without the fix: `python
   scripts/prove_test_fails_before.py <testfile> -k <expr>`. Its four verdicts are `GUARDS`
   (the recorded failure is the assertion the test names; only this counts as evidence),
