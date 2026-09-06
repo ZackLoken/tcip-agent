@@ -12,6 +12,11 @@ The operating point (conf / NMS IoU / tiling / max_dets) is resolved through the
 predictions, so a GUI run and an agent run can't diverge on the count or hide an unvalidated
 operating point. A run whose tile scale has no real basis at all is refused by the shared delivery
 gate before anything is written, the same refusal ``run_inference`` makes.
+
+A launch into a bucket already holding another run's prediction documents is refused the way
+``run_inference`` refuses one, naming a fresh bucket to write into instead; a bucket a live job of
+this process is still writing is refused by that job's own identity, never by a resolved path a
+second, concurrent pass could still be moving.
 """
 
 from __future__ import annotations
@@ -95,6 +100,11 @@ class InferenceJob:
     # The platform root this job launched under, resolved on whichever thread constructs it
     # (the request thread for a real launch); a rehydrated job restates the persisted value.
     platform_root: str = field(default_factory=_current_root)
+    # The launch this job answers, held only for the in-flight refusal: never in _summary, so
+    # a rehydrated job (whose worker is gone) never answers an in-flight match.
+    dataset_root: str = ""
+    requested_model_name: str = ""
+    date: Optional[str] = None
 
 
 def _summary(job: InferenceJob) -> dict:
@@ -368,8 +378,8 @@ def _worker(job: InferenceJob) -> None:
             job.done += 1
 
         if job.status != "failed":
-            # Last, never beside where it is built: a stamp certifies the prediction files it
-            # sits with, so a partway-dead pass leaves a bucket no reader mistakes for certified.
+            # Last, never beside where it is built, so a partway-dead pass leaves a bucket no
+            # reader mistakes for certified; image_filenames names every enumerated image whether written or not, including one cancelled before its first write.
             write_sidecar(output_dir, provenance)
             job.status = "cancelled" if job.cancel_event.is_set() else "completed"
     except Exception as exc:
@@ -405,10 +415,10 @@ def _worker(job: InferenceJob) -> None:
 
 class LaunchInferencePayload(BaseModel):
     checkpoint_path: str
-    # The run's images and its prediction bucket are named, not spelled: the dataset, the model
-    # whose name the bucket carries, and the capture date. Both dirs are resolved server-side
-    # through dataset_layout / prediction_buckets, so no caller reimplements the layout.
+    # The run's images and its prediction bucket are named, not spelled: both dirs are resolved
+    # server-side through dataset_layout / prediction_buckets, so no caller reimplements the layout.
     dataset_root: str
+    # A bucket name, not a model identity: it may name a variant (e.g. an @r2 suggestion) no registered model bears, which nothing downstream reads as a model (the stamp takes the checkpoint's own stem, the audit line records only output_dir).
     model_name: str
     date: str | None = None
     # None (default) derives tiling from the checkpoint's own training geometry in the worker,
@@ -426,7 +436,8 @@ class LaunchInferencePayload(BaseModel):
     overlap: float | None = None
     max_dets: int | None = None
     postprocess: str = "nms"
-    # Write into the named bucket even if it exists; refused (409) on review verdicts, including when every @r<n> variant to the resolver's ceiling already carries one, which now refuses by name instead of falling back to an unchecked @r100. The default (False) auto-redirects to a fresh bucket so a re-run never orphans recorded verdicts.
+    # Never overrides the document refusal below (a bucket with no verdict but a document refuses
+    # regardless); its one live effect is turning a verdict redirect into a 409 instead of the default auto-redirect, including on exhaustion of every @r<n> variant to the ceiling. The browser client never sends this field.
     overwrite: bool = False
 
 
@@ -459,12 +470,40 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
     if not images_dir.is_dir():
         raise HTTPException(404, f"images_dir not found: {images_dir}")
 
-    # Prediction-bucket immutability: never silently overwrite a bucket with review verdicts.
+    # Prediction-bucket immutability: never silently overwrite a bucket with review verdicts, and
+    # never begin a second publish beside one already writing or one a prior run already filled.
     from tcip_mcp.prediction_buckets import (
         BucketHasVerdicts,
+        BucketHoldsDocuments,
         resolve_prediction_bucket,
         review_state_dir_of,
     )
+
+    # Keyed on what was requested, not a resolved path a moving document count could shift: a
+    # second launch of this (dataset, model, date) while the first still writes names that job.
+    live_job = next(
+        (
+            j for j in _list_jobs()
+            if j.status in ("pending", "running")
+            and j.dataset_root == payload.dataset_root
+            and j.requested_model_name == payload.model_name
+            and j.date == payload.date
+        ),
+        None,
+    )
+    if live_job is not None:
+        raise HTTPException(409, {
+            "kind": "bucket_in_flight",
+            "message": (
+                f"a job for model {payload.model_name!r} on date {payload.date!r} in "
+                f"{payload.dataset_root!r} is already writing to {live_job.output_dir!r} "
+                f"(job {live_job.job_id!r}); wait for it or watch it rather than launching a "
+                "second job over the same images."
+            ),
+            "date": payload.date,
+            "requested_output_dir": live_job.output_dir,
+            "job_id": live_job.job_id,
+        })
 
     review_state_dir = review_state_dir_of(payload.dataset_root)
     try:
@@ -474,9 +513,27 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
             payload.date,
             review_state_dir=review_state_dir,
             overwrite=payload.overwrite,
+            refuse_documents=True,
         )
     except BucketHasVerdicts as exc:
         raise HTTPException(409, str(exc)) from exc
+    except BucketHoldsDocuments as exc:
+        requested_output_dir = str(
+            prediction_dir(payload.dataset_root, payload.model_name, payload.date))
+        suggested_output_dir = (
+            str(prediction_dir(payload.dataset_root, exc.suggested, payload.date))
+            if exc.suggested is not None else None
+        )
+        raise HTTPException(409, {
+            "kind": "bucket_holds_documents",
+            "message": str(exc),
+            "date": payload.date,
+            "requested_model_name": payload.model_name,
+            "requested_output_dir": requested_output_dir,
+            "document_stem_count": exc.document_stem_count,
+            "suggested_model_name": exc.suggested,
+            "suggested_output_dir": suggested_output_dir,
+        }) from exc
     resolved_output_dir = str(bucket_dir)
 
     # job.tile carries the caller's raw choice (None = derive from the checkpoint's training
@@ -500,6 +557,9 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
         checkpoint_path=payload.checkpoint_path,
         images_dir=str(images_dir),
         output_dir=resolved_output_dir,
+        dataset_root=payload.dataset_root,
+        requested_model_name=payload.model_name,
+        date=payload.date,
         tile=payload.tile,
         tile_source=tile_source,
         conf=resolved_conf,

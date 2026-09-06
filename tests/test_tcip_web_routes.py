@@ -1531,9 +1531,7 @@ def _verdicted_launch_dataset(tmp_path: Path, monkeypatch) -> tuple[Path, Path, 
 
     out = prediction_dir(dataset_root, "baseline", date)
     out.mkdir(parents=True)
-    (out / "img.json").write_text(
-        json.dumps({"image": "img", "width": 100, "height": 100, "annotations": []})
-    )
+    write_annotations(out / "img.json", [], img_w=100, img_h=100, keep_empty=True)
     engine = ReviewEngine(dataset_root / ".tcip" / "state")
     ctx = ReviewContext(img_name="img.png", img_width=100, img_height=100,
                         preds=[Annotation(subject="bud", geometry=BBox(10.0, 10.0, 30.0, 30.0),
@@ -1610,6 +1608,264 @@ def _launch_setup(tmp_path, monkeypatch):
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
     return str(ckpt), str(dataset_root), date, inference_routes
+
+
+def test_inference_launch_refuses_a_bucket_that_already_holds_a_document(
+    client: TestClient, tmp_path: Path, monkeypatch,
+) -> None:
+    """A guard: at b2ac13e1 the route resolves with no refuse_documents keyword and admits a
+    second publish beside a prior run's own documents; this launch must be refused by name."""
+    from tcip_mcp.dataset_layout import prediction_dir
+    from tcip_mcp.prediction_buckets import BucketHoldsDocuments
+
+    ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
+    bucket = prediction_dir(Path(dataset_root), "baseline", date)
+    bucket.mkdir(parents=True, exist_ok=True)
+    doc_path = bucket / "img.json"
+    write_annotations(doc_path, [], img_w=100, img_h=100, keep_empty=True)
+    before_bytes = doc_path.read_bytes()
+    before_jobs = inference_routes._list_jobs()
+    expected_message = str(BucketHoldsDocuments("baseline", 1, "baseline@r2"))
+
+    resp = client.post("/api/inference/launch", json={
+        "checkpoint_path": ckpt, "dataset_root": dataset_root,
+        "model_name": "baseline", "date": date,
+    })
+
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"] == {
+        "kind": "bucket_holds_documents",
+        "message": expected_message,
+        "date": date,
+        "requested_model_name": "baseline",
+        "requested_output_dir": str(bucket),
+        "document_stem_count": 1,
+        "suggested_model_name": "baseline@r2",
+        "suggested_output_dir": str(prediction_dir(Path(dataset_root), "baseline@r2", date)),
+    }
+    assert inference_routes._list_jobs() == before_jobs
+    assert doc_path.read_bytes() == before_bytes
+    assert _audit_entries(Path(dataset_root)) == []
+
+
+def test_inference_launch_admits_the_suggested_fresh_bucket(
+    client: TestClient, tmp_path: Path, monkeypatch,
+) -> None:
+    """Admits valid work: the bucket a document refusal suggests is itself free, and posting the
+    identical launch with model_name set to it writes in place rather than refusing again."""
+    from tcip_mcp.dataset_layout import prediction_dir
+
+    ckpt, dataset_root, date, _inference_routes = _launch_setup(tmp_path, monkeypatch)
+    bucket = prediction_dir(Path(dataset_root), "baseline", date)
+    bucket.mkdir(parents=True, exist_ok=True)
+    write_annotations(bucket / "img.json", [], img_w=100, img_h=100, keep_empty=True)
+
+    resp = client.post("/api/inference/launch", json={
+        "checkpoint_path": ckpt, "dataset_root": dataset_root,
+        "model_name": "baseline@r2", "date": date,
+    })
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["bucket_redirected"] is False
+    assert Path(body["output_dir"]) == prediction_dir(Path(dataset_root), "baseline@r2", date)
+
+
+def test_inference_launch_redirects_past_a_verdict_though_the_bucket_also_holds_a_document(
+    client: TestClient, tmp_path: Path, monkeypatch,
+) -> None:
+    """Coverage of the verdict-first order: a bucket carrying both a verdict and a document still
+    redirects rather than refusing on the document (the fixture leaves the real worker running,
+    so nothing about a prediction pass is asserted here, only the route's own synchronous step)."""
+    dataset_root, ckpt, date = _verdicted_launch_dataset(tmp_path, monkeypatch)
+
+    resp = client.post("/api/inference/launch", json={
+        "checkpoint_path": str(ckpt), "dataset_root": str(dataset_root),
+        "model_name": "baseline", "date": date,
+    })
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["bucket_redirected"] is True
+
+
+def test_inference_launch_admits_a_bucket_holding_only_a_stamp(
+    client: TestClient, tmp_path: Path, monkeypatch,
+) -> None:
+    """Coverage of the document predicate's own edge: a bucket carrying an earlier run's stamp
+    and no prediction document still runs in place (a cancel before the first image is the tab's
+    own producer of this state); the worker is stubbed, so the stamp's own bytes are not asserted
+    here."""
+    from tcip_mcp.dataset_layout import image_dir, prediction_dir
+    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
+
+    ckpt, dataset_root, date, _inference_routes = _launch_setup(tmp_path, monkeypatch)
+    bucket = prediction_dir(Path(dataset_root), "baseline", date)
+    stamp = operating_point_stamp(
+        {"conf": {"value": 0.5}},
+        validated=False,
+        validated_by=None,
+        tile_size_validated=None,
+        shippable_issues=[],
+        id_map=None,
+        subject="bud",
+        attribute=None,
+        trait=None,
+        dataset_hash="abc123",
+        checkpoint="baseline",
+        checkpoint_sha256="f" * 64,
+        experiment_id="exp_001",
+        images_dir=str(image_dir(Path(dataset_root), date)),
+        raster_path=None,
+        produced_at="2026-01-01T00:00:00+00:00",
+    )
+    write_sidecar(bucket, stamp)
+
+    resp = client.post("/api/inference/launch", json={
+        "checkpoint_path": ckpt, "dataset_root": dataset_root,
+        "model_name": "baseline", "date": date,
+    })
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["bucket_redirected"] is False
+    assert Path(body["output_dir"]) == bucket
+
+
+def test_inference_launch_refuses_by_name_with_no_suggestion_when_every_variant_is_taken(
+    client: TestClient, tmp_path: Path, monkeypatch,
+) -> None:
+    """A guard: at b2ac13e1 the route never passes refuse_documents, so three document-holding
+    directories raise nothing and the launch writes in place; with the keyword on, an exhausted
+    search at a lowered ceiling refuses by name with no suggestion."""
+    import functools
+
+    from tcip_mcp.dataset_layout import prediction_dir
+    from tcip_mcp.prediction_buckets import resolve_writable_bucket
+
+    ckpt, dataset_root, date, _inference_routes = _launch_setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "tcip_mcp.prediction_buckets.resolve_writable_bucket",
+        functools.partial(resolve_writable_bucket, max_variants=3),
+    )
+    for name in ("baseline", "baseline@r2", "baseline@r3"):
+        bucket = prediction_dir(Path(dataset_root), name, date)
+        bucket.mkdir(parents=True, exist_ok=True)
+        write_annotations(bucket / "img.json", [], img_w=100, img_h=100, keep_empty=True)
+
+    resp = client.post("/api/inference/launch", json={
+        "checkpoint_path": ckpt, "dataset_root": dataset_root,
+        "model_name": "baseline", "date": date,
+    })
+
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["kind"] == "bucket_holds_documents"
+    assert detail["suggested_model_name"] is None
+    assert detail["suggested_output_dir"] is None
+
+
+def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
+    client: TestClient, tmp_path: Path, monkeypatch,
+) -> None:
+    """A guard: at b2ac13e1 the route has no in-flight check, so a second launch of a job still
+    writing resolves a fresh job over the same images rather than being refused by that job's
+    own identity; admitted again once the first job is terminal."""
+    import threading
+    import time
+
+    ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
+    event = threading.Event()
+
+    def _wait_worker(job) -> None:
+        job.status = "running"
+        event.wait(timeout=5)
+        job.status = "completed"
+
+    monkeypatch.setattr(inference_routes, "_worker", _wait_worker)
+
+    first = client.post("/api/inference/launch", json={
+        "checkpoint_path": ckpt, "dataset_root": dataset_root,
+        "model_name": "baseline", "date": date,
+    })
+    assert first.status_code == 200, first.text
+    job_id = first.json()["job_id"]
+
+    second = client.post("/api/inference/launch", json={
+        "checkpoint_path": ckpt, "dataset_root": dataset_root,
+        "model_name": "baseline", "date": date,
+    })
+    assert second.status_code == 409, second.text
+    detail = second.json()["detail"]
+    assert detail == {
+        "kind": "bucket_in_flight",
+        "message": detail["message"],
+        "date": date,
+        "requested_output_dir": first.json()["output_dir"],
+        "job_id": job_id,
+    }
+    assert isinstance(detail["message"], str) and detail["message"]
+
+    event.set()
+    job = inference_routes._get(job_id)
+    for _ in range(100):
+        if job.status not in ("pending", "running"):
+            break
+        time.sleep(0.05)
+    assert job.status == "completed"
+
+    third = client.post("/api/inference/launch", json={
+        "checkpoint_path": ckpt, "dataset_root": dataset_root,
+        "model_name": "baseline", "date": date,
+    })
+    assert third.status_code == 200, third.text
+
+
+def test_inference_launch_refuses_by_the_requested_name_though_the_redirected_bucket_moved(
+    client: TestClient, tmp_path: Path, monkeypatch,
+) -> None:
+    """A guard: keyed on the requested (dataset_root, model_name, date) rather than the resolved
+    path, so a second launch of a verdicted model and date whose first job redirected to @r2 and
+    already wrote a document there is refused naming that job, never resolved past it (which the
+    resolver would otherwise do, landing on @r3) into a second concurrent job."""
+    import threading
+    import time
+
+    from tcip_web.routes import inference as inference_routes
+
+    dataset_root, ckpt, date = _verdicted_launch_dataset(tmp_path, monkeypatch)
+    event = threading.Event()
+
+    def _wait_worker(job) -> None:
+        job.status = "running"
+        event.wait(timeout=5)
+        job.status = "completed"
+
+    monkeypatch.setattr(inference_routes, "_worker", _wait_worker)
+
+    first = client.post("/api/inference/launch", json={
+        "checkpoint_path": str(ckpt), "dataset_root": str(dataset_root),
+        "model_name": "baseline", "date": date,
+    })
+    assert first.status_code == 200, first.text
+    assert first.json()["bucket_redirected"] is True
+    redirected_dir = Path(first.json()["output_dir"])
+    write_annotations(redirected_dir / "img2.json", [], img_w=100, img_h=100, keep_empty=True)
+
+    second = client.post("/api/inference/launch", json={
+        "checkpoint_path": str(ckpt), "dataset_root": str(dataset_root),
+        "model_name": "baseline", "date": date,
+    })
+    assert second.status_code == 409, second.text
+    detail = second.json()["detail"]
+    assert detail["kind"] == "bucket_in_flight"
+    assert detail["job_id"] == first.json()["job_id"]
+
+    event.set()
+    job = inference_routes._get(first.json()["job_id"])
+    for _ in range(100):
+        if job.status not in ("pending", "running"):
+            break
+        time.sleep(0.05)
 
 
 def test_inference_launch_resolves_explicit_conf_and_max_dets_source_from_the_payload(
