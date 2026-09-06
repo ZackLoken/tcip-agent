@@ -86,10 +86,21 @@ def test_ws_state_rejects_cross_site_origin(client: TestClient) -> None:
 
 
 def test_ws_state_rejects_duplicate_origin(client: TestClient) -> None:
-    # A duplicated Origin header is refused outright, the same way a duplicated Host is.
-    duplicated = _RawHeaderList([("origin", "http://127.0.0.1"), ("origin", "http://127.0.0.1")])
+    # Two individually permitted origins, so duplication alone is what closes this connect.
+    duplicated = _RawHeaderList([
+        ("origin", "http://127.0.0.1"), ("origin", "http://localhost:5173"),
+    ])
     with pytest.raises(WebSocketDisconnect) as closed:
         with client.websocket_connect("ws://127.0.0.1/ws/state", headers=duplicated):
+            pass
+    assert closed.value.code == 1008
+    assert closed.value.reason == "origin not allowed"
+
+
+def test_ws_state_rejects_empty_origin(client: TestClient) -> None:
+    # A present but empty Origin header is checked like any other, not read as absent.
+    with pytest.raises(WebSocketDisconnect) as closed:
+        with client.websocket_connect("ws://127.0.0.1/ws/state", headers={"origin": ""}):
             pass
     assert closed.value.code == 1008
     assert closed.value.reason == "origin not allowed"
@@ -136,7 +147,9 @@ def test_ws_inference_stream_rejects_cross_site_origin(client: TestClient) -> No
 
 
 def test_ws_training_stream_rejects_cross_site_origin(client: TestClient, tmp_path) -> None:
-    # project_root is confined so the origin, not the path guard, refuses this connect.
+    """project_root is confined so the origin, not the path guard, refuses this connect. Passes
+    at the baseline too, since the handler already refused a foreign Origin there: preservation
+    coverage for the move into the middleware, not a guard for this change."""
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect(
             f"ws://127.0.0.1/api/training/runs/does-not-exist/stream?project_root={tmp_path}",

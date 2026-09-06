@@ -17,7 +17,7 @@ import pytest
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-from tcip_web.app import app
+from tcip_web.app import ActiveTabPayload, app
 from tcip_web.trust_boundary import EXPOSURE_REFUSAL
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -105,9 +105,10 @@ def test_a_permitted_origin_still_reaches_the_handler(client: TestClient) -> Non
     """The rail must admit valid work: a request from the backend's own origin, from the Vite
     dev server's origin, and with no Origin at all all reach the handler's own outcome, both
     pass through the loopback arm on this local arrival."""
+    body = ActiveTabPayload(active_tab="annotate").model_dump()
     for origin in ("http://127.0.0.1", "http://localhost:5173", None):
         headers = {"origin": origin} if origin else {}
-        resp = client.post("/api/state/tab", json={"active_tab": "annotate"}, headers=headers)
+        resp = client.post("/api/state/tab", json=body, headers=headers)
         assert resp.status_code == 200, (origin, resp.status_code, resp.text)
 
         resp = client.post(
@@ -118,6 +119,14 @@ def test_a_permitted_origin_still_reaches_the_handler(client: TestClient) -> Non
         assert resp.json()["status"] == "not_running"
 
 
+def test_an_empty_origin_refuses_on_the_tab_route(client: TestClient) -> None:
+    """A present but empty Origin header is checked like any other, not read as absent."""
+    body = ActiveTabPayload(active_tab="annotate").model_dump()
+    resp = client.post("/api/state/tab", json=body, headers={"origin": ""})
+    assert resp.status_code == 403
+    assert "origin not allowed" in resp.text
+
+
 def test_an_exposed_arrival_admits_its_own_origin_only_by_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -126,22 +135,48 @@ def test_an_exposed_arrival_admits_its_own_origin_only_by_name(
     monkeypatch.setenv("TCIP_WEB_ALLOW_INSECURE", "1")
     monkeypatch.delenv("TCIP_WEB_ADVERTISED_HOSTS", raising=False)
     lan = TestClient(app, base_url="http://192.168.1.23:8765")
+    body = ActiveTabPayload(active_tab="annotate").model_dump()
 
-    resp = lan.post("/api/state/tab", json={"active_tab": "annotate"},
+    resp = lan.post("/api/state/tab", json=body,
                      headers={"origin": "http://192.168.1.23:8765"})
     assert resp.status_code == 200
 
-    resp = lan.post("/api/state/tab", json={"active_tab": "annotate"})
+    resp = lan.post("/api/state/tab", json=body)
     assert resp.status_code == 200
 
-    resp = lan.post("/api/state/tab", json={"active_tab": "annotate"},
+    resp = lan.post("/api/state/tab", json=body,
                      headers={"origin": "http://gui.example"})
     assert resp.status_code == 403
 
     monkeypatch.setenv("TCIP_WEB_ADVERTISED_HOSTS", "gui.example:80")
-    resp = lan.post("/api/state/tab", json={"active_tab": "annotate"},
+    resp = lan.post("/api/state/tab", json=body,
                      headers={"origin": "http://gui.example"})
     assert resp.status_code == 200
+
+
+def test_a_reverse_proxy_forwarding_its_own_name_is_admitted_once_advertised(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A same-machine reverse proxy that rewrites Host to a public name is admitted by both
+    the Host check and the Origin check once that name is advertised with its port written
+    out: the combined case, rather than Host and Origin proven admitted separately."""
+    monkeypatch.setenv("TCIP_WEB_ALLOW_INSECURE", "1")
+    monkeypatch.setenv("TCIP_WEB_ADVERTISED_HOSTS", "gui.example:80")
+    lan = TestClient(app, base_url="http://192.168.1.23:8765")
+    body = ActiveTabPayload(active_tab="annotate").model_dump()
+    resp = lan.post("/api/state/tab", json=body,
+                     headers={"host": "gui.example", "origin": "http://gui.example"})
+    assert resp.status_code == 200
+
+
+def test_the_local_method_set_matches_the_canonical_one() -> None:
+    """The literal above exists only so this module still collects at a baseline that
+    predates trust_boundary.STATE_CHANGING_METHODS; this pins it to that constant going
+    forward, imported here rather than at module scope so that baseline collection stays
+    unaffected by this one test."""
+    from tcip_web.trust_boundary import STATE_CHANGING_METHODS
+
+    assert _STATE_CHANGING_METHODS == STATE_CHANGING_METHODS
 
 
 def test_a_get_with_a_foreign_origin_answers_as_it_does_without_one(client: TestClient) -> None:

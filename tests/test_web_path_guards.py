@@ -35,15 +35,17 @@ def test_origin_without_a_parseable_host_is_not_local() -> None:
     assert not origin_allowed("file://", LOCAL_ARRIVAL)
     assert not origin_allowed("http://", LOCAL_ARRIVAL)
     assert not origin_allowed("http://evil.example.com", LOCAL_ARRIVAL)
+    # A present but empty Origin is checked like any other, not read as absent.
+    assert not origin_allowed("", LOCAL_ARRIVAL)
 
 
 def test_local_browser_and_non_browser_clients_are_still_admitted() -> None:
-    """Loopback pages and clients that send no Origin at all keep working."""
+    """Loopback pages, and only a client that sends no Origin at all (never an empty one),
+    keep working."""
     assert origin_allowed("http://127.0.0.1:8765", LOCAL_ARRIVAL)
     assert origin_allowed("http://localhost:5173", LOCAL_ARRIVAL)
     assert origin_allowed("http://[::1]:8765", LOCAL_ARRIVAL)
     assert origin_allowed(None, LOCAL_ARRIVAL)
-    assert origin_allowed("", LOCAL_ARRIVAL)
 
 
 # -- TCIP_IMAGE_ROOTS containment -----------------------------------------

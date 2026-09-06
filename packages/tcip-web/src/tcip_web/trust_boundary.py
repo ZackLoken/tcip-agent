@@ -266,14 +266,17 @@ def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:
     """Whether an Origin is one this backend serves for the connection it arrived on.
 
     Applied by :class:`TrustBoundaryMiddleware` to every WebSocket scope and to an ``http``
-    scope whose method is in :data:`STATE_CHANGING_METHODS`. A missing Origin is a non-browser
-    client (the MCP tools send none) and is allowed: this check is a browser-side mitigation
-    against a cross-site page reading GUI state or driving a mutation, not authentication. A
-    present Origin must be exactly the request's own origin (the validated Host at the request
-    scheme), or a loopback host at any port on a local arrival (the Vite dev server proxies from
-    its own port), or an advertised authority under the opt-in.
+    scope whose method is in :data:`STATE_CHANGING_METHODS`. Only an absent Origin (``None``)
+    is a non-browser client (the MCP tools send none) and is allowed: this check is a
+    browser-side mitigation against a cross-site page reading GUI state or driving a mutation,
+    not authentication. A present Origin, empty included, is checked like any other and refused
+    if it does not parse as a bare authority; this is a behaviour change on the socket path,
+    whose handlers today read an empty header (``if not origin``) as missing. A present Origin
+    must be exactly the request's own origin (the validated Host at the request scheme), or a
+    loopback host at any port on a local arrival (the Vite dev server proxies from its own
+    port), or an advertised authority under the opt-in.
     """
-    if not origin:
+    if origin is None:
         return True
     parsed = _parse_origin(origin)
     if parsed is None:
@@ -298,8 +301,11 @@ class TrustBoundaryMiddleware:
     with the exposure message; a Host the backend does not answer to is refused as an invalid
     host. After the Host check, every WebSocket scope and every ``http`` scope whose method is
     in :data:`STATE_CHANGING_METHODS` must also carry an Origin :func:`origin_allowed` admits; a
-    duplicated Origin header is refused the same way a duplicated Host is. A refused exposed
-    arrival is logged once per client and arrival address pair so the operator sees it.
+    duplicated Origin header is refused the same way a duplicated Host is. On a loopback
+    arrival every loopback origin at every port is admitted, so another local server's page
+    passes this check too; only the JSON-body guard's unanswered preflight
+    (``routes/_body_common.py``) stops its browser from mutating. A refused exposed arrival is
+    logged once per client and arrival address pair so the operator sees it.
     """
 
     def __init__(self, app: Callable[[Scope, Receive, Send], Awaitable[None]]) -> None:

@@ -1195,7 +1195,7 @@ transport's default identity (starlette's `TestClient`, `("testclient", 50000)`,
 of the accepted connection rather than the configured bind host, so this entry point always
 binds the requested host and port; whether an arrival through a non-loopback address is served
 is decided per request by `tcip_web.trust_boundary.TrustBoundaryMiddleware` (`trust_boundary.py:
-293`), which refuses one unless `TCIP_WEB_ALLOW_INSECURE=1` is set (`insecure_opt_in`,
+296`), which refuses one unless `TCIP_WEB_ALLOW_INSECURE=1` is set (`insecure_opt_in`,
 `trust_boundary.py:137`). The same middleware applies one Origin policy
 (`origin_allowed`, `trust_boundary.py:265`) to every WebSocket scope and to every HTTP scope
 whose method is state-changing (`STATE_CHANGING_METHODS`, `trust_boundary.py:43`), rather than
