@@ -750,13 +750,14 @@ export function AnnotateTab() {
     return false;
   }
 
-  // No polygon selected when a cut click or a keyboard cut lands: nothing to cut. Channelled
-  // "cut", so a repeat replaces the standing toast with a count rather than nothing.
+  // No keyboard path selects a polygon, so this names the click as the precondition for both
+  // paths. Channelled "cut", so a repeat replaces the standing toast with a count.
   function requireCutSelection(): void {
     useStore
       .getState()
       .pushToast(
-        "Select a polygon to cut, then click two points on either side of it.",
+        "Select a polygon first by clicking it, then click two points on either side of it or " +
+          "press Shift+H / Shift+V.",
         "error",
         "cut",
       );
@@ -773,7 +774,18 @@ export function AnnotateTab() {
   // Shift+H / Shift+V: two endpoints one bounding-box width (or height) outside each side of
   // the centre line, then the same splitPolygon/incrementAnnotationsAdded path a mouse cut takes.
   function runAxisCut(axis: "horizontal" | "vertical"): void {
-    if (cutStart) return; // a pending click-cut start is the mouse's; the keys leave it alone
+    if (cutStart) {
+      // A pending click-cut start is the mouse's; the keys leave it alone but say why nothing
+      // happened rather than staying silent.
+      useStore
+        .getState()
+        .pushToast(
+          "A cut is half-placed. Press Esc to clear it, then x to re-arm.",
+          "error",
+          "cut",
+        );
+      return;
+    }
     const idx = canvas.selectedPolygonIdx;
     if (idx === null) {
       requireCutSelection();
