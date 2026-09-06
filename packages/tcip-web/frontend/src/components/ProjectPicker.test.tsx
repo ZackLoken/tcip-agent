@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { ProjectPicker } from "@/components/ProjectPicker";
 import { useStore } from "@/store";
@@ -264,6 +264,38 @@ describe("ProjectPicker", () => {
     opts = Array.from(subjectSelect.options).map((o) => o.value);
     expect(opts).toContain("subject_a");
     expect(opts).not.toContain("bush");
+  });
+
+  it("names the unset subject and model options only when they carry the glyph, not the state word", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+    });
+    render(<ProjectPicker />);
+
+    // 2026-02-11 has options for both selects, so each renders its glyph branch.
+    fireEvent.click(await screen.findByText("crop_a_subject_a_valley-farm"));
+    fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2026-02-11" } });
+
+    const subjectSelect = screen.getByLabelText("Subject") as HTMLSelectElement;
+    expect(
+      within(subjectSelect).getByRole("option", { name: "no subject chosen" }),
+    ).toBeInTheDocument();
+    const modelSelect = screen.getByLabelText("Model") as HTMLSelectElement;
+    expect(
+      within(modelSelect).getByRole("option", { name: "no model chosen" }),
+    ).toBeInTheDocument();
+
+    // crop_b's only date has neither, so the state word stands as its own accessible name.
+    fireEvent.click(screen.getByText("crop_b_burr_site-b"));
+    const emptySubjectSelect = screen.getByLabelText("Subject") as HTMLSelectElement;
+    expect(
+      within(emptySubjectSelect).getByRole("option", { name: "no labels" }),
+    ).toBeInTheDocument();
+    const emptyModelSelect = screen.getByLabelText("Model") as HTMLSelectElement;
+    expect(within(emptyModelSelect).getByRole("option", { name: "no preds" })).toBeInTheDocument();
   });
 
   it("auto-opens the active project on first load without writing the marker", async () => {

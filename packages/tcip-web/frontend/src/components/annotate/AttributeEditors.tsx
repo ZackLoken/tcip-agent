@@ -42,7 +42,9 @@ export function AttributeEditors({
                 value={attributes[name] ?? ""}
                 onChange={(e) => onChange(name, e.target.value)}
               >
-                <option value="">{UNSET_GLYPH}</option>
+                <option value="" aria-label={`no ${name} value`}>
+                  {UNSET_GLYPH}
+                </option>
                 {def.values.map((v) => (
                   <option key={v} value={v}>
                     {v}
