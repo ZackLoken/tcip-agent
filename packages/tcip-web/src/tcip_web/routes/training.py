@@ -311,7 +311,9 @@ async def _stream_metrics(
     The cursor is the log's own resume token, so each tick reads only what was appended
     since the last one and an entry still being written is replayed once it is complete.
     The run's record is re-resolved until it exists, since a stream can be opened before the
-    launch has created it.
+    launch has created it. Both reads run off the event loop: a file-backend read can wait
+    on a training subprocess's own append, and that wait must stall this socket's own
+    coroutine rather than every request and socket the backend serves.
     """
     from tcip_store import read_log
 
@@ -323,7 +325,7 @@ async def _stream_metrics(
             key = _metrics_key(project_root, run_id)
         rows: list[dict] = []
         if key is not None:
-            page = read_log(key, after=cursor)
+            page = await asyncio.to_thread(read_log, key, after=cursor)
             cursor = page.cursor
             rows = [dict(row) for row in page.records]
         for row in rows:
@@ -341,7 +343,7 @@ async def _stream_metrics(
                 # A row can land between the read above and this terminal observation; drain
                 # it now so the status frame never precedes the row it terminates on.
                 if key is not None:
-                    final_page = read_log(key, after=cursor)
+                    final_page = await asyncio.to_thread(read_log, key, after=cursor)
                     cursor = final_page.cursor
                     for row in (dict(r) for r in final_page.records):
                         frame = TrainingMetricFrame(type="metric", run_id=run_id, row=row)

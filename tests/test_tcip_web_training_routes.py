@@ -214,6 +214,47 @@ def test_metrics_stream_pushes_complete_entries_and_defers_a_partial_one(tmp_pat
     assert sent[-1]["type"] == "status"
 
 
+def test_metrics_stream_reads_the_log_off_the_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stream's read_log calls must never run on the event loop's own thread: a
+    file-backend read waits on a writer holding the log's key, and that wait running on the
+    loop would stall every request and socket the backend serves, not only this one."""
+    import asyncio
+    import threading
+
+    import tcip_store
+    from tcip_mcp.experiments import create_experiment, log_metrics, update_status
+    from tcip_store.file_backend import FileBackend
+    from tcip_web.routes.training import _stream_metrics
+
+    tcip_store.bind(FileBackend())
+
+    run_id = "exp-off-loop"
+    create_experiment(run_id, {"model_source": {"builder": "m:f"}})
+    log_metrics(run_id, 1, {"loss": 0.9})
+    update_status(run_id, "completed")
+
+    main_thread = threading.current_thread()
+    read_threads: list[threading.Thread] = []
+    real_read_log = tcip_store.read_log
+
+    def recording_read_log(*args: object, **kwargs: object) -> object:
+        read_threads.append(threading.current_thread())
+        return real_read_log(*args, **kwargs)
+
+    monkeypatch.setattr(tcip_store, "read_log", recording_read_log)
+
+    class _Socket:
+        async def send_json(self, payload: dict) -> None:
+            pass
+
+    asyncio.run(_stream_metrics(_Socket(), str(tmp_path), run_id, poll_seconds=0.0))
+
+    assert read_threads
+    assert all(thread is not main_thread for thread in read_threads)
+
+
 def test_compare_route_handles_empty_ids(client: TestClient) -> None:
     resp = client.post("/api/training/compare", json={"experiment_ids": []})
     assert resp.status_code == 200
