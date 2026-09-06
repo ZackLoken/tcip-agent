@@ -319,7 +319,8 @@ def test_cancel_run_falls_back_to_disk_when_not_in_local_registry(tmp_path, monk
     real_output_dir = tmp_path / "real_run_dir"
     real_output_dir.mkdir()
     create_experiment("exp_cross_proc", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("exp_cross_proc", "run_cross_proc", str(real_output_dir))
+    stamp_run_identity("exp_cross_proc", "run_cross_proc", str(real_output_dir),
+                       launched_by={"launcher": "process"})
 
     assert cancel_run("run_cross_proc") is True
     assert (real_output_dir / ".cancel_requested").is_file()
@@ -343,7 +344,7 @@ def test_ensure_experiment_pristine_reuse_stamps_identity(tmp_path, monkeypatch)
 
     create_experiment("precreated", {"a": 1})  # agent pre-creates before any run_id exists
     eid = _ensure_experiment("precreated", {"a": 1}, None, resume_from="", run_id="run_later",
-                             output_dir=str(tmp_path / "out"))
+                             output_dir=str(tmp_path / "out"), launched_by={"launcher": "process"})
     assert eid == "precreated"
 
     resolved = resolve_experiment_dir_for_run("run_later")
@@ -362,7 +363,7 @@ def test_resolve_experiment_dir_for_run_handles_fresh_id_suffix(tmp_path, monkey
 
     create_experiment("exp1_run_9_0", {"model_source": {"builder": "x:y"}},
                       parent_experiment="exp1")
-    stamp_run_identity("exp1_run_9_0", "run_9_0", "out")
+    stamp_run_identity("exp1_run_9_0", "run_9_0", "out", launched_by={"launcher": "process"})
 
     resolved = resolve_experiment_dir_for_run("run_9_0")
     assert resolved is not None and resolved.name == "exp1_run_9_0"
@@ -385,7 +386,7 @@ def test_reconstruct_run_status_from_disk(tmp_path, monkeypatch):
     )
 
     create_experiment("exp_disk", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("exp_disk", "run_disk", "out_dir")
+    stamp_run_identity("exp_disk", "run_disk", "out_dir", launched_by={"launcher": "process"})
     update_status("exp_disk", "running")
     log_metrics("exp_disk", 3, {"loss": 0.1})
 
@@ -408,7 +409,7 @@ def test_reconstruct_run_status_derives_best_from_stamped_rows(tmp_path, monkeyp
     )
 
     create_experiment("exp_stamped", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("exp_stamped", "run_stamped", "out_dir")
+    stamp_run_identity("exp_stamped", "run_stamped", "out_dir", launched_by={"launcher": "process"})
     update_status("exp_stamped", "running")
     log_metrics("exp_stamped", 1, {"selection": 0.5, "selection_metric": "map50"})
     log_metrics("exp_stamped", 2, {"selection": 0.7, "selection_metric": "map50"})
@@ -463,7 +464,7 @@ def test_reconstruct_run_status_surfaces_error(tmp_path, monkeypatch):
     from tcip_mcp.experiments import create_experiment, reconstruct_run_status, stamp_run_identity, update_status
 
     create_experiment("exp_err", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("exp_err", "run_err", "out_dir")
+    stamp_run_identity("exp_err", "run_err", "out_dir", launched_by={"launcher": "process"})
     update_status("exp_err", "failed", error="exceeded max_wall_clock_seconds (10)")
 
     result = reconstruct_run_status("run_err")
@@ -482,7 +483,7 @@ def test_reconstruct_run_status_reports_cancelled_not_running_or_interrupted(tmp
     from tcip_mcp.experiments import create_experiment, reconstruct_run_status, stamp_run_identity, update_status
 
     create_experiment("exp_cancelled", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("exp_cancelled", "run_cancelled", "out_dir")
+    stamp_run_identity("exp_cancelled", "run_cancelled", "out_dir", launched_by={"launcher": "process"})
     update_status("exp_cancelled", "running")
     update_status("exp_cancelled", "cancelled")  # stamps a fresh heartbeat, same as any update_status call
 
@@ -521,7 +522,7 @@ def test_monitor_training_falls_back_to_disk_for_delegated_run(tmp_path, monkeyp
     run.pid = 999  # subprocess-delegated, in-memory fields below are now stale by design
 
     create_experiment("run_delegated", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("run_delegated", "run_delegated", "out_dir")
+    stamp_run_identity("run_delegated", "run_delegated", "out_dir", launched_by={"launcher": "process"})
     update_status("run_delegated", "running")
     log_metrics("run_delegated", 7, {"loss": 0.2})
 
@@ -589,7 +590,7 @@ def test_launched_runs_view_overlays_a_pid_bearing_entry_from_disk(tmp_path, mon
     run.pid = 4242
 
     create_experiment("run_pid_overlay", {"model_source": {"builder": "my_models:burr_det"}})
-    stamp_run_identity("run_pid_overlay", "run_pid_overlay", "out_dir")
+    stamp_run_identity("run_pid_overlay", "run_pid_overlay", "out_dir", launched_by={"launcher": "process"})
     update_status("run_pid_overlay", "running")
     log_metrics("run_pid_overlay", 9, {"loss": 0.1})
 
@@ -852,7 +853,7 @@ def test_inspect_compute_resources_counts_subprocess_delegated_running_runs(tmp_
     assert run.status == "created"  # the parent-side placeholder never advances
 
     create_experiment("run_active", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("run_active", "run_active", str(tmp_path))
+    stamp_run_identity("run_active", "run_active", str(tmp_path), launched_by={"launcher": "process"})
     update_status("run_active", "running")  # only the child's disk write reflects reality
 
     assert inspect_compute_resources()["active_training_runs"] == baseline + 1

@@ -1327,7 +1327,7 @@ def test_ensure_experiment_mints_fresh_id_instead_of_mutating(tmp_path, monkeypa
 
     # Relaunching with the same experiment_id must not reuse it.
     eid = _ensure_experiment("exp1", {"a": 2}, "imgs_v2", resume_from="", run_id="run_9_0",
-                             output_dir="out")
+                             output_dir="out", launched_by={"launcher": "process"})
     assert eid == "exp1_run_9_0"
     assert ts.read(status_key("exp1")) == status_before      # untouched
     assert read_metrics("exp1") == metrics_before             # untouched
@@ -1352,11 +1352,11 @@ def test_ensure_experiment_attaches_to_precreated(tmp_path, monkeypatch):
     # Agent pre-created the experiment (state 'created', no metrics): attach.
     create_experiment("pre", {"a": 1})
     assert _ensure_experiment("pre", {"a": 1}, None, resume_from="", run_id="r1",
-                              output_dir="out") == "pre"
+                              output_dir="out", launched_by={"launcher": "process"}) == "pre"
 
     # A brand-new id is simply created.
     assert _ensure_experiment("new", {"a": 1}, None, resume_from="", run_id="r3",
-                              output_dir="out") == "new"
+                              output_dir="out", launched_by={"launcher": "process"}) == "new"
 
 
 def test_ensure_experiment_attaches_to_precreated_and_rewrites_config(tmp_path, monkeypatch):
@@ -1370,7 +1370,7 @@ def test_ensure_experiment_attaches_to_precreated_and_rewrites_config(tmp_path, 
     create_experiment("pre", {"a": 1})
     effective_config = {"a": 1, "data": {"tiling": {"tile_size": 512}}, "seed": 99}
     assert _ensure_experiment("pre", effective_config, None, resume_from="", run_id="r1",
-                              output_dir="out") == "pre"
+                              output_dir="out", launched_by={"launcher": "process"}) == "pre"
 
     config = ts.read(config_key("pre"))
     assert config == effective_config
@@ -1390,7 +1390,7 @@ def test_ensure_experiment_resume_into_populated_id_mints_fresh_parented_id(tmp_
     update_status("res", "running")
     log_metrics("res", 1, {"loss": 0.5})
     eid = _ensure_experiment("res", {"a": 1}, None, resume_from="ckpt/checkpoint_epoch_5.pt",
-                             run_id="r2", output_dir="out")
+                             run_id="r2", output_dir="out", launched_by={"launcher": "process"})
     assert eid == "res_r2"
 
     lineage = ts.read(lineage_key("res_r2"))
@@ -1407,7 +1407,7 @@ def test_ensure_experiment_resume_into_pristine_id_still_attaches(tmp_path, monk
     create_experiment("pre2", {"a": 1})
     eid = _ensure_experiment("pre2", {"a": 1}, None,
                              resume_from="ckpt/checkpoint_epoch_5.pt", run_id="r9",
-                             output_dir="out")
+                             output_dir="out", launched_by={"launcher": "process"})
     assert eid == "pre2"
 
 

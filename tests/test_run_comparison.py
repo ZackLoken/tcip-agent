@@ -333,7 +333,7 @@ def test_all_training_runs_keeps_the_live_rows_own_resolved_id_over_the_disk_ove
 
     create_experiment("exp-disk", {"model_source": {"builder": "m:f"}}, data_source="imgs")
     update_status("exp-disk", "running")
-    stamp_run_identity("exp-disk", run.run_id, str(tmp_path / "out"))
+    stamp_run_identity("exp-disk", run.run_id, str(tmp_path / "out"), launched_by={"launcher": "process"})
 
     rows = _all_training_runs(read_progress=False)
     row = next(r for r in rows if r["run_id"] == run.run_id)
@@ -353,7 +353,7 @@ def test_all_training_runs_takes_the_disk_overlays_id_when_the_live_row_has_none
 
     create_experiment("exp-disk-2", {"model_source": {"builder": "m:f"}}, data_source="imgs")
     update_status("exp-disk-2", "running")
-    stamp_run_identity("exp-disk-2", run.run_id, str(tmp_path / "out"))
+    stamp_run_identity("exp-disk-2", run.run_id, str(tmp_path / "out"), launched_by={"launcher": "process"})
 
     rows = _all_training_runs(read_progress=False)
     row = next(r for r in rows if r["run_id"] == run.run_id)

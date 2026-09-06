@@ -538,7 +538,7 @@ def test_project_roots_names_a_run_output_dir_a_split_manifest_and_a_prediction_
     experiments.create_experiment("exp-1", {"model_source": {}})
     run_dir = tmp_path / "runs" / "exp-1"
     run_dir.mkdir(parents=True)
-    experiments.stamp_run_identity("exp-1", "exp-1", str(run_dir))
+    experiments.stamp_run_identity("exp-1", "exp-1", str(run_dir), launched_by={"launcher": "process"})
 
     split_dir = tmp_path / "splits" / "frozen-exp-1"
     split_dir.mkdir(parents=True)
@@ -659,7 +659,7 @@ def test_project_roots_skips_a_recorded_run_output_dir_that_no_longer_exists(
     experiments.create_experiment("exp-stale", {"model_source": {}})
     run_dir = tmp_path / "runs" / "exp-stale"
     run_dir.mkdir(parents=True)
-    experiments.stamp_run_identity("exp-stale", "exp-stale", str(run_dir))
+    experiments.stamp_run_identity("exp-stale", "exp-stale", str(run_dir), launched_by={"launcher": "process"})
     run_dir.rmdir()
 
     roots = project_roots(project)

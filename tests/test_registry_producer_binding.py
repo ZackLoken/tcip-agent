@@ -123,7 +123,7 @@ def test_resumed_run_records_and_binds_its_own_weights(tmp_path, monkeypatch):
 
     resumed_id = _ensure_experiment(
         base, {"model_source": {"builder": "x:y"}}, None, str(first_weights), "run-2",
-        output_dir=str(tmp_path / "out2"))
+        output_dir=str(tmp_path / "out2"), launched_by={"launcher": "process"})
     assert resumed_id != base  # a non-pristine base mints a fresh id, per _ensure_experiment
 
     second_weights = tmp_path / "out2" / "model_best.pt"

@@ -23,7 +23,8 @@ def test_relaunch_into_a_cancelled_id_mints_a_fresh_parented_id(tmp_path) -> Non
     status_before = ts.read(exp.status_key("stopped"))
 
     eid = _ensure_experiment("stopped", {"optimizer": {"head_lr": 0.05}}, "imgs_v2",
-                             resume_from="", run_id="run_c1", output_dir="out/c1")
+                             resume_from="", run_id="run_c1", output_dir="out/c1",
+                             launched_by={"launcher": "process"})
 
     assert eid == "stopped_run_c1"
     assert ts.read(exp.config_key("stopped")) == {"optimizer": {"head_lr": 0.001}}
@@ -51,7 +52,7 @@ def test_resuming_from_a_cancelled_runs_checkpoint_does_not_reopen_its_record(tm
 
     eid = _ensure_experiment("stopped_mid", {"seed": 7}, None,
                              resume_from="out/checkpoint_epoch_2.pt", run_id="run_c2",
-                             output_dir="out/c2")
+                             output_dir="out/c2", launched_by={"launcher": "process"})
 
     assert eid == "stopped_mid_run_c2"
     assert list(ts.read_log(exp.metrics_key("stopped_mid")).records) == metrics_before

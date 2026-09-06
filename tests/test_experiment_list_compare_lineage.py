@@ -116,7 +116,7 @@ def test_list_experiments_tool_carries_run_id_and_has_model_source(tmp_path, mon
     from tcip_mcp.tools.experiment_tools import list_experiments
 
     create_experiment("exp-run", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
-    stamp_run_identity("exp-run", "run-abc", "out_dir")
+    stamp_run_identity("exp-run", "run-abc", "out_dir", launched_by={"launcher": "process"})
     create_experiment("exp-precreated", {"a": 1})
 
     listed = {e["experiment_id"]: e for e in list_experiments()["experiments"]}
@@ -349,7 +349,8 @@ def test_compare_experiments_finds_a_refusal_under_the_pinned_root(tmp_path, mon
     (other_root / ".tcip").mkdir(parents=True)
     (other_root / ".tcip" / "store.db").write_bytes(b"not a real sqlite database")
     stamp_run_identity(
-        "exp-terminal", "run-1", str(other_root / ".tcip" / "experiments" / "exp-terminal")
+        "exp-terminal", "run-1", str(other_root / ".tcip" / "experiments" / "exp-terminal"),
+        launched_by={"launcher": "process"},
     )
 
     result = compare_experiments(["exp-terminal"])
