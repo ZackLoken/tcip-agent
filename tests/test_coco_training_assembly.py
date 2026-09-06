@@ -821,6 +821,220 @@ def test_quarantined_negative_reads_the_same_reason_on_both_label_paths(tmp_path
     assert counts_json == counts_coco
 
 
+def test_a_stale_complete_confirmation_is_quarantined_on_both_label_paths(tmp_path):
+    """A complete confirmation, unlike a negative, trained by its label file's real content alone
+    before this quarantine: a bud image finished under a two-value attribute vocabulary that grew
+    to three must be held out exactly as a stale negative already is, on both label paths, never
+    admitted as ``annotated`` by the boxes it happens to carry."""
+    from tcip_mcp import class_registry
+    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp.pipelines.data.label_queries import (
+        assemble_coco, require_samples, trainable_stems,
+    )
+
+    images = tmp_path / "images"
+    labels = tmp_path / "annotations"
+    labels.mkdir(parents=True)
+    registry = ClassRegistry(subjects=(
+        Subject(name=BUD, attributes=(
+            Attribute(name="opening", type="categorical", values=("closed", "open")),
+        )),
+    ))
+    write_registry(tmp_path / "classes.json", registry)
+    current_digest = class_registry.attribute_schema_digest(registry, BUD)
+
+    _make_images(images, ["a"])
+    json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12)], 100, 100)
+
+    record_image_statuses(tmp_path, status_bucket(BUD, None), {"a.jpg": "complete"},
+                          recorded_by="user:breeder")
+    assert current_digest != "stale-digest"
+    stamp_image_status_digests(tmp_path, status_bucket(BUD, None), ["a.jpg"], "stale-digest")
+
+    _, id_map = _reg_id_map()
+    keep_json, counts_json = trainable_stems(str(labels), str(images), subject=BUD, date=None)
+    coco = assemble_coco(labels, images, subject=BUD, date=None, id_map=id_map)
+    keep_coco, counts_coco = trainable_stems(str(labels), str(images), subject=BUD, date=None,
+                                             coco=coco)
+
+    assert keep_json == [] and keep_coco == []
+    assert counts_json["quarantined_stale_definition"] == 1
+    assert counts_json["annotated"] == 0
+    assert counts_json == counts_coco
+    with pytest.raises(ValueError, match="quarantined"):
+        require_samples(keep_json, counts_json, str(labels))
+
+
+def test_a_reconfirmed_complete_trains_again_after_the_schema_change(tmp_path):
+    """Re-confirming restamps the current digest, so the same image trains once a human has
+    looked again under the vocabulary now in effect."""
+    from tcip_mcp import class_registry
+    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp.pipelines.data.label_queries import trainable_stems
+
+    images = tmp_path / "images"
+    labels = tmp_path / "annotations"
+    labels.mkdir(parents=True)
+    registry = ClassRegistry(subjects=(
+        Subject(name=BUD, attributes=(
+            Attribute(name="opening", type="categorical", values=("closed", "open")),
+        )),
+    ))
+    write_registry(tmp_path / "classes.json", registry)
+    current_digest = class_registry.attribute_schema_digest(registry, BUD)
+
+    _make_images(images, ["a"])
+    json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12)], 100, 100)
+    record_image_statuses(tmp_path, status_bucket(BUD, None), {"a.jpg": "complete"},
+                          recorded_by="user:breeder")
+    stamp_image_status_digests(tmp_path, status_bucket(BUD, None), ["a.jpg"], current_digest)
+
+    keep, counts = trainable_stems(str(labels), str(images), subject=BUD, date=None)
+    assert keep == ["a"]
+    assert counts["annotated"] == 1
+    assert counts["quarantined_stale_definition"] == 0
+
+
+def test_an_unstamped_complete_trains(tmp_path):
+    """A complete confirmation the stamp transaction never reached is admitted, not quarantined:
+    absence of a stamp is never evidence of staleness."""
+    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp.pipelines.data.label_queries import trainable_stems
+
+    images = tmp_path / "images"
+    labels = tmp_path / "annotations"
+    labels.mkdir(parents=True)
+    registry = ClassRegistry(subjects=(
+        Subject(name=BUD, attributes=(
+            Attribute(name="opening", type="categorical", values=("closed", "open")),
+        )),
+    ))
+    write_registry(tmp_path / "classes.json", registry)
+
+    _make_images(images, ["a"])
+    json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12)], 100, 100)
+    record_image_statuses(tmp_path, status_bucket(BUD, None), {"a.jpg": "complete"},
+                          recorded_by="user:breeder")
+
+    keep, counts = trainable_stems(str(labels), str(images), subject=BUD, date=None)
+    assert keep == ["a"]
+    assert counts["quarantined_stale_definition"] == 0
+
+
+def test_a_complete_under_an_unchanged_subject_trains(tmp_path):
+    """Another subject's own schema change never quarantines a bucket the change had no part in:
+    only bud's digest moves, so bush's complete, stamped under its own still-current digest,
+    admits."""
+    from tcip_mcp import class_registry
+    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp.pipelines.data.label_queries import trainable_stems
+
+    images = tmp_path / "images"
+    labels = tmp_path / "annotations"
+    labels.mkdir(parents=True)
+    registry = ClassRegistry(subjects=(
+        Subject(name=BUD, attributes=(
+            Attribute(name="opening", type="categorical", values=("closed", "open")),
+        )),
+        Subject(name="bush"),
+    ))
+    write_registry(tmp_path / "classes.json", registry)
+    bush_digest = class_registry.attribute_schema_digest(registry, "bush")
+
+    _make_images(images, ["a"])
+    json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12, subject="bush")], 100, 100)
+    record_image_statuses(tmp_path, status_bucket("bush", None), {"a.jpg": "complete"},
+                          recorded_by="user:breeder")
+    stamp_image_status_digests(tmp_path, status_bucket("bush", None), ["a.jpg"], bush_digest)
+    # bud's own schema changes; bush's bucket, and its stamp, must be untouched by it.
+    stamp_image_status_digests(tmp_path, status_bucket(BUD, None), ["b.jpg"], "stale-digest")
+
+    keep, counts = trainable_stems(str(labels), str(images), subject="bush", date=None)
+    assert keep == ["a"]
+    assert counts["quarantined_stale_definition"] == 0
+
+
+def test_a_partial_carrying_a_stale_stamp_still_trains(tmp_path):
+    """A partial is not a human's assertion (it carries no Complete), so a stamp on it, however
+    stale, never quarantines: the quarantine is over finished statuses only."""
+    from tcip_mcp import class_registry
+    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp.pipelines.data.label_queries import trainable_stems
+
+    images = tmp_path / "images"
+    labels = tmp_path / "annotations"
+    labels.mkdir(parents=True)
+    registry = ClassRegistry(subjects=(
+        Subject(name=BUD, attributes=(
+            Attribute(name="opening", type="categorical", values=("closed", "open")),
+        )),
+    ))
+    write_registry(tmp_path / "classes.json", registry)
+
+    _make_images(images, ["a"])
+    json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12)], 100, 100)
+    record_image_statuses(tmp_path, status_bucket(BUD, None), {"a.jpg": "partial"},
+                          recorded_by="user:breeder")
+    stamped = stamp_image_status_digests(
+        tmp_path, status_bucket(BUD, None), ["a.jpg"], "stale-digest")
+    assert stamped == ["a.jpg"]
+
+    keep, counts = trainable_stems(str(labels), str(images), subject=BUD, date=None)
+    assert keep == ["a"]
+    assert counts["quarantined_stale_definition"] == 0
+
+
+def test_a_stale_and_contradicted_negative_still_trains_by_content(tmp_path):
+    """Real content contradicts a stored negative outright; staleness never overrides that, and
+    the contradiction is still named for the caller to surface."""
+    from tcip_mcp import class_registry
+    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp.pipelines.data.label_queries import trainable_stems
+
+    images = tmp_path / "images"
+    labels = tmp_path / "annotations"
+    labels.mkdir(parents=True)
+    registry = ClassRegistry(subjects=(
+        Subject(name=BUD, attributes=(
+            Attribute(name="opening", type="categorical", values=("closed", "open")),
+        )),
+    ))
+    write_registry(tmp_path / "classes.json", registry)
+
+    _make_images(images, ["a"])
+    # Recorded negative, but the label file now carries real content: a contradiction.
+    json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12)], 100, 100)
+    record_image_statuses(tmp_path, status_bucket(BUD, None), {"a.jpg": "negative"},
+                          recorded_by="user:breeder")
+    stamp_image_status_digests(tmp_path, status_bucket(BUD, None), ["a.jpg"], "stale-digest")
+
+    contradicted: set[str] = set()
+    keep, counts = trainable_stems(str(labels), str(images), subject=BUD, date=None,
+                                   contradicted_out=contradicted)
+    assert keep == ["a"]
+    assert counts["annotated"] == 1
+    assert counts["quarantined_stale_definition"] == 0
+    assert contradicted == {"a.jpg"}
+
+
+def test_trainable_stems_with_subject_none_over_only_complete_statuses_does_not_refuse(tmp_path):
+    """A tree holding only complete confirmations has no negative to lose, so an unthreaded
+    subject does not refuse the way it would with a confirmed negative present (coverage)."""
+    from tcip_mcp.pipelines.data.label_queries import trainable_stems
+
+    images = tmp_path / "images"
+    labels = tmp_path / "annotations"
+    labels.mkdir(parents=True)
+    _make_images(images, ["a"])
+    json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12)], 100, 100)
+    record_image_statuses(tmp_path, status_bucket(BUD, None), {"a.jpg": "complete"},
+                          recorded_by="user:breeder")
+
+    keep, counts = trainable_stems(str(labels), str(images), subject=None, date=None)
+    assert keep == ["a"]
+    assert counts["annotated"] == 1
+
+
 def test_json_det_targets_skips_unlabeled_instead_of_raising(tmp_path):
     """The loader's own per-image target reader must accept the same partially-attributed data
     to_coco_dataset does: an unlabeled instance is excluded, not a hard abort, while an

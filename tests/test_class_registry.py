@@ -235,7 +235,7 @@ def _leaf_bush() -> ClassRegistry:
 
 
 def test_replace_registry_refuses_an_empty_registry(tmp_path):
-    from tcip_mcp.class_registry import replace_registry
+    from tcip_mcp.class_registry import read_version, replace_registry
     from tcip_store import Version
 
     path = tmp_path / "classes.json"
@@ -355,6 +355,138 @@ def test_a_failed_compare_and_set_leaves_no_confirmation_stamp_behind(tmp_path):
 
     assert not ts.exists(image_status_digest_key(tmp_path))
     assert read_registry(path) == two_states
+
+
+def test_replace_registry_refuses_a_same_values_type_flip_without_allow_type_changes(tmp_path):
+    from tcip_mcp.class_registry import read_version, replace_registry
+    from tcip_store import Version
+
+    path = tmp_path / "classes.json"
+    categorical = ClassRegistry(subjects=(Subject(name="bud", attributes=(
+        Attribute(name="opening", type="categorical", values=("closed", "open")),)),))
+    replace_registry(path, categorical, expect=Version.ABSENT)
+    ordinal = ClassRegistry(subjects=(Subject(name="bud", attributes=(
+        Attribute(name="opening", type="ordinal", values=("closed", "open")),)),))
+
+    with pytest.raises(RegistryError, match="bud.opening"):
+        replace_registry(path, ordinal, expect=read_version(path))
+    assert read_registry(path) == categorical
+
+
+def test_replace_registry_refuses_the_reverse_type_flip_too(tmp_path):
+    from tcip_mcp.class_registry import read_version, replace_registry
+    from tcip_store import Version
+
+    path = tmp_path / "classes.json"
+    ordinal = ClassRegistry(subjects=(Subject(name="bud", attributes=(
+        Attribute(name="opening", type="ordinal", values=("closed", "open")),)),))
+    replace_registry(path, ordinal, expect=Version.ABSENT)
+    categorical = ClassRegistry(subjects=(Subject(name="bud", attributes=(
+        Attribute(name="opening", type="categorical", values=("closed", "open")),)),))
+
+    with pytest.raises(RegistryError, match="bud.opening"):
+        replace_registry(path, categorical, expect=read_version(path))
+    assert read_registry(path) == ordinal
+
+
+def test_replace_registry_allow_removals_alone_does_not_admit_a_type_flip(tmp_path):
+    from tcip_mcp.class_registry import read_version, replace_registry
+    from tcip_store import Version
+
+    path = tmp_path / "classes.json"
+    categorical = ClassRegistry(subjects=(Subject(name="bud", attributes=(
+        Attribute(name="opening", type="categorical", values=("closed", "open")),)),))
+    replace_registry(path, categorical, expect=Version.ABSENT)
+    ordinal = ClassRegistry(subjects=(Subject(name="bud", attributes=(
+        Attribute(name="opening", type="ordinal", values=("closed", "open")),)),))
+
+    with pytest.raises(RegistryError, match="bud.opening"):
+        replace_registry(path, ordinal, expect=read_version(path), allow_removals=True)
+
+
+def test_replace_registry_admits_a_type_flip_with_allow_type_changes_and_sweeps_it(tmp_path):
+    """A flip lands under the flag, and the confirmation-digest sweep stales a previously stamped
+    finished status under the subject exactly as a value change would."""
+    from tcip_mcp.class_registry import attribute_schema_digest, read_version, replace_registry
+    from tcip_mcp.dataset_layout import (
+        image_status_digest_key, record_image_statuses, stamp_image_status_digests, status_bucket,
+    )
+    from tcip_store import Version
+    import tcip_store as ts
+
+    path = tmp_path / "classes.json"
+    categorical = ClassRegistry(subjects=(Subject(name="bud", attributes=(
+        Attribute(name="opening", type="categorical", values=("closed", "open")),)),))
+    replace_registry(path, categorical, expect=Version.ABSENT)
+    record_image_statuses(
+        tmp_path, status_bucket("bud", None), {"img.jpg": "complete"}, recorded_by="user:breeder")
+    old_digest = attribute_schema_digest(categorical, "bud")
+    stamp_image_status_digests(tmp_path, status_bucket("bud", None), ["img.jpg"], old_digest)
+
+    ordinal = ClassRegistry(subjects=(Subject(name="bud", attributes=(
+        Attribute(name="opening", type="ordinal", values=("closed", "open")),)),))
+    result = replace_registry(
+        path, ordinal, expect=read_version(path), allow_type_changes=True)
+
+    assert read_registry(path) == ordinal
+    assert result["schema_change_sweep"]["predating_vocabulary"] == {"bud": 1}
+    assert ts.read(image_status_digest_key(tmp_path)).get(
+        status_bucket("bud", None), {}).get("img.jpg") == old_digest
+
+
+def test_replace_registry_admits_a_values_only_growth_and_a_same_type_resave(tmp_path):
+    """The type-flip refusal never fires over a growth or a re-save that restates the same type,
+    the existing sweep tests' own coverage of those shapes."""
+    from tcip_mcp.class_registry import read_version, replace_registry
+    from tcip_store import Version
+
+    path = tmp_path / "classes.json"
+    two_values = ClassRegistry(subjects=(Subject(name="bud", attributes=(
+        Attribute(name="opening", type="categorical", values=("closed", "open")),)),))
+    replace_registry(path, two_values, expect=Version.ABSENT)
+    grown = ClassRegistry(subjects=(Subject(name="bud", attributes=(
+        Attribute(name="opening", type="categorical", values=("closed", "partial", "open")),)),))
+    replace_registry(path, grown, expect=read_version(path))
+    assert read_registry(path) == grown
+    replace_registry(path, grown, expect=read_version(path))
+    assert read_registry(path) == grown
+
+
+def test_write_class_map_refuses_a_type_flip_without_the_flag(tmp_path):
+    from tcip_mcp.tools.annotation_tools import write_class_map
+
+    write_class_map(str(tmp_path), {"bud": {"attributes": {
+        "opening": {"type": "categorical", "values": ["closed", "open"]}}}})
+    result = write_class_map(str(tmp_path), {"bud": {"attributes": {
+        "opening": {"type": "ordinal", "values": ["closed", "open"]}}}})
+
+    assert "error" in result and "allow_type_changes" in result["error"]
+    assert read_registry(tmp_path / "classes.json").subject("bud").attribute("opening").type == \
+        "categorical"
+
+
+def test_write_class_map_allow_removals_alone_still_refuses_a_type_flip(tmp_path):
+    from tcip_mcp.tools.annotation_tools import write_class_map
+
+    write_class_map(str(tmp_path), {"bud": {"attributes": {
+        "opening": {"type": "categorical", "values": ["closed", "open"]}}}})
+    result = write_class_map(str(tmp_path), {"bud": {"attributes": {
+        "opening": {"type": "ordinal", "values": ["closed", "open"]}}}}, allow_removals=True)
+
+    assert "error" in result and "allow_type_changes" in result["error"]
+
+
+def test_write_class_map_admits_a_type_flip_with_allow_type_changes(tmp_path):
+    from tcip_mcp.tools.annotation_tools import write_class_map
+
+    write_class_map(str(tmp_path), {"bud": {"attributes": {
+        "opening": {"type": "categorical", "values": ["closed", "open"]}}}})
+    result = write_class_map(str(tmp_path), {"bud": {"attributes": {
+        "opening": {"type": "ordinal", "values": ["closed", "open"]}}}}, allow_type_changes=True)
+
+    assert "error" not in result
+    assert read_registry(tmp_path / "classes.json").subject("bud").attribute("opening").type == \
+        "ordinal"
 
 
 def test_write_class_map_refuses_dropping_a_declared_subject_without_allow_removals(tmp_path):

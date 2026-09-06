@@ -22,7 +22,7 @@ from tcip_annotation.json_io import write_annotations
 from tcip_mcp.class_registry import attribute_schema_digest, registry_from_dict
 from tcip_mcp.dataset_layout import (
     classes_path, image_status_digest_key, image_status_digest_path, record_image_statuses,
-    status_bucket,
+    stamp_image_status_digests, status_bucket,
 )
 from tcip_store.file_backend import FileBackend
 from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
@@ -315,13 +315,48 @@ def test_predating_vocabulary_counts_a_complete_confirmation_too_not_only_negati
     client: TestClient, dataset: Path
 ) -> None:
     """The sweep stamps every status in a subject's buckets, and the predating count follows the
-    same scope: a stale complete confirmation counts exactly like a stale negative."""
+    same scope over the finished statuses: a stale complete confirmation counts exactly like a
+    stale negative."""
     _save_via_route(client, dataset, BUD_TWO_STATES)
     _confirm_complete_stamped(client, dataset, "img_beta.jpg", "bud")
 
     response = _save_via_route(client, dataset, BUD_THREE_STATES)
 
     assert response["schema_change_sweep"]["predating_vocabulary"] == {"bud": 1}
+
+
+def test_the_save_route_marks_an_unstamped_complete_as_predating_the_schema_change_too(
+    client: TestClient, dataset: Path
+) -> None:
+    """newly_stamped follows the same finished-status scope as predating_vocabulary: an unstamped
+    complete confirmation is stamped, and counted, exactly like an unstamped negative."""
+    _save_via_route(client, dataset, BUD_TWO_STATES)
+    record_image_statuses(dataset, status_bucket("bud", None), {"img_alpha.jpg": "complete"},
+                          recorded_by="user:breeder")
+    assert not ts.exists(image_status_digest_key(dataset))
+
+    response = _save_via_route(client, dataset, BUD_THREE_STATES)
+
+    assert response["schema_change_sweep"]["newly_stamped"] == {"bud": 1}
+
+
+def test_neither_sweep_count_includes_a_stamped_partial(
+    client: TestClient, dataset: Path
+) -> None:
+    """A partial is not a human's assertion, so a stale stamp on one is harmless and neither
+    count, which exist to track finished confirmations, ever reports it."""
+    _save_via_route(client, dataset, BUD_TWO_STATES)
+    record_image_statuses(dataset, status_bucket("bud", None), {"img_alpha.jpg": "partial"},
+                          recorded_by="user:breeder")
+    two_state_digest = attribute_schema_digest(
+        registry_from_dict(_subjects(BUD_TWO_STATES)), "bud")
+    stamp_image_status_digests(dataset, status_bucket("bud", None), ["img_alpha.jpg"],
+                               two_state_digest)
+
+    response = _save_via_route(client, dataset, BUD_THREE_STATES)
+
+    assert "bud" not in response["schema_change_sweep"]["newly_stamped"]
+    assert "bud" not in response["schema_change_sweep"]["predating_vocabulary"]
 
 
 def test_predating_vocabulary_counts_only_the_subject_whose_schema_actually_changed(

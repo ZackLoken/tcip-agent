@@ -161,6 +161,138 @@ def test_bind_manifest_stems_refuses_a_manifest_member_the_run_does_not_admit(tm
                             images_dir=root / "images" / DATES[0])
 
 
+def _quarantine_manifest_dataset(root: Path) -> Path:
+    """Six leaf stems under one date, an attribute vocabulary on leaf: enough to clear
+    ``draw_splits``' floor, one of which will be confirmed and quarantined by a schema change."""
+    write_registry(root / "classes.json", ClassRegistry(subjects=(
+        Subject(name=SUBJECT, attributes=(
+            Attribute(name="opening", type="categorical", values=("closed", "open")),
+        )),
+    )))
+    images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
+    for stem in ("a", "b", "c", "d", "e", "f"):
+        _write_stem(images_dir, labels_dir, stem, [
+            Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20),
+                      attributes={"opening": "closed"})])
+    return root
+
+
+def _draw_then_quarantine_a(tmp_path: Path):
+    """A manifest drawn while ``a`` still admits normally, then a vocabulary growth that
+    quarantines ``a``'s already-stamped complete confirmation. Returns ``(manifest, root,
+    admitted, counts)`` for the run's own current (post-quarantine) admission."""
+    from tcip_mcp import class_registry as cr
+    from tcip_mcp.class_registry import read_registry, replace_registry
+    from tcip_mcp.dataset_layout import (
+        record_image_statuses, stamp_image_status_digests, status_bucket,
+    )
+    from tcip_mcp.pipelines.data.label_queries import trainable_stems
+
+    root = _quarantine_manifest_dataset(tmp_path / "ds")
+    manifest = _draw(root, tmp_path / "m")
+
+    old_digest = cr.attribute_schema_digest(read_registry(root / "classes.json"), SUBJECT)
+    record_image_statuses(root, status_bucket(SUBJECT, DATES[0]), {"a.jpg": "complete"},
+                          recorded_by="user:breeder")
+    stamp_image_status_digests(root, status_bucket(SUBJECT, DATES[0]), ["a.jpg"], old_digest)
+
+    grown = ClassRegistry(subjects=(
+        Subject(name=SUBJECT, attributes=(
+            Attribute(name="opening", type="categorical", values=("closed", "partial", "open")),
+        )),
+    ))
+    replace_registry(root / "classes.json", grown, expect=None)
+
+    admitted, counts = trainable_stems(
+        str(root / "annotations" / DATES[0]), str(root / "images" / DATES[0]),
+        subject=SUBJECT, date=DATES[0])
+    assert "a" not in admitted
+    assert counts["quarantined_stale_definition"] == 1
+    return manifest, root, admitted, counts
+
+
+def _place_member_on(manifest: dict, date: str, stem: str, side: str) -> None:
+    """Force one member's manifest assignment to exactly ``side`` (``train``/``val``/
+    ``calibration``), for a deterministic scenario a real draw's seed cannot guarantee."""
+    from tcip_mcp.pipelines.data.splits import member_identity
+
+    member = member_identity(date, stem)
+    for s in ("train", "val", "calibration"):
+        manifest["splits"][s] = [i for i in manifest["splits"][s] if i != member]
+    manifest["splits"][side].append(member)
+
+
+def test_bind_manifest_stems_refuses_naming_the_quarantine_count_when_it_sits_on_train(
+    tmp_path: Path
+):
+    from tcip_mcp.pipelines.data.splits import bind_manifest_stems
+
+    manifest, root, admitted, counts = _draw_then_quarantine_a(tmp_path)
+    _place_member_on(manifest, DATES[0], "a", "train")
+
+    with pytest.raises(ValueError, match="quarantined_stale_definition"):
+        bind_manifest_stems(manifest, DATES[0], SUBJECT, None, admitted,
+                            images_dir=root / "images" / DATES[0], admission_counts=counts)
+
+
+def test_bind_manifest_stems_names_reconfirmation_as_the_remedy_for_the_quarantine_count(
+    tmp_path: Path
+):
+    from tcip_mcp.pipelines.data.splits import bind_manifest_stems
+
+    manifest, root, admitted, counts = _draw_then_quarantine_a(tmp_path)
+    _place_member_on(manifest, DATES[0], "a", "val")
+
+    with pytest.raises(ValueError, match="re-confirm"):
+        bind_manifest_stems(manifest, DATES[0], SUBJECT, None, admitted,
+                            images_dir=root / "images" / DATES[0], admission_counts=counts)
+
+
+def test_bind_manifest_stems_launches_when_the_quarantined_member_sits_on_calibration(
+    tmp_path: Path
+):
+    from tcip_mcp.pipelines.data.splits import bind_manifest_stems
+
+    manifest, root, admitted, counts = _draw_then_quarantine_a(tmp_path)
+    _place_member_on(manifest, DATES[0], "a", "calibration")
+
+    binding = bind_manifest_stems(manifest, DATES[0], SUBJECT, None, admitted,
+                                  images_dir=root / "images" / DATES[0], admission_counts=counts)
+
+    assert "a" in binding.calibration
+    assert "a" not in binding.train and "a" not in binding.val
+
+
+def test_bind_manifest_stems_admits_the_quarantined_member_once_reconfirmed(tmp_path: Path):
+    """Re-confirming restamps the current digest, admitting the same image the manifest already
+    placed on the train side."""
+    from tcip_mcp import class_registry as cr
+    from tcip_mcp.class_registry import read_registry
+    from tcip_mcp.dataset_layout import (
+        record_image_statuses, stamp_image_status_digests, status_bucket,
+    )
+    from tcip_mcp.pipelines.data.label_queries import trainable_stems
+    from tcip_mcp.pipelines.data.splits import bind_manifest_stems
+
+    manifest, root, _admitted, _counts = _draw_then_quarantine_a(tmp_path)
+    _place_member_on(manifest, DATES[0], "a", "train")
+
+    current_digest = cr.attribute_schema_digest(read_registry(root / "classes.json"), SUBJECT)
+    record_image_statuses(root, status_bucket(SUBJECT, DATES[0]), {"a.jpg": "complete"},
+                          recorded_by="user:breeder")
+    stamp_image_status_digests(root, status_bucket(SUBJECT, DATES[0]), ["a.jpg"], current_digest)
+
+    admitted, counts = trainable_stems(
+        str(root / "annotations" / DATES[0]), str(root / "images" / DATES[0]),
+        subject=SUBJECT, date=DATES[0])
+    assert "a" in admitted
+    assert counts["quarantined_stale_definition"] == 0
+
+    binding = bind_manifest_stems(manifest, DATES[0], SUBJECT, None, admitted,
+                                  images_dir=root / "images" / DATES[0], admission_counts=counts)
+    assert "a" in binding.train
+
+
 def test_bind_manifest_stems_refuses_an_empty_side_after_binding(tmp_path: Path):
     """No manifest write can draw an empty side any more (every ratio is refused at zero): an
     empty side after binding is exercised on a real draw with its own val members for one date

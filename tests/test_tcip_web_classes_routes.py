@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -194,6 +195,54 @@ def test_save_with_a_null_version_succeeds_over_a_still_absent_registry(
               "subjects": {"bush": {"description": "first write"}}, "version": None},
     )
     assert resp.status_code == 200
+
+
+def test_save_refuses_a_same_values_attribute_type_flip(client: TestClient, tmp_path: Path) -> None:
+    """The route passes neither allow_removals nor allow_type_changes, so a type flip has no door
+    here at all, in either direction: only a values-only growth or a same-type re-save lands."""
+    first = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"bud": {"attributes": {
+                  "opening": {"type": "categorical", "values": ["closed", "open"]}}}},
+              "version": None},
+    )
+    assert first.status_code == 200
+
+    flipped = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"bud": {"attributes": {
+                  "opening": {"type": "ordinal", "values": ["closed", "open"]}}}},
+              "version": first.json()["version"]},
+    )
+    assert flipped.status_code == 400
+    assert "bud.opening" in flipped.text
+    assert "categorical" in flipped.text
+    assert "ordinal" in flipped.text
+
+
+def test_save_refuses_the_reverse_attribute_type_flip_too(
+    client: TestClient, tmp_path: Path
+) -> None:
+    first = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"bud": {"attributes": {
+                  "opening": {"type": "ordinal", "values": ["closed", "open"]}}}},
+              "version": None},
+    )
+    assert first.status_code == 200
+
+    flipped = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"bud": {"attributes": {
+                  "opening": {"type": "categorical", "values": ["closed", "open"]}}}},
+              "version": first.json()["version"]},
+    )
+    assert flipped.status_code == 400
+    assert "bud.opening" in flipped.text
 
 
 def test_save_refuses_malformed_registry(client: TestClient, tmp_path: Path) -> None:
@@ -427,6 +476,105 @@ def test_image_status_round_trip(client: TestClient, tmp_path: Path) -> None:
     body = resp.json()
     assert body["statuses"]["IMG_0001.JPG"] == "complete"
     assert _status_store_exists(tmp_path)
+
+
+def test_get_image_status_reports_stale_definition_after_a_schema_change(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A finished confirmation stamped under a since-grown vocabulary shows up as stale, and
+    re-confirming through the status route (which restamps) clears it."""
+    save = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"bud": {"attributes": {
+                  "opening": {"type": "categorical", "values": ["closed", "open"]}}}},
+              "version": None},
+    )
+    client.post(
+        "/api/classes/image_status",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
+    )
+    grown = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"bud": {"attributes": {
+                  "opening": {"type": "categorical", "values": ["closed", "partial", "open"]}}}},
+              "version": save.json()["version"]},
+    )
+    assert grown.status_code == 200
+
+    body = client.get(
+        "/api/classes/image_status",
+        params={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud"},
+    ).json()
+    assert "stale_definition" in body
+    assert body["stale_definition"] == ["IMG_0001.JPG"]
+
+    reconfirm = client.post(
+        "/api/classes/image_status",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
+    )
+    assert reconfirm.json()["digest_stamped"] is True
+
+    after = client.get(
+        "/api/classes/image_status",
+        params={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud"},
+    ).json()
+    assert after["stale_definition"] == []
+
+
+def test_reconfirm_with_the_digest_store_obstructed_answers_digest_stamped_false(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A re-confirm whose restamp fails must not read as resolved: the route still names the
+    image stale, the same obstruction the sweep tests use (file backend)."""
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+    from tcip_mcp.dataset_layout import image_status_digest_path
+
+    ts.bind(FileBackend())
+    save = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"bud": {"attributes": {
+                  "opening": {"type": "categorical", "values": ["closed", "open"]}}}},
+              "version": None},
+    )
+    client.post(
+        "/api/classes/image_status",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
+    )
+    client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"bud": {"attributes": {
+                  "opening": {"type": "categorical", "values": ["closed", "partial", "open"]}}}},
+              "version": save.json()["version"]},
+    )
+
+    # Read-only, not replaced: the earlier real stamp must stay readable (still positively stale
+    # under the new schema) while the restamp write itself fails.
+    digest_path = image_status_digest_path(tmp_path)
+    digest_path.chmod(stat.S_IREAD)
+    try:
+        reconfirm = client.post(
+            "/api/classes/image_status",
+            json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+                  "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
+        )
+        assert reconfirm.json()["digest_stamped"] is False
+
+        body = client.get(
+            "/api/classes/image_status",
+            params={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+                    "subject": "bud"},
+        ).json()
+        assert body["stale_definition"] == ["IMG_0001.JPG"]
+    finally:
+        digest_path.chmod(stat.S_IWRITE | stat.S_IREAD)
 
 
 def test_image_status_rejects_invalid(client: TestClient, tmp_path: Path) -> None:
