@@ -378,8 +378,8 @@ def _worker(job: InferenceJob) -> None:
             job.done += 1
 
         if job.status != "failed":
-            # Last, never beside where it is built, so a partway-dead pass leaves a bucket no
-            # reader mistakes for certified; image_filenames names every enumerated image whether written or not, including one cancelled before its first write.
+            # Last, never beside where it is built, so a partway-dead pass leaves a bucket no reader mistakes for certified;
+            # image_filenames names every enumerated image whether written or not, including one cancelled before its first write.
             write_sidecar(output_dir, provenance)
             job.status = "cancelled" if job.cancel_event.is_set() else "completed"
     except Exception as exc:
@@ -418,7 +418,8 @@ class LaunchInferencePayload(BaseModel):
     # The run's images and its prediction bucket are named, not spelled: both dirs are resolved
     # server-side through dataset_layout / prediction_buckets, so no caller reimplements the layout.
     dataset_root: str
-    # A bucket name, not a model identity: it may name a variant (e.g. an @r2 suggestion) no registered model bears, which nothing downstream reads as a model (the stamp takes the checkpoint's own stem, the audit line records only output_dir).
+    # A bucket name, not a model identity: it may name a variant (e.g. an @r2 suggestion) no registered model bears, which
+    # nothing downstream reads as a model (the stamp takes the checkpoint's own stem, the audit line records only output_dir).
     model_name: str
     date: str | None = None
     # None (default) derives tiling from the checkpoint's own training geometry in the worker,
@@ -436,8 +437,8 @@ class LaunchInferencePayload(BaseModel):
     overlap: float | None = None
     max_dets: int | None = None
     postprocess: str = "nms"
-    # Never overrides the document refusal below (a bucket with no verdict but a document refuses
-    # regardless); its one live effect is turning a verdict redirect into a 409 instead of the default auto-redirect, including on exhaustion of every @r<n> variant to the ceiling. The browser client never sends this field.
+    # Never overrides the document refusal below (a bucket with no verdict but a document refuses regardless); its one live effect is turning a verdict redirect
+    # into a 409 instead of the default auto-redirect, including on exhaustion of every @r<n> variant to the ceiling. The browser client never sends this field.
     overwrite: bool = False
 
 

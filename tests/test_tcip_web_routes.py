@@ -1613,8 +1613,9 @@ def _launch_setup(tmp_path, monkeypatch):
 def test_inference_launch_refuses_a_bucket_that_already_holds_a_document(
     client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
-    """A guard: at b2ac13e1 the route resolves with no refuse_documents keyword and admits a
-    second publish beside a prior run's own documents; this launch must be refused by name."""
+    """A guard: a launch into a bucket already holding a document is refused by name rather than
+    admitted beside it (the document's bytes, the job registry and the platform audit log are
+    asserted unchanged as coverage of the no-state-change decision, not part of what this guards)."""
     from tcip_mcp.dataset_layout import prediction_dir
     from tcip_mcp.prediction_buckets import BucketHoldsDocuments
 
@@ -1734,9 +1735,8 @@ def test_inference_launch_admits_a_bucket_holding_only_a_stamp(
 def test_inference_launch_refuses_by_name_with_no_suggestion_when_every_variant_is_taken(
     client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
-    """A guard: at b2ac13e1 the route never passes refuse_documents, so three document-holding
-    directories raise nothing and the launch writes in place; with the keyword on, an exhausted
-    search at a lowered ceiling refuses by name with no suggestion."""
+    """A guard: once every bucket variant up to the ceiling holds a document, the launch is
+    refused by name with no fresh bucket suggested."""
     import functools
 
     from tcip_mcp.dataset_layout import prediction_dir
@@ -1767,9 +1767,9 @@ def test_inference_launch_refuses_by_name_with_no_suggestion_when_every_variant_
 def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
     client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
-    """A guard: at b2ac13e1 the route has no in-flight check, so a second launch of a job still
-    writing resolves a fresh job over the same images rather than being refused by that job's
-    own identity; admitted again once the first job is terminal."""
+    """A guard: a second launch of the same model and date while the first job still writes is
+    refused by that job's own identity rather than resolving a fresh job over the same images;
+    admitted again once the first job is terminal."""
     import threading
     import time
 
