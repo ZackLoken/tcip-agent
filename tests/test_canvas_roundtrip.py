@@ -138,14 +138,14 @@ class TestPolygonRoundtrip:
         state.annotations.append(Annotation(
             subject="bud", geometry=Polygon(rings=[[(10, 10), (100, 10), (100, 100), (10, 100)]])))
         state.annotations.append(Annotation(
-            subject="bud", geometry=Polygon(rings=[[(200, 200), (300, 200), (300, 300), (200, 300)]])))
+            subject="leaf", geometry=Polygon(rings=[[(200, 200), (300, 200), (300, 300), (200, 300)]])))
 
         label_path = str(img_dir / "labels" / "test_001.json")
         write_annotations(label_path, state.annotations, 640, 480)
 
         read_back = read_annotations(label_path)
         assert len(read_back) == 2
-        assert {a.subject for a in read_back} == {"bud", "bud"}
+        assert {a.subject for a in read_back} == {"bud", "leaf"}
 
     def test_occlusion_split_prediction_survives_the_round_trip(self, img_dir: Path) -> None:
         """A model-predicted mask the review canvas overlays can be occlusion-split: one instance,
@@ -229,10 +229,12 @@ class TestPredictionOverlay:
         """Verify different classes get distinct subject names for color mapping."""
         state = AnnotationState(img_width=640, img_height=480)
 
-        subjects = ["bud", "bud", "leaf", "nut", "bush"]
+        subjects = ["bud", "shoot", "leaf", "nut", "bush"]
         for i, subj in enumerate(subjects):
             state.annotations.append(
                 Annotation(subject=subj, geometry=BBox(x1=i * 100, y1=10, x2=i * 100 + 80, y2=90)))
 
+        assert len(state.annotations) == 5
         seen = {a.subject for a in state.annotations}
+        assert len(seen) == 5
         assert seen == set(subjects)
