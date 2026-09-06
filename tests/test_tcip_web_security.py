@@ -107,7 +107,6 @@ def test_ws_state_rejects_empty_origin(client: TestClient) -> None:
 
 
 def test_ws_panel_rejects_cross_site_origin(client: TestClient) -> None:
-    # The panel event socket has no origin test today; it is Origin-checked like every other.
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect(
             "ws://127.0.0.1/ws/panel/meta", headers={"origin": "http://evil.example.com"}

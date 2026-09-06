@@ -88,7 +88,7 @@ def test_every_state_changing_route_refuses_a_foreign_origin(client: TestClient)
 
 def test_a_null_or_duplicated_origin_is_refused_the_same_way(client: TestClient) -> None:
     method, path = _state_changing_calls()[0]
-    duplicated = [("origin", FOREIGN_ORIGIN), ("origin", FOREIGN_ORIGIN)]
+    duplicated = [("origin", "http://127.0.0.1"), ("origin", "http://localhost:5173")]
     for headers in ({"origin": "null"}, duplicated):
         resp = client.request(method, path, json={}, headers=headers)
         assert resp.status_code == 403, (headers, resp.status_code, resp.text)
@@ -103,8 +103,9 @@ def test_a_foreign_origin_post_to_a_path_no_route_serves_still_refuses(client: T
 
 def test_a_permitted_origin_still_reaches_the_handler(client: TestClient) -> None:
     """The rail must admit valid work: a request from the backend's own origin, from the Vite
-    dev server's origin, and with no Origin at all all reach the handler's own outcome, both
-    pass through the loopback arm on this local arrival."""
+    dev server's origin, and with no Origin header reach the handler's own outcome. The
+    backend's own origin matches the request's own authority; the Vite origin takes the
+    loopback arm; a missing Origin returns before either arm runs."""
     body = ActiveTabPayload(active_tab="annotate").model_dump()
     for origin in ("http://127.0.0.1", "http://localhost:5173", None):
         headers = {"origin": origin} if origin else {}
@@ -130,8 +131,9 @@ def test_an_empty_origin_refuses_on_the_tab_route(client: TestClient) -> None:
 def test_an_exposed_arrival_admits_its_own_origin_only_by_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Both routes above pass through the loopback arm on a local arrival, so this exercises
-    the request's-own-origin arm on an exposed arrival, where no loopback arm helps."""
+    """A local arrival admits the backend's own origin and a loopback origin alike, so the test
+    above cannot isolate the request's-own-origin arm from the loopback arm; this exercises the
+    request's-own-origin arm on an exposed arrival, where no loopback arm helps."""
     monkeypatch.setenv("TCIP_WEB_ALLOW_INSECURE", "1")
     monkeypatch.delenv("TCIP_WEB_ADVERTISED_HOSTS", raising=False)
     lan = TestClient(app, base_url="http://192.168.1.23:8765")
@@ -159,7 +161,9 @@ def test_a_reverse_proxy_forwarding_its_own_name_is_admitted_once_advertised(
 ) -> None:
     """A same-machine reverse proxy that rewrites Host to a public name is admitted by both
     the Host check and the Origin check once that name is advertised with its port written
-    out: the combined case, rather than Host and Origin proven admitted separately."""
+    out: the combined case, rather than Host and Origin proven admitted separately. Passes at
+    the baseline too, since no HTTP origin check existed there: coverage for the check now in
+    the middleware, not a guard for this change."""
     monkeypatch.setenv("TCIP_WEB_ALLOW_INSECURE", "1")
     monkeypatch.setenv("TCIP_WEB_ADVERTISED_HOSTS", "gui.example:80")
     lan = TestClient(app, base_url="http://192.168.1.23:8765")
