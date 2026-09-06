@@ -149,18 +149,21 @@ def _write_positive_label(
     Under a classified ``scope`` (``resolution.BucketScope``), a verdict's ``class_name`` is the
     confirmed value, not the object: every record carries ``scope.subject`` with that value under
     ``scope.attribute``, the shape a classified bucket's own records carry, checked against
-    ``vocabulary`` (the bucket's own recorded ``id_map`` keys), required under a classified scope
-    rather than defaulted away, since a confirmed value written with nothing to check it against is
-    the rail this scope exists to hold every reader to; the one production caller
-    (``materialize_review_dataset``) already resolves and threads it. Without a classified
-    ``scope``, ``class_name`` is the object class itself, written to ``subject`` as before.
+    ``vocabulary`` (the bucket's own recorded ``id_map`` keys), required non-empty under a
+    classified scope rather than defaulted away (an absent or empty vocabulary refuses the same
+    way, since neither has anything to check a confirmed value against), since a confirmed value
+    written with nothing to check it against is the rail this scope exists to hold every reader
+    to; the one production caller (``materialize_review_dataset``) already resolves and threads
+    it, refusing by name itself before this call when the bucket records no map at all. Without a
+    classified ``scope``, ``class_name`` is the object class itself, written to ``subject`` as
+    before.
     """
     # Denormalize the verdict log's [cx,cy,w,h] to pixel xyxy for the name-based per-image JSON.
     def _annotation(name: str, cx: float, cy: float, w: float, h: float) -> Annotation:
         box = BBox((cx - w / 2) * img_w, (cy - h / 2) * img_h,
                    (cx + w / 2) * img_w, (cy + h / 2) * img_h)
         if scope is not None and scope.classified:
-            if vocabulary is None:
+            if not vocabulary:
                 raise ValueError(
                     "a classified scope requires the bucket's own recorded vocabulary "
                     "(the bucket's own id_map keys) to check a confirmed value against; "
