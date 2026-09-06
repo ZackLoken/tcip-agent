@@ -43,17 +43,12 @@ function Etool({
   onClick,
   disabled,
   title,
-  keyboardPassthrough,
 }: {
   label: string;
   pressed: boolean;
   onClick: () => void;
   disabled?: boolean;
   title?: string;
-  /** Marks this control as the one focus target a `whileFocused` keyboard shortcut is allowed
-   *  to fire past (see `useKeyboardShortcuts`'s `Shortcut.whileFocused`): the Cut button arms a
-   *  precondition an axis-cut shortcut then reads while keeping focus after the click. */
-  keyboardPassthrough?: boolean;
 }) {
   return (
     <button
@@ -62,7 +57,6 @@ function Etool({
       onClick={onClick}
       disabled={disabled}
       title={title}
-      data-keyboard-passthrough={keyboardPassthrough ? "" : undefined}
       className={`flex h-7 items-center gap-2 rounded border px-3 text-[12px] transition-colors disabled:opacity-40 ${
         pressed
           ? "border-tcip-accent/55 bg-tcip-accent/20 text-tcip-fg"
@@ -644,14 +638,12 @@ export function AnnotateToolbar({
               pressed={annotateUi.cut}
               onClick={() => setCut(!annotateUi.cut)}
               disabled={mode !== "polygon" || isLocked}
-              keyboardPassthrough
               title={
                 mode !== "polygon"
                   ? "Cut: in polygon mode only"
                   : isLocked
                     ? "Cut: this image is confirmed; uncheck Complete to edit"
-                    : "Click two points on either side of the selected polygon to split it (x), " +
-                      "or press Shift+H / Shift+V once a polygon is selected"
+                    : "Click two points on either side of the selected polygon to split it (x)"
               }
             />
             <Etool

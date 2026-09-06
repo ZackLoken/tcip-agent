@@ -222,17 +222,8 @@ describe("AnnotateToolbar Cut button", () => {
     expect(cutButton).not.toBeDisabled();
     expect(cutButton).toHaveAttribute(
       "title",
-      "Click two points on either side of the selected polygon to split it (x), or press " +
-        "Shift+H / Shift+V once a polygon is selected",
+      "Click two points on either side of the selected polygon to split it (x)",
     );
-  });
-
-  it("carries the keyboard passthrough attribute so a whileFocused shortcut can fire past it", () => {
-    renderToolbar();
-    openEditor();
-    fireEvent.click(modeButton("Polygon"));
-    const cutButton = screen.getByRole("button", { name: "Cut" });
-    expect(cutButton).toHaveAttribute("data-keyboard-passthrough");
   });
 });
 
