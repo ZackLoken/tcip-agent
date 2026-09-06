@@ -51,7 +51,7 @@ MODULE_COUNT_TABLE_HEADER = "| Package (root) | Modules | Lines |"
 MODULE_COUNT_ROW_RE = re.compile(r"^\|\s*(?P<package>[^|]+?)\s*\|\s*(?P<modules>\d+)\s*\|\s*(?P<lines>\d+)\s*\|\s*$")
 
 SOURCE_SENTENCE_RE = re.compile(
-    r"^Source: the module inventory `scripts/build_module_inventory\.py` produces, run at HEAD "
+    r"^Source: the module inventory `tools/build_module_inventory\.py` produces, run at HEAD "
     r"(?P<head>[0-9a-f]+)\.$"
 )
 
@@ -103,7 +103,7 @@ COVERED_ROOTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("packages/tcip-annotation/src", (".py",)),
     ("packages/tcip-web/src", (".py",)),
     ("packages/tcip-store/src", (".py",)),
-    ("scripts", (".py",)),
+    ("tools", (".py",)),
     ("packages/tcip-web/frontend/src", (".ts", ".tsx")),
 )
 """The trees the module tables claim to cover, with the extensions a table row names."""

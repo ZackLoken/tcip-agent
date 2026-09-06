@@ -37,14 +37,14 @@ def _table(*paths: str) -> str:
 
 def test_a_source_file_no_table_names_is_reported(tmp_path):
     checker = _load()
-    (tmp_path / "scripts").mkdir()
-    (tmp_path / "scripts" / "named.py").write_text("", encoding="utf-8")
-    (tmp_path / "scripts" / "orphan.py").write_text("", encoding="utf-8")
-    rows = checker.parse_module_rows(_table("scripts/named.py"))
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "named.py").write_text("", encoding="utf-8")
+    (tmp_path / "tools" / "orphan.py").write_text("", encoding="utf-8")
+    rows = checker.parse_module_rows(_table("tools/named.py"))
 
     findings = checker.check_coverage(rows, tmp_path)
 
-    assert [f["path"] for f in findings] == ["scripts/orphan.py"]
+    assert [f["path"] for f in findings] == ["tools/orphan.py"]
 
 
 def test_a_tree_every_file_of_which_is_named_passes(tmp_path):
@@ -176,7 +176,7 @@ def test_architecture_md_module_count_summary_matches_a_fresh_inventory():
 
 
 def _source_line(head: str) -> str:
-    return f"Source: the module inventory `scripts/build_module_inventory.py` produces, run at HEAD {head}.\n"
+    return f"Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD {head}.\n"
 
 
 def test_a_summary_table_row_naming_an_unknown_package_is_reported():
