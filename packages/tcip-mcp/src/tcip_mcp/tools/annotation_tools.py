@@ -511,6 +511,7 @@ def score_predictions(
 @audited(scope_arg="dataset_root")
 def write_class_map(
     dataset_root: str, subjects: dict, output_path: str = "", allow_removals: bool = False,
+    allow_type_changes: bool = False,
 ) -> dict:
     """Author the dataset's nested class registry, a thin wrapper over ``class_registry``.
 
@@ -532,7 +533,12 @@ def write_class_map(
     is refused (labels or confirmations may still reference the dropped name) unless
     ``allow_removals`` is set, which states the removal as deliberate; the same flag also allows
     replacing a stored registry whose bytes will not decode, since that is this tool's own repair
-    door.
+    door. A write that keeps an attribute's name and values but changes its ``type`` (categorical
+    to ordinal or back) is refused independently of ``allow_removals`` (a type flip drops no
+    name) unless ``allow_type_changes`` is set: the flip reinterprets every recorded value of that
+    attribute, on confirmed and unconfirmed images alike, without a single record changing, and
+    landing it quarantines the finished statuses under the subject the same way a value change
+    does.
 
     Changing a subject's attribute vocabulary invalidates the confirmations made under the old one,
     so once the new registry lands, the outgoing digest is recorded onto that subject's still-
@@ -546,6 +552,8 @@ def write_class_map(
         output_path: Optional explicit path (overrides ``<dataset_root>/classes.json``).
         allow_removals: State a dropped name, or a stored registry that will not decode, as a
             deliberate removal/repair rather than refusing it.
+        allow_type_changes: State a same-values attribute type flip (categorical to ordinal or
+            back) as deliberate rather than refusing it.
     """
     from tcip_store import VersionConflict
 
@@ -563,7 +571,8 @@ def write_class_map(
     expect = class_registry.read_version(out)
     try:
         result = class_registry.replace_registry(
-            out, registry, expect=expect, allow_removals=allow_removals)
+            out, registry, expect=expect, allow_removals=allow_removals,
+            allow_type_changes=allow_type_changes)
     except (class_registry.RegistryError, VersionConflict) as exc:
         return {"error": str(exc)}
     return {"classes_path": str(out), "subjects": [s.name for s in registry.subjects],

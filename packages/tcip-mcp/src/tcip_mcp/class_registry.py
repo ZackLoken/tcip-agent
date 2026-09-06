@@ -303,28 +303,32 @@ def _sweep_schema_change(
 
     Stamps the same set the confirmation-time writer stamps, every status in the subject's buckets
     rather than the negatives alone, since the quarantine question is asked of whatever a later
-    reader takes from the store. Already-stamped confirmations, and subjects whose digest is
-    unchanged, are left alone.
+    reader takes from the store; a stamp on a status nobody asserted (``partial``, ``unannotated``)
+    is harmless, and the bulk route stamps those statuses too. Already-stamped confirmations, and
+    subjects whose digest is unchanged, are left alone.
 
-    Also counts, per affected subject, its confirmations (every status, not the negatives alone)
-    whose stamped digest, once this write's own stamping above has landed, still disagrees with
-    the subject's new digest: a confirmation stamped under an outgoing schema this write just
-    recorded, and one already stamped under a still-earlier schema that a prior sweep never
-    touched because it was not unstamped, read alike as made before the vocabulary in effect now.
-    Computed with :func:`~tcip_mcp.pipelines.data.label_queries.stale_stamped_names`, the same
-    comparison :func:`~tcip_mcp.pipelines.data.label_queries.confirmed_negative_records` quarantines
-    a stale negative by, so the two readers cannot disagree about what "stale" means.
+    Also counts, per affected subject, its *finished* confirmations
+    (:func:`~tcip_mcp.dataset_layout.is_finished_status`, complete or negative, never a
+    ``partial`` or ``unannotated`` a human never asserted) whose stamped digest, once this
+    write's own stamping above has landed, still disagrees with the subject's new digest: a
+    confirmation stamped under an outgoing schema this write just recorded, and one already
+    stamped under a still-earlier schema that a prior sweep never touched because it was not
+    unstamped, read alike as made before the vocabulary in effect now. The stamping above still
+    runs over every status regardless, so this count narrows what it *reports*, not what it
+    *writes*. Computed with :func:`~tcip_mcp.pipelines.data.label_queries.stale_stamped_names`,
+    the same comparison :func:`~tcip_mcp.pipelines.data.label_queries._stale_finished` quarantines
+    a stale finished status by, so the two readers cannot disagree about what "stale" means.
 
     Never blocks the registry write, which has already landed by the time this runs: an absent
     ``outgoing`` is a no-op, and a failing sweep returns a ``warning`` for the caller to surface.
     Returns ``{"newly_stamped": {subject: count}, "predating_vocabulary": {subject: count},
-    "warning": str | None}``.
+    "warning": str | None}``, each count over finished statuses only.
     """
     import tcip_store
 
     from tcip_mcp.dataset_layout import (
         bucket_digest_stamps, bucket_subject_date, image_status_digest_key, image_status_key,
-        normalize_status_store, stamp_image_status_digests,
+        is_finished_status, normalize_status_store, stamp_image_status_digests,
     )
     from tcip_mcp.pipelines.data.label_queries import stale_stamped_names
 
@@ -350,8 +354,9 @@ def _sweep_schema_change(
                 continue
             stamped = stamp_image_status_digests(
                 dataset_root, bucket, sorted(entries), outgoing_digest, only_unstamped=True)
-            if stamped:
-                newly_stamped[subject] = newly_stamped.get(subject, 0) + len(stamped)
+            finished_stamped = [name for name in stamped if is_finished_status(entries.get(name))]
+            if finished_stamped:
+                newly_stamped[subject] = newly_stamped.get(subject, 0) + len(finished_stamped)
         stamps_after = tcip_store.read(image_status_digest_key(dataset_root), default={})
         for bucket, entries in statuses.items():
             subject, _ = bucket_subject_date(bucket)
@@ -360,8 +365,9 @@ def _sweep_schema_change(
             new_digest = attribute_schema_digest(incoming, subject)
             if new_digest is None:
                 continue
+            finished_names = [name for name, status in entries.items() if is_finished_status(status)]
             stale = stale_stamped_names(
-                bucket_digest_stamps(stamps_after, bucket), new_digest, entries)
+                bucket_digest_stamps(stamps_after, bucket), new_digest, finished_names)
             if stale:
                 predating_vocabulary[subject] = predating_vocabulary.get(subject, 0) + len(stale)
     except (OSError, tcip_store.StoreError) as exc:
@@ -374,6 +380,7 @@ def _sweep_schema_change(
 
 def replace_registry(
     path: str | Path, registry: ClassRegistry, *, expect: "Version | None", allow_removals: bool = False,
+    allow_type_changes: bool = False,
 ) -> dict:
     """The one write both registry doors call: read what it replaces, refuse a silent drop.
 
@@ -390,6 +397,16 @@ def replace_registry(
     ``allow_removals``, refusing the whole write rather than letting the repair path overwrite a
     newer writer's document.
 
+    Refuses, independently of ``allow_removals``, a write that keeps an attribute's name and
+    values but changes its ``type`` (categorical to ordinal or back), unless
+    ``allow_type_changes`` is set: a type flip drops no name, so ``allow_removals`` (a dropped
+    name, or a repair of undecodable bytes) does not admit it. The flip changes what every
+    recorded value of that attribute means, on confirmed and unconfirmed images alike, without a
+    single record changing (a rank against an unordered label, or the reverse); landing it under
+    ``allow_type_changes`` runs the same confirmation-digest sweep a value change does,
+    quarantining the finished statuses under the subject, while the unconfirmed annotated images
+    train by content with their values reinterpreted.
+
     ``expect`` is compare-and-set against the blob's actual version at write time
     (``tcip_store.VersionConflict`` on a mismatch, nothing written): pass the version the caller
     read, or ``Version.ABSENT`` for a caller asserting no registry exists yet. ``None`` skips the
@@ -400,7 +417,8 @@ def replace_registry(
     the compare-and-set leaves no stamp against a registry that never landed. The accepted
     residual is the reverse case: a crash between the put landing and the sweep completing leaves
     the affected confirmations unstamped under the registry that did land, which the training
-    carry's quarantine then reads as predating the change rather than made under it. Returns
+    carry's quarantine then admits them as if made under the schema now in effect, the opposite
+    of the caution a landed stamp would have given them. Returns
     ``{"version": Version, "schema_change_sweep": dict}``.
     """
     import tcip_store
@@ -435,6 +453,23 @@ def replace_registry(
                 "confirmations may still reference them; pass allow_removals to drop them "
                 "deliberately"
             )
+
+    if outgoing is not None and not allow_type_changes:
+        for s in outgoing.subjects:
+            new_s = registry.subject(s.name)
+            if new_s is None:
+                continue
+            for a in s.attributes:
+                new_a = new_s.attribute(a.name)
+                if new_a is not None and new_a.type != a.type:
+                    raise RegistryError(
+                        f"this write changes {s.name}.{a.name}'s type from {a.type!r} to "
+                        f"{new_a.type!r} at {path}; pass allow_type_changes to state the flip as "
+                        "deliberate. Every recorded value of that attribute, on confirmed and "
+                        "unconfirmed images alike, acquires the other type's meaning (a rank, or "
+                        "an unordered label), and only the finished statuses under the subject "
+                        "are quarantined by the sweep that follows"
+                    )
 
     new_version = tcip_store.put_blob(
         key, tcip_store.RECORD_JSON.encode(registry_to_dict(registry)), expect=expect
