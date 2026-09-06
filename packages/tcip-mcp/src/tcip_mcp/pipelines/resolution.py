@@ -2477,9 +2477,13 @@ def _reconcile_validity(
     body so no delivery door can reach a validated result without it.
 
     Returns ``{validated, on_disk_validated, missing_sidecars, unvalidated_buckets, binding_notes,
-    bindings, conf, per_bucket}``. ``bindings`` carries one verified result per bucket read, so a
-    delivery door stamps its provenance columns from the verification this body already ran rather
-    than repeating it.
+    bindings, conf, confs, per_bucket}``. ``bindings`` carries one verified result per bucket read,
+    so a delivery door stamps its provenance columns from the verification this body already ran
+    rather than repeating it. ``confs`` maps every bucket in ``pred_dirs`` to the numeric value its
+    stamp's own operating-point mapping records for this document's param, whatever the bucket's
+    own validation state (a fact about what the predictions were produced at, independent of
+    whether that value cleared a reference), or ``None`` for a missing or undecodable stamp, or one
+    whose value is not numeric.
     """
     param_key, validation_kind = _DOCUMENT_PARAM[document]
     per_bucket: dict[str, str] = {}
@@ -2489,6 +2493,7 @@ def _reconcile_validity(
     bindings: dict[str, StampBinding] = {}
     refs: set[str] = set()
     confs: list[float] = []
+    bucket_confs: dict[str, float | None] = {}
     all_validated = bool(pred_dirs)
     accepted = accepted_references(validation_kind)
     memo = digest_memo if digest_memo is not None else {}
@@ -2498,6 +2503,7 @@ def _reconcile_validity(
             missing.append(str(d))
             per_bucket[str(d)] = VALIDATED_FALSE
             bindings[str(d)] = StampBinding(ok=True, claimed=False)
+            bucket_confs[str(d)] = None
             all_validated = False
             continue
         ref = _sidecar_reference(sc, param_key=param_key, validation_kind=validation_kind)
@@ -2507,11 +2513,12 @@ def _reconcile_validity(
             binding_notes[str(d)] = binding.note
             ref = VALIDATED_FALSE
         per_bucket[str(d)] = ref
+        conf_val = ((sc.get("operating_point") or {}).get(param_key) or {}).get("value")
+        bucket_confs[str(d)] = float(conf_val) if isinstance(conf_val, (int, float)) else None
         if ref in accepted:
             refs.add(ref)
-            conf_val = ((sc.get("operating_point") or {}).get(param_key) or {}).get("value")
-            if isinstance(conf_val, (int, float)):
-                confs.append(float(conf_val))
+            if bucket_confs[str(d)] is not None:
+                confs.append(bucket_confs[str(d)])
         else:
             unvalidated.append(str(d))
             all_validated = False
@@ -2532,6 +2539,7 @@ def _reconcile_validity(
         "binding_notes": binding_notes,
         "bindings": bindings,
         "conf": (confs[0] if len(set(confs)) == 1 else None),
+        "confs": bucket_confs,
         "per_bucket": per_bucket,
     }
 

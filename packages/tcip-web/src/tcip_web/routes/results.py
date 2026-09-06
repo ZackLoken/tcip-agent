@@ -519,6 +519,7 @@ def _measure_phenology(
         "operating_point": recon["validated"],
         "classifier": classifier_state,
         "operating_point_conf": recon["conf"],
+        "operating_point_confs": recon["confs"],
         "missing_operating_point_sidecars": recon["missing_sidecars"],
         "unvalidated_buckets": recon["unvalidated_buckets"],
         "binding_notes": recon["binding_notes"],
@@ -791,7 +792,7 @@ def export_csv(payload: ExportCsvPayload) -> Response:
         cells = write_csv(
             "results.export_csv", rows, saved_path, measurement.spec,
             flags=measurement.flags, acknowledgement=acknowledgement, basis=measurement.basis,
-            operating_point_conf=measurement.validity["operating_point_conf"], producer=producer,
+            operating_point_confs=measurement.validity["operating_point_confs"], producer=producer,
             bindings=measurement.bindings, pred_dirs=measurement.pred_dirs,
             project_root=measurement.project_root,
             plant_mapping=measurement.plant_mapping_disclosure)
