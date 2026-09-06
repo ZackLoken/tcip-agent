@@ -235,7 +235,7 @@ def _leaf_bush() -> ClassRegistry:
 
 
 def test_replace_registry_refuses_an_empty_registry(tmp_path):
-    from tcip_mcp.class_registry import read_version, replace_registry
+    from tcip_mcp.class_registry import replace_registry
     from tcip_store import Version
 
     path = tmp_path / "classes.json"
