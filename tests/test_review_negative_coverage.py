@@ -292,8 +292,15 @@ def test_is_negative_for_subject_agrees_across_branches_after_a_same_size_edit(
     )
     populated = pred_file.read_bytes()
     os.utime(pred_file, (1_000_000, 1_000_000))
-    _seed_sidecar(d, {"checkpoint_sha256": CHECKPOINT_SHA, "id_map": {"bud": 0},
-                      "subject": "bud", "attribute": None})
+    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
+
+    stamp = operating_point_stamp(
+        {"conf": {"value": 0.5}}, validated=False, validated_by=None, tile_size_validated=None,
+        shippable_issues=[], id_map={"bud": 0}, trait="bud", dataset_hash="H", checkpoint="m",
+        checkpoint_sha256=CHECKPOINT_SHA, experiment_id="exp-17", images_dir=None,
+        raster_path=None, produced_at="2026-01-01T00:00:00Z", subject="bud", attribute=None,
+    )
+    write_sidecar(d, stamp)
 
     assert _is_negative_for_subject(str(d), "IMG_0007.JPG", None) is False
     assert _is_negative_for_subject(str(d), "IMG_0007.JPG", "bud") is False
