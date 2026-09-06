@@ -194,9 +194,11 @@ def test_a_classifier_bucket_is_rewritten_and_stamped(tmp_path):
 
 
 def test_a_sourced_attribute_with_no_subject_refuses_before_any_write(tmp_path):
-    """The experiment source reads a run's config verbatim, with no validation of its own: a
-    hand-corrupted record naming an attribute under no subject refuses by name before any write,
-    rather than reaching a stamp write the rail would refuse anyway."""
+    """Coverage of the named-attribute message, not a guard: the experiment source reads a run's
+    config verbatim, with no validation of its own, and a hand-corrupted record naming an
+    attribute under no subject refuses before any write through the same subject-is-None gate the
+    (None, None) case below guards; removing only this shape's own attribute-naming branch still
+    refuses through that gate's shared fallback message."""
     bind_default()
     module = _load_script()
     project = tmp_path / "project"
@@ -221,9 +223,9 @@ def test_a_sourced_attribute_with_no_subject_refuses_before_any_write(tmp_path):
 def test_an_experiment_source_answering_neither_subject_nor_attribute_refuses_before_any_write(
     tmp_path,
 ):
-    """A bespoke run's experiment record can honestly answer no scope at all (both keys present,
-    both None): refused by name before any write, rather than admitted as a detector pair naming
-    no object class."""
+    """The guard: a bespoke run's experiment record can honestly answer no scope at all (both keys
+    present, both None), and this is the shape the subject-is-None gate exists to catch before any
+    write, rather than admitting it as a detector pair naming no object class."""
     bind_default()
     module = _load_script()
     project = tmp_path / "project"
@@ -736,22 +738,31 @@ def test_a_bare_like_rewrite_writes_one_audit_entry_with_its_structured_fields(
     assert (entry["subject"], entry["attribute"]) == (SUBJECT, ATTRIBUTE)
     assert entry["source"] == f"--like {scoped}"
     assert "digest_before" not in entry
+    assert entry["outcome"] == outcome
 
 
-def test_a_classified_rewrite_under_no_dataset_root_writes_one_entry_to_the_platform_log(
+def test_a_classified_rewrite_under_no_dataset_root_writes_one_entry_consistent_with_dataset_scope_of(
     tmp_path, monkeypatch,
 ):
     """A bucket outside any dataset root's canonical layout (no predictions/images/annotations
-    segment in its path) has no dataset log to file under: the run's own audit entry lands in the
-    platform log, carrying both content digests since this branch rewrites documents.
+    segment in its path) is filed wherever ``dataset_scope_of`` resolves for it: the same value,
+    computed once before any write into the bucket and reused for both the outcome note and the
+    audit entry's own scope, never re-derived afterward from a state this run's own write changed.
 
-    Bound to the file backend explicitly: the sqlite backend's own per-root database file would
-    otherwise plant a ``.tcip`` under the bucket the moment its stamp is written, which
-    ``dataset_scope_of``'s own fallback then reads as the bucket carrying its own project state.
+    On the file backend that resolves to ``None`` (a genuinely bare directory carries no ``.tcip``
+    of its own): the entry lands in the platform log, and the outcome note says so. On the
+    database backend, a bucket that already carries a stamp of its own answers to itself
+    (``dataset_scope_of``'s own ``.tcip`` fallback cannot tell a bucket's own prior stamp from a
+    genuine dataset marker, the seam's known behaviour documented on ``_emit_conform_audit``, not
+    this command's to change): the entry lands under that resolved root's own log instead, and the
+    outcome note carries no no-dataset-root claim. Either way, the outcome text and the entry's
+    filed scope never disagree, which is the bug this pin guards: the two used to be read from
+    ``dataset_scope_of`` at two different times (once before the rewrite, once after), and the
+    stamp write in between could make the second read answer differently from the first.
     """
     import tcip_mcp.audit as audit_module
+    from tcip_mcp.audit import dataset_scope_of
 
-    monkeypatch.setenv("TCIP_STORE_BACKEND", "file")
     platform_root = tmp_path / "platform"
     platform_root.mkdir()
     monkeypatch.setattr(audit_module, "AUDIT_ROOT", platform_root)
@@ -761,6 +772,7 @@ def test_a_classified_rewrite_under_no_dataset_root_writes_one_entry_to_the_plat
     _write_doc(bucket, "img1", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10))])
     _write_doc(bucket, "img2", [Annotation(subject="diseased", geometry=BBox(5, 5, 15, 15))])
     _write_stamp(bucket, _base_stamp(id_map=VALUE_ID_MAP))  # no subject/attribute recorded yet
+    resolved_scope = dataset_scope_of(bucket)
 
     outcome, refused, id_map, changed = module.conform_bucket(
         bucket, root=None, plan=False, like_dir=None,
@@ -770,14 +782,20 @@ def test_a_classified_rewrite_under_no_dataset_root_writes_one_entry_to_the_plat
     assert refused is False
     assert changed is True
     assert id_map == VALUE_ID_MAP
-    entries = _platform_audit_entries()
-    assert len(entries) == 1
-    entry = entries[0]
+    assert ("this bucket sits under no dataset root" in outcome) == (resolved_scope is None)
+    if resolved_scope is None:
+        filed_entries = _platform_audit_entries()
+    else:
+        filed_entries = _dataset_audit_entries(resolved_scope)
+        assert _platform_audit_entries() == []
+    assert len(filed_entries) == 1
+    entry = filed_entries[0]
     assert entry["documents_rewritten"] == 2
     assert entry["stamp_written"] is True
     assert (entry["subject"], entry["attribute"]) == (SUBJECT, ATTRIBUTE)
     assert entry["source"] == "operator statement (--subject/--attribute)"
     assert entry["digest_before"] != entry["digest_after"]
+    assert entry["outcome"] == outcome
 
 
 def test_a_refused_bucket_writes_no_audit_entry(tmp_path, monkeypatch):
@@ -803,6 +821,163 @@ def test_a_refused_bucket_writes_no_audit_entry(tmp_path, monkeypatch):
     assert refused is True
     assert changed is False
     assert _platform_audit_entries() == []
+
+
+def _dataset_audit_entries(
+    dataset_root: Path, *, tool: str = "repair_classified_predictions",
+) -> list[dict]:
+    from tcip_mcp.tools.meta_tools import read_audit_log
+
+    return read_audit_log(scope=str(dataset_root), tool=tool)["entries"]
+
+
+def test_a_reviewed_classified_bucket_walked_through_process_project_root_writes_no_audit_entry(
+    tmp_path, monkeypatch,
+):
+    """The direct-call refusal pin above (test_a_refused_bucket_writes_no_audit_entry) never
+    reaches process_project_root's own caller loop: driven through it here, a bucket carrying
+    review verdicts, seeded through ReviewEngine.record_detection_action the way
+    tests/test_tcip_web_routes.py's _verdicted_launch_dataset does, writes nothing to either the
+    platform log or the dataset's own."""
+    import tcip_mcp.audit as audit_module
+    from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
+    from tcip_mcp.prediction_buckets import bucket_content_digest, bucket_key_of
+
+    platform_root = tmp_path / "platform"
+    platform_root.mkdir()
+    monkeypatch.setattr(audit_module, "AUDIT_ROOT", platform_root)
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    bucket = _pre_conform_classified_bucket(dataset_root, date="reviewed-walk")
+    _write_experiment_config("exp-classified", project,
+                              {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
+
+    engine = ReviewEngine(dataset_root / ".tcip" / "state")
+    ctx = ReviewContext(img_name="img1.png", img_width=100, img_height=80,
+                        preds=[Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10),
+                                          score=0.9)])
+    det = ReviewDetection(det_type="fp", class_name="healthy", conf=0.9, iou=None, gt_idx=None,
+                          pred_idx=0, bbox=(0.0, 0.0, 10.0, 10.0))
+    engine.record_detection_action(bucket_key_of(bucket), det, ctx, action="accepted")
+
+    before = bucket_content_digest(bucket)
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert refused is True
+    assert any("review verdict" in o for o in outcomes), outcomes
+    assert bucket_content_digest(bucket) == before
+    assert _platform_audit_entries() == []
+    assert _dataset_audit_entries(dataset_root) == []
+
+
+def test_a_second_bare_like_run_over_an_already_conformed_copy_writes_no_entry(
+    tmp_path, monkeypatch,
+):
+    """A no-op --like run (the second over an already-conformed bare copy) rewrites nothing, so
+    it emits no audit entry and reports changed false, unlike the first run pinned above
+    (test_a_bare_like_rewrite_writes_one_audit_entry_with_its_structured_fields)."""
+    import tcip_mcp.audit as audit_module
+
+    platform_root = tmp_path / "platform"
+    platform_root.mkdir()
+    monkeypatch.setattr(audit_module, "AUDIT_ROOT", platform_root)
+    bind_default()
+    module = _load_script()
+    dataset_root = tmp_path / "dataset"
+    scoped = _scoped_like_bucket(dataset_root, id_map=VALUE_ID_MAP, date="source")
+    bare_copy = tmp_path / "hand_split" / "calibration"
+    _write_doc(bare_copy, "imgA", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10))])
+
+    first = module.conform_bucket(
+        bare_copy, root=None, plan=False, like_dir=scoped,
+        operator_subject=None, operator_attribute=None, is_bare_named=True,
+    )
+    assert first[1] is False and first[3] is True
+    assert len(_platform_audit_entries()) == 1
+
+    outcome, refused, id_map, changed = module.conform_bucket(
+        bare_copy, root=None, plan=False, like_dir=scoped,
+        operator_subject=None, operator_attribute=None, is_bare_named=True,
+    )
+
+    assert refused is False
+    assert changed is False
+    assert len(_platform_audit_entries()) == 1
+
+
+def test_a_classified_rewrite_with_a_validated_stamp_writes_an_entry_whose_outcome_carries_the_floor_note(
+    tmp_path, monkeypatch,
+):
+    """A rewrite of a bucket whose stamp already claimed validated floors the claim (rule 7),
+    since the rewrite changes the bucket's own content digest away from the one the validation
+    record was earned over. The floor note used to reach only stdout in the returned outcome
+    string; it now rides the audit entry's own outcome field too."""
+    import tcip_mcp.audit as audit_module
+    from tests._binding_fixtures import file_validation_record
+    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
+
+    platform_root = tmp_path / "platform"
+    platform_root.mkdir()
+    monkeypatch.setattr(audit_module, "AUDIT_ROOT", platform_root)
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    bucket = dataset_root / "predictions" / "classifier" / "validated"
+    _write_doc(bucket, "img1", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10), score=0.9)])
+    _write_doc(bucket, "img2", [Annotation(subject="diseased", geometry=BBox(5, 5, 15, 15), score=0.8)])
+    _write_experiment_config("exp-classified", project,
+                              {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
+    stamp = _base_stamp(
+        id_map=VALUE_ID_MAP, experiment_id="exp-classified",
+        operating_point={"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}})
+    # file_validation_record hashes pred_dirs as they are on disk now, so it is called before the
+    # rewrite: the record covers the pre-conform, value-in-subject content the rewrite replaces.
+    bound = file_validation_record(
+        stamp, dataset_root=dataset_root, pred_dirs=[bucket],
+        experiment_id="exp-validated-ref", trait=ATTRIBUTE)
+    bound["validated"] = True
+    _write_stamp(bucket, bound)
+
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert refused is False
+    assert any("floors" in o for o in outcomes), outcomes
+    entries = _dataset_audit_entries(dataset_root)
+    assert len(entries) == 1
+    assert "floors" in entries[0]["outcome"]
+
+
+def test_process_project_root_summary_counts_changed_and_unchanged_buckets(tmp_path):
+    """process_project_root's own returned outcomes name how many buckets its walk changed and
+    how many it left as they were, so the count field conform_bucket returns finally has a
+    reader."""
+    module = _load_script()
+    bind_default()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    _pre_conform_classified_bucket(dataset_root, date="to-change")
+    _write_experiment_config("exp-classified", project,
+                              {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
+    unchanged_bucket = dataset_root / "predictions" / "classifier" / "already-scoped"
+    _write_doc(unchanged_bucket, "img1",
+              [Annotation(subject=SUBJECT, geometry=BBox(0, 0, 10, 10), score=0.9,
+                         attributes={ATTRIBUTE: "healthy"})])
+    _write_stamp(unchanged_bucket, _base_stamp(id_map=VALUE_ID_MAP, subject=SUBJECT,
+                                              attribute=ATTRIBUTE))
+
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert refused is False
+    assert any("1 bucket(s) changed, 1 left as they were" in o for o in outcomes), outcomes
 
 
 def test_bucket_dirs_under_agrees_with_the_shared_walk_over_a_dot_prefixed_date_directory(tmp_path):
