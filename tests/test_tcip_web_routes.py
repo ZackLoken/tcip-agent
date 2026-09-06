@@ -1866,6 +1866,17 @@ def test_inference_launch_refuses_by_the_requested_name_though_the_redirected_bu
         if job.status not in ("pending", "running"):
             break
         time.sleep(0.05)
+    assert job.status == "completed"
+
+    third = client.post("/api/inference/launch", json={
+        "checkpoint_path": str(ckpt), "dataset_root": str(dataset_root),
+        "model_name": "baseline", "date": date,
+    })
+    assert third.status_code == 200, third.text
+    assert third.json()["bucket_redirected"] is True
+    from tcip_mcp.dataset_layout import prediction_dir
+
+    assert Path(third.json()["output_dir"]) == prediction_dir(dataset_root, "baseline@r3", date)
 
 
 def test_inference_launch_resolves_explicit_conf_and_max_dets_source_from_the_payload(
