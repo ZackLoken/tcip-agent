@@ -2,12 +2,12 @@
 via the same shared ``resolve_tile_geometry`` ``run_inference`` uses (refusing rather than
 scoring at an ungrounded scale when nothing is resolvable), honors ``max_dets`` verbatim on both
 regimes with a per-image ``cap_hit``/``max_dets_cap_saturated_frac`` signal on the gating path, and
-records
-``tiled``'s provenance (``raw_operating_point``/``resolve_operating_point``) to distinguish an
-explicit caller choice from a documented default, mirroring the existing
-``tile_size``/``tile_size_source`` pattern. See ``test_detection_measurement_integrity.py`` for the
-geometry-resolution and calibrated-bundle integration tests; this file covers the
-``evaluate_model`` wrapper's passthrough + refusal handling.
+resolves its own operating point through the same raw resolution (``resolution.raw_operating_point``)
+``run_inference`` resolves through, recording ``tiled``'s provenance to distinguish an explicit
+caller choice from a documented default, mirroring the existing ``tile_size``/``tile_size_source``
+pattern. See ``test_detection_measurement_integrity.py`` for the geometry-resolution and
+calibrated-bundle integration tests; this file covers the ``evaluate_model`` wrapper's
+passthrough + refusal handling and the runner's own recorded merge and operating point.
 """
 
 from __future__ import annotations
@@ -69,26 +69,29 @@ def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
 
 
 def test_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch):
-    import tcip_mcp.pipelines.training.eval_runners as runners
+    """The door's own pass-through: an unstated max_dets reaches run_full_frame_evaluation as
+    None, and the runner itself, not the door, resolves it to the delivery-grade default. Proven
+    on the runner's own persisted record rather than a fake's captured kwarg, since the door no
+    longer resolves this value itself."""
+    from pathlib import Path
+
+    import tcip_store as ts
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
+    from tcip_mcp.pipelines.training.eval_runners import evaluation_results_key
     from tcip_mcp.tools.training_tools import evaluate_model
 
-    captured: dict = {}
-
-    def _fake(ckpt, images_dir, labels_dir, output_dir, **kw):
-        captured.update(kw)
-        return {"eval_regime": "full-frame-tiled-inference"}
-
-    monkeypatch.setattr(runners, "run_full_frame_evaluation", _fake)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gating-max-dets-default")
 
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="bud",
-                   use_tiled_inference=True)
-    assert captured["max_dets"] == DEFAULT_MAX_DETS == 1000
+    r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="bud",
+                       use_tiled_inference=True, tiling={"tile_size": 128, "overlap": 0.0})
+    assert "error" not in r, r
+    on_disk = ts.read(evaluation_results_key(Path(ckpt).parent))
+    assert on_disk["max_dets"] == DEFAULT_MAX_DETS == 1000
+    assert on_disk["operating_point"]["max_dets"]["source"] == "default"
 
 
 def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypatch):
@@ -261,6 +264,66 @@ def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
         predictor_mod.build_predictor = build_predictor_orig
     assert r["max_dets"] == 2  # honored verbatim
     assert r["max_dets_cap_saturated_frac"] == 1.0  # the one image hit the cap, now visible
+
+
+def test_run_full_frame_evaluation_records_merge_and_operating_point(tmp_path):
+    """The raw regime through the runner: the record carries global_nms_iou, postprocess and an
+    operating_point mapping whose conf/max_dets read source "explicit" when stated (a stated
+    value equal to the default included) and "default" when not, tiled always explicit, conf's
+    validated_against false, and cross_tile_nms.value equal to the flat global_nms_iou; a direct
+    call stating max_dets=2 records 2 as explicit."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
+
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    class _EmptyStub:
+        train_tile_size = 100
+        train_overlap = 0.2
+
+        def predict_tiled(self, path, **kw):
+            return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],
+                    "labels": [], "cap_hit": False}
+
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    Image.new("RGB", (128, 128)).save(images_dir / "a.png")
+    json_io.write_annotations(str(labels_dir / "a.json"),
+                              [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 128, 128)
+
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+
+    checkpoint = stub_verified_checkpoint("ckpt.pt")
+    build_predictor_orig = predictor_mod.build_predictor
+    try:
+        predictor_mod.build_predictor = lambda *a, **kw: _EmptyStub()
+        r_default = run_full_frame_evaluation(
+            checkpoint, str(images_dir), str(labels_dir), str(tmp_path / "default"),
+            subject="bud")
+        r_stated = run_full_frame_evaluation(
+            checkpoint, str(images_dir), str(labels_dir), str(tmp_path / "stated"),
+            subject="bud", conf_threshold=0.5, global_nms_iou=0.3, max_dets=2)
+    finally:
+        predictor_mod.build_predictor = build_predictor_orig
+
+    for r in (r_default, r_stated):
+        assert r["global_nms_iou"] == 0.3
+        assert r["postprocess"] == "nms"
+        op = r["operating_point"]
+        assert op["tiled"]["source"] == "explicit"
+        assert op["conf"]["validated_against"] == "false"
+        assert op["cross_tile_nms"]["value"] == r["global_nms_iou"]
+
+    assert r_default["operating_point"]["conf"]["source"] == "default"
+    assert r_default["operating_point"]["max_dets"]["source"] == "default"
+    # A stated value equal to the platform default is still recorded as explicit.
+    assert r_stated["operating_point"]["conf"]["source"] == "explicit"
+    assert r_stated["operating_point"]["max_dets"]["source"] == "explicit"
+    assert r_stated["max_dets"] == 2
 
 
 # ══════════════════════════════════════════════════════════════════════════
