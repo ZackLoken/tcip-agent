@@ -827,14 +827,16 @@ describe("AnnotateTab AttributePanel authoring", () => {
       version: "v2",
       schema_change_sweep: {
         newly_stamped: { subject_a: 4 },
-        predating_vocabulary: {},
+        predating_vocabulary: { subject_a: 4 },
         warning: null,
       },
     });
 
     await declareAttribute();
 
-    expect(useStore.getState().toasts.at(-1)?.message).toMatch(/4 of subject_a's confirmations/);
+    expect(useStore.getState().toasts.at(-1)?.message).toMatch(
+      /4 confirmed image\(s\) of subject_a/,
+    );
   });
 
   it("counts the active subject's shapes carrying no value for each declared attribute", async () => {
