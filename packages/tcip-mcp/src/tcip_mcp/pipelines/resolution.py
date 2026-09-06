@@ -164,6 +164,19 @@ DEFAULT_OVERLAP = 0.2
 DEFAULT_MAX_DETS = 1000
 
 
+def applied_operating_point(
+    conf_threshold: float | None, global_nms_iou: float | None, max_dets: int | None,
+) -> tuple[float, float, int]:
+    """The stated-vs-platform-default resolution for conf/NMS/max_dets, shared by every caller
+    that applies one directly: ``run_inference``'s ``dry_run`` preview, its verified body and its
+    raster branch (``inference_tools.py``), and the full-frame delivery-grade evaluation
+    (``run_full_frame_evaluation``), so none of them can resolve an unstated parameter differently."""
+    applied_nms_iou = DEFAULT_NMS_IOU if global_nms_iou is None else float(global_nms_iou)
+    applied_max_dets = DEFAULT_MAX_DETS if max_dets is None else int(max_dets)
+    applied_conf = DEFAULT_CONF if conf_threshold is None else float(conf_threshold)
+    return applied_conf, applied_nms_iou, applied_max_dets
+
+
 class UnvalidatedOperatingPointError(RuntimeError):
     """Raised when a param that requires validation is consumed as if it were trustworthy.
 
@@ -448,7 +461,7 @@ def raw_operating_point(
     max_dets: int | None, tile_size_source: str = "default", tile_size_derived_from: str | None = None,
     tiled_source: str = "default", conf_stated: bool = False, max_dets_stated: bool = False,
 ) -> ResolvedBundle:
-    """The operating point for raw (uncalibrated) inference, the one both doors resolve through.
+    """The operating point for raw (uncalibrated) inference, the one every caller resolves through.
 
     ``conf`` is a documented default with no per-dataset GT behind it, so it requires validation and
     is stamped ``validated_against=false``: reading it requires ``unvalidated_value(...)`` and the
@@ -475,7 +488,7 @@ def raw_operating_point(
     a fabricated number), not silently shippable engineering trivia.
     ``tiled_source`` is the same provenance vocabulary for the boolean itself: a caller that
     explicitly chose to tile (or not) stamps ``"explicit"``; a caller who passed nothing gets
-    ``"default"``. Both callers of this function derive their own concrete ``tiled`` bool (no shared
+    ``"default"``. Every caller of this function derives its own concrete ``tiled`` bool (no shared
     fallback constant) before reaching here, so ``tiled`` itself is always a real bool, never ``None``.
 
     ``tile_size_derived_from`` is forwarded to :func:`resolve_tile_size_param` unchanged; it matters

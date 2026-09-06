@@ -21,10 +21,8 @@ from tcip_mcp.pipelines.postprocessing.export import (
     write_predictions_json,
 )
 from tcip_mcp.pipelines.resolution import (
-    DEFAULT_CONF,
-    DEFAULT_MAX_DETS,
-    DEFAULT_NMS_IOU,
     DeliveryRefused,
+    applied_operating_point,
 )
 from tcip_mcp.project_paths import resolve_output_path
 
@@ -548,7 +546,7 @@ def run_inference(
     if dry_run:
         # No model load here: an unset ``tile`` is a pending derivation, not a fabricated default.
         # A preview needs no images_dir/raster_path: those are about the pass, not this preview.
-        applied_conf, applied_nms_iou, applied_max_dets = _applied_operating_point(
+        applied_conf, applied_nms_iou, applied_max_dets = applied_operating_point(
             conf_threshold, global_nms_iou, max_dets)
         if tile is None:
             tiled_dry: bool | str = "pending-checkpoint-derivation"
@@ -704,17 +702,6 @@ def run_inference(
     return response
 
 
-def _applied_operating_point(
-    conf_threshold: float | None, global_nms_iou: float | None, max_dets: int | None,
-) -> tuple[float, float, int]:
-    """The stated-vs-platform-default resolution for conf/NMS/max_dets, shared by
-    ``run_inference``'s ``dry_run`` preview and its verified body so the two can't diverge."""
-    applied_nms_iou = DEFAULT_NMS_IOU if global_nms_iou is None else float(global_nms_iou)
-    applied_max_dets = DEFAULT_MAX_DETS if max_dets is None else int(max_dets)
-    applied_conf = DEFAULT_CONF if conf_threshold is None else float(conf_threshold)
-    return applied_conf, applied_nms_iou, applied_max_dets
-
-
 def _run_inference_verified(
     checkpoint,
     *,
@@ -748,7 +735,7 @@ def _run_inference_verified(
     """
     max_dets_stated = max_dets is not None
     conf_stated = conf_threshold is not None
-    applied_conf, applied_nms_iou, applied_max_dets = _applied_operating_point(
+    applied_conf, applied_nms_iou, applied_max_dets = applied_operating_point(
         conf_threshold, global_nms_iou, max_dets)
 
     from tcip_mcp.pipelines.inference.predictor import build_predictor
@@ -1573,11 +1560,10 @@ def _export_predictions_raster(
 
     # An unstated cap falls to the shared platform default for the pass; this regime has no
     # per-dataset derivation of one to leave room for.
-    applied_nms_iou = DEFAULT_NMS_IOU if global_nms_iou is None else float(global_nms_iou)
-    applied_max_dets = DEFAULT_MAX_DETS if max_dets is None else int(max_dets)
     raw_max_dets_stated = max_dets is not None
-    applied_conf = DEFAULT_CONF if conf_threshold is None else float(conf_threshold)
     raw_conf_stated = conf_threshold is not None
+    applied_conf, applied_nms_iou, applied_max_dets = applied_operating_point(
+        conf_threshold, global_nms_iou, max_dets)
 
     predictor = build_predictor(
         checkpoint, device=device, score_threshold=applied_conf,
