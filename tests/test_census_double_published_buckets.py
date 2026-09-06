@@ -1,7 +1,8 @@
 """The double-publish census reports a bucket whose stamp names fewer stems than it holds
-documents for, a bucket whose stamp decodes with no ``image_filenames`` map at all (unjudgeable
-rather than clean), a validation row sealed over a mixed-run bucket, and nothing for a bucket
-whose stamp names every document. Coverage of a read-only census; it changes no behaviour."""
+documents for, a bucket holding at least one document whose stamp decodes with no
+``image_filenames`` map (unjudgeable rather than clean), a validation row sealed over a mixed-run
+bucket, and nothing for a bucket whose stamp names every document or for a stamp with no
+document beside it. Coverage of a read-only census; it changes no behaviour."""
 
 from __future__ import annotations
 
@@ -242,8 +243,9 @@ def test_a_stamp_that_will_not_decode_is_read_refused_and_the_census_continues_o
     tmp_path, monkeypatch, capsys,
 ):
     """Coverage of the continuation clause the module docstring states: a stamp whose bytes are
-    corrupted in place is reported READ-REFUSED for its own root, and a second, clean root passed
-    alongside it still gets its own line, rather than the walk stopping at the first root."""
+    corrupted in place is reported READ-REFUSED on an indented line naming its own bucket, and a
+    second, clean root passed alongside it still gets its own line, rather than the walk stopping
+    at the first root."""
     from tests._record_damage_fixtures import damage_record
     from tcip_mcp.pipelines.resolution import sidecar_key
 
@@ -260,6 +262,6 @@ def test_a_stamp_that_will_not_decode_is_read_refused_and_the_census_continues_o
 
     assert exit_code == 2
     out = capsys.readouterr().out
-    refused_at = out.index("READ-REFUSED")
+    refused_at = out.index(f"  READ-REFUSED {bucket}: ")
     clean_at = out.index(f"project {clean}")
     assert clean_at > refused_at
