@@ -25,19 +25,19 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 80ac2ab8.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 55c44eba.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 80ac2ab8 has 426 modules across the six scanned roots (136525 total lines):
+HEAD 55c44eba has 426 modules across the six scanned roots (136538 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 134 | 60695 |
+| tcip-mcp | 134 | 60706 |
 | tcip-annotation | 12 | 4299 |
-| tcip-web | 39 | 13369 |
+| tcip-web | 39 | 13371 |
 | tcip-store | 13 | 5244 |
 | tcip-web-frontend | 211 | 47987 |
 | tools | 17 | 4931 |
@@ -821,8 +821,8 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `register_plant_registry` | `phenology_tools.py:31` | yes | Register a plant-locations CSV set under a name, so `build_plant_mapping` and |
 | `build_plant_mapping` | `phenology_tools.py:102` | yes | Assign each geolocated image to a plant, then persist the mapping under this project. |
-| `calibrate_classifier_operating_point` | `phenology_tools.py:551` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
-| `deliver_phenology_milestones` | `phenology_tools.py:696` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `calibrate_classifier_operating_point` | `phenology_tools.py:560` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
+| `deliver_phenology_milestones` | `phenology_tools.py:705` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (5 tools)
 
