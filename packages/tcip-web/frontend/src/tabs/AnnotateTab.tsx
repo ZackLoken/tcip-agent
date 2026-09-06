@@ -45,10 +45,8 @@ import {
   cutRing,
   findHitPoint,
   findHoveredPolygon,
-  keyboardCutRefusal,
   pointInRings,
   pointToSegmentDist,
-  ringsBbox,
   withRing,
 } from "@/lib/polygonGeometry";
 import { applyEditDrag, hitTestEdit, MIN_BOX_SIDE, type EditDrag } from "@/lib/editGeometry";
@@ -750,74 +748,22 @@ export function AnnotateTab() {
     return false;
   }
 
-  // No keyboard path selects a polygon, so this names the click as the precondition for both
-  // paths. Channelled "cut", so a repeat replaces the standing toast with a count.
+  // Channelled "cut", so a repeat replaces the standing toast with a count.
   function requireCutSelection(): void {
     useStore
       .getState()
       .pushToast(
-        "Select a polygon first by clicking it, then click two points on either side of it or " +
-          "press Shift+H / Shift+V.",
+        "Select a polygon to cut, then click two points on either side of it.",
         "error",
         "cut",
       );
   }
 
-  // Shared by the mouse and keyboard cut paths, so the two never drift onto separate wordings.
   function multiRingCutRefusal(ringCount: number): string {
     return (
       `This shape covers ${ringCount} separate parts of one object; the cut applies to a ` +
       "single outline. Cut a part in polygon mode after the others are removed, or redraw it."
     );
-  }
-
-  // Shift+H / Shift+V: two endpoints one bounding-box width (or height) outside each side of
-  // the centre line, then the same splitPolygon/incrementAnnotationsAdded path a mouse cut takes.
-  function runAxisCut(axis: "horizontal" | "vertical"): void {
-    if (cutStart) {
-      // A pending click-cut start is the mouse's; the keys leave it alone but say why nothing
-      // happened rather than staying silent.
-      useStore
-        .getState()
-        .pushToast(
-          "A cut is half-placed. Press Esc to clear it, then x to re-arm.",
-          "error",
-          "cut",
-        );
-      return;
-    }
-    const idx = canvas.selectedPolygonIdx;
-    if (idx === null) {
-      requireCutSelection();
-      return;
-    }
-    const polygon = canvas.polygons[idx];
-    if (polygon.rings.length > 1) {
-      useStore.getState().pushToast(multiRingCutRefusal(polygon.rings.length), "error", "cut");
-      return;
-    }
-    const [minX, minY, maxX, maxY] = ringsBbox(polygon.rings);
-    const width = maxX - minX;
-    const height = maxY - minY;
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
-    const [a, b]: [[number, number], [number, number]] =
-      axis === "horizontal"
-        ? [
-            [minX - width, cy],
-            [maxX + width, cy],
-          ]
-        : [
-            [cx, minY - height],
-            [cx, maxY + height],
-          ];
-    const result = cutRing(polygon.rings[0], a, b);
-    if ("reason" in result) {
-      useStore.getState().pushToast(keyboardCutRefusal(result.reason), "error", "cut");
-      return;
-    }
-    splitPolygon(idx, result.rings);
-    incrementAnnotationsAdded(1);
   }
 
   useKeyboardShortcuts([
@@ -840,18 +786,6 @@ export function AnnotateTab() {
       keys: "x",
       action: () => useStore.getState().setCut(!annotateUi.cut),
       when: () => mode === "polygon" && !isLocked,
-    },
-    {
-      keys: "shift+h",
-      action: () => runAxisCut("horizontal"),
-      when: () => mode === "polygon" && !isLocked && annotateUi.cut,
-      whileFocused: true,
-    },
-    {
-      keys: "shift+v",
-      action: () => runAxisCut("vertical"),
-      when: () => mode === "polygon" && !isLocked && annotateUi.cut,
-      whileFocused: true,
     },
     {
       keys: "delete",
