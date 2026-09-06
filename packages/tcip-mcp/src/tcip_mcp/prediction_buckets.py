@@ -16,8 +16,9 @@ A second, narrower rule applies only to the callers that opt into it
 (:func:`resolve_writable_bucket`'s ``refuse_documents``): a requested bucket that already holds
 prediction documents, with no verdict yet recorded against it, refuses outright rather than
 redirecting or overwriting, since a bucket left in that state was already published by a prior
-run this call would otherwise write beside or over. ``stage_prediction_shapes`` leaves this off,
-since it accumulates one stem per call into a bucket by contract.
+run this call would otherwise write beside or over. Three publishers opt in (``run_inference``,
+``deliver_per_image_counts``'s live path, and the web route's own launch); ``stage_prediction_shapes``
+alone leaves this off, since it accumulates one stem per call into a bucket by contract.
 
 A staged bucket carries no ``operating_point.json`` stamp and so no recorded ``(subject,
 attribute)`` scope: each record's ``subject`` is whatever the caller named
@@ -28,9 +29,8 @@ than a stamp's.
 A third change reaches every caller regardless of that keyword: when every ``<name>@r<n>``
 variant up to the search's ceiling already carries a verdict, the resolver no longer falls back
 to an unchecked, never-searched ``<name>@r100``; it raises :class:`BucketHasVerdicts` naming no
-suggestion. ``stage_prediction_shapes`` and the web route's own ``resolve_prediction_bucket``
-call never opt into the document guard, but a caller of either that exhausts every verdicted
-variant now meets this refusal where it previously wrote into ``@r100`` unchecked.
+suggestion. ``stage_prediction_shapes``, the one caller left that never opts into the document
+guard, meets this same refusal on exhaustion where it previously wrote into ``@r100`` unchecked.
 """
 
 from __future__ import annotations
@@ -315,10 +315,10 @@ def resolve_writable_bucket(
     unchecked next one is never returned as a target: the resolver raises the class it was
     resolving for with ``suggested=None`` and a message saying every variant is taken, since a
     redirect or a suggestion onto an unchecked directory is the overwrite this guard exists to
-    refuse. This exhaustion refusal fires whether or not ``refuse_documents`` is set: a caller
-    that leaves it off (``stage_prediction_shapes``, the web route's own
-    ``resolve_prediction_bucket`` call) is gated on verdicts alone, but on exhaustion meets this
-    same raise rather than the unchecked ``@r100`` fallback it received before this change.
+    refuse. This exhaustion refusal fires whether or not ``refuse_documents`` is set:
+    ``stage_prediction_shapes``, the one caller that leaves it off, is gated on verdicts alone,
+    but on exhaustion meets this same raise rather than the unchecked ``@r100`` fallback it
+    received before this change.
 
     A raster pass' own progress records, kept under a bucket's ``<out>/.tcip/`` subdirectory,
     never register as a document either: :func:`bucket_document_stem_count`'s
@@ -412,8 +412,9 @@ def stage_prediction_shapes(
     This door leaves ``resolve_prediction_bucket``'s ``refuse_documents`` at its default off: a
     staging bucket accumulates one stem per call by contract, so a stem this call adds beside
     another call's own document is the bucket working as designed, never the second-publish the
-    document guard exists to refuse. ``run_inference`` and ``deliver_per_image_counts``, the two
-    doors that opt into that guard, never call this function.
+    document guard exists to refuse. ``run_inference``, ``deliver_per_image_counts``'s live path
+    and the web route's own launch, the three publishers that opt into that guard, never call
+    this function.
 
     Returns the bucket actually written and the path.
     """
