@@ -541,6 +541,28 @@ describe("TrainingTab chart accessibility", () => {
     expect(toggle.getAttribute("aria-controls")).toBe(table.parentElement?.id);
   });
 
+  it("resolves aria-controls to an element even while the table disclosure is closed", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
+    }));
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-controls-closed", status: "running" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
+    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+      onMessage({ type: "metric", run_id: runId, row: { epoch: 1, loss: 0.5 } });
+      return () => {};
+    });
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-controls-closed"));
+    const toggle = await screen.findByRole("button", { name: "as table" });
+
+    const controlsId = toggle.getAttribute("aria-controls");
+    expect(controlsId).toBeTruthy();
+    expect(document.getElementById(controlsId as string)).not.toBeNull();
+  });
+
   it("marks the metrics placeholder as a live region so its swap to the chart is announced", async () => {
     useStore.setState((s) => ({
       gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
@@ -702,7 +724,7 @@ describe("TrainingTab chart default series", () => {
 
     expect(
       await screen.findByRole("img", {
-        name: "Live metrics for train-validated: train_loss, val_loss (selection); every other logged metric is in the table below",
+        name: 'Live metrics for train-validated: train_loss, val_loss (selection); every other logged metric is behind the "as table" toggle',
       }),
     ).toBeInTheDocument();
 

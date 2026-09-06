@@ -529,7 +529,7 @@ export function TrainingTab() {
                             .map((key) => chartSeries.labels[key] ?? key)
                             .join(", ")}${
                             chartSeries.keys.length < metricKeys.length
-                              ? "; every other logged metric is in the table below"
+                              ? '; every other logged metric is behind the "as table" toggle'
                               : ""
                           }`}
                     </span>
@@ -586,8 +586,12 @@ export function TrainingTab() {
                 )}
               </div>
 
-              {selectedRun && chartData.length > 0 && chartTableOpen && (
-                <div id={chartTableId} className="overflow-auto max-h-64 shrink-0">
+              {selectedRun && chartData.length > 0 && (
+                <div
+                  id={chartTableId}
+                  hidden={!chartTableOpen}
+                  className="overflow-auto max-h-64 shrink-0"
+                >
                   <table className="w-full text-[11px]">
                     <caption className="sr-only">{`${selectedRun} metrics as a table`}</caption>
                     <thead>
