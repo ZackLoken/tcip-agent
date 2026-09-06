@@ -249,7 +249,7 @@ def test_a_trait_authored_and_confirmed_through_this_surface_delivers_end_to_end
         phenology_prefix="bud",
         majority_milestone="95per",
         majority_provisional=True,
-        majority_label="opening",
+        majority_label="majority",
         notes=BUD_OPENING.notes,
         rationale="the breeder called open a texture change on the object itself, "
                   "never a bbox-ratio proxy, and wants the 5/50/95% crossings of that call",
