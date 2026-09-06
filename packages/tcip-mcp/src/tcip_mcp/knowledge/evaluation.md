@@ -39,8 +39,8 @@ measurement-agreement/method-comparison contexts specifically because of that de
 | Tool | Purpose |
 |------|---------|
 | `evaluate_model` | Evaluate a checkpoint on a held-out dataset, or a named split manifest's `calibration` side (`split_manifest_dir`); writes `test_results.json` |
-| `annotation_tools.score_predictions` (library call) / `scripts/score_predictions.py` (logged script) | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN. On a classified bucket this scores the object's localization, never the classifier's own confirmed-state call |
-| `scripts/render_failure_cases.py` (logged script, run with python) | Surface + render the N images with highest triage error |
+| `annotation_tools.score_predictions` (library call) / `tcip score-predictions` (logged command) | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN. On a classified bucket this scores the object's localization, never the classifier's own confirmed-state call |
+| `tcip render-failure-cases` (logged command) | Surface + render the N images with highest triage error |
 | `experiment_tools.compare_experiments` (library call) | Side-by-side metrics across experiments |
 | `get_experiment` (`view='lineage'`) | Trace data → model → predictions chain |
 | `list_experiments` | Enumerate every experiment on record, including one no other tool can rediscover (a calibration experiment, a pre-created one never launched) |
@@ -121,11 +121,11 @@ manifest, seals all four keys `null`.
 
 When metrics are poor, investigate systematically:
 
-1. Data issues: `python scripts/doctor.py <root>`'s `check_data_quality`, missing labels, format errors, class imbalance
-2. Worst cases: `python scripts/render_failure_cases.py`, surface and visually inspect the worst
+1. Data issues: `tcip doctor <root>`'s `check_data_quality`, missing labels, format errors, class imbalance
+2. Worst cases: `tcip render-failure-cases`, surface and visually inspect the worst
    N images
 3. Per-image breakdown: `annotation_tools.score_predictions` (library call, or
-   `scripts/score_predictions.py`) on a dataset dir; find images with the highest FP/FN counts
+   `tcip score-predictions`) on a dataset dir; find images with the highest FP/FN counts
    (no built-in per-class breakdown for detection; use
    `annotation_tools.score_predictions(<image>, detail=True)` per image and aggregate by
    `class_id` if class-level numbers are needed). On a classified bucket the breakdown is the

@@ -63,11 +63,11 @@ this project would need, and be honest about what failed.
 ### What must not go in a retrospective
 
 - A reusable pipeline shape. Record what you *measured* that led you to a shape, not the shape.
-- An inventory of existing machinery. Read the source, or run `scripts/list_tools.py`.
+- An inventory of existing machinery. Read the source, or run `tools/list_tools.py`.
 
 ## Distill: closing the loop toward a platform change
 
-`scripts/distill_learnings.py` gathers one project's (or, with `--workspace`, every project's)
+`tcip distill-learnings` gathers one project's (or, with `--workspace`, every project's)
 reports and retrospectives into a worksheet of recurring themes; it only reads, nothing is
 written, applied, or promoted. After reviewing a worksheet, call `record_distillation_pass(project_path)` per project covered:
 the one audited write in this loop, kept out of the script. It only resets that

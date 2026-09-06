@@ -28,7 +28,7 @@ folder per project. The shape is declared once, in `workspace.format_project_nam
 `parse_project_name`: three lowercase segments joined by underscores, hyphens allowed
 within a segment. Neither function checks a segment against a vocabulary (tentative);
 `ingest_images`, `initialize_project` and
-`scripts/import_project.py` refuse a non-conforming name when the directory they create lands
+`tcip import-project` refuse a non-conforming name when the directory they create lands
 under the workspace.
 
     black-locust_tree_trunk-diameter
@@ -118,7 +118,7 @@ There must be something to train on. Two paths (see
 
 - Agent/MCP path: `propose_annotations` a starter batch with a chosen `engine` (`'sam'` is the
   built-in reference; the agent can bring another) → review the candidates visually
-  (`vision_tools.visualize`, a library call, or `scripts/visualize.py`, then your client's
+  (`vision_tools.visualize`, a library call, or `tcip visualize`, then your client's
   image-capable read tool on the returned `image_path`) → `stage_proposals`
   with `assignments=[...]` for the good ones. `grid_cells=[...]` restricts a pass to a region of a large or crowded image
   instead of the whole frame. Trial engines and keep the one whose high-conf
@@ -178,9 +178,9 @@ active marker *and* repins the platform-state root to `<workspace>/<project>`, s
 the experiment store and the model registry live under that one project's `.tcip/` alongside its
 data, and the platform's own audit log is now this project's own, one file at one key
 (self-contained and portable; a dataset's own audit log stays beside that dataset, unaffected by
-adoption; `python scripts/archive_project.py <project_path> --output-path <path>` bundles the
+adoption; `tcip archive-project <project_path> --output-path <path>` bundles the
 project into a ZIP at the destination you name, or `--output-dir <dir>` writes the identical
-bundle as a directory tree; `python scripts/import_project.py <bundle_path> <destination>`
+bundle as a directory tree; `tcip import-project <bundle_path> <destination>`
 restores either container into a destination dir, round-tripping back to an
 `inspect_project`-visible project). After
 adoption, `inspect_project`, `rank_registered_models` (listing with `metric=""` or ranking with

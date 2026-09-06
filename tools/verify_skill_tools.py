@@ -89,11 +89,14 @@ def tool_table_first_cells(md_text: str) -> list[str]:
 def extract_tool_name(cell: str) -> str | None:
     """The plain identifier named by a Tools-table cell's first backticked token, or ``None``
     when that token is not a snake_case identifier (a call signature or a keyword note still
-    yields the name; a path fragment like `tools/` yields nothing to check)."""
+    yields the name; a path fragment like `tools/` yields nothing to check) or is a `tcip
+    <command>` console invocation (never a claimed MCP tool name, so nothing to check either)."""
     m = _BACKTICK_SPAN.search(cell)
     if not m:
         return None
     token = m.group(1)
+    if token.startswith("tcip "):
+        return None
     for sep in ("(", " "):
         idx = token.find(sep)
         if idx != -1:

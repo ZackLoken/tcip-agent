@@ -8,7 +8,7 @@ Current scope: 2D imagery (RGB + N-channel) from any capture modality, object de
 
 Six crops in scope: hazelnut, chestnut, currant, elderberry, persimmon, black locust. Phase 1 target is hazelnut catkin phenology.
 
-Status: the browser GUI is built out across all tabs (Annotate / Review / Training / Tuning / Inference / Results / Meta), the MCP tool surface is in place (run `python scripts/list_tools.py` for the current count), and every delivered phenotype (a count, a dimensional measurement, a phenology milestone) is gated on validated measurement inputs end to end: an uncalibrated confidence threshold, an unproven physical scale, or a fabricated tile geometry refuses delivery. Phase 1 focus remains hazelnut catkin phenology; the orthomosaic capability described above is built, not yet exercised end to end against a first live delivery.
+Status: the browser GUI is built out across all tabs (Annotate / Review / Training / Tuning / Inference / Results / Meta), the MCP tool surface is in place (run `python tools/list_tools.py` for the current count), and every delivered phenotype (a count, a dimensional measurement, a phenology milestone) is gated on validated measurement inputs end to end: an uncalibrated confidence threshold, an unproven physical scale, or a fabricated tile geometry refuses delivery. Phase 1 focus remains hazelnut catkin phenology; the orthomosaic capability described above is built, not yet exercised end to end against a first live delivery.
 
 ## Architecture
 
@@ -35,7 +35,7 @@ All three processes share `.tcip/` on disk (experiment state, model registry, au
 
 Supporting libraries: `packages/tcip-annotation` (headless annotation engine: label I/O, IoU matching, SAM wrapper) and `packages/tcip-store` (the storage seam: one locked, atomic interface for the platform's records, append-only logs and blobs). `tcip-store` is the bottom of the stack, depending on nothing else here; `tcip-annotation` depends on it and on neither of the other two.
 
-Records and append-only logs go into one SQLite database per root, `<root>/.tcip/store.db`; blob bytes stay files under every backend, so imagery, labels and predictions travel with the dataset. Set `TCIP_STORE_BACKEND=file` to bind the file backend instead, which reads and writes the same records as loose files. A root whose records are still loose files is refused rather than read as empty: `python scripts/adopt_store.py <root>` moves them into a database, and `python scripts/export_store.py <root>` writes them back out.
+Records and append-only logs go into one SQLite database per root, `<root>/.tcip/store.db`; blob bytes stay files under every backend, so imagery, labels and predictions travel with the dataset. Set `TCIP_STORE_BACKEND=file` to bind the file backend instead, which reads and writes the same records as loose files. A root whose records are still loose files is refused rather than read as empty: `tcip adopt-store <root>` moves them into a database, and `tcip export-store <root>` writes them back out.
 
 ## Repository layout
 
@@ -45,7 +45,7 @@ packages/
   tcip-mcp/                    # MCP server (python -m tcip_mcp)
     src/tcip_mcp/
       knowledge/               # domain knowledge modules (crops, annotation, training, ...)
-      tools/                   # domain tools (run scripts/list_tools.py for the current list)
+      tools/                   # domain tools (repo-root tools/list_tools.py prints the current list)
       pipelines/               # ML: model_build, trainer, predictor (windowed/tiled raster
                                #   reads), envelope + plain nn.Module blocks; postprocessing
                                #   (per-image plant mapping + phenology, plus orthomosaic
@@ -57,7 +57,7 @@ packages/
     src/tcip_web/
       routes/                  # annotate, review, training, tuning, inference, results, ...
     frontend/src/              # Vite + React 18 + TypeScript + Tailwind + Konva
-scripts/                       # agent one-off scripts + end-to-end smokes (smoke_*_e2e.py); see scripts/README.md
+tools/                         # CI + development tooling, never a project-facing command; see tools/README.md
 tests/                         # pytest suite
 data/                          # sample hazelnut dataset (gitignored)
 ```
@@ -103,12 +103,12 @@ pytest tests/ -n 4 --tb=short --timeout=300 -q
 mypy               # type gate; roots come from mypy.ini's files list, run from the repo root
 cd packages/tcip-web/frontend && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
 # CI-parity gate: runs the steps .github/workflows/ci.yml declares (see CLAUDE.md's Commands block)
-python scripts/gate_baseline.py --out <dir>
+python tools/gate_baseline.py --out <dir>
 
-# End-to-end smokes (scripts/smoke_*_e2e.py)
-python scripts/smoke_phenology_e2e.py   # phenology pipeline: mapping -> milestones (offline)
-python scripts/smoke_terminal_e2e.py    # in-app agent terminal (costs one model turn)
-python scripts/smoke_fence_e2e.py       # agent permission fence (costs one model turn)
+# End-to-end smokes (tools/smoke_*_e2e.py)
+python tools/smoke_phenology_e2e.py   # phenology pipeline: mapping -> milestones (offline)
+python tools/smoke_terminal_e2e.py    # in-app agent terminal (costs one model turn)
+python tools/smoke_fence_e2e.py       # agent permission fence (costs one model turn)
 ```
 
 The MCP server starts automatically when an MCP client connects (see `.mcp.json`).
@@ -146,7 +146,7 @@ later run to a partition an earlier run already drew, not for drawing the first 
 | `evaluate_model(run_id_or_ckpt, images_dir)` | Evaluates a trained checkpoint on a held-out dataset and writes `test_results.json`. |
 
 Before any number can ship, its confidence operating point needs validating against held-out
-ground truth: `scripts/calibrate_operating_point.py` runs one model pass over a disjoint
+ground truth: `tcip calibrate-operating-point` runs one model pass over a disjoint
 calibration/holdout split, derives a count-unbiased detection
 operating point, and checks its held-out count bias (a trait whose delivery reads a classified
 positive state, such as a phenology milestone, instead calibrates through the

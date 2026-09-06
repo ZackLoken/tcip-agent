@@ -30,8 +30,9 @@ each with its own `CLAUDE.md` for layout: `packages/tcip-store/` (the storage se
 atomic records, logs and blobs over a database backend and a file backend that must mean the same
 thing; bottom of the stack), `packages/tcip-annotation/` (headless annotation and review engine),
 `packages/tcip-mcp/` (the MCP server, domain tools and composable ML; your primary surface),
-`packages/tcip-web/` (FastAPI plus Vite/React/TS/Konva; the breeder's only surface). `scripts/`
-holds one-off logged scripts; domain knowledge lives in `packages/tcip-mcp/src/tcip_mcp/knowledge/`
+`packages/tcip-web/` (FastAPI plus Vite/React/TS/Konva; the breeder's only surface). `tools/`
+holds CI and development tooling, never a project-facing command; an operator command lives in
+its package's own `cli/` module, behind the `tcip` console command. Domain knowledge lives in `packages/tcip-mcp/src/tcip_mcp/knowledge/`
 as repo files, loaded before acting in its domain. Claude Code reaches it through the generated
 skills under `.claude/skills/`; Codex and Antigravity reach it under `.agents/skills/`, and
 Codex also through the generated block in `AGENTS.md`; any other client reaches it through the
@@ -48,7 +49,7 @@ Your default failure is pushing through friction by guessing.
   `activate_project` on every project switch and persists across sessions between switches),
   asking when the task names none; then
   `load_project_memory` (reports and retrospectives), `inspect_project`, and
-  `python scripts/doctor.py <project_root>`, reporting what it finds through `report_friction`
+  `tcip doctor <project_root>`, reporting what it finds through `report_friction`
   before acting on the data.
 - Report friction through `report_friction` the moment you hit it (a missing tool, ambiguous data,
   an op that failed twice, a decision needing human judgment, behavior that surprised you); the
@@ -108,7 +109,7 @@ Your default failure is pushing through friction by guessing.
 - Confirm before destructive or outward actions (deleting labels, overwriting weights, exporting
   deliverables); approval for one does not extend to the next.
 - Persisted formats are frozen. `frozen-formats.json`, generated from the store registry by
-  `scripts/generate_frozen_manifest.py` and held to it by `tests/test_frozen_manifest.py`, is the
+  `tools/generate_frozen_manifest.py` and held to it by `tests/test_frozen_manifest.py`, is the
   commitment: every store's classification and version ceiling, total over the registry. The version
   field is lazy (absence means the frozen version 1; the first writer of the field is whichever
   change bumps a format), and the seam refuses, on read and on write, a version it does not know. A
@@ -140,7 +141,7 @@ composer or registry (`toolkit-inventory` maps the pieces, the derivations and t
 `model_source`/`training_source`/`dataset_source` seams). A detector at `in_chans != 3` needs
 per-band `image_mean`/`image_std` from `derivations.band_normalization_stats` through
 `builder_kwargs`; `build_detector` refuses without them. You can see images: `tcip_annotation.viz`'s
-renderers, `vision_tools.visualize` and `scripts/visualize.py` write to `.tcip/artifacts/viz/`; read
+renderers, `vision_tools.visualize` and `tcip visualize` write to `.tcip/artifacts/viz/`; read
 the path with your image-capable tool, describe, then recommend. External phenotyping resources
 (PlantCV and the like) are read for general techniques only, never for a per-trait pipeline; the
 endpoint is a trained model.
@@ -155,7 +156,7 @@ endpoint is a trained model.
   briefed to refute, one read workflow at a time, each finding re-run by an independent refuter.
 - Model tiering, stated per delegation: Fable for design and adjudication, Opus for adversarial
   reads and synthesis, Sonnet for implementation and fail-before proofs, Haiku
-  (`claude-haiku-4-5-20251001`) for sweeps. Cross-family review runs `scripts/cross_family_ask.py`
+  (`claude-haiku-4-5-20251001`) for sweeps. Cross-family review runs `tools/cross_family_ask.py`
   at its parity defaults (claude `opus` high, codex from `~/.codex/config.toml`, antigravity
   `gemini-3.1-pro-high`), and afterwards you quote each `meta.json`'s `model_resolved`,
   `model_used`, `model_mismatch`, `effort_requested` and `response_source`. Cross-family
@@ -170,7 +171,7 @@ endpoint is a trained model.
   <worktree HEAD> HEAD`; re-anchor citations with `--fix` as their own commit (an `ARCHITECTURE.md`
   conflict that is line numbers only takes main's side); remove the worktree and branch.
 - A test that guards a fix is observed failing without it: `python
-  scripts/prove_test_fails_before.py <testfile> -k <expr>` (`--baseline <rev>` when HEAD already
+  tools/prove_test_fails_before.py <testfile> -k <expr>` (`--baseline <rev>` when HEAD already
   holds the fix). Only `GUARDS` counts, and only when the recorded failure is the assertion the
   test names; `VACUOUS` is said, not counted; `INDETERMINATE` and `REFUSED` are runs to redo. A
   coverage test is stated as coverage. Every admits-valid-work test constructs its input through
@@ -181,7 +182,7 @@ endpoint is a trained model.
   `check_architecture_citations.py --fix`),
   `mypy`, the change's test files on both backends in batches of at most 20 with
   `--timeout=300`, the frontend gate in CI order if a frontend file changed. On the final tree:
-  the same plus `docs/audit/ledger_check.py`, the batch's counts script, `scripts/list_tools.py`,
+  the same plus `docs/audit/ledger_check.py`, the batch's counts script, `tools/list_tools.py`,
   and `pytest tests/ -n 4` on both backends with `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1` (the file
   leg under `TCIP_STORE_BACKEND=file`), on the tree you actually commit. After any change to a
   reader's contract, the full suite runs before the landed read. Never report a gate before its
@@ -204,12 +205,12 @@ conda activate tcip-agent          # Python 3.12; torch installs CUDA by default
 pytest tests/ -n 4 --tb=short --timeout=300 -q
 ruff check .
 mypy                               # roots from mypy.ini, run from the repo root
-python scripts/list_tools.py       # the MCP tool list (never hardcode counts in docs)
-python scripts/gate_baseline.py --out <dir>   # the CI-parity gate, Git Bash on Windows
+python tools/list_tools.py         # the MCP tool list (never hardcode counts in docs)
+python tools/gate_baseline.py --out <dir>   # the CI-parity gate, Git Bash on Windows
 cd packages/tcip-web/frontend && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
 python -m tcip_web                 # backend plus built UI at http://127.0.0.1:8765
-python scripts/export_store.py <root>   # a root's database-held records back out as files
-python scripts/adopt_store.py <root>    # a root's loose record files into its database
+tcip export-store <root>           # a root's database-held records back out as files
+tcip adopt-store <root>             # a root's loose record files into its database
 ```
 
 Every process binds one storage backend at its entry point; an unset environment or
@@ -226,8 +227,8 @@ via `$TCIP_STATE_ROOT`, pinned at startup by the web backend and every MCP serve
 
 - Lazy-import torch and torchvision inside function bodies. MCP tools live in
   `packages/tcip-mcp/src/tcip_mcp/tools/`, decorated `@mcp.tool()` and `@audited`. Prefer a
-  logged script in `scripts/` over a new MCP tool; add a tool only for an audit seam,
-  long-running infrastructure, or domain knowledge the agent lacks.
+  console-command door in the package's own `cli/` module over a new MCP tool; add a tool only
+  for an audit seam, long-running infrastructure, or domain knowledge the agent lacks.
 - Crop traits are controlled vocabulary in `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`;
   verify there before asserting.
 - The word provisional is reserved for the delivery gate's acknowledged-unvalidated sense
