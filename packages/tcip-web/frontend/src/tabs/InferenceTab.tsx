@@ -394,7 +394,9 @@ export function InferenceTab() {
       <div className="border-r border-tcip-border p-4 overflow-auto">
         <div className="tcip-heading mb-3">Inference config</div>
 
-        <label className="tcip-label mb-1">Model checkpoint</label>
+        <label className="tcip-label mb-1" htmlFor="inference-model-select">
+          Model checkpoint
+        </label>
         {modelsError && (
           <div className="text-[11px] text-tcip-fp mb-1">
             {modelsError}{" "}
@@ -405,6 +407,7 @@ export function InferenceTab() {
         )}
         {models.length > 0 ? (
           <select
+            id="inference-model-select"
             className="tcip-select w-full mb-3"
             value={modelPath}
             onChange={(e) => setModelPath(e.target.value)}

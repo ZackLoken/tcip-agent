@@ -652,6 +652,19 @@ describe("InferenceTab bucket refusals", () => {
   });
 });
 
+describe("InferenceTab model select", () => {
+  it("associates the model checkpoint label with the select by accessible name", async () => {
+    mockTree([]);
+    vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
+      models: [{ name: "baseline", checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt" }],
+    });
+
+    render(<InferenceTab />);
+
+    expect(await screen.findByRole("combobox", { name: "Model checkpoint" })).toBeInTheDocument();
+  });
+});
+
 describe("InferenceTab heading", () => {
   it("renders exactly one top-level heading naming the tab", () => {
     render(<InferenceTab />);
