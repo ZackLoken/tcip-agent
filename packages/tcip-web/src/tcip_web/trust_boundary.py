@@ -40,6 +40,15 @@ _LOOPBACK_NAMES = frozenset({"localhost"})
 _ADVERTISED_ENV = "TCIP_WEB_ADVERTISED_HOSTS"
 _OPT_IN_ENV = "TCIP_WEB_ALLOW_INSECURE"
 
+STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+"""HTTP methods the trust boundary treats as mutating: a request using one of these must carry
+an allowed Origin, the same requirement every WebSocket scope carries regardless of method."""
+
+_ORIGIN_REFUSAL_WS = "origin not allowed"
+_ORIGIN_REFUSAL_HTTP = (
+    f"{_ORIGIN_REFUSAL_WS}: a state-changing request from another origin is refused."
+)
+
 EXPOSURE_REFUSAL = (
     "this connection arrived through a network address and the backend is not opted into network "
     "exposure: an exposed GUI hands an unauthenticated network client filesystem reads and writes "
@@ -254,11 +263,13 @@ def _parse_origin(origin: str) -> tuple[str, Authority] | None:
 
 
 def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:
-    """Whether a WebSocket Origin is one this backend serves for the connection it arrived on.
+    """Whether an Origin is one this backend serves for the connection it arrived on.
 
-    A missing Origin is a non-browser client (the MCP tools send none) and is allowed: this check
-    is a browser-side mitigation against a cross-site page reading GUI state, not authentication.
-    A present Origin must be exactly the request's own origin (the validated Host at the request
+    Applied by :class:`TrustBoundaryMiddleware` to every WebSocket scope and to an ``http``
+    scope whose method is in :data:`STATE_CHANGING_METHODS`. A missing Origin is a non-browser
+    client (the MCP tools send none) and is allowed: this check is a browser-side mitigation
+    against a cross-site page reading GUI state or driving a mutation, not authentication. A
+    present Origin must be exactly the request's own origin (the validated Host at the request
     scheme), or a loopback host at any port on a local arrival (the Vite dev server proxies from
     its own port), or an advertised authority under the opt-in.
     """
@@ -285,8 +296,10 @@ class TrustBoundaryMiddleware:
     Applies to ``http`` and ``websocket`` scopes only; a ``lifespan`` scope carries no arrival.
     An arrival the backend cannot classify, and an exposed arrival without the opt-in, are refused
     with the exposure message; a Host the backend does not answer to is refused as an invalid
-    host. A refused exposed arrival is logged once per client and arrival address pair so the
-    operator sees it.
+    host. After the Host check, every WebSocket scope and every ``http`` scope whose method is
+    in :data:`STATE_CHANGING_METHODS` must also carry an Origin :func:`origin_allowed` admits; a
+    duplicated Origin header is refused the same way a duplicated Host is. A refused exposed
+    arrival is logged once per client and arrival address pair so the operator sees it.
     """
 
     def __init__(self, app: Callable[[Scope, Receive, Send], Awaitable[None]]) -> None:
@@ -305,7 +318,23 @@ class TrustBoundaryMiddleware:
         if not host_allowed(scope):
             await _refuse(scope, send, 400, "invalid host header")
             return
+        if scope["type"] == "websocket" or scope.get("method") in STATE_CHANGING_METHODS:
+            if not self._origin_ok(scope):
+                detail = _ORIGIN_REFUSAL_WS if scope["type"] == "websocket" else _ORIGIN_REFUSAL_HTTP
+                await _refuse(scope, send, 403, detail)
+                return
         await self.app(scope, receive, send)
+
+    def _origin_ok(self, scope: Mapping[str, Any]) -> bool:
+        """Whether this scope's Origin header, if any, is one :func:`origin_allowed` admits.
+
+        A duplicated Origin header is refused outright, the same way a duplicated Host is
+        (:func:`request_authority`), rather than resolved to either of its values.
+        """
+        values = _header_values(scope, b"origin")
+        if len(values) > 1:
+            return False
+        return origin_allowed(values[0] if values else None, scope)
 
     def _log_refusal(self, scope: Mapping[str, Any]) -> None:
         client = scope.get("client")
