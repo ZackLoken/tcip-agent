@@ -136,14 +136,20 @@ def test_a_cap_the_resolver_derives_itself_still_says_how(tmp_path):
     assert "p99 GT objects/image" in cap.derived_from
 
 
-def test_full_frame_evaluation_defaults_agree_with_the_shared_inference_defaults():
-    """The select-point must equal the ship-point, so the delivery-grade eval's cross-tile NMS and
-    detection cap start where inference's do."""
+def test_full_frame_evaluation_leaves_nms_and_cap_unstated_for_the_shared_resolution():
+    """The select-point must equal the ship-point: the delivery-grade eval binds no cross-tile NMS
+    or detection cap of its own, leaving both unstated (``None``) so ``applied_operating_point``,
+    the one resolution ``run_inference`` also calls, supplies the platform defaults. Coverage of
+    the signature and of the shared resolution's own defaults; the agreement itself holds by
+    construction, one function called from both doors."""
     import inspect
 
-    from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS, DEFAULT_NMS_IOU
+    from tcip_mcp.pipelines.resolution import (
+        DEFAULT_CONF, DEFAULT_MAX_DETS, DEFAULT_NMS_IOU, applied_operating_point,
+    )
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
     params = inspect.signature(run_full_frame_evaluation).parameters
-    assert params["global_nms_iou"].default == DEFAULT_NMS_IOU
-    assert params["max_dets"].default == DEFAULT_MAX_DETS
+    assert params["global_nms_iou"].default is None
+    assert params["max_dets"].default is None
+    assert applied_operating_point(None, None, None) == (DEFAULT_CONF, DEFAULT_NMS_IOU, DEFAULT_MAX_DETS)
