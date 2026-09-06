@@ -416,6 +416,10 @@ def stage_prediction_shapes(
     and the web route's own launch, the three publishers that opt into that guard, never call
     this function.
 
+    A bucket this door writes carries no stamp of its own: it is reviewed through the accept path
+    and is never promoted to a validation reference, which refuses a bucket with no stamp a
+    producer wrote.
+
     Returns the bucket actually written and the path.
     """
     from tcip_annotation import json_io

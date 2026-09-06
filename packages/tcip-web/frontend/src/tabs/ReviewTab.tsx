@@ -1293,7 +1293,7 @@ export function ReviewTab() {
             disabled={validating || !!edit || !trait || !canReview}
             title={
               traitError ??
-              "Check whether this review confirms the model's counts well enough to trust them for results. Runs the platform's own validation check; it will tell you if it isn't enough yet."
+              "Check whether this review confirms the model's counts well enough to trust them for results. Runs the platform's own validation check; it will tell you if it isn't enough yet. A staged bucket is reviewed through the accept path and is never promoted to a validation reference."
             }
           >
             {validating ? "Checking…" : "Use review as validation reference"}
