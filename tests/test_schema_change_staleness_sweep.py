@@ -325,10 +325,12 @@ def test_predating_vocabulary_counts_a_complete_confirmation_too_not_only_negati
     assert response["schema_change_sweep"]["predating_vocabulary"] == {"bud": 1}
 
 
-def test_the_save_route_marks_an_unstamped_complete_as_predating_the_schema_change_too(
+def test_newly_stamped_counts_an_unstamped_complete_confirmation(
     client: TestClient, dataset: Path
 ) -> None:
-    """newly_stamped follows the same finished-status scope as predating_vocabulary: an unstamped
+    """Coverage: newly_stamped follows the same finished-status scope as predating_vocabulary,
+    proven for predating_vocabulary by
+    test_predating_vocabulary_counts_a_complete_confirmation_too_not_only_negatives. An unstamped
     complete confirmation is stamped, and counted, exactly like an unstamped negative."""
     _save_via_route(client, dataset, BUD_TWO_STATES)
     record_image_statuses(dataset, status_bucket("bud", None), {"img_alpha.jpg": "complete"},
