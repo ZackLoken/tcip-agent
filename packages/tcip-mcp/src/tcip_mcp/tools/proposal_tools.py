@@ -730,7 +730,9 @@ def _stage_explicit_regime(image_path: str, img: Path, address: StagingAddress,
     bucket = staged["bucket"]
 
     note = ("staged to predictions/ for canvas review, not committed as ground truth; the human "
-            "accepts on the Review tab before it becomes GT (focus_human_attention tab='review' to send them)")
+            "accepts on the Review tab before it becomes GT (focus_human_attention tab='review' to "
+            "send them). It is reviewed through the accept path and is never promoted to a "
+            "validation reference.")
     if staged["redirected"]:
         note = (f"bucket {model_name!r} has {staged['verdict_count']} review verdict(s), staged to a "
                 f"fresh bucket {bucket!r} instead so the reviewed predictions stay intact; " + note)
