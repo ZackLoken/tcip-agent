@@ -4,11 +4,11 @@ An agentic ML/CV system for automated phenotyping in tree crop breeding programs
 
 Who it's for: plant breeders, not CV engineers. They know their crops and traits; they don't write PyTorch or make CV decisions. The objective is to replace the CV scientist in the loop: an agent that guides a breeder end to end, from imagery plus a trait to a validated per-plant phenotype, maintaining scientific rigor on the breeder's behalf. There are two distinct users and two UX surfaces: the agent's UX is the tools/skills/code/docs/MCP API surface it reasons through (see `CLAUDE.md`), and the breeder's UX is the browser GUI, the only surface they experience the platform through (label a few examples, confirm/correct the model, receive the result).
 
-Current scope: 2D imagery (RGB + N-channel) from any capture modality, object detection first. Two genuinely different capture shapes are both supported, not just "any modality" as a vague umbrella: an ordinary per-plant image (one photo of one or a few plants, from a phone, DSLR, GoPro, or ground rig) and a single large georeferenced orthomosaic covering many plants in one file (a drone survey mosaic, potentially tens of gigabytes, read via windowed/tiled access rather than loaded whole, with each detection resolved to a real-world coordinate and matched to the plant it belongs to). The data layer reads RGB and multi-band rasters (GeoTIFF / NPZ / grayscale) for both shapes; 3D point-cloud (LiDAR / SfM) support is not built yet (see [Roadmap](#roadmap)).
+Current scope: 2D imagery (RGB + N-channel) from any capture modality, object detection first. Two different capture shapes are supported: an ordinary per-plant image (one photo of one or a few plants, from a phone, DSLR, GoPro, or ground rig) and a single large georeferenced orthomosaic covering many plants in one file (a drone survey mosaic, potentially tens of gigabytes, read via windowed/tiled access rather than loaded whole, with each detection resolved to a real-world coordinate and matched to the plant it belongs to). The data layer reads RGB and multi-band rasters (GeoTIFF / NPZ / grayscale) for both shapes; 3D point-cloud (LiDAR / SfM) support is not built yet (see [Roadmap](#roadmap)).
 
 Six crops in scope: hazelnut, chestnut, currant, elderberry, persimmon, black locust. Phase 1 target is hazelnut catkin phenology.
 
-Status: the browser GUI is built out across all tabs (Annotate / Review / Training / Tuning / Inference / Results / Meta), the MCP tool surface is in place (run `python scripts/list_tools.py` for the current count), and every delivered phenotype (a count, a dimensional measurement, a phenology milestone) is gated on validated measurement inputs end to end: an uncalibrated confidence threshold, an unproven physical scale, or a fabricated tile geometry refuses delivery rather than shipping a confident, unvalidated number. Phase 1 focus remains hazelnut catkin phenology; the orthomosaic capability described above is built and verified against a real 90+ GB drone survey file, not yet exercised end to end against a first live delivery.
+Status: the browser GUI is built out across all tabs (Annotate / Review / Training / Tuning / Inference / Results / Meta), the MCP tool surface is in place (run `python scripts/list_tools.py` for the current count), and every delivered phenotype (a count, a dimensional measurement, a phenology milestone) is gated on validated measurement inputs end to end: an uncalibrated confidence threshold, an unproven physical scale, or a fabricated tile geometry refuses delivery. Phase 1 focus remains hazelnut catkin phenology; the orthomosaic capability described above is built, not yet exercised end to end against a first live delivery.
 
 ## Architecture
 
@@ -35,7 +35,7 @@ All three processes share `.tcip/` on disk (experiment state, model registry, au
 
 Supporting libraries: `packages/tcip-annotation` (headless annotation engine: label I/O, IoU matching, SAM wrapper) and `packages/tcip-store` (the storage seam: one locked, atomic interface for the platform's records, append-only logs and blobs). `tcip-store` is the bottom of the stack, depending on nothing else here; `tcip-annotation` depends on it and on neither of the other two.
 
-Records and append-only logs go into one SQLite database per root, `<root>/.tcip/store.db`; blob bytes stay files under every backend, so imagery, labels and predictions travel with the dataset as they always did. Set `TCIP_STORE_BACKEND=file` to bind the file backend instead, which reads and writes the same records as loose files. A root whose records are still loose files is refused rather than read as empty: `python scripts/adopt_store.py <root>` moves them into a database, and `python scripts/export_store.py <root>` writes them back out.
+Records and append-only logs go into one SQLite database per root, `<root>/.tcip/store.db`; blob bytes stay files under every backend, so imagery, labels and predictions travel with the dataset. Set `TCIP_STORE_BACKEND=file` to bind the file backend instead, which reads and writes the same records as loose files. A root whose records are still loose files is refused rather than read as empty: `python scripts/adopt_store.py <root>` moves them into a database, and `python scripts/export_store.py <root>` writes them back out.
 
 ## Repository layout
 
@@ -65,10 +65,8 @@ data/                          # sample hazelnut dataset (gitignored)
 ## Setup
 
 ```bash
-# Python: creates the env and installs the four packages (editable). Run from
-# the repo root. Installs the CUDA (cu126) torch wheel by default (environment.yml's
-# --extra-index-url); it runs fine without a GPU too, since device placement branches on
-# torch.cuda.is_available().
+# Python: creates the env and installs the four packages (editable). Run from the repo root.
+# Installs the CUDA (cu126) torch wheel by default (environment.yml's --extra-index-url); runs fine without a GPU too.
 conda env create -f environment.yml
 conda activate tcip-agent
 
@@ -118,12 +116,12 @@ The MCP server starts automatically when an MCP client connects (see `.mcp.json`
 ## From images to a first delivered number
 
 The sample hazelnut dataset under `data/` is gitignored and not shipped with the repository; a
-stranger starts from their own imagery. What follows is the real path an agent walks with the
-platform's own tools, in the order a first run actually needs them.
+stranger starts from their own imagery. What follows is the path an agent walks with the
+platform's own tools, in the order a first run needs them.
 
 | Tool | Purpose |
 |------|---------|
-| `initialize_project(project_path, site)` | Scaffolds `.tcip/` under the project directory and records the breeder-stated `site` (the orchard or station the plants stand in, asked of the breeder, never guessed from a path). `site` is a required argument; there is no default. |
+| `initialize_project(project_path, site)` | Scaffolds `.tcip/` under the project directory and records the breeder-stated `site` (the orchard or station the plants stand in, asked of the breeder). `site` is a required argument; there is no default. |
 | `ingest_images(source, name, site)` | Copies a raw folder of photos into the canonical `images/<YYYY-MM-DD>/` layout under a workspace project. |
 | `register_dataset(dataset_root, crop)` | Records the dataset's identity (crop, id, content fingerprint) so a later delivered number can be traced back to the exact data behind it. |
 | `write_class_map(dataset_root, subjects)` | Authors the dataset's class registry: the subjects (object classes to isolate) and their attributes, the expert's own vocabulary, never inferred from labels. |
@@ -148,7 +146,7 @@ later run to a partition an earlier run already drew, not for drawing the first 
 | `evaluate_model(run_id_or_ckpt, images_dir)` | Evaluates a trained checkpoint on a held-out dataset and writes `test_results.json`. |
 
 Before any number can ship, its confidence operating point needs validating against held-out
-ground truth, never left at a frozen default: `scripts/calibrate_operating_point.py` runs one
+ground truth: `scripts/calibrate_operating_point.py` runs one
 model pass over a disjoint calibration/holdout split, derives a count-unbiased detection
 operating point, and checks its held-out count bias (a trait whose delivery reads a classified
 positive state, such as a phenology milestone, instead calibrates through the
@@ -170,66 +168,65 @@ only a Results tab delivering route can, through the breeder's own acknowledged 
 
 - Annotations: per-image COCO-shaped JSON (with `created_by`/`accepted_by` provenance), plus the dataset-level COCO assembled from it for training.
 - Experiments: one record per run holding config, metrics, artifacts and lineage, with the run's own files (weights, TensorBoard events, the source snapshot) under `.tcip/experiments/<id>/` beside it.
-- Audit log: all MCP tool calls logged via the `@audited` decorator, into the append-only log under the root each call's scope names, and written out at `.tcip/audit.jsonl` by the file backend and by `export_store.py`. An entry the decorator cannot append raises, since the append runs after the tool body.
-- Lazy imports: within the MCP server's import closure, heavy deps (torch, torchvision) are imported inside function bodies for fast startup; other modules under `packages/*/src` (the training and inference pipelines, model components) import them at module level, since they load only once training or inference actually runs.
+- Audit log: all MCP tool calls logged via the `@audited` decorator, into the append-only log under the root each call's scope names, and written out at `.tcip/audit.jsonl` by the file backend and by `export_store.py`. The append runs after the tool body; an entry the decorator cannot append raises.
+- Lazy imports: within the MCP server's import closure, heavy deps (torch, torchvision) are imported inside function bodies; other modules under `packages/*/src` (the training and inference pipelines, model components) import them at module level.
 - Crop traits: controlled vocabulary defined in `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`.
 - Measurement-integrity gates: every parameter a delivered phenotype depends on (confidence
   threshold, tile geometry, mask-binarize threshold, physical pixel-to-real-world scale) carries
-  its own validation state and a record of what actually cleared it, never a bare number. A
+  its own validation state and a record of what cleared it, never a bare number. A
   delivery door refuses to write a bare unvalidated result; only that result's own delivering
   route in the Results tab can ship a flagged unvalidated one, through the breeder's own
-  acknowledged act, never a caller of any door in general. The same shared gate (`check_delivery_gate` in
-  `pipelines/resolution.py`) backs every delivery path so none of them can drift into disagreeing
-  about when a number is trustworthy.
+  acknowledged act, never a caller of any door in general. The same shared gate
+  (`check_delivery_gate` in `pipelines/resolution.py`) backs every delivery path.
 
 ## Roadmap
 
-The pitch above describes the long-term target. What's actually built today is a
-narrower slice; this section keeps the two honest.
+The pitch above describes the long-term target; what's built today is a narrower slice.
 
-Working now: 2D-image detection, instance/semantic segmentation, and classification, end
-to end, via an agent-written `nn.Module` that imports the plain building blocks (necks, heads,
-losses, backbone wrappers, and `build_detector`, one of whose four builders is mask-capable for
-`instance_seg`), on RGB and
-N-channel imagery (multi-band GeoTIFF/NPZ/grayscale; `num_channels` threads to the backbone's
-`in_chans`, and an `in_chans != 3` detector takes per-band `image_mean`/`image_std` from
-`derivations.band_normalization_stats`), with training that loads the native per-image JSON
-labels directly, experiment tracking, annotation/review, SAM-assisted labeling, calibration of
-a trait's positive-class operating point (`calibrate_classifier_operating_point`), and per-plant
-CSV export, including a percentile-crossing phenology-milestone deliverable (per-plant
-`<trait>_05/50/95per_date` = the dates a plant's classified positive-state fraction of detected
-objects crosses 5/50/95%; the positive state is a validated per-object classifier call, never a
-geometric proxy). Ordinal and regression are also trainable and evaluable, through the same
-model/training machinery and their own heads, losses, and metrics, and calibrate through their
-own door (`calibrate_scalar_operating_point`), but neither has an annotation/review
-surface built for it: both read labels from a hand-authored external CSV of image stem plus rank
-or value rather than the platform's own annotation/review UI, and both are excluded from the
-platform's automatic train/val split. The agent composes the
-working slice end to end via `build_plant_mapping` → tiled inference → `deliver_phenology_milestones`, and
-the same milestone code backs the Results tab, so a milestone date means one thing on both
-surfaces. Phase 1's own shipped example is hazelnut catkin bloom phenology
-(`catkin_05/50/95per_date`, elongation as the positive state).
+Working now:
 
-Also working now: tiled detection/instance_seg inference over a single georeferenced orthomosaic
-too large to load into memory (confirmed against a real 90.7 GB, 141130x239921px, 4-band drone
-survey file), instead of the one-photo-per-plant path above. `OrthomosaicGeoreference` reads a
-GeoTIFF's own tags to turn a pixel into a real-world coordinate (refusing cleanly, never guessing,
-on a rotated raster or one whose CRS it can't determine), and `raster_source.GdalSource` serves
-windowed reads through GDAL's budgeted block cache (overview-aware when the raster carries an
-`.ovr` pyramid) so the raster is never decoded whole. `GenericPredictor.predict_tiled`'s windowed-
-reader source kind runs the same tiled-inference core the per-photo path uses, including
-`instance_seg` masks (kept as small tile-local patches with a full-raster offset, not one
-full-raster-sized array per detection). Each detection resolves to a real-world coordinate and is
-matched to the nearest plant in a plant-locations CSV (`assign_detections_to_plants`, honest
-`source`/`distance_m`, no fabricated confidence, an unmatched detection stays unmatched rather than
-being forced onto the nearest plant regardless of distance). Two MCP tools compose the whole path
-end to end the same way `build_plant_mapping` → `deliver_phenology_milestones` do for the per-photo case:
-`run_inference`'s `raster_path` regime (tile, persist a prediction bucket) and
-`deliver_orthomosaic_plant_counts` (map detections to plants, aggregate, deliver through the same
-measurement-integrity gate every other per-plant CSV goes through). Not yet built: a composed
-pipeline for a dimensional (not count) trait measured this way, and an automated smoke test against
-a real multi-gigabyte file (verified manually against the file above; the automated suite uses a
-synthetic fixture, since a real 90+ GB file can't live in CI).
+- 2D-image detection, instance/semantic segmentation, and classification, end to end, via an
+  agent-written `nn.Module` that imports the plain building blocks (necks, heads, losses,
+  backbone wrappers, and `build_detector`, one of whose four builders is mask-capable for
+  `instance_seg`), on RGB and N-channel imagery (multi-band GeoTIFF/NPZ/grayscale; `num_channels`
+  threads to the backbone's `in_chans`, and an `in_chans != 3` detector takes per-band
+  `image_mean`/`image_std` from `derivations.band_normalization_stats`).
+- Training that loads the native per-image JSON labels directly, experiment tracking,
+  annotation/review, SAM-assisted labeling, calibration of a trait's positive-class operating
+  point (`calibrate_classifier_operating_point`), and per-plant CSV export, including a
+  percentile-crossing phenology-milestone deliverable (per-plant `<trait>_05/50/95per_date` = the
+  dates a plant's classified positive-state fraction of detected objects crosses 5/50/95%; the
+  positive state is a validated per-object classifier call, never a geometric proxy). Phase 1's
+  own shipped example is hazelnut catkin bloom phenology (`catkin_05/50/95per_date`, elongation
+  as the positive state).
+- Ordinal and regression, trainable and evaluable through the same model/training machinery and
+  their own heads, losses, and metrics, calibrating through their own door
+  (`calibrate_scalar_operating_point`). Neither has an annotation/review surface built for it:
+  both read labels from a hand-authored external CSV of image stem plus rank or value, and both
+  are excluded from the platform's automatic train/val split.
+- The agent composes the working slice end to end via `build_plant_mapping` → tiled inference →
+  `deliver_phenology_milestones`, and the same milestone code backs the Results tab.
+- Tiled detection/instance_seg inference over a single georeferenced orthomosaic too large to
+  load into memory, instead of the one-photo-per-plant path above. `OrthomosaicGeoreference`
+  reads a GeoTIFF's own tags to turn a pixel into a real-world coordinate, refusing on a rotated
+  raster or one whose CRS it can't determine. `raster_source.GdalSource` serves windowed reads
+  through GDAL's budgeted block cache (overview-aware when the raster carries an `.ovr` pyramid)
+  so the raster is never decoded whole. `GenericPredictor.predict_tiled`'s windowed-reader source
+  kind runs the same tiled-inference core the per-photo path uses, including `instance_seg` masks
+  kept as small tile-local patches with a full-raster offset rather than one full-raster-sized
+  array per detection.
+- Each detection resolves to a real-world coordinate and is matched to the nearest plant in a
+  plant-locations CSV (`assign_detections_to_plants`, which records the match source and
+  distance for each detection); an unmatched detection stays unmatched. Two MCP tools compose
+  the whole path end to end
+  the same way `build_plant_mapping` → `deliver_phenology_milestones` do for the per-photo case:
+  `run_inference`'s `raster_path` regime (tile, persist a prediction bucket) and
+  `deliver_orthomosaic_plant_counts` (map detections to plants, aggregate, deliver through the
+  same measurement-integrity gate every other per-plant CSV goes through).
+
+Not yet built for the orthomosaic path: a composed pipeline for a dimensional (not count) trait
+measured this way, and an automated smoke test against a real multi-gigabyte file; the automated
+suite uses a synthetic fixture.
 
 Trained ML models are the deliverable; classical image analysis (OpenCV, scikit-image) is
 available for the agent to compose as a situational bootstrapping assist, cheaply producing soft
@@ -245,11 +242,11 @@ The detection training pipeline mirrors a production drone-phenotyping workflow:
 - Small objects: opt-in SAHI-style sliding-window tiling at train and inference
   time (core-region reconstruction + global NMS), plus an FCOS/RetinaNet anchor-free
   detector option and an extra high-resolution (P2) pyramid level.
-- Honest splits: group-aware, annotation-stratified train/val/calibration splitting
+- Splits: group-aware, annotation-stratified train/val/calibration splitting
   (no source-image leakage) with automatic validation loaders; the calibration side is
   held out from both training and checkpoint selection.
 - Imbalance & augmentation: class-weighted / focal losses and a nadir-imagery
-  augmentation preset (free rotation + flips; mosaic/copy-paste intentionally off).
+  augmentation preset (free rotation + flips; mosaic/copy-paste off).
 - HPO: Ray Tune search over the composite, with a pluggable searcher/scheduler
   (ASHA-style pruning and known-good warm start available, not mandatory).
 - Reproducibility: global seeding, checkpoint resume (model + optimizer +
