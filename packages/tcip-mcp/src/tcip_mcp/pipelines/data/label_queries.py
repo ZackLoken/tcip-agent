@@ -250,7 +250,7 @@ def trainable_stems(
     since changed and the confirmation can no longer be trusted as-is, a different situation from
     nobody ever having looked, and one a reproduce-a-number chain must be able to tell apart (see
     :func:`confirmed_negative_records`'s and :func:`stale_finished_names`'s shared quarantine
-    logic, :func:`_stale_finished`). A recorded count from before this widening counted negatives
+    logic, :func:`_stale_finished`). A count recorded under the narrower rule counted negatives
     alone, so counts across that boundary are not comparable.
 
     ``date`` states which capture date's confirmations this partition may admit, ``None`` for a
@@ -276,8 +276,7 @@ def trainable_stems(
     to carry boxes. Three asymmetries follow from this and stay unresolved by design: a stale
     finished status with no label file at all counts the quarantine first on the COCO path but
     ``skipped_unannotated`` first on the direct-JSON path (see the branches below); a materialized
-    split tree carries a negative's stamp and no ``complete``, so it can still train a stale
-    ``complete`` its source dataset would refuse (a residual of this family, not closed here); and
+    split tree carries no ``complete`` status, so it trains one its source dataset refuses; and
     a run bound to a split manifest refuses only through its ``train``/``val`` members
     (:func:`~tcip_mcp.pipelines.data.splits.bind_manifest_stems`), never through a ``calibration``
     member, which still calibrates on a stale finished image as it always has.
@@ -542,7 +541,7 @@ def stale_finished_names(
 ) -> set[str]:
     """Names in ``status_bucket(subject, date)`` whose stored status is finished and whose
     stamped digest positively disagrees with ``subject``'s current attribute-schema digest: the
-    public D1 reader over a resolved dataset root, for a caller that has one directly rather than
+    public reader over a resolved dataset root, for a caller that has one directly rather than
     a labels directory to derive it from (the status route holds ``root``;
     :func:`confirmed_negative_records` already resolves its own and calls :func:`_stale_finished`
     without going through this wrapper, so the partition it feeds
