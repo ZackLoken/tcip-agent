@@ -1351,7 +1351,7 @@ subject whose attribute schema is about to change so the confirmations under it 
 before the outgoing digest is gone; `routes.classes.get_image_status`,
 `packages/tcip-web/src/tcip_web/routes/classes.py:308`, through
 `tcip_mcp.pipelines.data.label_queries.stale_finished_names`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:539`, the public D1 reader over a
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:539`, the public reader over a
 resolved dataset root.
 
 `IMAGE_STATUSES = ("complete", "partial", CONFIRMED_NEGATIVE, "unannotated")`,

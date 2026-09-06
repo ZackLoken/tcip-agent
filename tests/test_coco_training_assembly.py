@@ -822,10 +822,10 @@ def test_quarantined_negative_reads_the_same_reason_on_both_label_paths(tmp_path
 
 
 def test_a_stale_complete_confirmation_is_quarantined_on_both_label_paths(tmp_path):
-    """A complete confirmation, unlike a negative, trained by its label file's real content alone
-    before this quarantine: a bud image finished under a two-value attribute vocabulary that grew
-    to three must be held out exactly as a stale negative already is, on both label paths, never
-    admitted as ``annotated`` by the boxes it happens to carry."""
+    """A complete confirmation, unlike a negative, is an image trained by its label file's content
+    alone: a bud image finished under a two-value attribute vocabulary that grew to three must be
+    held out exactly as a stale negative already is, on both label paths, never admitted as
+    ``annotated`` by the boxes it happens to carry."""
     from tcip_mcp import class_registry
     from tcip_mcp.class_registry import write_registry
     from tcip_mcp.pipelines.data.label_queries import (
