@@ -399,8 +399,9 @@ def test_golden_consolidated_operating_point_defaults():
     ev_sig = inspect.signature(TT.evaluate_model)
     assert ev_sig.parameters["max_dets"].default is None
     assert ev_sig.parameters["iou_threshold"].default == 0.5
-    assert ev_sig.parameters["global_nms_iou"].default == 0.3
-    assert ev_sig.parameters["conf_threshold"].default == 0.5
+    # Honest None sentinels, resolved once through applied_operating_point ahead of the split.
+    assert ev_sig.parameters["global_nms_iou"].default is None
+    assert ev_sig.parameters["conf_threshold"].default is None
 
     # evaluation.py surfaces: pinned so a metrics-default change is visible too.
     coco_sig = inspect.signature(EV.coco_detection_metrics)
@@ -408,41 +409,36 @@ def test_golden_consolidated_operating_point_defaults():
     assert coco_sig.parameters["iou_threshold"].default == 0.5
     assert coco_sig.parameters["max_dets"].default == 100
     ff_sig = inspect.signature(runners.run_full_frame_evaluation)
-    assert ff_sig.parameters["global_nms_iou"].default == 0.3
+    # Also None sentinels, resolved inside the runner itself through applied_operating_point.
+    assert ff_sig.parameters["conf_threshold"].default is None
+    assert ff_sig.parameters["global_nms_iou"].default is None
+    assert ff_sig.parameters["max_dets"].default is None
     # tile_size/overlap are no longer pinned constants (640/0.2): an honest None
     # sentinel resolved from the checkpoint's persisted geometry (or refused) by resolve_tile_geometry.
     assert ff_sig.parameters["tile_size"].default is None
     assert ff_sig.parameters["overlap"].default is None
-    # max_dets itself keeps its own 1000 default at this layer (the delivery-grade default,
-    # distinct from evaluate_model's None sentinel one layer up).
-    assert ff_sig.parameters["max_dets"].default == 1000
     assert EV.DEFAULT_SCORE_WEIGHTS == {"loss": 0.45, "f1": 0.35, "map50": 0.2}
 
 
-def test_golden_evaluate_model_resolves_max_dets_per_regime_when_unset(tmp_path, monkeypatch):
-    """A signature-shape golden alone cannot see
-    what a no-arg caller's max_dets actually resolves to per regime; without this, the golden set
-    would ratify "the default is unspecified" rather than pin the two real behaviors (1000 on the
-    delivery-gating regime, 100 on the tile-level/diagnostic regime)."""
-    from tcip_mcp.pipelines import resolution as R
+def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path, monkeypatch):
+    """A signature-shape golden alone cannot see what a no-arg caller's max_dets actually resolves
+    to on the tile-level/diagnostic regime (100, the COCOeval maxDets convention): evaluate_model
+    still resolves this one itself, ahead of calling run_test_evaluation. The delivery-gating
+    regime's own resolution (1000) now happens inside run_full_frame_evaluation itself, pinned on
+    the runner's own record by test_gating_path_defaults_max_dets_to_1000_when_unset
+    (test_delivery_grade_eval_regime.py)."""
     from tcip_mcp.pipelines.training import eval_runners as runners
     from tcip_mcp.tools import training_tools as TT
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     captured: dict = {}
 
-    def _fake_gate(ckpt, images_dir, labels_dir, output_dir, **kw):
-        captured["gate_max_dets"] = kw.get("max_dets")
-        return {"eval_regime": "full-frame-tiled-inference"}
-
     def _fake_diagnostic(ckpt, loader, device, task, output_dir, **kw):
         captured["diagnostic_max_dets"] = kw.get("max_dets")
         return {"tiled": False, "eval_regime": "tile-level"}
 
-    orig_gate = runners.run_full_frame_evaluation
     orig_diag = runners.run_test_evaluation
     try:
-        runners.run_full_frame_evaluation = _fake_gate
         runners.run_test_evaluation = _fake_diagnostic
 
         from PIL import Image
@@ -461,15 +457,92 @@ def test_golden_evaluate_model_resolves_max_dets_per_regime_when_unset(tmp_path,
         ckpt = registered_checkpoint(tmp, project_root=tmp)
 
         TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
-                          subject="bud", use_tiled_inference=True)
-        TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
                           subject="bud")
     finally:
-        runners.run_full_frame_evaluation = orig_gate
         runners.run_test_evaluation = orig_diag
 
-    assert captured["gate_max_dets"] == R.DEFAULT_MAX_DETS == 1000
     assert captured["diagnostic_max_dets"] == 100
+
+
+def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp_path, monkeypatch):
+    """A no-arg caller's conf_threshold resolves to the platform default on all three regimes,
+    each constructed genuinely (a tiling dict for the tile-level run, nothing for the single
+    pass, use_tiled_inference=True for the full frame), and the discriminating case: a caller
+    stating the default value explicitly (0.5) still reaches the full-frame runner's record as an
+    explicit stated value, never read back as an untouched default at the same number."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    import tcip_mcp.pipelines.model_build as model_build
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.pipelines import resolution as R
+    from tcip_mcp.pipelines.training.eval_runners import evaluation_results_key
+    from tcip_mcp.tools import training_tools as TT
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    def _dataset(root):
+        images_dir, labels_dir = root / "images", root / "labels"
+        images_dir.mkdir(parents=True)
+        labels_dir.mkdir(parents=True)
+        Image.new("RGB", (64, 64), color=(120, 120, 120)).save(images_dir / "a.png")
+        json_io.write_annotations(str(labels_dir / "a.json"),
+                                  [Annotation(subject="bud", geometry=BBox(5, 5, 20, 20))], 64, 64)
+        return images_dir, labels_dir
+
+    from PIL import Image
+
+    class _DummyModel:
+        def load_state_dict(self, state_dict):
+            pass
+
+        def to(self, device):
+            pass
+
+    class _StubPredictor:
+        train_tile_size = 64
+        train_overlap = 0.0
+
+        def predict_tiled(self, path, **kw):
+            return {"width": 64, "height": 64, "boxes": [], "scores": [], "labels": []}
+
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+
+    # Checkpoints are built (a real bespoke model, through the unpatched build_model) before the
+    # model/predictor stubs below go in, so the fixture's own checkpoint save is never stubbed.
+    def _prepare(root_name, name):
+        root = tmp_path / root_name
+        images_dir, labels_dir = _dataset(root)
+        return images_dir, labels_dir, registered_checkpoint(
+            root, project_root=tmp_path, name=name)
+
+    tile_ds = _prepare("tile", "conf-tile-level")
+    single_ds = _prepare("single", "conf-single-pass")
+    ff_default_ds = _prepare("ff-default", "conf-full-frame-default")
+    ff_stated_ds = _prepare("ff-stated", "conf-full-frame-stated")
+
+    monkeypatch.setattr(model_build, "build_model", lambda ckpt: _DummyModel())
+    monkeypatch.setattr(evaluation, "evaluate",
+                        lambda *a, **k: {"loss": 0.1, "precision": 0.4, "recall": 0.5, "f1": 0.44})
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _StubPredictor())
+
+    def _run(dataset, **kw):
+        images_dir, labels_dir, ckpt = dataset
+        r = TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
+                              subject="bud", **kw)
+        assert "error" not in r, r
+        return ts.read(evaluation_results_key(Path(ckpt).parent))
+
+    tile_level = _run(tile_ds, tiling={"tile_size": 64, "overlap": 0.0})
+    assert tile_level["conf_threshold"] == R.DEFAULT_CONF == 0.5
+
+    single_pass = _run(single_ds)
+    assert single_pass["conf_threshold"] == R.DEFAULT_CONF == 0.5
+
+    full_frame_default = _run(ff_default_ds, use_tiled_inference=True)
+    assert full_frame_default["conf_threshold"] == R.DEFAULT_CONF == 0.5
+    assert full_frame_default["operating_point"]["conf"]["source"] == "default"
+
+    full_frame_stated = _run(ff_stated_ds, use_tiled_inference=True, conf_threshold=0.5)
+    assert full_frame_stated["conf_threshold"] == 0.5
+    assert full_frame_stated["operating_point"]["conf"]["source"] == "explicit"
 
 
 # ══════════════════════════════════════════════════════════════════════════
