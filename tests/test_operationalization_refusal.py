@@ -667,8 +667,8 @@ def test_write_phenology_csv_refuses_without_a_basis(tmp_path: Path):
     with pytest.raises(ValueError) as excinfo:
         phenology.write_phenology_csv(
             "test", [], tmp_path / "out.csv", BUD_OPENING, flags={}, acknowledgement=None,
-            basis=None, operating_point_confs={}, producer={}, bindings={}, pred_dirs=[],
-            project_root=tmp_path, plant_mapping=_NO_MAPPING)
+            basis=None, operating_point_confs={}, producer={}, bindings={},
+            predictions_by_date={}, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
     assert "deliver_phenology_milestones and export_csv produce one" in str(excinfo.value)
     assert not (tmp_path / "out.csv").exists()
@@ -731,7 +731,8 @@ def test_write_phenology_csv_with_a_basis_writes_the_delivered_schema(tmp_path: 
     phenology.write_phenology_csv(
         "test", [row], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgement=None,
         basis=check.basis, operating_point_confs=recon["confs"], producer={}, bindings=recon["bindings"],
-        pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
+        predictions_by_date=body["predictions_by_date"], project_root=tmp_path,
+        plant_mapping=_NO_MAPPING)
 
     header = (tmp_path / "out.csv").read_text(encoding="utf-8").splitlines()[0].split(",")
     assert header == phenology.phenology_csv_columns(BUD_OPENING)

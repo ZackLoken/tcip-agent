@@ -935,7 +935,7 @@ def deliver_phenology_milestones(
         "deliver_phenology_milestones", rows, Path(output_csv_path), spec,
         flags=flags, acknowledgement=None, basis=still_stated.basis,
         operating_point_confs=recon["confs"], producer=producer, bindings=recon["bindings"],
-        pred_dirs=list(predictions_by_date.values()), project_root=platform_state_root(),
+        predictions_by_date=predictions_by_date, project_root=platform_state_root(),
         plant_mapping=disclosure)
     # Per-milestone summary: report reached-counts for each milestone the spec actually declares.
     n_reached: dict[str, int] = {}
