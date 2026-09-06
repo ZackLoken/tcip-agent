@@ -23,6 +23,7 @@ from tcip_mcp.experiments import config_key
 from tcip_mcp.pipelines.resolution import bucket_scope, sidecar_key
 from tcip_mcp.prediction_buckets import review_state_dir_of
 from tcip_mcp.tools.project_tools import upsert_dataset
+from tests._store_damage import damage_record
 
 SUBJECT = "leaf"
 ATTRIBUTE = "condition"
@@ -54,37 +55,11 @@ def _write_stamp(bucket: Path, stamp: dict) -> None:
     ts.replace(sidecar_key(bucket, "operating_point"), stamp, expect=ts.Version.ABSENT)
 
 
-def _damage_record(key: ts.Key, data: bytes) -> None:
-    """Put ``data`` behind a record, wherever the bound backend keeps it (mirrors
-    test_project_tools.py's own helper: the record must already exist at the key)."""
-    import os
-
-    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
-    from tcip_store.store import _backend
-
-    name = os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND
-    if name == FILE_BACKEND:
-        _backend().path_for(key).write_bytes(data)
-        return
-    import sqlite3
-
-    from tcip_store.sqlite_backend import database_path, encode_parts
-
-    conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
-    try:
-        conn.execute(
-            "update records set value = ? where store = ? and parts = ?",
-            (data, key.store, encode_parts(key.parts)),
-        )
-    finally:
-        conn.close()
-
-
 def _write_undecodable_stamp(bucket: Path) -> None:
     bucket.mkdir(parents=True, exist_ok=True)
     key = sidecar_key(bucket, "operating_point")
     ts.replace(key, _base_stamp(id_map=VALUE_ID_MAP), expect=ts.Version.ABSENT)
-    _damage_record(key, b"{not json")
+    damage_record(key, b"{not json")
 
 
 def _write_doc(bucket: Path, stem: str, annotations: list[Annotation], w=100, h=80) -> Path:
@@ -198,7 +173,10 @@ def test_a_sourced_attribute_with_no_subject_refuses_before_any_write(tmp_path):
     config verbatim, with no validation of its own, and a hand-corrupted record naming an
     attribute under no subject refuses before any write through the same subject-is-None gate the
     (None, None) case below guards; removing only this shape's own attribute-naming branch still
-    refuses through that gate's shared fallback message."""
+    refuses through that gate's shared fallback message. The match string names the
+    attribute-specific wording (``names attribute ... with no subject``), not the bare "no
+    subject" fragment the fallback message also carries, so this test actually exercises the
+    branch it names rather than passing on either one."""
     bind_default()
     module = _load_script()
     project = tmp_path / "project"
@@ -215,7 +193,7 @@ def test_a_sourced_attribute_with_no_subject_refuses_before_any_write(tmp_path):
         project, plan=False, operator_subject=None, operator_attribute=None)
 
     assert refused is True
-    assert any("no subject" in o for o in outcomes), outcomes
+    assert any(f"names attribute {ATTRIBUTE!r} with no subject" in o for o in outcomes), outcomes
     assert bucket_content_digest(bucket) == before
     assert module.read_stamp_state(bucket).kind == "unstated"
 
