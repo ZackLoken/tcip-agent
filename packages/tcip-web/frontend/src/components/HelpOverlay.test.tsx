@@ -53,8 +53,27 @@ describe("HelpOverlay", () => {
     render(<HelpOverlay activeTab="annotate" />);
     fireEvent.keyDown(document.body, { key: "?" });
 
-    for (const key of ["Ctrl+Y", "v", "s", "x", "0–9", "Double-click", "Right-click"]) {
+    for (const key of [
+      "Ctrl+Y",
+      "v",
+      "s",
+      "x",
+      "Shift+H",
+      "Shift+V",
+      "0–9",
+      "Double-click",
+      "Right-click",
+    ]) {
       expect(screen.getByText(key)).toBeInTheDocument();
     }
+  });
+
+  it("names the cut tool's disarm and re-arm in the Annotate section's own Esc row", () => {
+    render(<HelpOverlay activeTab="annotate" />);
+    fireEvent.keyDown(document.body, { key: "?" });
+
+    expect(
+      screen.getByText(/Clear a pending cut click and disarm the cut tool/),
+    ).toBeInTheDocument();
   });
 });

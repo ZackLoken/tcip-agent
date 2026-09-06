@@ -186,6 +186,33 @@ export const CUT_PIECE_TOO_SMALL_REFUSAL =
   `A piece of the cut would be smaller than ${MIN_BOX_SIDE} pixels on a side. Move the cut ` +
   "farther from the outline's edge so both pieces stay a usable size.";
 
+/** The keyboard cut path's own sentence for every `cutRing` reason a centred axis cut can
+ *  reach except the piece floor and zero extent below: the mouse's wording ("move the cut",
+ *  "with two clicks") instructs a gesture the keyboard cannot make. */
+export const CUT_KEYBOARD_UNDIVIDED_REFUSAL =
+  "A centred straight cut does not divide this shape into two pieces; cut it through one part " +
+  "with the pointer, or redraw it as two shapes.";
+
+/** The keyboard path's own sentence for `CUT_PIECE_TOO_SMALL_REFUSAL`. */
+export const CUT_KEYBOARD_TOO_SMALL_REFUSAL = "This shape is too small on that axis to split.";
+
+/** The keyboard path's own sentence for `CUT_ZERO_LENGTH_REFUSAL`, reachable there when the
+ *  selected ring has zero extent on the cut axis (its endpoints then coincide). */
+export const CUT_KEYBOARD_ZERO_EXTENT_REFUSAL = "This shape has no extent on that axis.";
+
+/**
+ * The keyboard cut path's own refusal sentence for `cutRing`'s `reason`. The crossings, edge and
+ * partition reasons are reachable from a centred axis cut on a concave or near-degenerate ring
+ * and all read as `CUT_KEYBOARD_UNDIVIDED_REFUSAL`; the endpoint-inside and segment-misses
+ * reasons are unreachable by construction (a centred axis cut's endpoints always fall outside
+ * the ring) and fall to the same sentence rather than ever surfacing the mouse's own wording.
+ */
+export function keyboardCutRefusal(reason: string): string {
+  if (reason === CUT_PIECE_TOO_SMALL_REFUSAL) return CUT_KEYBOARD_TOO_SMALL_REFUSAL;
+  if (reason === CUT_ZERO_LENGTH_REFUSAL) return CUT_KEYBOARD_ZERO_EXTENT_REFUSAL;
+  return CUT_KEYBOARD_UNDIVIDED_REFUSAL;
+}
+
 const AREA_TOLERANCE = 1e-6;
 
 /** Extra slack for the partition post-condition, as a fraction of the parent ring's own area per

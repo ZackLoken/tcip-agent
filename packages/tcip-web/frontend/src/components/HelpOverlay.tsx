@@ -20,10 +20,24 @@ const ANNOTATE: Shortcut[] = [
   { key: "Ctrl+S", desc: "Save labels" },
   { key: "v", desc: "Toggle stream drawing: click starts/pauses laying, double-click closes" },
   { key: "s", desc: "Toggle vertex snapping (polygon mode)" },
-  { key: "x", desc: "Arm the cut tool: click two points on either side of the selected polygon" },
+  {
+    key: "x",
+    desc:
+      "Arm the cut tool: click two points on either side of the selected polygon, or " +
+      "press Shift+H / Shift+V once a polygon is selected",
+  },
+  {
+    key: "Shift+H",
+    desc: "Cut the selected polygon horizontally through its bounding box's centre (cut tool armed)",
+  },
+  {
+    key: "Shift+V",
+    desc: "Cut the selected polygon vertically through its bounding box's centre (cut tool armed)",
+  },
   { key: "0–9", desc: "Select the Nth registered subject (0 is the first)" },
   { key: "Enter", desc: "Close current polygon (or double-click)" },
   { key: "Delete", desc: "Delete the selected polygon, box or point" },
+  { key: "Esc", desc: "Clear a pending cut click and disarm the cut tool; re-arm with x" },
   { key: "←  →", desc: "Prev / Next image" },
   { key: "[  ]", desc: "Prev / Next unswept grid cell (large rasters with a coverage grid)" },
 ];
