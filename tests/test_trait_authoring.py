@@ -509,7 +509,7 @@ def test_deliver_phenology_milestones_derives_class_id_and_delivers(tmp_path: Pa
     assert "error" not in res, res
     assert res["positive_class_assessed"] is True
     assert out_csv.exists()
-    assert ("bud_opening_crossing_unconfirmed"
+    assert ("bud_majority_crossing_unconfirmed"
             in phenology.phenology_csv_columns(get_trait("bud_opening")))
 
 
