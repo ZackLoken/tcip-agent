@@ -39,8 +39,9 @@ ritual-injection hook, `SessionEnd` learning capture) scoped to that breeder-fac
 write that is neither denied nor allow-listed reaches a human approval prompt rather than being
 auto-denied. `--settings` merges its permission lists (union) with the repo root's own,
 gitignored, developer-local `.claude/settings.json` and the user's own settings rather than
-replacing them: list-valued settings keys merge across sources. A broad allow entry in the
-developer's own user settings therefore widens the breeder-lane fence too. The fence is
+replacing them: list-valued settings keys merge across sources
+(code.claude.com/docs/en/configuration). A broad allow entry in the developer's own user
+settings therefore widens the breeder-lane fence too. The fence is
 deny-list first. A `claude` session launched without `--settings` is unaffected by the fence
 file. Don't extend or edit that fence file without calling it out explicitly.
 
@@ -73,8 +74,8 @@ human approval prompt, and a `cd`-then-relative write is an accepted residual of
 - Path access from routes goes through `assert_path_allowed`, which is always on: the allow-set is
   derived from the workspace, every workspace project and its registered dataset roots, plus the
   additive `TCIP_IMAGE_ROOTS` list, and containment is by filesystem identity. Every route uses the
-  resolved path the guard returns, never the client's string. A 403 on escape is not routed
-  around. The Results doors go further: they serve only the project the GUI has
+  resolved path the guard returns, never the client's string. Never route around a 403 on
+  escape. The Results doors go further: they serve only the project the GUI has
   open (`StateStore.project_root`, set by the guarded `/dataset/select`) and refuse evidence that
   does not belong to it.
 - A path a route reads out of the platform's own records (a manifest directory an experiment
