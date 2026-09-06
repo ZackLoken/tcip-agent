@@ -35,9 +35,10 @@ src/tcip_store/
 - A store declares its kind, codec, concurrency policy and durability once, in the module that
   owns it; importing that module registers it, so an `UnknownStore` is answered by an import.
 - Two backends must answer alike: `binding.py` selects the database (the default) or the file
-  layout from the storage-backend environment variable. A root's records move between the two
+  layout from `TCIP_STORE_BACKEND`. A root's records move between the two
   only through `adoption.py` and `export.py`, never by binding the other backend directly against
   files the first one produced.
-- A frozen store's documents carry a `schema_version` ceiling, checked by `schema_version.py`;
-  absence in an existing document reads as version 1.
+- A frozen store declares a `schema_version` ceiling in its descriptor; `schema_version.py`
+  refuses a document whose version is above it, and absence in an existing document reads as
+  version 1.
 - No dependency on `tcip-annotation`, `tcip-mcp`, or `tcip-web`.
