@@ -24,7 +24,7 @@ Reproductive biology relevant to imaging:
 
 - Flowers are perfect (bisexual): papilionaceous (pea-type), borne in showy,
   pendant axillary racemes near new-shoot tips. The species is hermaphroditic, not
-  monoecious or dioecious. This is why the vocabulary gives black locust a single
+  monoecious or dioecious. The vocabulary gives black locust a single
   bloom trait (`bloom_50per_date`) and no separate staminate/pistillate or catkin
   phenology (unlike hazelnut): there is one bloom event to detect.
 - Insect-pollinated (chiefly bees; a major honey plant). Wind pollination is

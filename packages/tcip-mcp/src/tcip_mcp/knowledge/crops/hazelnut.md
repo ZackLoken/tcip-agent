@@ -12,8 +12,8 @@ Interspecific hybrids of *Corylus americana* Walter (American hazelnut) × *Cory
 Upper-Midwest program favors hybrids for cold-hardiness and Eastern Filbert Blight resistance.
 
 Growth form is a multi-stemmed, clump-forming shrub (~1-5 m), arising from a root crown and
-spreading by basal suckers/rhizomes into a dense clump or hedgerow, not a single-trunk tree. This
-is why the vocabulary tracks multiple stems and a root crown (`stem_count`,
+spreading by basal suckers/rhizomes into a dense clump or hedgerow, not a single-trunk tree. The
+vocabulary tracks multiple stems and a root crown (`stem_count`,
 `stem_branching_frequency`, `root_crown_inrow_width`, `root_crown_betweenrow_width`) and separate
 in-row vs between-row canopy widths rather than a single-trunk diameter (hazelnut carries no
 trunk-diameter trait).
