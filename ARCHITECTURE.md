@@ -908,10 +908,10 @@ registered at HEAD.
 | GET | `/api/state` | `get_state` | `app.py:319` |
 | POST | `/api/state/tab` | `set_active_tab` | `app.py:328` |
 | WS | `/ws/state` | `state_ws` | `app.py:336` |
-| GET | `/health` | `health` | `app.py:434` |
+| GET | `/health` | `health` | `app.py:431` |
 | GET | `/` | `index` | `app.py:442` |
-| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:506` |
-| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:557` |
+| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:503` |
+| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:554` |
 
 ### routes/annotate.py, prefix `/api/annotate` (2 routes)
 
@@ -1040,26 +1040,26 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/status` | `get_status` | `routes/terminal.py:253` |
-| POST | `/sessions` | `create_session` | `routes/terminal.py:282` |
-| POST | `/sessions/{session_id}/restart` | `restart_session` | `routes/terminal.py:305` |
-| WS | `/ws/{session_id}` (full path `/api/terminal/ws/{session_id}`) | `terminal_ws` | `routes/terminal.py:333` |
+| GET | `/status` | `get_status` | `routes/terminal.py:252` |
+| POST | `/sessions` | `create_session` | `routes/terminal.py:281` |
+| POST | `/sessions/{session_id}/restart` | `restart_session` | `routes/terminal.py:304` |
+| WS | `/ws/{session_id}` (full path `/api/terminal/ws/{session_id}`) | `terminal_ws` | `routes/terminal.py:332` |
 
 ### routes/training.py, prefix `/api/training` (10 HTTP + 1 WS)
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/configs` | `list_configs_route` | `routes/training.py:49` |
-| GET | `/configs/{experiment_id}/splits` | `list_split_choices_route` | `routes/training.py:57` |
-| POST | `/runs` | `relaunch_config_route` | `routes/training.py:76` |
-| GET | `/runs` | `list_runs_route` | `routes/training.py:127` |
-| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:141` |
-| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:148` |
-| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:189` |
-| POST | `/compare` | `compare_runs_route` | `routes/training.py:209` |
-| POST | `/compare/best` | `compare_best_route` | `routes/training.py:223` |
-| GET | `/metric-directions` | `metric_directions_route` | `routes/training.py:276` |
-| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:368` |
+| GET | `/configs` | `list_configs_route` | `routes/training.py:48` |
+| GET | `/configs/{experiment_id}/splits` | `list_split_choices_route` | `routes/training.py:56` |
+| POST | `/runs` | `relaunch_config_route` | `routes/training.py:75` |
+| GET | `/runs` | `list_runs_route` | `routes/training.py:126` |
+| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:140` |
+| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:147` |
+| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:188` |
+| POST | `/compare` | `compare_runs_route` | `routes/training.py:208` |
+| POST | `/compare/best` | `compare_best_route` | `routes/training.py:222` |
+| GET | `/metric-directions` | `metric_directions_route` | `routes/training.py:275` |
+| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:367` |
 
 ### routes/tuning.py, prefix `/api/tuning` (10 routes)
 
@@ -1195,8 +1195,11 @@ transport's default identity (starlette's `TestClient`, `("testclient", 50000)`,
 of the accepted connection rather than the configured bind host, so this entry point always
 binds the requested host and port; whether an arrival through a non-loopback address is served
 is decided per request by `tcip_web.trust_boundary.TrustBoundaryMiddleware` (`trust_boundary.py:
-282`), which refuses one unless `TCIP_WEB_ALLOW_INSECURE=1` is set (`insecure_opt_in`,
-`trust_boundary.py:128`).
+293`), which refuses one unless `TCIP_WEB_ALLOW_INSECURE=1` is set (`insecure_opt_in`,
+`trust_boundary.py:137`). The same middleware applies one Origin policy
+(`origin_allowed`, `trust_boundary.py:265`) to every WebSocket scope and to every HTTP scope
+whose method is state-changing (`STATE_CHANGING_METHODS`, `trust_boundary.py:43`), rather than
+leaving each handler to call it for itself.
 
 `.mcp.json` (repo root): declares one MCP server, `tcip`, which launches
 `conda run -n tcip-agent --no-capture-output python -m tcip_mcp`. A semantic code-search server
@@ -1497,7 +1500,7 @@ Platform-scoped, no `scope` of their own: the training envelope's open/close eve
 `experiments.py`'s post-terminal refusal (`_audit_refused`, `experiments.py:369`) when its caller names no
 project root (the training watchdog passes the launch's own pinned platform root, so its lines
 carry a `scope` equal to the platform root, the presence-never-means-non-platform case), and
-`routes/terminal.py`'s one line per agent-terminal launch (`agent_terminal_started`, `routes/terminal.py:83`). The `@audited(scope_arg=...)`
+`routes/terminal.py`'s one line per agent-terminal launch (`agent_terminal_started`, `routes/terminal.py:82`). The `@audited(scope_arg=...)`
 doors span every category by whatever root their declared argument resolves; this paragraph
 names the explicit-emitter files, not a closed census of the decorator's doors.
 Dataset-scoped: three GUI route writers passing the dataset root their own guard resolved
@@ -2194,7 +2197,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
 Side A: `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:302` (`result = post_panel_event("app", "annotate_focus", payload)`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:529` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:526` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
 Phase 3 verdict: single. The posted payload carries `subject` beside `active_subject` (`packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:300`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus_human_attention tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. `audit_log`, one append-only store under three kinds of root
@@ -2246,7 +2249,7 @@ Phase 3 verdict: single.
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
 Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:965` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
-Side B: `packages/tcip-web/src/tcip_web/routes/training.py:328` (`asyncio.to_thread(read_log, key, after=cursor)`, the training stream's incremental tail read off the event loop, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:616` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
+Side B: `packages/tcip-web/src/tcip_web/routes/training.py:327` (`asyncio.to_thread(read_log, key, after=cursor)`, the training stream's incremental tail read off the event loop, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:616` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->
@@ -2547,7 +2550,7 @@ Phase 3 verdict: duplicated.
 ## S49. Terminal PTY WebSocket protocol  <!-- queued: P5-289 unify -->
 
 Must agree: control-message type names and field names match, and output frames are treated as raw text rather than JSON.
-Side A: `packages/tcip-web/src/tcip_web/routes/terminal.py:332` (`@router.websocket("/ws/{session_id}")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/terminal.py:331` (`@router.websocket("/ws/{session_id}")`).
 Side B: `packages/tcip-web/frontend/src/components/TerminalRail.tsx:321` (`send({ type: "input", data });`).
 Phase 3 verdict: duplicated.
 
@@ -2561,7 +2564,7 @@ Phase 3 verdict: duplicated.
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
 
 Must agree: the status payload the MCP tool returns is renderable by the browser's training view.
-Side A: `packages/tcip-web/src/tcip_web/routes/training.py:367` (`@router.websocket("/runs/{run_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/training.py:366` (`@router.websocket("/runs/{run_id}/stream")`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`monitor_training` supplies the status payload).
 Phase 3 verdict: duplicated.
 
@@ -2583,7 +2586,7 @@ Phase 3 verdict: single.
 
 Must agree: the directory Vite writes is one of the directories the backend looks in.
 Side A: `packages/tcip-web/frontend/vite.config.ts:26` (`outDir: "../static",`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:398` (`def _find_static_dir() -> Path:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:395` (`def _find_static_dir() -> Path:`).
 Phase 3 verdict: duplicated.
 
 ## S55. Vite dev-server proxy prefixes  <!-- queued: P5-306 unify -->
@@ -2621,13 +2624,6 @@ Side A: `packages/tcip-web/src/tcip_web/paths.py:46` (`def allowed_roots() -> li
 Side B: `packages/tcip-web/src/tcip_web/routes/annotate.py:83` (`p = assert_path_allowed(path)`).
 Phase 3 verdict: single.
 
-## S60. WebSocket origin check
-
-Must agree: every WebSocket endpoint applies the same origin policy before accept().
-Side A: `packages/tcip-web/src/tcip_web/trust_boundary.py:256` (`def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:340` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
-Phase 3 verdict: single.
-
 ## S61. Bash guard and PowerShell guard protected-path sets
 
 Must agree: the two shells fence the same platform paths.
@@ -2646,7 +2642,7 @@ Phase 3 verdict: single.
 
 Must agree: the hook command strings in the committed profile resolve to real guard files from whatever cwd the terminal starts in.
 Side A: `packages/tcip-web/src/tcip_web/agent_terminal.settings.json` (hook commands are repo-relative).
-Side B: `packages/tcip-web/src/tcip_web/terminal.py:79` (`def _materialize_fence_settings() -> Optional[Path]:`).
+Side B: `packages/tcip-web/src/tcip_web/terminal.py:80` (`def _materialize_fence_settings() -> Optional[Path]:`).
 Phase 3 verdict: duplicated.
 
 ## S64. MCP tool registry against documented tool names  <!-- queued: P5-303 unify -->
@@ -2681,13 +2677,13 @@ Phase 3 verdict: duplicated.
 
 ## Totals
 
-67 of 67 seams from the Phase 0 inventory carry a Phase 3 `single_implementation` verdict.
+66 of 66 seams from the Phase 0 inventory carry a Phase 3 `single_implementation` verdict.
 By verdict:
 
 - `duplicated`: 22 seams.
-- `single`: 43 seams (S01, S02, S03, S06, S07, S08, S12, S13, S14, S15, S16, S17, S18, S19, S20,
+- `single`: 42 seams (S01, S02, S03, S06, S07, S08, S12, S13, S14, S15, S16, S17, S18, S19, S20,
   S21, S22, S23, S26, S27, S28, S29, S30, S31, S32, S33, S34, S35, S36, S37, S38, S39, S40, S44,
-  S45, S46, S53, S58, S59, S60, S61, S62, S66).
+  S45, S46, S53, S58, S59, S61, S62, S66).
 - `restated-in-test`: 2 seams (S25, S57).
 
-43 of 67 seams (64%) hold their agreement in a single implementation.
+42 of 66 seams (64%) hold their agreement in a single implementation.

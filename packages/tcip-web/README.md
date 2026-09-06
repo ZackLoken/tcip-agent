@@ -114,8 +114,16 @@ Calls made for this single-operator desktop GUI:
   and writes and the interactive agent terminal (keyboard access to Claude Code) with no login.
   The Host header must name this backend as reached (its arrival address, its own hostname, or
   an entry of `TCIP_WEB_ADVERTISED_HOSTS`, consulted only under the opt-in; never a wildcard),
-  and a WebSocket Origin must be the request's own origin. Token auth for an intentionally
-  exposed GUI is a planned follow-on (needs the frontend to attach a token).
+  and every WebSocket connect and every state-changing HTTP request (`POST`/`PUT`/`PATCH`/
+  `DELETE`) must carry an Origin the backend serves: the request's own origin, a loopback
+  origin at any port on a local arrival, or an advertised authority under the opt-in. The port
+  compared is the Origin's own, with its scheme's default port filled in when none is written,
+  so a same-machine reverse proxy that terminates HTTPS and forwards a bare `Host: gui.example`
+  needs two `TCIP_WEB_ADVERTISED_HOSTS` entries (`gui.example:80` for the Host check,
+  `gui.example:443` for the Origin), while one that forwards `Host: gui.example:443` needs only
+  that one; an advertised name is scheme-blind, so it admits an `http` or `https` Origin alike.
+  Token auth for an intentionally exposed GUI is a planned follow-on (needs the frontend to
+  attach a token).
 
 ### Packaging the GUI into a wheel
 

@@ -17,9 +17,10 @@ tests drive a scripted fake program at the process boundary, and CI (no ``claude
 installed) cleanly reports unavailable.
 
 Trust boundary: same as every GUI surface (``tcip_web.trust_boundary``: local arrivals
-served, network arrivals refused until the operator opts in, WS Origin check). The terminal
-gives keyboard access to Claude Code, equivalent power to the terminal the operator already
-has on this machine; exposing it is what the opt-in's disclosure names.
+served, network arrivals refused until the operator opts in, an Origin check the middleware
+applies to this and every other WebSocket connect and to every state-changing request). The
+terminal gives keyboard access to Claude Code, equivalent power to the terminal the operator
+already has on this machine; exposing it is what the opt-in's disclosure names.
 """
 
 from __future__ import annotations
