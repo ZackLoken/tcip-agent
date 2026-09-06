@@ -128,6 +128,37 @@ def test_a_validation_row_sealed_over_a_mixed_bucket_is_reported_with_its_digest
     assert any("MIXED-RUN-CLAIM" in line and "content changed" in line for line in lines)
 
 
+def test_a_project_registering_an_external_dataset_still_notes_its_own_unwalked_tree(
+    tmp_path, monkeypatch,
+):
+    """The project registers a dataset, just not its own tree: the note names what the gate
+    actually tests (the project's own prediction buckets are outside every root the census
+    walked), not that the project registers no dataset at all."""
+    project = tmp_path / "project"
+    project.mkdir()
+    initialize_project(str(project), site="north orchard")
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
+
+    external = tmp_path / "external"
+    images = external / "images" / DATE
+    images.mkdir(parents=True)
+    Image.new("RGB", (10, 10), (1, 2, 3)).save(images / "a.png")
+    result = register_dataset(str(external), "chestnut", str(project))
+    assert "error" not in result, result
+
+    own_bucket = _bucket(project, "baseline", ["a"])
+    _stamp(own_bucket, ["a"])
+
+    census = _load().census_project(project)
+
+    assert census.unregistered_tree is True
+    lines = _load().render(census)
+    note = next(line for line in lines if line.strip().startswith("NOTE"))
+    assert str(project) in note
+    assert "own predictions/ tree" in note
+    assert "not among the roots" in note
+
+
 def test_a_bucket_whose_stamp_names_every_document_is_not_a_finding(tmp_path, monkeypatch):
     project = _project(tmp_path, monkeypatch)
     clean = _bucket(project, "baseline", ["a", "b"])
@@ -182,22 +213,53 @@ def test_a_bucket_whose_stamp_records_no_image_filenames_map_is_unjudgeable(tmp_
     assert _load().main([str(project)]) == 1
 
 
-def test_a_stamp_that_will_not_decode_is_read_refused_and_exits_two(tmp_path, monkeypatch):
-    """Coverage of the read-refusal exit-2 arm, not a guard: distinct from the exit-2 arm for a
-    named root that is not a project, a stamp whose bytes are corrupted in place is reported
-    READ-REFUSED and the census continues over the remaining roots."""
-    from tests._record_damage_fixtures import damage_record
-    from tcip_mcp.pipelines.resolution import sidecar_key
-
+def test_a_bucket_whose_stamp_records_no_image_filenames_map_and_holds_no_document_is_not_reported(
+    tmp_path, monkeypatch,
+):
+    """Coverage: a stamp with no image_filenames map beside a bucket holding no document at all
+    published nothing, so it is not the UNJUDGEABLE finding the sibling test above pins; no line
+    is rendered for it and the exit stays clean."""
     project = _project(tmp_path, monkeypatch)
-    bucket = _bucket(project, "baseline", ["a"])
-    _stamp(bucket, ["a"])
-    damage_record(sidecar_key(bucket, "operating_point"), b"{not json")
+    bucket = _bucket(project, "baseline", [])
+    stamp = operating_point_stamp(
+        {"conf": {"value": 0.25}}, validated=False, validated_by=None,
+        tile_size_validated=None, shippable_issues=[], id_map=None, subject="bud",
+        attribute=None, trait=None, dataset_hash="H", checkpoint="m",
+        checkpoint_sha256="sha-detector", experiment_id=None, images_dir=None,
+        raster_path=None, produced_at="2026-04-02T00:00:00+00:00",
+    )
+    write_sidecar(bucket, stamp)
 
     census = _load().census_project(project)
 
-    assert len(census.read_errors) == 1
-    assert str(bucket) in census.read_errors[0]
+    assert census.buckets == []
     lines = _load().render(census)
-    assert any(line.startswith("  READ-REFUSED") for line in lines)
-    assert _load().main([str(project)]) == 2
+    assert not any("UNJUDGEABLE" in line for line in lines)
+    assert _load().main([str(project)]) == 0
+
+
+def test_a_stamp_that_will_not_decode_is_read_refused_and_the_census_continues_over_the_remaining_roots(
+    tmp_path, monkeypatch, capsys,
+):
+    """Coverage of the continuation clause the module docstring states: a stamp whose bytes are
+    corrupted in place is reported READ-REFUSED for its own root, and a second, clean root passed
+    alongside it still gets its own line, rather than the walk stopping at the first root."""
+    from tests._record_damage_fixtures import damage_record
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    damaged = _project(tmp_path / "damaged", monkeypatch)
+    bucket = _bucket(damaged, "baseline", ["a"])
+    _stamp(bucket, ["a"])
+    damage_record(sidecar_key(bucket, "operating_point"), b"{not json")
+
+    clean = _project(tmp_path / "clean", monkeypatch)
+    clean_bucket = _bucket(clean, "baseline", ["a"])
+    _stamp(clean_bucket, ["a"])
+
+    exit_code = _load().main([str(damaged), str(clean)])
+
+    assert exit_code == 2
+    out = capsys.readouterr().out
+    refused_at = out.index("READ-REFUSED")
+    clean_at = out.index(f"project {clean}")
+    assert clean_at > refused_at

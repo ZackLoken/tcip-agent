@@ -12,15 +12,17 @@ an earlier one, leaving documents the stamp does not vouch for. A validation rec
 line says whether the sealed content is still what is on disk. Nothing is repaired; every
 finding is printed with the path and the counts.
 
-A project that never registered its own tree as a dataset has no record naming its
-``predictions/`` buckets, so they are outside this census; the script prints a note when such
-a tree exists. Reading a stamp or a validation log goes through the storage seam, which binds
-the process's default backend and opens nothing that is not already a database.
+A project whose own ``predictions/`` tree is not among the roots ``project_roots`` walks (never
+registered as a dataset, or registered alongside a different dataset elsewhere) has no record
+naming those buckets, so they are outside this census; the script prints a note when such a tree
+exists. Reading a stamp or a validation log goes through the storage seam, which binds the
+process's default backend and opens nothing that is not already a database.
 
-A bucket whose stamp decodes but carries no ``image_filenames`` mapping cannot be checked
-against its documents at all (``image_filenames`` is a producer extension,
-``STAMP_EXTENSION_KEYS`` in ``pipelines/resolution.py``, not one of the stamp constructor's own
-keys): it is reported UNJUDGEABLE rather than read as clean. A clean exit therefore means no
+A bucket whose stamp decodes but carries no ``image_filenames`` mapping cannot be checked against
+its documents at all (``image_filenames`` is a producer extension, ``STAMP_EXTENSION_KEYS`` in
+``pipelines/resolution.py``, not one of the stamp constructor's own keys): when it holds at least
+one document, it is reported UNJUDGEABLE rather than read as clean; a stamp with no document
+beside it published nothing, so it is not a finding at all. A clean exit therefore means no
 finding among the buckets this census could judge, not that every walked bucket answered clean.
 
 Exit codes: 0 with no finding among the judgeable buckets, 1 with at least one finding (a
@@ -172,8 +174,8 @@ def render(census: ProjectCensus) -> list[str]:
     lines = [f"project {census.project_root}: {len(census.buckets)} bucket(s) with documents or a stamp"]
     if census.unregistered_tree:
         lines.append(
-            f"  NOTE {census.project_root} holds a predictions/ tree but registers no dataset, so "
-            "no record names those buckets and this census does not walk them"
+            f"  NOTE {census.project_root}'s own predictions/ tree is not among the roots this "
+            "census walked, so no record names those buckets and this census does not walk them"
         )
     for entry in census.buckets:
         if entry.unjudgeable:
