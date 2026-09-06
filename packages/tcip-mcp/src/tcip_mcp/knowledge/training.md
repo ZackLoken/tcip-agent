@@ -131,7 +131,7 @@ naming why. Whole-frame training and whole-decode sources gain nothing from it; 
 | `cancel_training` | Request graceful cancellation of a running run; stops at the next batch/epoch boundary, still saves `model_final.pt` |
 | `cancel_hyperparameter_search` | Request cooperative cancellation of a running sweep: the running trial stops at its next batch boundary and reports the losing side, new trials report without training, the manifest records `cancelled`; Ray's hard stop is only the fallback after the heartbeat window |
 | `run_hyperparameter_search` | HPO on Ray Tune, you pick the search algorithm + trial scheduler |
-| `scripts/render_failure_cases.py` (logged script, run with python) | Surface + render images ranked by count-mismatch (not IoU-matched, see evaluation skill) |
+| `tcip render-failure-cases` (logged command) | Surface + render images ranked by count-mismatch (not IoU-matched, see evaluation skill) |
 | `create_experiment` | Track training run with full lineage |
 
 ## TensorBoard

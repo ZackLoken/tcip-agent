@@ -13,7 +13,7 @@ from the data in hand.
 
 Derive it by measuring the dataset, not by classifying the trait:
 
-- `python scripts/scan_dataset.py <folder_path>`: how many images, labels and predictions exist,
+- `tcip scan-dataset <folder_path>`: how many images, labels and predictions exist,
   and the detected label format; capture dates come from `ingest_images`, below.
 - `pipelines.derivations.gt_aspect_ratios` over the GT `(w, h)`: the object elongation that
   actually occurs here, rather than an assumed shape.
@@ -173,15 +173,15 @@ boundary was produced; what it requires is that a person positively stands behin
 
 ## Multi-phase pipelines
 
-When a trait's decomposition needs more than one training phase, write a logged script in
-`scripts/` that chains the canonical primitives: one build path, every step audited.
+When a trait's decomposition needs more than one training phase, write a one-off logged script
+that chains the canonical primitives: one build path, every step audited.
 Each training phase calls `launch_training` (full audited envelope, leakage-free split,
 tiling persistence) against a `model_source` builder; run each stage's model with
 `run_inference`; then aggregate with the importable postprocessing libs
 (`aggregate_per_plant` / `export_aggregated_csv`, or `deliver_phenology_milestones` for milestone dates):
 
 ```python
-# scripts/<trait>_pipeline.py: chain the primitives; each launch_training goes
+# <trait>_pipeline.py: chain the primitives; each launch_training goes
 # through the audited envelope, so provenance and immutability hold across the whole run.
 stage_a = launch_training(config={"model_source": {...}, "data": {...}})
 stage_b = launch_training(config={"model_source": {...}, "data": {...}})

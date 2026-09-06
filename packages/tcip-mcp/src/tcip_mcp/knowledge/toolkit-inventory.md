@@ -113,13 +113,13 @@ bring-your-own-objective seam under `run_hyperparameter_search`. Bring your own 
 (call `report(value)` each step) for a search that isn't a training sweep; `storage_path` is
 required, trial results land where you say, never Ray's home-directory default.
 
-## Concurrent runs: `scripts/inspect_compute_resources.py`
+## Concurrent runs: `tcip inspect-compute-resources`
 
 Every `launch_training`/`run_hyperparameter_search` call already trains in its own OS process (crash/OOM isolation
 between concurrent runs), but nothing caps how many you launch at once or how much of the host each
 one claims; that's a judgment call, not a platform-enforced number (a pinned memory/CPU ceiling
 would be right on one host and wrong on the next). Before launching another concurrent candidate,
-`python scripts/inspect_compute_resources.py` gives you the actual facts to reason from: free VRAM
+`tcip inspect-compute-resources` gives you the actual facts to reason from: free VRAM
 per GPU, host CPU/RAM headroom (`None` if `psutil` isn't installed; everything else still works),
 and how many runs this process's own registry currently reports running.
 
@@ -154,7 +154,7 @@ built-ins itself, rather than silently substituting one.
 
 `require_composed_detector` (`active_learning.helpers`) is the guard the logit-reading
 scorers use: it returns an error rather than reading logits off a non-`nn.Module` model, and
-`feedback_tools.triage_predictions` (run through `scripts/triage_predictions.py`) is the
+`feedback_tools.triage_predictions` (run through `tcip triage-predictions`) is the
 kind-agnostic fallback.
 
 ## Classical image analysis (OpenCV, scikit-image)

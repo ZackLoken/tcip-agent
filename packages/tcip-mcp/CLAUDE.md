@@ -49,8 +49,8 @@ src/tcip_mcp/
 Every MCP tool in `tools/` is decorated `@mcp.tool()` + `@audited`, except `serve_domain_knowledge`,
 whose `@mcp.tool(description=...)` composes its client-visible description from the knowledge
 corpus at import time rather than leaving it as the bare docstring. A door demoted from tool
-status (run only through its own `scripts/` entry point) keeps `@audited` without registering.
-Run `python scripts/list_tools.py` for the current tool list/count; never hardcode a count in a
+status (run only through its own `tcip` subcommand) keeps `@audited` without registering.
+Run `python tools/list_tools.py` for the current tool list/count; never hardcode a count in a
 doc or comment.
 
 ## Conventions specific to this package
@@ -63,9 +63,9 @@ doc or comment.
   model spec or component registry; see the `toolkit-inventory` skill for the full composition
   surface (`build_detector`/`build_loss` task strings, heads/necks/backbones, derivations, the `ctx`
   craft library, and the `model_source`/`training_source`/`dataset_source` seams).
-- Prefer a logged script in `scripts/` over a new tool here. Add a tool only for an audit seam,
-  long-running infrastructure, or domain knowledge the agent lacks that a script can't carry.
-- State mutations route through `@audited` doors only: the MCP tools and the script-invoked doors
+- Prefer a console-command door in `cli/` over a new tool here. Add a tool only for an audit seam,
+  long-running infrastructure, or domain knowledge the agent lacks that a console command can't carry.
+- State mutations route through `@audited` doors only: the MCP tools and the console-command doors
   demoted from them; the record is `audit_log`, one store addressed by `audit.audit_log_key` under
   three kinds of root (the platform's own, a dataset's own, a project's own), held by whichever
   backend the process bound, that other code (including scripts) must not write around. `audit.py`

@@ -44,7 +44,7 @@ empty either; it also refuses the old `objects` label schema outright rather tha
 since that schema is converted once and never read in place.
 
 A collaborator's delivery in some other schema is yours to convert: read a sample, write a
-converter in `scripts/`, and emit the canonical per-image JSON. The platform carries no built-in
+one-off converter script, and emit the canonical per-image JSON. The platform carries no built-in
 importers.
 
 ## Coordinate frame: upright, EXIF applied once
@@ -135,7 +135,7 @@ viewport, and unsaved or in-progress shapes), so the agent can comment on work i
 before they save.
 
 Corrective loop (for missed objects):
-1. `vision_tools.overlay_reference_grid(image_path)` (library call, or `scripts/overlay_reference_grid.py`) → labeled reference grid ('A1' top-left) for spatial reference
+1. `vision_tools.overlay_reference_grid(image_path)` (library call, or `tcip overlay-reference-grid`) → labeled reference grid ('A1' top-left) for spatial reference
 2. Agent reads the grid overlay with its own image-capable read tool → identifies missed regions by grid cell
 3. `segment_prompt(image_path, grid_cells=["B3", "D5"], tile_size=<echoed>)` → the engine segments
    at those locations
@@ -164,7 +164,7 @@ Grid cell system:
 
 1. Load ground truth with `annotation_tools.read_annotations` (library call, no MCP tool for it)
 2. Load predictions (from inference or prior annotation)
-3. `annotation_tools.score_predictions` (library call, or `scripts/score_predictions.py`) pairs
+3. `annotation_tools.score_predictions` (library call, or `tcip score-predictions`) pairs
    predictions to GT by IoU (default threshold: 0.5) and returns
    aggregate TP/FP/FN; `detail=True` adds a per-detection breakdown (each TP/FP/FN tagged with
    its class id, box/polygon, IoU, and confidence). On a classified bucket (predictions carrying
@@ -222,7 +222,7 @@ frames → they accept on the canvas → only then does it become GT. See
   `replace_image_status_store` rather than by hand. `to_coco_dataset` silently skips an
   empty file that is not in that set, treating it as unannotated. You cannot manufacture
   negatives; writing empty label files does not create them; only the human's Complete does.
-  `python scripts/doctor.py <root>` runs separate checks bound to what each one reads:
+  `tcip doctor <root>` runs separate checks bound to what each one reads:
   `check_negatives` reads the status store through the same seam `check_data_quality` does,
   and on a store that will not read, emits one warning and reports negatives unverified rather
   than walking any label file; `check_status_tokens` reads the raw store file directly and
