@@ -1,6 +1,7 @@
 """The double-publish census reports a bucket whose stamp names fewer stems than it holds
-documents for, a validation row sealed over such a bucket, and nothing for a bucket whose stamp
-names every document. Coverage of a read-only census; it changes no behaviour."""
+documents for, a bucket whose stamp decodes with no ``image_filenames`` map at all (unjudgeable
+rather than clean), a validation row sealed over a mixed-run bucket, and nothing for a bucket
+whose stamp names every document. Coverage of a read-only census; it changes no behaviour."""
 
 from __future__ import annotations
 
@@ -151,3 +152,52 @@ def test_main_exits_one_on_a_finding_and_two_on_a_non_project(tmp_path, monkeypa
     assert "DOUBLE-PUBLISH" in out
 
     assert mod.main([str(tmp_path / "nowhere")]) == 2
+
+
+def test_a_bucket_whose_stamp_records_no_image_filenames_map_is_unjudgeable(tmp_path, monkeypatch):
+    """A stamp decoding with no ``image_filenames`` mapping at all (the shape a producer from
+    before that extension key existed writes) cannot be checked against the bucket's documents;
+    it must be reported UNJUDGEABLE rather than read as clean, the pre-refusal population this
+    census exists to find."""
+    project = _project(tmp_path, monkeypatch)
+    bucket = _bucket(project, "baseline", ["a", "b"])
+    stamp = operating_point_stamp(
+        {"conf": {"value": 0.25}}, validated=False, validated_by=None,
+        tile_size_validated=None, shippable_issues=[], id_map=None, subject="bud",
+        attribute=None, trait=None, dataset_hash="H", checkpoint="m",
+        checkpoint_sha256="sha-detector", experiment_id=None, images_dir=None,
+        raster_path=None, produced_at="2026-04-02T00:00:00+00:00",
+    )
+    write_sidecar(bucket, stamp)
+
+    census = _load().census_project(project)
+
+    assert census.mixed == []
+    assert len(census.buckets) == 1
+    entry = census.buckets[0]
+    assert entry.unjudgeable is True
+    assert entry.named_stems is None
+    lines = _load().render(census)
+    assert any(line.startswith("  UNJUDGEABLE") and str(bucket) in line for line in lines)
+    assert _load().main([str(project)]) == 1
+
+
+def test_a_stamp_that_will_not_decode_is_read_refused_and_exits_two(tmp_path, monkeypatch):
+    """Coverage of the read-refusal exit-2 arm, not a guard: distinct from the exit-2 arm for a
+    named root that is not a project, a stamp whose bytes are corrupted in place is reported
+    READ-REFUSED and the census continues over the remaining roots."""
+    from tests._store_damage import damage_record
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    project = _project(tmp_path, monkeypatch)
+    bucket = _bucket(project, "baseline", ["a"])
+    _stamp(bucket, ["a"])
+    damage_record(sidecar_key(bucket, "operating_point"), b"{not json")
+
+    census = _load().census_project(project)
+
+    assert len(census.read_errors) == 1
+    assert str(bucket) in census.read_errors[0]
+    lines = _load().render(census)
+    assert any(line.startswith("  READ-REFUSED") for line in lines)
+    assert _load().main([str(project)]) == 2

@@ -17,8 +17,17 @@ A project that never registered its own tree as a dataset has no record naming i
 a tree exists. Reading a stamp or a validation log goes through the storage seam, which binds
 the process's default backend and opens nothing that is not already a database.
 
-Exit codes: 0 with no finding, 1 with at least one finding, 2 when a stamp or a validation
-log could not be read (the refusal is printed and the census continues).
+A bucket whose stamp decodes but carries no ``image_filenames`` mapping cannot be checked
+against its documents at all (``image_filenames`` is a producer extension,
+``STAMP_EXTENSION_KEYS`` in ``pipelines/resolution.py``, not one of the stamp constructor's own
+keys): it is reported UNJUDGEABLE rather than read as clean. A clean exit therefore means no
+finding among the buckets this census could judge, not that every walked bucket answered clean.
+
+Exit codes: 0 with no finding among the judgeable buckets, 1 with at least one finding (a
+double-publish, a named-without-document mismatch, a mixed-run claim, or an unjudgeable
+bucket), 2 when a stamp or a validation log could not be read, or when a named root is not a
+project (no ``.tcip`` directory); a read refusal is printed and the census continues over the
+remaining roots.
 
     python tools/census_double_published_buckets.py <project_root> [<project_root> ...]
 """
@@ -42,6 +51,7 @@ class BucketCensus:
     document_stems: set[str]
     named_stems: set[str] | None
     stamp_read_error: str | None = None
+    unjudgeable: bool = False
 
     @property
     def unnamed(self) -> set[str]:
@@ -98,7 +108,7 @@ def census_bucket(bucket: Path) -> BucketCensus:
         return BucketCensus(bucket, stems, None)
     names = stamp.get("image_filenames")
     if not isinstance(names, dict):
-        return BucketCensus(bucket, stems, None)
+        return BucketCensus(bucket, stems, None, unjudgeable=True)
     return BucketCensus(bucket, stems, set(names))
 
 
@@ -108,7 +118,6 @@ def census_project(project_root: Path) -> ProjectCensus:
     from tcip_mcp.experiments import experiment_ids_with_status, read_validations
     from tcip_mcp.prediction_buckets import bucket_content_digest
     from tcip_mcp.store_catalogue import project_roots
-    from tcip_mcp.tools.project_tools import read_datasets_raw
 
     result = ProjectCensus(project_root=project_root)
     roots = project_roots(project_root)
@@ -129,9 +138,7 @@ def census_project(project_root: Path) -> ProjectCensus:
             Path(path).resolve() for path, layout in roots if layout == PREDICTION_BUCKET
         }
         own = {p.resolve() for p in dataset_layout.prediction_bucket_dirs(project_root)}
-        result.unregistered_tree = bool(own) and not own & registered and not any(
-            e.get("path") for e in read_datasets_raw(project_root)
-        )
+        result.unregistered_tree = bool(own) and not own & registered
 
     mixed_by_path = {b.bucket.resolve(): b for b in result.mixed}
     for experiment_id in experiment_ids_with_status(project_root):
@@ -169,6 +176,11 @@ def render(census: ProjectCensus) -> list[str]:
             "no record names those buckets and this census does not walk them"
         )
     for entry in census.buckets:
+        if entry.unjudgeable:
+            lines.append(
+                f"  UNJUDGEABLE {entry.bucket}: {len(entry.document_stems)} document(s), the "
+                "stamp records no image_filenames map"
+            )
         if entry.unnamed:
             lines.append(
                 f"  DOUBLE-PUBLISH {entry.bucket}: {len(entry.document_stems)} document(s), the "
@@ -218,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
             print(line)
         findings = len(census.mixed) + len(census.claims) + sum(
             1 for b in census.buckets if b.named_without_document
-        )
+        ) + sum(1 for b in census.buckets if b.unjudgeable)
         if census.read_errors:
             code = max(code, 2)
         elif findings:
