@@ -12,6 +12,11 @@ function fmtSeconds(totalSeconds: number): string {
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
+// Pluralized on its own value: a count of one never borrows the other count's plural form.
+function countLabel(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 export function StatusBar() {
   const view = useStore((s) => s.gui.view);
   const canvasMatchesDataset = useStore(selectCanvasMatchesDataset);
@@ -67,9 +72,9 @@ export function StatusBar() {
       ) : null}
       {activeTab === "annotate" && canvasMatchesDataset && (polyCount > 0 || boxCount > 0) && (
         <span className="tabular-nums">
-          {polyCount > 0 && `${polyCount} polygons`}
+          {polyCount > 0 && countLabel(polyCount, "polygon", "polygons")}
           {polyCount > 0 && boxCount > 0 && <span className="mx-1.5 text-tcip-border">|</span>}
-          {boxCount > 0 && `${boxCount} boxes`}
+          {boxCount > 0 && countLabel(boxCount, "box", "boxes")}
         </span>
       )}
       {/* Points are counted on their own: they are not detection targets, so they never fold into
