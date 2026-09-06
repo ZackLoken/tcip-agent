@@ -383,10 +383,13 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     ``pred_dir``'s own recorded scope governs when it has one: no stamp at all (the hand-split
     calibration/holdout workflow) leaves the caller's stated ``(subject, attribute)`` in force; a
     classified stamp must agree with it, else this refuses naming both; a detector stamp refuses
-    outright, a detector bucket carries no value to calibrate. The vocabulary a bare ``pred_dir``
-    is held to comes from ``gt_dir``'s own dataset registry when it has one, else from the values
-    ``gt_dir`` itself carries under ``attribute`` (plus ``positive_value``), never a registry a
-    loose hand-split pair was never placed under.
+    outright, a detector bucket carries no value to calibrate. The vocabulary a bare ``pred_dir``,
+    or a classified stamp recording no usable ``id_map``, is held to is the registry ``gt_dir``'s
+    own dataset root carries; with none, this refuses naming ``pred_dir``, ``gt_dir`` and the
+    remedy (place the split under its dataset root), since the vocabulary a classifier is
+    calibrated against is the registry the reference belongs to, never the values the reference
+    happens to carry, and a registry borrowed from elsewhere would be a claim the data does not
+    carry.
 
     ``gt_dir`` is read as a measurement reference, so it goes through
     ``json_io.require_reference_ground_truth`` first: a GT dir pointed at a prediction bucket would
@@ -427,18 +430,26 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
             resolved_classes_path,
         )
 
-        if resolved_classes_path(gt_dir) is not None:
-            _reg, vocabulary_map = resolve_registry_id_map(gt_dir, subject, attribute)
-        else:
-            observed = {
-                a.attributes[attribute]
-                for gt_file in prediction_documents(gt_p)
-                for a in json_io.read_annotations(str(gt_file))
-                if a.subject == subject and attribute in (a.attributes or {})
-            }
-            observed.add(positive_value)
-            vocabulary_map = {name: i for i, name in enumerate(sorted(observed))}
+        if resolved_classes_path(gt_dir) is None:
+            absent = (
+                "carries no stamp at all" if scope is None
+                else "records a classified scope with no usable id_map"
+            )
+            raise ValueError(
+                f"{pred_p} {absent}, and {gt_p} resolves no dataset registry of its own: place "
+                "the split under its dataset root (<root>/annotations/<date>/, or a labels/ tree "
+                "directly under a root carrying classes.json), since the vocabulary a classifier "
+                "is calibrated against is the registry the reference belongs to, never the values "
+                "the reference happens to carry."
+            )
+        _reg, vocabulary_map = resolve_registry_id_map(gt_dir, subject, attribute)
     vocabulary = set(vocabulary_map or {})
+    if positive_value not in vocabulary:
+        raise ValueError(
+            f"{gt_p}'s registry declares values {sorted(vocabulary)} for (subject={subject!r}, "
+            f"attribute={attribute!r}), which does not include the positive value "
+            f"{positive_value!r}: declare it in the registry before calibrating against this split."
+        )
     # gt_dir/pred_dir may themselves be prediction buckets (a calibration/holdout split of one),
     # so both are walked through prediction_documents, their own sidecar stamps excluded.
     paired = [f for f in prediction_documents(gt_p) if (pred_p / f.name).is_file()]
@@ -474,6 +485,12 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
                 # Never assessed for `attribute` yet: a soft, expected gap, not a confirmed
                 # negative, which would fabricate a disagreement against a perfect classifier.
                 continue
+            if gt_value not in vocabulary:
+                raise ValueError(
+                    f"{gt_file}: ground-truth value {gt_value!r} under (subject={subject!r}, "
+                    f"attribute={attribute!r}) is outside the registry's declared values "
+                    f"{sorted(vocabulary)}."
+                )
             pred_value = json_io.require_classified_record(
                 pred_a, subject=subject, attribute=attribute, vocabulary=vocabulary,
                 source=f"{pred_file}")
@@ -491,7 +508,11 @@ def _stated_root_disagreement(dataset_root: str, candidates: dict[str, str]) -> 
     """The refusal for a stated dataset root a caller-supplied directory's own root contradicts.
 
     Only a positive disagreement refuses: a directory the dataset layout cannot place answers
-    nothing, and a bespoke calibration over loose directories with a stated root is legitimate work.
+    nothing, and a bespoke calibration over loose directories with a stated root is legitimate work
+    for the two detector doors this check otherwise serves alone. The classifier door additionally
+    requires, past this check, that a bare or map-less prediction bucket's ground truth resolve the
+    registry its own dataset root carries (``_classification_items``): a loose ground-truth
+    directory with no relation to the stated root refuses there even when this check alone does not.
 
     Two other modules (``scale_tools.py``, ``calibration_tools.py``) import this beside its own
     caller here, the same cross-module-consumer shape that moved ``calibrate_operating_point``/
@@ -579,8 +600,12 @@ def calibrate_classifier_operating_point(
         dataset_root: The dataset this calibration's claim hangs off, stated by the caller: the
             record's reference locations are written against it, and it is the root a reader
             resolves them from. Refuses when either GT dir's own layout places it under a different
-            root; loose directories the layout cannot place refuse nothing, since a calibration
-            over a bespoke reference with a stated root is legitimate.
+            root; loose directories the layout cannot place refuse nothing here. Past this check, a
+            GT dir whose prediction bucket carries no usable vocabulary of its own (a bare bucket,
+            or a classified stamp with no id_map) must itself resolve the registry its own dataset
+            root carries (``_classification_items``'s own refusal, naming both directories and the
+            remedy), so the two ground-truth directories cannot be loose unless their buckets
+            already carry a vocabulary.
         experiment_id: The classifier checkpoint's training-run id, if known, gates train-
             disjointness the same way the detector calibration path does. ``None`` (a foreign/
             unregistered checkpoint) skips that check rather than failing closed.
