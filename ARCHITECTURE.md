@@ -31,16 +31,16 @@ snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the 
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD b60982aa has 423 modules across the six scanned roots (133864 total lines):
+HEAD b60982aa has 423 modules across the six scanned roots (133852 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 134 | 60287 |
+| tcip-mcp | 134 | 60261 |
 | tcip-annotation | 12 | 4299 |
-| tcip-web | 39 | 13258 |
+| tcip-web | 39 | 13264 |
 | tcip-store | 13 | 5139 |
 | tcip-web-frontend | 209 | 46200 |
-| tools | 16 | 4681 |
+| tools | 16 | 4689 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
 `packages/`; `tools` is `tools/` at the repo root (not an installed package);
@@ -80,7 +80,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/cli/plant_aware_group_splits.py | Plant-aware group-key derivation for ``draw_splits``, over per-stem georeferenced rasters. | 6 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/preflight_config.py | Validate a training configuration before launching, from the command line. | 3 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/render_failure_cases.py | Find and render the worst predictions for failure analysis. | 3 | 0 |
-| packages/tcip-mcp/src/tcip_mcp/cli/repair_classified_predictions.py | Conform a project's classified prediction buckets to the writer rail's shape: an ``operating_point.json`` stamp carrying its ``(subject, attribute)`` pair, and per-image documents that carry the decoded value under ``attributes[attribute]`` with the object class in ``subject``, the shape ``write_predictions_json`` now writes and every reader now holds a bucket to. | 11 | 0 |
+| packages/tcip-mcp/src/tcip_mcp/cli/repair_classified_predictions.py | Repair a project's classified prediction buckets into the writer rail's shape: an ``operating_point.json`` stamp carrying its ``(subject, attribute)`` pair, and per-image documents that carry the decoded value under ``attributes[attribute]`` with the object class in ``subject``, the shape ``write_predictions_json`` now writes and every reader now holds a bucket to. | 11 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/scan_dataset.py | Scan a folder for images, labels, and predictions. | 3 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/score_predictions.py | Score on-disk predictions against on-disk ground truth (COCOeval), from the command line. | 3 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/shp_to_plant_csv.py | Convert a plant-locations shapefile into ``read_plant_csvs``' CSV schema. | 1 | 0 |
@@ -246,7 +246,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/agent_powershell_guard.py | PreToolUse PowerShell guard for the fenced in-app agent terminal. | 1 | 0 |
 | packages/tcip-web/src/tcip_web/agent_session_start.py | SessionStart ritual hook: inject the session-start ritual directive naming the active project. | 3 | 0 |
 | packages/tcip-web/src/tcip_web/app.py | FastAPI application: REST API for MCP tools + WebSocket for GUI state sync. | 15 | 4 |
-| packages/tcip-web/src/tcip_web/cli/__init__.py | ``tcip``: the operator console command, dispatching to one subcommand per operator command. | 0 | 1 |
+| packages/tcip-web/src/tcip_web/cli/__init__.py | ``tcip``: the operator console command, dispatching to one subcommand per operator command. | 0 | 2 |
 | packages/tcip-web/src/tcip_web/cli/__main__.py | ``python -m tcip_web.cli``: a package's own ``__init__.py`` cannot be the ``-m`` target, so this thin entry point is what a test (and an operator with no ``tcip`` console script installed yet) actually spawns. | 1 | 0 |
 | packages/tcip-web/src/tcip_web/cli/distill_learnings.py | Distill worksheet: gather one project's learning record in one place. | 5 | 0 |
 | packages/tcip-web/src/tcip_web/identity.py | Current-user identity for provenance stamping (created_by / accepted_by). | 0 | 5 |  <!-- queued: P5-329 unwired -->
@@ -510,7 +510,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | tools/smoke_fence_e2e.py | Live smoke: does the real fenced `claude` refuse to edit platform internals? | 3 | 0 |
 | tools/smoke_phenology_e2e.py | Live e2e smoke: the agent's phenology pipeline on real geolocated images. | 12 | 0 |
 | tools/smoke_terminal_e2e.py | One-shot smoke: the embedded agent terminal against the real `claude` CLI. | 2 | 0 |
-| tools/verify_skill_tools.py | Guardrail: hold every tool name in agent-facing prose to the registry. | 2 | 0 |
+| tools/verify_skill_tools.py | Guardrail: hold every tool name in agent-facing prose to the registry. | 3 | 0 |
 | tools/verify_skill_traits.py | Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in crops.yml. | 1 | 0 |
 
 ## Package-level dependency rules holding at HEAD 2670cebf
@@ -525,16 +525,14 @@ Non-zero cross-package edge counts at HEAD:
 
 - `tools` -> `tcip-annotation`: 0 import edges.
 - `tools` -> `tcip-mcp`: 15 import edges.
-- `tools` -> `tcip-web`: 16 import edges.
-- `tcip-mcp` -> `tcip-annotation`: 43 import edges.
-- `tcip-mcp` -> `tcip-web`: 5 import edges (`store_catalogue.py`'s own module-level imports of
-  `tcip_web.agent_learning_capture`, `tcip_web.jobstore`, `tcip_web.routes.canvas`,
-  `tcip_web.routes.sessions` and `tcip_web.state`, predating this restructure, not introduced by
-  it: the "no module under packages/tcip-mcp imports from tcip-web" rule this section once stated
-  was already false before this family started, unverified since this section carries no
-  automated check).
-- `tcip-web` -> `tcip-annotation`: 7 import edges.
-- `tcip-web` -> `tcip-mcp`: 71 import edges.
+- `tools` -> `tcip-web`: 17 import edges.
+- `tcip-mcp` -> `tcip-annotation`: 76 import edges.
+- `tcip-mcp` -> `tcip-web`: 5 import edges, all from `store_catalogue.py`'s own module-level
+  imports of `tcip_web.agent_learning_capture`, `tcip_web.jobstore`, `tcip_web.routes.canvas`,
+  `tcip_web.routes.sessions` and `tcip_web.state`; no other module under `packages/tcip-mcp`
+  imports from `tcip-web`.
+- `tcip-web` -> `tcip-annotation`: 14 import edges.
+- `tcip-web` -> `tcip-mcp`: 105 import edges.
 
 `packages/tcip-web/frontend/src` (`tcip-web-frontend`) has zero in-repo import edges to any Python module in any of the five Python roots: `build_module_inventory.py` resolves a TypeScript specifier only against a relative path or the `@/` alias into `packages/tcip-web/frontend/src` itself (`tools/build_module_inventory.py:307-327`), so no specifier in the frontend source tree can resolve to a file outside that tree.
 
@@ -1703,10 +1701,9 @@ The index document is `{entries: [...]}`, no `schema_version` field until this s
 `_read_registry_document`/`_write_registry_document`, that is the only code touching the raw
 value: an absent key answers the empty document, a present bare array is the shape this store
 carried before the family that wrapped it and refuses by name (`RegistryVersionRefused`,
-deliberately not a `StoreError`) naming the archive/import round trip as the remedy: no door
-rewraps a live project's registry in place, so a stuck project is corrected by archiving it with
-`archive_project` and importing the archive back. `_register_entry` spells `checkpoint_path`
-through
+deliberately not a `StoreError`) stating that no operator door rewraps a live project's registry
+in place: the registry predates the entries-mapping shape the platform writes, and nothing
+repairs it in place. `_register_entry` spells `checkpoint_path` through
 `registry_paths.checkpoint_registry_path_for` against the registry's own scope root: relative
 POSIX when the checkpoint resolves under it, absolute when it does not (the dataset registry's
 own `entry_is_external`/`registry_path_for` share the same containment core and grammar-aware
@@ -1715,10 +1712,10 @@ unconformed index and respells every entry in one transaction, relocating a move
 checkpoint by content digest when its stored path no longer resolves; `import_project` runs it
 on the staging tree before accounting for it and before the rename.
 
-Readers: `read_registry_index`, `model_registry.py:143`, the read path for anything outside the
+Readers: `read_registry_index`, `model_registry.py:145`, the read path for anything outside the
 module (`packages/tcip-mcp/src/tcip_mcp/cli/doctor.py:409`, `"metrics_source"`), and the entry-by-entry accessors built on
-it: `ModelRegistry.list_models`, `model_registry.py:906`; `get_model`, `model_registry.py:917`;
-`best_model`, `model_registry.py:924`; `verify_model`, `model_registry.py:880`. `best_model` takes `metric_key` and `higher_is_better` as required
+it: `ModelRegistry.list_models`, `model_registry.py:881`; `get_model`, `model_registry.py:892`;
+`best_model`, `model_registry.py:899`; `verify_model`, `model_registry.py:855`. `best_model` takes `metric_key` and `higher_is_better` as required
 keywords, no default and no name heuristic, and by default ranks only entries whose
 `metrics_source` is `"trainer"` (`include_unverified=True` also ranks the rest). The
 `rank_registered_models` tool (`tools/model_tools.py:123`) resolves `higher_is_better` from
@@ -2383,7 +2380,7 @@ Phase 3 verdict: single.
 ## S27. Trained-model registry .tcip/models/registry.json
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
-Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:143` (`def read_registry_index(`, the read path for everything outside the module; `_register_entry`, `model_registry.py:448`, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, `model_registry.py:128`, mints).
+Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:145` (`def read_registry_index(`, the read path for everything outside the module; `_register_entry`, `model_registry.py:450`, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, `model_registry.py:130`, mints).
 Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1396` (`@router.get("/models/registered")`, serving `model_tools.rank_registered_models`'s listing view) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
