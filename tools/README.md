@@ -9,6 +9,11 @@ breeder or an operator runs against a project are documented in `README.md` and
 - `build_module_inventory.py` - builds a module inventory and real import graph for the repo's
   Python and TypeScript source trees, so `check_architecture_doc.py` can cross-check
   ARCHITECTURE.md's module-ownership tables against the tree it actually describes.
+- `census_double_published_buckets.py` - read-only census over one or more project roots of
+  prediction buckets published more than once before the live-bucket refusal landed: a stamp
+  whose `image_filenames` names fewer stems than the bucket holds documents for, and any
+  validation record sealed over such a bucket's mixed-run digest. Prints findings, repairs
+  nothing; the exit code says whether any was found.
 - `check_architecture_doc.py` - verifies ARCHITECTURE.md's module-ownership tables against the
   tree, for CI: every named path exists, and, given a module-inventory JSON, the in-repo-import
   and imported-by counts per row are cross-checked for drift.
