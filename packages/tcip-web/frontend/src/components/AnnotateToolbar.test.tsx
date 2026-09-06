@@ -582,6 +582,32 @@ describe("AnnotateToolbar Complete toggle, subject-scoped", () => {
       undefined,
     );
   });
+
+  it("does not restore a mark on a failed stamp when unchecking Complete (not a finished status)", async () => {
+    seedImageDataset({ subject: "subject_a", currentStatus: "complete" });
+    setCanvasBoxSubjects([]);
+    const setStatus = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({
+      status: "ok",
+      digest_stamped: false,
+    });
+    renderToolbar();
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Complete"));
+    });
+
+    expect(setStatus).toHaveBeenCalledWith(
+      "C:/proj",
+      "img1.jpg",
+      "unannotated",
+      "subject_a",
+      "2026-01-01",
+      "C:/data",
+      "C:/data/annotations/2026-01-01",
+      undefined,
+    );
+    expect(useStore.getState().imageStatus.staleMarks).toEqual([]);
+  });
 });
 
 describe("AnnotateToolbar current image identity", () => {

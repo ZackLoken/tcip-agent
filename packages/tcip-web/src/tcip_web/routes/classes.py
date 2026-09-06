@@ -272,30 +272,32 @@ def _require_bucket(subject: str | None, date: str | None) -> str:
 
 
 def _stamp_digest(dataset_root: str, bucket: str, subject: str | None,
-                  image_names: Iterable[str]) -> bool:
-    """Best-effort: record the subject's current attribute-schema digest against each of
-    ``image_names``, so a later read can tell a confirmation made under a since-changed schema from
-    one still valid. Never blocks the status write: an unreadable registry, an absent one, or a
-    failure writing the sidecar itself just leaves these images unstamped (admitted, not
-    quarantined, on read; see ``stale_finished_names``), because the status the human recorded
-    is already committed by the time this runs. Returns whether the stamp actually landed, so a
-    caller whose write did not restamp can tell a mark it is about to clear still describes
-    reality."""
+                  image_names: Iterable[str]) -> bool | None:
+    """Record the subject's current attribute-schema digest against each of ``image_names``, so a
+    later read can tell a confirmation made under a since-changed schema from one still valid.
+    Never blocks the status write: an unreadable registry, an absent one, or a failure writing the
+    sidecar itself just leaves these images unstamped (admitted, not quarantined, on read; see
+    ``stale_finished_names``), because the status the human recorded is already committed by the
+    time this runs. Returns ``None`` when there was nothing to stamp (no subject, no
+    ``classes.json``, an unreadable or subject-less registry) -- not a failure, since no
+    confirmation was ever asserted against a schema that says nothing about this subject --
+    ``True`` once the stamp lands, and ``False`` only when the write itself raised, so a caller
+    can tell a mark it is about to clear still describes reality."""
     if not subject:
-        return False
+        return None
     from tcip_mcp.class_registry import attribute_schema_digest, read_registry
     from tcip_mcp.dataset_layout import classes_path, stamp_image_status_digests
 
     cp = classes_path(dataset_root)
     if not cp.is_file():
-        return False
+        return None
     try:
         digest = attribute_schema_digest(read_registry(cp), subject)
     except (OSError, ValueError):
         # ValueError covers json.JSONDecodeError and class_registry.RegistryError (its subclass).
-        return False
+        return None
     if digest is None:
-        return False
+        return None
     try:
         stamp_image_status_digests(dataset_root, bucket, image_names, digest)
     except (OSError, StoreError):
@@ -329,7 +331,10 @@ def set_image_status(payload: ImageStatusPayload) -> dict:
     bucket = _require_bucket(payload.subject, payload.date)
     record_image_statuses(root, bucket, {payload.image_name: payload.status},
                           recorded_by=user_id(resolve_user(payload.user)))
-    digest_stamped = _stamp_digest(root, bucket, payload.subject, [payload.image_name])
+    # Nothing to stamp (no subject in the registry, say) is not a failed write: only a stamp
+    # attempt that actually raised reads back as unstamped.
+    stamped = _stamp_digest(root, bucket, payload.subject, [payload.image_name])
+    digest_stamped = stamped is not False
     _audit_dataset_write(
         root,
         "gui_set_image_status",
@@ -361,7 +366,9 @@ def set_image_status_bulk(payload: ImageStatusBulkPayload) -> dict:
         record_image_statuses(root, bucket, applied,
                               recorded_by=user_id(resolve_user(payload.user)))
     stamped = _stamp_digest(root, bucket, payload.subject, applied)
-    not_stamped = [] if stamped else sorted(applied)
+    # Nothing to stamp (None) is not a failed write; only an actual write failure (False) names
+    # the applied statuses as unstamped.
+    not_stamped = sorted(applied) if stamped is False else []
     # Record what was actually written, not the raw payload: an entry whose status was skipped
     # would overstate the change, and a no-op write logged as a mutation is noise.
     if applied:

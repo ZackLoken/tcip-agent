@@ -11,7 +11,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import type { ImageBandsResponse } from "@/api/client";
-import { classesApi, subjectColor, type ImageStatus } from "@/api/classes";
+import { classesApi, FINISHED_STATUSES, subjectColor, type ImageStatus } from "@/api/classes";
 import { BandPicker } from "@/components/BandPicker";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { useDisclosure } from "@/hooks/useDisclosure";
@@ -235,9 +235,9 @@ export function AnnotateToolbar({
         dataset.annotations_dir,
         useStore.getState().user || undefined,
       );
-      // The optimistic write above already cleared the mark; a stamp that did not land leaves
-      // this confirmation exactly as unverifiable against the current schema as before the write.
-      if (!result.digest_stamped) {
+      // Only a finished status is a human assertion the schema stamp backs; a stamp that did not
+      // land on one leaves it exactly as unverifiable as before the write.
+      if (FINISHED_STATUSES.includes(newStatus) && !result.digest_stamped) {
         useStore.getState().markStale(currentImage);
         useStore
           .getState()
