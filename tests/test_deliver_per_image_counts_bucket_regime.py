@@ -1013,8 +1013,7 @@ def test_the_live_regimes_export_detection_csv_stamp_scope_unstated_becomes_the_
                                str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
                                predictions_dir=str(bucket))
 
-    assert "error" in r
-    assert "tcip repair-classified-predictions" in r["error"]
+    assert r["error"] == str(real_exc)
 
 
 def test_the_live_regimes_export_detection_csv_store_error_becomes_the_tools_own_error(
@@ -1042,8 +1041,7 @@ def test_the_live_regimes_export_detection_csv_store_error_becomes_the_tools_own
                                str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
                                predictions_dir=str(bucket))
 
-    assert "error" in r
-    assert str(real_exc) in r["error"]
+    assert r["error"] == str(real_exc)
 
 
 def test_per_image_counts_from_bucket_converts_export_detection_csvs_stamp_scope_unstated(
@@ -1078,7 +1076,7 @@ def test_per_image_counts_from_bucket_converts_export_detection_csvs_stamp_scope
         itools.per_image_counts_from_bucket(
             str(bucket), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT)
 
-    assert "tcip repair-classified-predictions" in str(excinfo.value)
+    assert str(excinfo.value) == str(real_exc)
 
 
 def test_per_image_counts_from_bucket_converts_export_detection_csvs_store_error(
@@ -1111,4 +1109,4 @@ def test_per_image_counts_from_bucket_converts_export_detection_csvs_store_error
         itools.per_image_counts_from_bucket(
             str(bucket), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT)
 
-    assert str(real_exc) in str(excinfo.value)
+    assert str(excinfo.value) == str(real_exc)
