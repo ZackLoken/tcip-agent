@@ -152,7 +152,7 @@ def test_labels_term_excludes_a_bucket_sidecar(tmp_path):
     assert fingerprint_mod._labels_term(sidecar_only) is None
 
 
-def test_rgb_nested_dataset_fingerprints_byte_identically_before_and_after_the_extension_widening(
+def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_own_determinism(
         tmp_path):
     """The images term's extension set widened from a photographic-only set to
     ``image_utils.IMAGE_EXTS`` (adding ``.heic``/``.npy``/``.npz``/``.bandgroup``); ``.jpg`` was a
