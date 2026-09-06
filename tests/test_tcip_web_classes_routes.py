@@ -575,6 +575,27 @@ def test_reconfirm_with_the_digest_store_obstructed_answers_digest_stamped_false
     assert body["stale_definition"] == ["IMG_0001.JPG"]
 
 
+def test_set_image_status_reports_digest_stamped_true_for_a_subject_the_registry_does_not_declare(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A subject absent from classes.json earns no digest to stamp against; that is nothing to
+    stamp, not a failed write, so the confirmation must not read back as needing
+    re-confirmation."""
+    client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"leaf": {"attributes": {}}},
+              "version": None},
+    )
+
+    resp = client.post(
+        "/api/classes/image_status",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
+    )
+    assert resp.json()["digest_stamped"] is True
+
+
 def test_image_status_rejects_invalid(client: TestClient, tmp_path: Path) -> None:
     resp = client.post(
         "/api/classes/image_status",
