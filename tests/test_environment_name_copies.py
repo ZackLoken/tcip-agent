@@ -79,7 +79,6 @@ _EXPECTED_COUNTS = {
     "scripts/smoke_fence_e2e.py": 1,
     "scripts/smoke_phenology_e2e.py": 1,
     "scripts/smoke_terminal_e2e.py": 1,
-    "scripts/watch_agent_chat.py": 1,
 }
 
 
