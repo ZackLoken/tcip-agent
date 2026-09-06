@@ -157,3 +157,107 @@ describe("StatusBar canvas facts", () => {
     expect(screen.queryByText(/boxes/)).not.toBeInTheDocument();
   });
 });
+
+describe("StatusBar shape counts (stored records only, never a derived box)", () => {
+  beforeEach(() => {
+    useStore.getState().setActiveTab("annotate");
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, images_dir: "/data/images/2026-01-01" } },
+      canvas: { ...s.canvas, loadedImagePath: "/data/images/2026-01-01/img1.jpg" },
+    }));
+  });
+
+  it("counts a cut polygon's two pieces as polygons, never as boxes", () => {
+    useStore.setState((s) => ({
+      canvas: {
+        ...s.canvas,
+        polygons: [
+          {
+            rings: [
+              [
+                [0, 0],
+                [10, 0],
+                [10, 10],
+                [0, 10],
+              ],
+            ],
+            subject: "bud",
+            attributes: {},
+          },
+          {
+            rings: [
+              [
+                [20, 0],
+                [30, 0],
+                [30, 10],
+                [20, 10],
+              ],
+            ],
+            subject: "bud",
+            attributes: {},
+          },
+        ],
+      },
+    }));
+    render(<StatusBar />);
+
+    expect(screen.getByText("2 polygons")).toBeInTheDocument();
+    expect(screen.queryByText(/boxes/)).not.toBeInTheDocument();
+  });
+
+  it("shows the separator only between two shown counts, not with polygons and no boxes", () => {
+    useStore.setState((s) => ({
+      canvas: {
+        ...s.canvas,
+        polygons: [
+          {
+            rings: [
+              [
+                [0, 0],
+                [10, 0],
+                [10, 10],
+                [0, 10],
+              ],
+            ],
+            subject: "bud",
+            attributes: {},
+          },
+        ],
+      },
+    }));
+    const { container } = render(<StatusBar />);
+
+    expect(screen.getByText("1 polygons")).toBeInTheDocument();
+    expect(container.textContent).not.toContain("|");
+  });
+
+  it("shows both counts with the separator between them when both exist", () => {
+    useStore.setState((s) => ({
+      canvas: {
+        ...s.canvas,
+        polygons: [
+          {
+            rings: [
+              [
+                [0, 0],
+                [10, 0],
+                [10, 10],
+                [0, 10],
+              ],
+            ],
+            subject: "bud",
+            attributes: {},
+          },
+        ],
+        boxes: [{ x1: 0, y1: 0, x2: 10, y2: 10, subject: "fruit", attributes: {} }],
+      },
+    }));
+    render(<StatusBar />);
+
+    // Both counts and the separator sit in one span as sibling text/element nodes, so a
+    // whole-string match misses; a substring regex still finds each independently.
+    expect(screen.getByText(/1 polygons/)).toBeInTheDocument();
+    expect(screen.getByText(/1 boxes/)).toBeInTheDocument();
+    expect(screen.getByText("|")).toBeInTheDocument();
+  });
+});
