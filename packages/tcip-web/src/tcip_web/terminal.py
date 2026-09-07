@@ -35,6 +35,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -307,6 +308,11 @@ class _WinPty:
         subprocess.run(
             ["taskkill", "/F", "/T", "/PID", str(self.pid)], capture_output=True, check=False
         )
+        # taskkill returning is not the process exiting: bounded-poll isalive() (the POSIX
+        # path's own wait discipline), so a caller reading it right after sees the real state.
+        deadline = time.monotonic() + 5
+        while self._p.isalive() and time.monotonic() < deadline:
+            time.sleep(0.1)
 
     def close(self) -> None:
         """Reader-owned cleanup after EOF (winpty frees its handles internally)."""

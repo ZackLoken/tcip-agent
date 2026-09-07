@@ -146,7 +146,13 @@ class TerminalSession:
         return None
 
     def restart(self, rows: int, cols: int) -> Optional[str]:
-        self.terminate()
+        # A survivor here stays attached under the old generation: start() below would find
+        # self._pty alive and report success with no process spawned and no line written.
+        if not self.terminate():
+            return (
+                "the previous agent process could not be stopped and stays attached to this "
+                "session."
+            )
         with self._lock:
             self._scrollback = []
             self._scrollback_len = 0
@@ -267,7 +273,8 @@ _SESSIONS_LOCK = threading.Lock()
 def shutdown_all() -> None:
     """Kill every live agent terminal (called from the app lifespan on shutdown)."""
     for s in list(_SESSIONS.values()):
-        s.terminate()
+        if not s.terminate():
+            logger.warning("terminal session %s survived shutdown termination", s.id)
     _SESSIONS.clear()
 
 
