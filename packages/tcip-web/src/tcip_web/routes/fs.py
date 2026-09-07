@@ -58,11 +58,12 @@ def _windows_drives() -> list[dict]:
 def _roots_listing(confined: bool) -> dict:
     """Top-level view (no path given): the allowed roots when confined, else drives (Windows) / '/'."""
     if confined:
+        roots, _excluded = allowed_roots()
         return {
             "path": "",
             "parent": None,
             "is_dataset_root": False,
-            "entries": [_entry(r) for r in allowed_roots() if r.is_dir()],
+            "entries": [_entry(r) for r in roots if r.is_dir()],
         }
     if os.name == "nt":
         return {"path": "", "parent": None, "is_dataset_root": False, "entries": _windows_drives()}

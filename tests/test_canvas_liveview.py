@@ -201,6 +201,38 @@ def test_push_answers_409_on_a_stale_generation_and_nothing_lands_under_the_old_
     assert _meta(second_root)["image_path"] == "C:/img/b.jpg"
 
 
+def test_select_refuses_a_project_root_pending_removal_and_the_binding_is_unchanged(
+    client, tmp_path,
+):
+    """A select naming a pending project's root is refused ahead of the binding write: the
+    generation an earlier, ordinary select left in force is untouched by the refused one."""
+    import tcip_store as ts
+    from tcip_mcp import workspace
+
+    (tmp_path / ".tcip").mkdir()
+    first = _select(client, tmp_path)
+
+    ts.replace(
+        workspace.pending_removal_key(tmp_path),
+        {"requested_at": "20260304T120000Z", "requested_by": "user:tester",
+         "archive_path": "archive.zip", "holding_dir": "holding",
+         "external_roots": [], "dependent_projects": []},
+        expect=ts.Version.ABSENT,
+    )
+
+    resp = client.post(
+        "/api/dataset/select",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
+    )
+    assert resp.status_code == 409
+    assert "20260304T120000Z" in resp.json()["detail"]
+
+    from tcip_mcp.web_client import read_canvas_binding
+
+    current = read_canvas_binding()
+    assert current["generation"] == first["generation"]
+
+
 def test_push_answers_409_on_no_binding_at_all(client, tmp_path):
     """The refusal's other half: a push before any select has ever run names a missing record,
     not a generation mismatch."""

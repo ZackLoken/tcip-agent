@@ -86,7 +86,8 @@ def test_the_workspace_is_admitted_and_a_sibling_outside_it_is_refused_with_no_e
     inside.parent.mkdir(parents=True)
     inside.write_bytes(b"x")
     assert assert_path_allowed(str(inside)) == inside.resolve()
-    assert allowed_roots()[0] == tmp_path.parent.resolve()
+    roots, _excluded = allowed_roots()
+    assert roots[0] == tmp_path.parent.resolve()
     with pytest.raises(ValueError, match="outside the allowed roots"):
         assert_path_allowed(str(outside / "leak.jpg"))
 
@@ -142,7 +143,7 @@ def test_a_dataset_registered_as_the_projects_own_tree_contributes_no_relative_r
     registered = register_dataset(str(project), crop="currant", project_root=str(project))
     assert "error" not in registered
 
-    roots = allowed_roots()
+    roots, _excluded = allowed_roots()
 
     assert all(root.is_absolute() for root in roots)
     assert project.resolve() in roots
