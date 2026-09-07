@@ -886,7 +886,7 @@ anything.
 | `cancel_training` | `training_tools.py:1446` | yes | Request graceful cancellation of a running training run. |
 | `run_hyperparameter_search` | `training_tools.py:2164` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
 | `cancel_hyperparameter_search` | `training_tools.py:2570` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:3305` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `evaluate_model` | `training_tools.py:3315` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (1 tool)
 
@@ -1086,16 +1086,16 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/sweeps` | `relaunch_sweep` | `routes/tuning.py:488` |
-| POST | `/sweeps/{sweep_id}/cancel` | `cancel_sweep_route` | `routes/tuning.py:534` |
-| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:545` |
-| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:559` |
-| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:600` |
-| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:621` |
-| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:648` |
-| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:734` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:751` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:765` |
+| POST | `/sweeps` | `relaunch_sweep` | `routes/tuning.py:508` |
+| POST | `/sweeps/{sweep_id}/cancel` | `cancel_sweep_route` | `routes/tuning.py:555` |
+| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:566` |
+| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:580` |
+| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:621` |
+| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:642` |
+| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:669` |
+| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:755` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:772` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:786` |
 
 ### routes/validation.py, prefix `/api/review` (1 route)
 
@@ -2295,7 +2295,7 @@ Phase 3 verdict: single.
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
 Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:983` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
-Side B: `packages/tcip-web/src/tcip_web/routes/training.py:334` (`asyncio.to_thread(read_log, key, after=cursor)`, the training stream's incremental tail read off the event loop, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:634` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
+Side B: `packages/tcip-web/src/tcip_web/routes/training.py:334` (`asyncio.to_thread(read_log, key, after=cursor)`, the training stream's incremental tail read off the event loop, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:655` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->
