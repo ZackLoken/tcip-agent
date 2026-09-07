@@ -1555,20 +1555,28 @@ class _AccessTrackingConfig(dict):
     misspelled leaf under an otherwise-read block is reported by its own dotted name rather than
     being hidden behind the block it lives in, and a write through that nested read
     (``cfg["model_source"]["builder_kwargs"]["width"] = 8``) lands on the same tree ``cfg`` itself
-    holds, not a throwaway copy.
+    holds, not a throwaway copy. A value already wrapped by an earlier read is answered untouched
+    on a later one, carrying whatever tracker and prefix it was built with; every wrap today
+    shares this same instance's own ``accessed`` set and prefix, since only one construction
+    site ever builds one.
 
     Real, stated limitations (never gates the run, warn-only, so a false positive costs a log
     line, not a failed trial): a C-level copy (``dict(cfg)``, ``**cfg``) bypasses the overrides
     entirely, since this class doesn't override ``__iter__`` and CPython's dict-merge and
     dict-construction paths read a dict subclass's own storage directly rather than through
-    ``__getitem__``/``get`` whenever that's true, so the copy is a plain dict with none of this
-    class's own wrapping. Whole-dict iteration (``.items()``/``.values()``/``.keys()``) isn't
-    tracked per key either, for the same reason. A reference to a nested dict taken before the
-    tracker's first read of that key (the ``merged`` dict ``_apply_hpo_params`` returned, for one,
-    before anything here has wrapped it) diverges from the tracked tree from that first read on:
-    the old reference still points at the pre-wrap plain dict, while ``cfg`` now holds the
-    wrapper in its place. The tracked tree, reached off ``cfg`` itself (or a value ``cfg`` already
-    returned), is the one to read and to persist.
+    ``__getitem__``/``get`` whenever that's true. The copy's keys are read untracked (nothing it
+    reads afterward is recorded in ``accessed``), and its values are exactly whatever this
+    instance currently holds at copy time, this class's own installed wrappers included when a
+    key was wrapped before the copy was taken: that is why ``{**tracked_config}`` carries the
+    stamped data block into a persisted snapshot, and why the store this snapshot is written
+    through must accept dict subclasses as values. Whole-dict iteration
+    (``.items()``/``.values()``/``.keys()``) isn't tracked per key either, for the same reason.
+    A reference to a nested dict taken before the tracker's first read of that key (the
+    ``merged`` dict ``_apply_hpo_params`` returned, for one, before anything here has wrapped
+    it) diverges from the tracked tree from that first read on: the old reference still points
+    at the pre-wrap plain dict, while ``cfg`` now holds the wrapper in its place. The tracked
+    tree, reached off ``cfg`` itself (or a value ``cfg`` already returned), is the one to read
+    and to persist.
     """
 
     def __init__(self, *args: Any, _prefix: str = "", _accessed: set[str] | None = None,
