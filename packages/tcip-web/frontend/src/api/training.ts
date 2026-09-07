@@ -191,7 +191,10 @@ export const trainingApi = {
     getJson<TrainingRunDetail>(ROUTES.getTrainingRunsByExperimentId(experiment_id)),
 
   launchTensorboard: (experiment_id: string) =>
-    postJson<TensorboardLaunch>(ROUTES.postTrainingRunsByExperimentIdTensorboard(experiment_id), {}),
+    postJson<TensorboardLaunch>(
+      ROUTES.postTrainingRunsByExperimentIdTensorboard(experiment_id),
+      {},
+    ),
 
   cancel: (experiment_id: string) =>
     postJson<{ experiment_id: string; status: string; cancel_requested: boolean }>(
