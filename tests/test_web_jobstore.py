@@ -519,6 +519,56 @@ def test_inference_worker_healthy_run_serves_audit_warning_none(tmp_path, monkey
     assert served.get("audit_warning") is None
 
 
+def test_inference_worker_persists_terminal_status_when_dataset_root_of_raises(tmp_path, monkeypatch):
+    """A raise from ``dataset_root_of`` is not ``AuditEntryNotWritten`` and is not caught inside
+    the worker's finally block, so it propagates out of ``_worker``; the terminal status still
+    has to land on the job and on the persisted summary before that happens, rather than the
+    persisted row staying "running" forever."""
+    pytest.importorskip("fastapi")
+    monkeypatch.chdir(tmp_path)
+    from PIL import Image
+
+    from tcip_web.routes.inference import InferenceJob, _register, _worker
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    Image.new("RGB", (16, 16)).save(images_dir / "img.jpg")
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+
+    class FakePredictor:
+        def __init__(self, checkpoint_path=None, **kw):
+            pass
+
+        def predict_batch(self, paths, **kw):
+            return [{"boxes": [], "scores": [], "labels": [], "width": 16, "height": 16}]
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
+
+    import tcip_mcp.dataset_layout as dataset_layout_module
+
+    def _raise_dataset_root_of(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("dataset_root_of blew up")
+
+    monkeypatch.setattr(dataset_layout_module, "dataset_root_of", _raise_dataset_root_of)
+
+    output_dir = tmp_path / "ds" / "predictions" / "model" / "2026-01-01"
+    job = InferenceJob(job_id="j-root-raise", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+                       output_dir=str(output_dir), tile=False, conf=0.25, iou=0.7,
+                       slice_hw=(640, 640), overlap=0.2)
+    _register(job)
+
+    with pytest.raises(RuntimeError, match="dataset_root_of blew up"):
+        _worker(job)
+
+    assert job.status == "completed"
+
+    from tcip_web.jobstore import load
+    rows = {row["job_id"]: row for row in load("inference_jobs")}
+    assert rows["j-root-raise"]["status"] == "completed"
+
+
 def test_inference_stream_final_frame_never_precedes_the_audit_attempt(tmp_path, monkeypatch):
     """The worker's terminal status must not become visible to the stream before the audit
     attempt for this run resolves: a frame that read the status while the append was still in

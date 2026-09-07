@@ -422,10 +422,10 @@ def _worker(job: InferenceJob) -> None:
                 except AuditEntryNotWritten as exc:
                     job.audit_warning = str(exc)
         finally:
-            # In its own inner finally so the status still lands terminal whatever the audit
-            # attempt above raises, rather than leaving the job "running" forever.
+            # In its own inner finally so the status and the persisted summary both land
+            # whatever the audit attempt above raises, rather than leaving the job "running" forever.
             job.status = terminal_status
-        _persist()
+            _persist()
 
 
 # ── Request/response ───────────────────────────────────────────────────
