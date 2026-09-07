@@ -1141,11 +1141,12 @@ def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
     subprocess-delegated run's real status is visible to both and neither reimplements the merge.
 
     A live in-memory entry (HPO trials excluded) wins by ``run_id`` over its own disk row: a
-    ``pid``-bearing one takes the disk overlay for ``status``/``current_epoch``/``error`` and
-    ``best_metric``/``best_metric_name`` (a subprocess-delegated run mutates its own separate
-    copy on disk, so the parent-side in-memory record, ``best_metric`` included, is a stale
-    launch-time placeholder past that point); a ``pid``-less one (every synchronous run) is
-    reported from its own in-memory record, untouched. Both carry
+    ``pid``-bearing one takes the disk overlay for ``status``/``heartbeat``/``current_epoch``/
+    ``error`` and ``best_metric``/``best_metric_name`` (a subprocess-delegated run mutates its
+    own separate copy on disk, so the parent-side in-memory record, ``best_metric`` included, is
+    a stale launch-time placeholder past that point); a ``pid``-less one (every synchronous run)
+    is reported from its own in-memory record, untouched, with no ``heartbeat`` at all: this
+    process running the loop is itself the liveness fact, nothing else to legibilize. Both carry
     ``external: False`` (a process-locality fact, never who launched the run) and an
     ``experiment_id``: the row's own resolved field
     (``TrainRun.experiment_id``, set by ``launch_training`` once ``_ensure_experiment`` resolves
@@ -1171,6 +1172,7 @@ def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
         overlay = disk_by_run_id.get(row["run_id"]) if row.get("pid") is not None else None
         if overlay is not None:
             row["status"] = overlay["status"]
+            row["heartbeat"] = overlay.get("heartbeat")
             if overlay["current_epoch"] is not None:
                 row["current_epoch"] = overlay["current_epoch"]
             if overlay.get("error"):

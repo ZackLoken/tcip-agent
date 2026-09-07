@@ -56,6 +56,29 @@ def test_reconstructed_run_running_vs_interrupted(tmp_path, monkeypatch):
     assert by_id["dead"]["status"] == "interrupted"
 
 
+def test_reconstructed_row_carries_the_heartbeat_instant(tmp_path, monkeypatch):
+    """No process id is persisted anywhere a reconstructed row could check, so a client showing
+    a 'running' row as live needs the heartbeat instant itself, not just the derived state, to
+    say how stale that liveness claim already is."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment, status_key, update_status
+    from tcip_mcp.tools.experiment_tools import list_experiments
+
+    create_experiment("beating", {"model_source": {"builder": "x:y"}}, data_source="imgs")
+    update_status("beating", "running")
+    key = status_key("beating")
+    stamped = (datetime.now(timezone.utc) - timedelta(minutes=3)).isoformat()
+    with ts.transaction(key) as txn:
+        s = txn.read(key)
+        s["heartbeat"] = stamped
+        txn.write(key, s)
+
+    by_id = {r["run_id"]: r for r in list_experiments(launched_only=True)["runs"]}
+    assert by_id["beating"]["status"] == "running"
+    assert by_id["beating"]["heartbeat"] == stamped
+
+
 def test_configured_stale_window_agrees_across_run_list_compare_and_status(tmp_path, monkeypatch):
     """list_experiments(launched_only=True), compare_experiments (the tool) and monitor_training
     must derive
