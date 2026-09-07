@@ -30,6 +30,11 @@ def state_trait_operationalization(
 ) -> dict:
     """Record what this trait's delivered number means, in the breeder's terms, for one delivery.
 
+    Refuses when this trait's own trait-spec statement (what the trait itself measures, authored
+    with `author_trait_spec` or `revise_trait_spec`) is not both confirmed and current: the
+    breeder confirms what a trait is before this records what its delivered number means, and the
+    refusal names the door that clears it.
+
     Every delivery door reads this record before it writes anything. A trait with none, or one
     nobody confirmed, delivers nothing, and the refusal names which half is missing.
 
