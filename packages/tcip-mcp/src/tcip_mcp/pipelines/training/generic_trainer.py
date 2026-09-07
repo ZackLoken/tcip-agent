@@ -146,8 +146,10 @@ def stamp_effective_data_geometry(data_cfg: dict, train_ds: Any) -> dict:
     """Record the input geometry ``train_ds`` actually serves into ``data_cfg``, in place.
 
     ``data_cfg`` is the live ``config["data"]`` dict the run persists (checkpoints embed the
-    run config by reference; an HPO trial's resolved-config snapshot spreads the merged
-    config), so this must run after the dataset is built and before training starts.
+    run config by reference; an HPO trial's resolved-config snapshot is written from the
+    trial's tracked config, so a mutation this function makes lands in that snapshot only when
+    ``data_cfg`` is reached through the tracked tree), so this must run after the dataset is
+    built and before training starts.
 
     A tiled train dataset (one carrying a ``tile_size``) stamps its effective
     ``tile_size``/``overlap`` into the tiling record, filling in defaults the caller's config

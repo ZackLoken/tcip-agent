@@ -111,11 +111,14 @@ def evaluation_section(config: dict) -> dict:
     ``preflight_config`` and the sweep's direction resolution all call this rather than each
     choosing between the two placements on its own.
 
-    The returned block is the caller's own object, top-level or nested, never copied, when
-    ``config`` is a plain dict. When ``config`` is a dict subclass whose ``get`` wraps a nested
-    read (an HPO trial's access-tracking config), the returned block is that subclass's own
-    wrapped view of the nested dict, installed back onto ``config`` on first read, so a write
-    through it is visible on ``config`` from then on, the same as the plain-dict case.
+    When a block is present (top-level or nested) and not itself falsy, the returned block is
+    the caller's own object, never copied, when ``config`` is a plain dict; when ``config`` is a
+    dict subclass whose ``get`` wraps a nested read (an HPO trial's access-tracking config), the
+    returned block is that subclass's own wrapped view of the nested dict, installed back onto
+    ``config`` on first read, so a write through it is visible on ``config`` from then on, the
+    same as the plain-dict case. When no block is present, or the present block is falsy (an
+    empty dict), the function answers a fresh ``{}`` instead: a write through that returned
+    block reaches nothing, top-level or nested alike.
     """
     top = config.get("evaluation", _NO_TOP_LEVEL_EVALUATION)
     if top is not _NO_TOP_LEVEL_EVALUATION:
