@@ -120,7 +120,7 @@ def redraw_calibration_holdout(
     from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_store import DecodeError, store
 
-    from tcip_mcp.audit import dataset_scope_of, record_event
+    from tcip_mcp.audit import dataset_scope_of, record_event_or_raise
     from tcip_mcp.pipelines.data.splits import (
         cal_holdout_lock_key, cal_holdout_scope_root, count_label_lines, label_image_stems,
         resolve_locked_cal_holdout_split,
@@ -211,8 +211,9 @@ def redraw_calibration_holdout(
     )
     new_membership = {"calibration": new_lock["calibration"], "holdout": new_lock["holdout"]}
 
-    # A distinct tool name under the same scope: @audited logs the call, this logs what it made.
-    record_event(
+    # A distinct tool name under the same scope: @audited logs the call, this logs what it made;
+    # the lock above is already redrawn, so a failed append raises rather than staying silent.
+    record_event_or_raise(
         "redraw_calibration_holdout_result",
         {"identity_hash": identity_hash, "group_by": group_by, "group_key_map": group_key_map,
          "seed": seed, "holdout_ratio": holdout_ratio, "reason": reason,

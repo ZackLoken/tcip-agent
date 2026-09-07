@@ -428,12 +428,15 @@ def _write_registry_entry(txn: tcip_store.Txn, key: Key, entry: dict) -> dict | 
 def _audit_entry_replace(name: str, superseded: dict | None, entry: dict) -> None:
     """Emit ``model_registry_replace`` once the transaction that changed ``name`` has closed, and
     only when the replace actually changed content (not an idempotent same-digest re-registration).
+
+    The transaction above has already replaced the entry, so a failed append raises
+    ``AuditEntryNotWritten`` rather than leaving a provenance gap nobody is told about.
     """
     if superseded is None or superseded.get("sha256") == entry["sha256"]:
         return
-    from tcip_mcp.audit import record_event
+    from tcip_mcp.audit import record_event_or_raise
 
-    record_event("model_registry_replace", {
+    record_event_or_raise("model_registry_replace", {
         "name": name, "superseded_sha256": superseded.get("sha256"),
         "superseded_tags": superseded.get("tags"),
         "superseded_experiment_id": superseded.get("experiment_id"),

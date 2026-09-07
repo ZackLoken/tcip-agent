@@ -1129,15 +1129,13 @@ def _append_validation(experiment_id: str, body: dict[str, Any]) -> dict[str, An
     # No terminal-state check: a validation is a statement made about a run after it ended.
     store.append(validations_key(experiment_id), body)
     digest = validation_digest(body)
-    try:
-        from tcip_mcp.audit import record_event
+    from tcip_mcp.audit import record_event_or_raise
 
-        # Platform log: the record this mutates is a platform-scoped experiment member.
-        record_event("experiment_validation_recorded",
-                     {"experiment_id": experiment_id, "document": body["document"],
-                      "trait": body["trait"], "record_digest": digest})
-    except Exception:
-        logger.debug("could not audit validation append", exc_info=True)
+    # Platform log: the row above is already on disk, so a failed append raises rather than
+    # leaving a provenance gap nobody is told about.
+    record_event_or_raise("experiment_validation_recorded",
+                 {"experiment_id": experiment_id, "document": body["document"],
+                  "trait": body["trait"], "record_digest": digest})
     return {"experiment_id": experiment_id, "record_digest": digest}
 
 
@@ -1211,14 +1209,12 @@ def ensure_calibration_experiment(
     # create_experiment's create-only refusal is the existence check; a repeat names this same calibration.
     created = create_experiment(experiment_id, {**identity, **config})
     if "error" not in created:
-        try:
-            from tcip_mcp.audit import record_event
+        from tcip_mcp.audit import record_event_or_raise
 
-            # Platform log: the experiment record lives at the platform root.
-            record_event("calibration_experiment_created",
-                         {"experiment_id": experiment_id, "document": document, "trait": trait})
-        except Exception:
-            logger.debug("could not audit calibration experiment creation", exc_info=True)
+        # Platform log: the experiment above is already created, so a failed append raises
+        # rather than leaving a provenance gap nobody is told about.
+        record_event_or_raise("calibration_experiment_created",
+                     {"experiment_id": experiment_id, "document": document, "trait": trait})
     return experiment_id
 
 

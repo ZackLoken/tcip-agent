@@ -190,13 +190,16 @@ def _entry(
 def _write_entry(entry: dict[str, Any], scope: str | Path | None = None) -> None:
     """Append one audit entry to the log ``scope`` names (lock-guarded + fsync'd), never raising.
 
-    What :func:`record_event` writes through, for the emitters that are not MCP tools. Its callers
-    are built on never raising here: the training envelope brackets a body already running in a
-    background thread, and each GUI route states that recording never fails the request. Standing
-    residual: some of those callers record after their own mutation, the position :func:`audited`
-    refuses from, so a dropped line there is a provenance gap nobody is told about. The refusal
-    covers the decorator; extending it to these emitters means changing what each caller does with
-    the failure, not this function.
+    What :func:`record_event` writes through, for the emitters that are not MCP tools. Its
+    remaining callers each have their own reason to stay best-effort rather than move to
+    :func:`record_event_or_raise`: the training envelope's open and close events
+    (``envelope.py:486``, ``:501``) bracket a body already running in a background thread, its
+    two ``model_registration_failed`` lines (``:588``, ``:596``) are themselves recording a
+    failure, the worker's crash path (``subprocess_worker.py:210``) is reconciling a
+    pre-training crash before its own ``training_run`` event can open, and the web
+    ``phenology_measurement`` view (``routes/results.py``) is a read, with no mutation to leave
+    unrecorded. None of them records after its own mutation the position :func:`audited` refuses
+    from; a caller that does uses :func:`record_event_or_raise` instead.
     """
     try:
         append(_stamp_scope(entry, scope), entry)
