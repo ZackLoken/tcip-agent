@@ -70,7 +70,8 @@ def _band_rects(
     local ``(0, 0)``), then translates every returned rect back by the region's own origin
     (``+ x0, + y0``), the clean, lattice-phase-safe translation confirmed by design review.
 
-    ``seed`` is recorded on the returned split and governs no band placement:
+    ``seed`` is handed to :func:`spatial_strip_split`, which only records it on the split this
+    function reads the rects from and discards; it governs no band placement:
     :func:`spatial_strip_split` places every band by its fixed center-out order alone, band
     names being interchangeable and only the set of band rects consumed by this function's
     callers.

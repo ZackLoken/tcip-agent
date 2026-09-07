@@ -842,8 +842,8 @@ class SpatialStripSplit:
     ``stripes_per_split`` asks for that many separate pieces per side, but the fixed
     center-out order does not scatter every side equally: the largest share's pieces sort
     adjacent under that order and merge back into one contiguous region, so it is the smaller
-    sides that actually end up split into pieces flanking it. Three equal-count names at
-    ``stripes_per_split=3`` land in the order ``C, B, B, A, A, A, B, C, C`` (``A`` the largest
+    sides that actually end up split into pieces flanking it. Three names of distinct shares,
+    each cut into three pieces at ``stripes_per_split=3``, land in the order ``C, B, B, A, A, A, B, C, C`` (``A`` the largest
     share, ``C`` the smallest), five merged regions once adjacent same-name pieces combine:
     ``A`` stays whole, ``B`` and ``C`` each split into two pieces on either side of it.
     ``discard_ceiling`` caps how many pieces actually get used regardless of how many were
@@ -939,8 +939,8 @@ def _strip_regions(
     space: a region with positive pixel width could otherwise miss the stride-spaced lattice
     entirely and contain zero real tile origins.
 
-    Two independent knobs: ``stripes_per_split`` sets how many separate, scattered pieces a
-    side gets (capped by ``discard_ceiling``, the maximum share of the axis a buffer band
+    Two independent knobs: ``stripes_per_split`` sets how many separate pieces a side is cut
+    into before adjacent same-name pieces merge (capped by ``discard_ceiling``, the maximum share of the axis a buffer band
     between differing sides may consume, so asking for more pieces never buys precision at
     unbounded discard cost); the fraction each side targets sets its total share of the axis
     directly. At the default of one piece per side, every side is one contiguous region, the
