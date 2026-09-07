@@ -275,6 +275,27 @@ def test_run_hyperparameter_search_refuses_a_caller_split_seed_axis_at_one_draw(
     assert not ran
 
 
+@pytest.mark.parametrize("value, expected", [
+    pytest.param(2.5, None, id="a-fractional-float"),
+    pytest.param(False, None, id="the-bool-False"),
+    pytest.param(True, None, id="the-bool-True"),
+    pytest.param("2.0", None, id="a-decimal-string"),
+    pytest.param("2", 2, id="an-integer-string"),
+    pytest.param(2.0, 2, id="a-whole-float"),
+    pytest.param(1e30, int(1e30), id="a-whole-float-past-ordinary-int-range"),
+    pytest.param(float("inf"), None, id="positive-infinity"),
+    pytest.param(-3, -3, id="a-negative-int"),
+])
+def test_coerce_split_draws_verdicts(value, expected):
+    """coerce_split_draws answers an int only for an int that is not a bool, or a str or finite
+    float whose int() equals the value it was given; a bool (int(True) would otherwise silently
+    read as 1), a fractional float (int(2.5) would otherwise silently truncate to 2), a
+    non-numeric string and a non-finite float are none of those and answer None."""
+    import tcip_mcp.tools.training_tools as tt
+
+    assert tt.coerce_split_draws(value) == expected
+
+
 def test_caller_split_seed_refusal_tolerates_an_infinite_split_draws_value():
     """A JSON Infinity literal decodes to float("inf") through the store's own plain
     json.loads even though its encode refuses to write one, so a manifest of unknown

@@ -1064,12 +1064,17 @@ def test_relaunch_coerces_a_manifests_numeric_string_split_draws(
     assert captured["split_draws"] == 2
 
 
+@pytest.mark.parametrize("value, study", [
+    pytest.param("not-a-number", "hpo_drawsbad01", id="not-a-number"),
+    pytest.param(2.5, "hpo_drawsbad02", id="a-fractional-float"),
+])
 def test_relaunch_route_409s_for_a_manifest_whose_split_draws_is_not_a_draw_count(
-    client: TestClient, hpo_root, monkeypatch
+    client: TestClient, hpo_root, monkeypatch, value, study,
 ) -> None:
-    """A manifest whose split_draws value int() cannot read at all is not a draw count; the
-    relaunch route refuses it by name before the worker starts, rather than replaying it into
-    the same TypeError a numeric string used to cause."""
+    """A manifest whose split_draws value coerce_split_draws cannot read as an int is not a
+    draw count; the relaunch route refuses it by name before the worker starts, rather than
+    replaying it into the same TypeError a numeric string used to cause or the silently
+    truncated int a bare int() would give a fractional float."""
     captured: dict = {}
 
     def fake_run_hyperparameter_search(**kwargs):
@@ -1078,9 +1083,9 @@ def test_relaunch_route_409s_for_a_manifest_whose_split_draws_is_not_a_draw_coun
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
-    _write_sweep(hpo_root, "hpo_drawsbad01", base_config=base_config, split_draws="not-a-number")
+    _write_sweep(hpo_root, study, base_config=base_config, split_draws=value)
 
-    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_drawsbad01"})
+    resp = client.post("/api/tuning/sweeps", json={"study_name": study})
     assert resp.status_code == 409
     assert "split_draws" in resp.json()["detail"]
     assert not captured
@@ -1404,9 +1409,10 @@ def test_manifest_fields_of_an_absent_manifest_is_not_relaunchable_with_no_reaso
     assert fields["cancel_requested"] is False
 
 
-def test_manifest_fields_tolerates_an_unreadable_split_draws_value() -> None:
-    """A split_draws value int() cannot read is not a draw count and refuses nothing: the
-    listing still renders rather than raising on a malformed manifest."""
+def test_manifest_fields_reports_not_relaunchable_for_an_unreadable_split_draws_value() -> None:
+    """A split_draws value int() cannot read is not a draw count, and the relaunch route would
+    409 on it (_invalid_split_draws_field); the listing marker agrees rather than reporting
+    relaunchable for a manifest the route refuses, with the route's own reason."""
     from tcip_web.routes.tuning import _manifest_fields
 
     manifest = {
@@ -1414,15 +1420,17 @@ def test_manifest_fields_tolerates_an_unreadable_split_draws_value() -> None:
         "param_space": {"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
     }
     fields = _manifest_fields(manifest)
-    assert fields["relaunchable"] is True
-    assert fields["reason"] is None
+    assert fields["relaunchable"] is False
+    assert fields["reason"] == "this sweep's record's split_draws is not a draw count"
+    assert fields["split_draws"] is None
 
 
-def test_manifest_fields_tolerates_an_infinite_split_draws_value() -> None:
+def test_manifest_fields_reports_not_relaunchable_for_an_infinite_split_draws_value() -> None:
     """A JSON Infinity literal decodes to float("inf") through the store's plain json.loads
     even though its own encode refuses to write one, so a manifest of unknown provenance under
-    hpo_root() can carry it; int() cannot read it as a draw count either, and the listing
-    renders rather than raising OverflowError."""
+    hpo_root() can carry it; int() cannot read it as a draw count either, and the marker reports
+    not relaunchable with the same reason the route's 409 would give, rather than raising or
+    reporting relaunchable for a manifest that would fail the worker."""
     from tcip_web.routes.tuning import _manifest_fields
 
     manifest = {
@@ -1430,8 +1438,64 @@ def test_manifest_fields_tolerates_an_infinite_split_draws_value() -> None:
         "param_space": {"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
     }
     fields = _manifest_fields(manifest)
-    assert fields["relaunchable"] is True
-    assert fields["reason"] is None
+    assert fields["relaunchable"] is False
+    assert fields["reason"] == "this sweep's record's split_draws is not a draw count"
+    assert fields["split_draws"] is None
+
+
+def test_invalid_split_draws_reason_matches_what_the_marker_tests_assert_literally() -> None:
+    """The two tests above assert the marker's reason as a literal string, not the imported
+    constant, since a test proving baseline behavior cannot import a name the baseline predates;
+    this pins that literal to the module's own constant, so a reword of one is caught here."""
+    from tcip_web.routes.tuning import _INVALID_SPLIT_DRAWS_REASON
+
+    assert _INVALID_SPLIT_DRAWS_REASON == "this sweep's record's split_draws is not a draw count"
+
+
+def test_list_sweeps_serves_a_manifest_with_an_infinite_split_draws_value_beside_a_healthy_one(
+    client: TestClient, hpo_root,
+) -> None:
+    """A manifest whose split_draws is a JSON Infinity literal cannot come from _write_sweep
+    (tcip_store.replace goes through the same encode that refuses a non-finite number on write),
+    so it is hand-written directly to the file this key resolves to, bound to the file backend
+    explicitly rather than through whichever backend the ambient test run is on: the store's own
+    write-side refusal makes the file backend the only producer of this manifest. Before the
+    projection fix the route still answered 200 (FastAPI's own response_model handling for this
+    route's -> dict annotation already renders a non-finite float as JSON null rather than
+    raising, so the raw value never crashed the listing the way a bare Starlette JSONResponse
+    would), but the row it served was wrong on both fields this fixes: relaunchable stayed True,
+    computed from the raw in-memory inf before that silent null coercion ever touched it, and
+    split_draws read null by that same accident rather than by a deliberate coercion."""
+    import tcip_store
+    from datetime import datetime, timezone
+    from tcip_store.file_backend import FileBackend
+    from tcip_mcp.tools.training_tools import sweep_manifest_key
+
+    tcip_store.bind(FileBackend())
+    _write_sweep(hpo_root, "hpo_healthy_beside_inf",
+                base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+
+    key = sweep_manifest_key("hpo_infinite_draws")
+    path = FileBackend().path_for(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "study_name": "hpo_infinite_draws", "status": "completed",
+        "heartbeat": datetime.now(timezone.utc).isoformat(), "n_trials": 2,
+        **_RELAUNCH_FIELD_DEFAULTS,
+        "base_config": {},
+        "param_space": {"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
+        "split_draws": float("inf"),
+    }
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    resp = client.get("/api/tuning/sweeps")
+    assert resp.status_code == 200
+    by_id = {s["sweep_id"]: s for s in resp.json()["sweeps"]}
+    assert "hpo_healthy_beside_inf" in by_id
+    assert "hpo_infinite_draws" in by_id
+    infinite_row = by_id["hpo_infinite_draws"]
+    assert infinite_row["relaunchable"] is False
+    assert infinite_row["split_draws"] is None
 
 
 def test_manifest_fields_narrows_a_truthy_non_mapping_param_space_rather_than_crashing() -> None:
