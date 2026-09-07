@@ -329,6 +329,19 @@ def test_spatial_strip_split_no_tile_shared_and_buffer_respected():
             assert max(gap_x, gap_y) >= split.buffer
 
 
+def test_spatial_strip_split_tied_shares_place_by_declared_order_not_seed():
+    """The center-out tie-break resolves equal shares in declared (``split_names``) order,
+    never by seed: at seed=0, the pre-fix shuffle-then-stable-sort placed the tied ``val`` and
+    ``test`` sides on opposite cardinal sides from where seed=1 placed them (val left of the
+    largest share, test right, at seed=1; the mirror image at seed=0), found by scanning small
+    seeds for one where the shuffle disagreed with declared order. The fixed order gives the
+    same layout at both seeds."""
+    a = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.6, 0.2, 0.2), seed=0)
+    b = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.6, 0.2, 0.2), seed=1)
+    assert a.regions == b.regions
+    assert a.seed == 0 and b.seed == 1
+
+
 def test_spatial_strip_split_deterministic():
     a = spatial_strip_split(8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1), seed=11)
     b = spatial_strip_split(8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1), seed=11)
