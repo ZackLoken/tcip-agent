@@ -2443,6 +2443,32 @@ def test_annotate_resave_preserves_original_creator(client, dataset_root, tmp_pa
     assert objs[1]["created_by"] == "user:emily"                 # only the new shape is Emily's
 
 
+def test_annotate_resave_preserves_accepted_by_rule(client, dataset_root, tmp_path) -> None:
+    """A loaded record carrying the rule marker saves back with it; a new shape saves with None;
+    the load route's _ann_dict emits the key for both."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
+    resp = client.post("/api/annotate/labels", json={
+        "image_path": str(img_path), "label_path": str(label_path),
+        "annotations": [
+            {"subject": "bud", "bbox": [10, 10, 40, 40], "created_by": "sam",
+             "accepted_by": "user:breeder", "accepted_by_rule": "exp-1:0123456789abcdef"},
+            {"subject": "bud", "bbox": [50, 50, 70, 70]},
+        ],
+        "user": "emily",
+    })
+    assert resp.status_code == 200
+    objs = json.loads(label_path.read_text())["annotations"]
+    assert objs[0]["accepted_by_rule"] == "exp-1:0123456789abcdef"
+    assert "accepted_by_rule" not in objs[1]
+
+    load = client.get(
+        "/api/annotate/labels", params={"image_path": str(img_path), "label_path": str(label_path)})
+    loaded = load.json()["annotations"]
+    assert loaded[0]["accepted_by_rule"] == "exp-1:0123456789abcdef"
+    assert loaded[1]["accepted_by_rule"] is None
+
+
 def test_annotate_polygons_keep_and_stamp_provenance(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = tmp_path / "labels" / "IMG_0000.json"

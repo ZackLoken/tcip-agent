@@ -1,0 +1,304 @@
+"""The rule-admitted accept: a Review confirm of a prediction the bucket's own validated count
+operating point pre-admits, verified against the binding before anything is written, refused by
+name otherwise.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from tcip_annotation.json_io import read_annotations, read_annotations_versioned, write_annotations
+from tcip_annotation.state import Annotation, BBox
+from tcip_web.app import app
+
+from tests._clear_prediction_bucket_fixtures import build_published_bucket, earn_validated_stamp
+
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
+
+_EARNED_TRAIT = "bud_opening"
+_STEM = "img"
+_BOX = (10.0, 10.0, 30.0, 30.0)
+
+
+@pytest.fixture
+def client() -> TestClient:
+    return TestClient(app, base_url="http://127.0.0.1")
+
+
+def _earned_bucket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, experiment_id: str,
+    scores: tuple[float, ...] = (0.9,),
+) -> dict:
+    """A published, sealed bucket: one image, one prediction at ``scores[0]``, a validated stamp
+    earned over its content (so every refusal case's bucket content predates the seal)."""
+    dataset_root = tmp_path / "data"
+    built = build_published_bucket(
+        tmp_path, monkeypatch, experiment_id=experiment_id, dataset_root=dataset_root,
+        stems=(_STEM,), boxes=(_BOX,), scores=scores,
+    )
+    bucket = Path(built["bucket"])
+    stamp = earn_validated_stamp(bucket, dataset_root, trait=_EARNED_TRAIT)
+    pred = read_annotations(bucket / f"{_STEM}.json")[0]
+    return {
+        "dataset_root": dataset_root, "bucket": bucket, "images_dir": Path(built["images_dir"]),
+        "stamp": stamp, "pred": pred,
+    }
+
+
+def _accept_payload(built: dict, *, det_type: str, gt_idx: int | None, pred_idx: int | None,
+                    rule_admitted: bool, conf: float | None = None) -> dict:
+    pred = built["pred"]
+    img_path = built["images_dir"] / f"{_STEM}.png"
+    gt_path = built["dataset_root"] / "annotations" / "2026-03-04" / f"{_STEM}.json"
+    return {
+        "dataset_root": str(built["dataset_root"]), "image_name": f"{_STEM}.png",
+        "image_path": str(img_path), "gt_path": str(gt_path),
+        "pred_path": str(built["bucket"] / f"{_STEM}.json"),
+        "det_type": det_type, "class_name": pred.subject,
+        "conf": conf if conf is not None else pred.score, "iou": 1.0 if det_type == "tp" else None,
+        "gt_idx": gt_idx, "pred_idx": pred_idx, "bbox": list(_BOX),
+        "action": "accepted", "rule_admitted": rule_admitted,
+    }
+
+
+def test_a_verified_claim_writes_the_marker_beside_the_person(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The producer chain: a published, sealed bucket; the rule read back through
+    /generation_conf; an accept on the fp with rule_admitted true writes accepted_by_rule naming
+    the stamp's own validated_by; a second accept on the now-tp answers reviewed and leaves the
+    raw document's version unchanged."""
+    built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-1")
+    stamp = built["stamp"]
+    validated_by = stamp["validated_by"]
+    rule_conf = stamp["operating_point"]["conf"]["value"]
+    assert built["pred"].score is not None and built["pred"].score >= rule_conf
+
+    conf_resp = client.get(
+        "/api/review/generation_conf", params={"pred_dir": str(built["bucket"])})
+    assert conf_resp.status_code == 200, conf_resp.text
+    body = conf_resp.json()
+    assert body["admission_reason"] == ""
+    admission = body["admission_rule"]
+    assert admission == {
+        "conf": pytest.approx(rule_conf), "experiment_id": validated_by["experiment_id"],
+        "record_digest": validated_by["record_digest"],
+    }
+
+    resp = client.post("/api/review/action", json=_accept_payload(
+        built, det_type="fp", gt_idx=None, pred_idx=0, rule_admitted=True))
+    assert resp.status_code == 200, resp.text
+    fresh = resp.json()["matches"]
+    assert fresh["detections"][0]["reviewed"] is True
+    expected_identity_early = f"{validated_by['experiment_id']}:{validated_by['record_digest']}"
+    assert fresh["gt"][0]["accepted_by_rule"] == expected_identity_early  # review._ann_dict
+
+    gt_path = Path(_accept_payload(built, det_type="fp", gt_idx=None, pred_idx=0,
+                                   rule_admitted=True)["gt_path"])
+    raw = json.loads(gt_path.read_text(encoding="utf-8"))
+    record = raw["annotations"][0]
+    expected_identity = f"{validated_by['experiment_id']}:{validated_by['record_digest']}"
+    assert record.get("accepted_by_rule") == expected_identity  # GUARDS: absent at the baseline
+    assert record.get("accepted_by", "").startswith("user:")
+    assert "score" not in record
+
+    import tcip_store
+    from tcip_mcp.audit import audit_log_key
+
+    last = tcip_store.read_log(audit_log_key(built["dataset_root"])).records[-1]
+    assert last["arguments"]["rule_admitted"] is True
+    assert last["arguments"]["accepted_by_rule"] == expected_identity
+
+    _, version_before = read_annotations_versioned(gt_path)
+    resp2 = client.post("/api/review/action", json=_accept_payload(
+        built, det_type="tp", gt_idx=0, pred_idx=0, rule_admitted=True))
+    assert resp2.status_code == 200, resp2.text
+    assert resp2.json()["matches"]["detections"][0]["reviewed"] is True
+    _, version_after = read_annotations_versioned(gt_path)
+    assert version_after == version_before
+
+
+def test_ordinary_accept_on_the_same_bucket_writes_none(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Admits valid work: an ordinary accept (rule_admitted omitted) on a bucket that carries a
+    rule writes accepted_by_rule as None, unaffected by the rule's existence."""
+    built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-ordinary")
+    resp = client.post("/api/review/action", json=_accept_payload(
+        built, det_type="fp", gt_idx=None, pred_idx=0, rule_admitted=False))
+    assert resp.status_code == 200, resp.text
+    gt_path = Path(_accept_payload(built, det_type="fp", gt_idx=None, pred_idx=0,
+                                   rule_admitted=False)["gt_path"])
+    raw = json.loads(gt_path.read_text(encoding="utf-8"))
+    assert raw["annotations"][0].get("accepted_by_rule") is None
+
+
+def test_refusal_unvalidated_stamp(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GUARDS: at the baseline pydantic ignores rule_admitted and the accept answers 200."""
+    dataset_root = tmp_path / "data"
+    built = build_published_bucket(
+        tmp_path, monkeypatch, experiment_id="exp-unvalidated", dataset_root=dataset_root,
+        stems=(_STEM,), boxes=(_BOX,), scores=(0.9,),
+    )
+    built = {"dataset_root": dataset_root, "bucket": Path(built["bucket"]),
+             "images_dir": Path(built["images_dir"]),
+             "pred": read_annotations(Path(built["bucket"]) / f"{_STEM}.json")[0]}
+    resp = client.post("/api/review/action", json=_accept_payload(
+        built, det_type="fp", gt_idx=None, pred_idx=0, rule_admitted=True))
+    assert resp.status_code == 400, resp.text
+    assert "validated" in resp.text or "claim" in resp.text
+
+
+def test_refusal_pointer_names_a_row_no_experiment_holds(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The precondition: an ordinary accept (no claim) still answers 200 on this same bucket."""
+    from tcip_mcp.experiments import config_key
+    import tcip_store
+
+    built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-gone")
+    validated_by = built["stamp"]["validated_by"]
+    tcip_store.delete(config_key(validated_by["experiment_id"]))
+
+    precondition = client.post("/api/review/action", json=_accept_payload(
+        built, det_type="tp", gt_idx=None, pred_idx=None, rule_admitted=False))
+    assert precondition.status_code == 200, precondition.text
+    conf_resp = client.get(
+        "/api/review/generation_conf", params={"pred_dir": str(built["bucket"])})
+    assert conf_resp.json()["admission_rule"] is None
+    assert validated_by["experiment_id"] in conf_resp.json()["admission_reason"]
+
+    resp = client.post("/api/review/action", json=_accept_payload(
+        built, det_type="fp", gt_idx=None, pred_idx=0, rule_admitted=True))
+    assert resp.status_code == 400, resp.text
+
+
+def test_refusal_changed_bucket_content(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-changed")
+    write_annotations(
+        built["bucket"] / f"{_STEM}.json",
+        [Annotation(subject=built["pred"].subject, geometry=BBox(*_BOX), score=0.95)],
+        100, 100, keep_empty=True,
+    )
+    resp = client.post("/api/review/action", json=_accept_payload(
+        built, det_type="fp", gt_idx=None, pred_idx=0, rule_admitted=True))
+    assert resp.status_code == 400, resp.text
+    assert "hash" in resp.text or "content" in resp.text or "added, replaced" in resp.text
+
+
+def test_refusal_below_conf_prediction(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-lowconf", scores=(0.05,))
+    resp = client.post("/api/review/action", json=_accept_payload(
+        built, det_type="fp", gt_idx=None, pred_idx=0, rule_admitted=True))
+    assert resp.status_code == 400, resp.text
+    assert "below the rule" in resp.text
+
+
+def test_refusal_scoreless_prediction(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scoreless prediction, published before the seal: compute_matches reads it as confidence
+    one for matching only, and a rule about a reported score cannot admit a record with none."""
+    from tests._clear_prediction_bucket_fixtures import write_image
+
+    dataset_root = tmp_path / "data"
+    built = build_published_bucket(
+        tmp_path, monkeypatch, experiment_id="exp-admit-scoreless", dataset_root=dataset_root,
+        stems=(_STEM,), boxes=(_BOX,), scores=(0.9,),
+    )
+    bucket = Path(built["bucket"])
+    subject = read_annotations(bucket / f"{_STEM}.json")[0].subject
+    images_dir = Path(built["images_dir"])
+    write_image(images_dir / "scoreless.png")
+    write_annotations(
+        bucket / "scoreless.json", [Annotation(subject=subject, geometry=BBox(*_BOX))], 100, 100,
+    )
+    earn_validated_stamp(bucket, dataset_root, trait=_EARNED_TRAIT)
+    scoreless_pred = read_annotations(bucket / "scoreless.json")[0]
+    assert scoreless_pred.score is None
+
+    payload = {
+        "dataset_root": str(dataset_root), "image_name": "scoreless.png",
+        "image_path": str(images_dir / "scoreless.png"),
+        "gt_path": str(dataset_root / "annotations" / "2026-03-04" / "scoreless.json"),
+        "pred_path": str(bucket / "scoreless.json"),
+        "det_type": "fp", "class_name": subject, "conf": None, "iou": None,
+        "gt_idx": None, "pred_idx": 0, "bbox": list(_BOX), "action": "accepted",
+        "rule_admitted": True,
+    }
+    resp = client.post("/api/review/action", json=payload)
+    assert resp.status_code == 400, resp.text
+    assert "scoreless" in resp.text
+
+
+def test_refusal_classified_scope(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The precondition: an ordinary accept the tab makes today succeeds on a classified bucket;
+    a claim refuses by name, since the count operating point admits detections, not values."""
+    import tcip_store
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    dataset_root = tmp_path / "data"
+    bucket = dataset_root / "predictions" / "m" / "2026-03-04"
+    bucket.mkdir(parents=True)
+    images_dir = tmp_path / "images"
+    from tests._clear_prediction_bucket_fixtures import write_image
+
+    write_image(images_dir / f"{_STEM}.png")
+    write_annotations(
+        bucket / f"{_STEM}.json",
+        [Annotation(subject="bud", geometry=BBox(*_BOX), score=0.9,
+                    attributes={"state": "open"})],
+        100, 100,
+    )
+    tcip_store.replace(sidecar_key(bucket, "operating_point"), {
+        "checkpoint_sha256": "sha-classified", "experiment_id": None, "validated": True,
+        "validated_by": {"experiment_id": "exp-classified", "record_digest": "0" * 16},
+        "id_map": {"open": 0, "closed": 1}, "subject": "bud", "attribute": "state",
+        "operating_point": {"tiled": {"value": False}, "conf": {"value": 0.1}},
+    }, expect=tcip_store.Version.ABSENT)
+
+    payload = {
+        "dataset_root": str(dataset_root), "image_name": f"{_STEM}.png",
+        "image_path": str(images_dir / f"{_STEM}.png"),
+        "gt_path": str(dataset_root / "annotations" / "2026-03-04" / f"{_STEM}.json"),
+        "pred_path": str(bucket / f"{_STEM}.json"),
+        "det_type": "fp", "class_name": "open", "conf": 0.9, "iou": None,
+        "gt_idx": None, "pred_idx": 0, "bbox": list(_BOX), "action": "accepted",
+        "subject": "bud", "attribute": "state",
+    }
+    ordinary = client.post("/api/review/action", json=payload)
+    assert ordinary.status_code == 200, ordinary.text
+
+    claimed = client.post("/api/review/action", json={**payload, "rule_admitted": True})
+    assert claimed.status_code == 400, claimed.text
+    assert "classified" in claimed.text
+
+
+def test_refusal_stale_detection(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ground-truth record written under the fp's box after the tab's matches were taken makes
+    the submitted fp a tp in a fresh recompute; the claim refuses with 409, not a duplicate write."""
+    built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-stale")
+    gt_path = built["dataset_root"] / "annotations" / "2026-03-04" / f"{_STEM}.json"
+    gt_path.parent.mkdir(parents=True, exist_ok=True)
+    write_annotations(
+        gt_path, [Annotation(subject=built["pred"].subject, geometry=BBox(*_BOX),
+                             created_by="user:someone_else")],
+        100, 100,
+    )
+    resp = client.post("/api/review/action", json=_accept_payload(
+        built, det_type="fp", gt_idx=None, pred_idx=0, rule_admitted=True))
+    assert resp.status_code == 409, resp.text

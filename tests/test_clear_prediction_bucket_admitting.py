@@ -10,7 +10,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from tests._clear_prediction_bucket_fixtures import (
-    assert_source_stamps_absent, build_published_bucket,
+    assert_source_stamps_absent, build_published_bucket, earn_validated_stamp,
 )
 
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
@@ -34,63 +34,6 @@ def _bundle_class(accounting, path: Path) -> str:
     return "not_walked"
 
 
-def _earn_a_validated_stamp(bucket: Path, dataset_root: Path) -> dict:
-    """Replace the published stamp's operating_point with one earned through the same two-phase
-    gate a producer runs (open_validation, then seal_validation), keeping the run's own
-    experiment_id, checkpoint_sha256, subject and attribute so the door's other checks stay
-    meaningful; returns the stamp as stored after the merge."""
-    from tests._dense_op_fixtures import dense_records
-
-    from tcip_mcp.pipelines.resolution import (
-        open_validation, operating_point_stamp, read_operating_point_sidecar, seal_validation,
-        update_sidecar,
-    )
-
-    stored = read_operating_point_sidecar(bucket)
-    assert stored is not None
-
-    common = dict(n_images=20, objects_per_image=80, miss_pattern=[0] * 20,
-                  fp_pattern=[1] * 20, score=0.9, fp_score=0.05)
-    cal = dense_records(id_prefix="c", **common)
-    hold = dense_records(id_prefix="h", shift=5.0, **common)
-    labels_dir = dataset_root / "annotations" / "2026-03-04"
-    labels_dir.mkdir(parents=True, exist_ok=True)
-
-    draft = open_validation(
-        document="operating_point",
-        evidence={"resolver": "resolve_operating_point",
-                  "inputs": {"dataset_hash": "h1", "calibration_records": cal,
-                             "holdout_records": hold, "staged_conf_floor": 0.01,
-                             "tiled": False}},
-        trait=_EARNED_TRAIT, checkpoint_sha256=stored.get("checkpoint_sha256"),
-        producing_experiment_id=None,
-        reference_inputs={"dataset_root": str(dataset_root),
-                          "label_dirs": {"calibration": labels_dir},
-                          "stated_values": {"split_identity": "clear-bucket-admitting"}},
-    )
-    earned_body = operating_point_stamp(
-        draft.result.to_provenance()["operating_point"], validated=True, validated_by=None,
-        tile_size_validated=None, shippable_issues=draft.result.shippable_issues(), id_map=None,
-        subject=stored.get("subject"), attribute=stored.get("attribute"), trait=_EARNED_TRAIT,
-        dataset_hash="h1", checkpoint=stored.get("checkpoint"),
-        checkpoint_sha256=stored.get("checkpoint_sha256"), experiment_id=stored.get("experiment_id"),
-        images_dir=stored.get("images_dir"), raster_path=stored.get("raster_path"),
-        produced_at=stored.get("produced_at"),
-    )
-    _digest, stamped = seal_validation(
-        draft, dataset_root=dataset_root, bucket_dirs=[bucket], stamp_body=earned_body)
-
-    def _merge(current: dict) -> dict:
-        return {**current, "validated": True, "validated_by": stamped["validated_by"],
-                "operating_point": earned_body["operating_point"], "trait": _EARNED_TRAIT}
-
-    assert update_sidecar(bucket, _merge) is True
-    updated = read_operating_point_sidecar(bucket)
-    assert updated is not None
-    assert updated.get("validated_by") is not None
-    return updated
-
-
 @pytest.mark.parametrize("date", ["2026-03-02", None])
 @pytest.mark.parametrize("state", ["completed", "failed"])
 def test_admitting_round_trip_clears_and_admits_republication(tmp_path, monkeypatch, date, state):
@@ -108,7 +51,7 @@ def test_admitting_round_trip_clears_and_admits_republication(tmp_path, monkeypa
     built = build_published_bucket(
         tmp_path, monkeypatch, experiment_id=exp_id, date=date, state=state)
     dataset_root, source = built["dataset_root"], built["bucket"]
-    original_stamp = _earn_a_validated_stamp(source, dataset_root)
+    original_stamp = earn_validated_stamp(source, dataset_root, trait=_EARNED_TRAIT)
     original_stems = bucket_stems(source)
     live_reference = str(image_path(dataset_root, date, "img", ".png"))
     assert find_prediction(live_reference) == source / "img.json"
