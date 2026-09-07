@@ -1140,6 +1140,39 @@ def test_release_canvas_record_decode_error_after_the_marker_cleared_still_recor
     assert line["arguments"]["canvas_binding_released"] is False
 
 
+def test_release_canvas_record_missing_generation_after_the_marker_cleared_still_records_the_line(
+    client, tmp_path,
+):
+    """GUARDS: the baseline lets a KeyError on the record's missing generation field escape the
+    route uncaught (an unhandled 500), the marker already cleared with no line naming it."""
+    from tcip_mcp.web_client import canvas_open_binding_key
+
+    ws = tmp_path.parent
+    _seed(ws)
+    target = _init(ws, "sample_plot_canvas-no-gen")
+    workspace.activate_project("sample_plot_canvas-no-gen")
+
+    ts.replace(
+        canvas_open_binding_key(),
+        {"root": str(target), "project_name": "sample_plot_canvas-no-gen",
+         "issued_at": "2026-03-04T12:00:00+00:00"},
+        expect=ts.Version.ABSENT,
+    )
+
+    resp = client.post(
+        "/api/projects/sample_plot_canvas-no-gen/release-binding", json={"user": "t"},
+    )
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert "sample_plot_canvas-no-gen" in detail
+    assert "marker_cleared=True" in detail
+
+    lines = _audit_lines(target)
+    line = next(l for l in lines if l["tool"] == "project_binding_released")
+    assert line["arguments"]["marker_cleared"] is True
+    assert line["arguments"]["canvas_binding_released"] is False
+
+
 def test_release_with_an_unreadable_marker_clears_nothing_for_it_and_does_not_500(
     client, tmp_path,
 ):
