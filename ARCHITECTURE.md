@@ -25,21 +25,21 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 9f7dea68.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 10d9eae4.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 9f7dea68 has 434 modules across the six scanned roots (141690 total lines):
+HEAD 10d9eae4 has 434 modules across the six scanned roots (141690 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 137 | 62930 |
+| tcip-mcp | 137 | 62928 |
 | tcip-annotation | 12 | 4299 |
 | tcip-web | 40 | 13833 |
 | tcip-store | 13 | 5282 |
-| tcip-web-frontend | 215 | 50399 |
+| tcip-web-frontend | 215 | 50401 |
 | tools | 17 | 4947 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
@@ -524,7 +524,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | tools/verify_skill_tools.py | Guardrail: hold every tool name in agent-facing prose to the registry. | 3 | 0 |
 | tools/verify_skill_traits.py | Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in crops.yml. | 1 | 0 |
 
-## Package-level dependency rules holding at HEAD 61503290
+## Package-level dependency rules holding at HEAD 10d9eae4
 
 The following sentences are checked against every in-repo Python import edge in the regenerated module inventory (an edge is counted only when both the importing file and the imported file resolve to a file inside this repo; stdlib and third-party imports are excluded by `build_module_inventory.py`, see docstring at `tools/build_module_inventory.py:9-20`).
 
@@ -538,12 +538,15 @@ Non-zero cross-package edge counts at HEAD:
 - `tools` -> `tcip-web`: 18 import edges.
 - `tcip-mcp` -> `tcip-annotation`: 76 import edges.
 - `tcip-web` -> `tcip-annotation`: 13 import edges.
-- `tcip-web` -> `tcip-mcp`: 120 import edges, two of them `routes/projects.py`'s own
+- `tcip-web` -> `tcip-mcp`: 119 import edges, two of them `routes/projects.py`'s own
   `_job_conflict` importing `tcip_mcp.registry_paths.nearest_containing_ancestor` and
   `tcip_mcp.tools.training_tools`, the edges the job-registry walk carries.
+- `tcip-annotation` -> `tcip-store`: 6, `tcip-mcp` -> `tcip-store`: 136, `tcip-web` -> `tcip-store`: 25,
+  `tools` -> `tcip-store`: 6 import edges, the seam every package reads its records through.
 
-Two directions hold zero import edges at HEAD. `tools` -> `tcip-annotation` is zero. `tcip-mcp` ->
-`tcip-web` is zero too: the inventory walks the whole AST, so a function-body import counts;
+Every other ordered pair of roots holds zero import edges at HEAD; two of them are stated, since
+each was once non-zero. `tools` -> `tcip-annotation` is zero. `tcip-mcp` ->
+`tcip-web` is zero: the inventory walks the whole AST, so a function-body import counts;
 `project_removal.py`'s doors take the job-registry walk as a `job_conflict` callable and the
 requesting identity as a string, both supplied by `tcip_web.routes.projects`, so the package
 holds no edge into the layer above it.
@@ -907,12 +910,12 @@ the response shape `tuning.py`'s trial-metrics route answers in, and `_body_comm
 `EmptyBodyPayload`, the empty body model six path-parameter-only routes now declare so the
 browser must send a preflighted request rather than reaching the handler as a simple one.
 
-Total HTTP routes at HEAD: 80 (5 on `app.py` plus 75 across the 17 route modules, both counts
-obtained this session by grepping `@app.get/post(` and `@router.get/post(` and summing);
+Total HTTP routes at HEAD: 88 (5 on `app.py` plus 83 across the 17 route modules, both counts
+obtained by grepping `@app.get/post(` and `@router.get/post(` and summing);
 websocket routes are counted separately, below, and excluded from this total. Each per-router
-heading's own route count (and their sum, 78) includes any websocket route it lists, since
+heading's own route count (and their sum, 86) includes any websocket route it lists, since
 `routes/inference.py`, `routes/terminal.py` and `routes/training.py` each carry one; net of
-those three, the 17 modules hold the 75 HTTP routes counted here.
+those three, the 17 modules hold the 83 HTTP routes counted here.
 
 Total WebSocket routes at HEAD: 5 (`/ws/state`, `/ws/panel/{panel}` on `app.py`;
 `/api/terminal/ws/{session_id}` on `routes/terminal.py`; `/api/inference/jobs/{job_id}/stream`  <!-- queued: P5-124 unify -->
@@ -2166,8 +2169,8 @@ suffix=".json")`, the same shape `dataset_registry` and `.tcip/project.json` (fo
 Shape: `{requested_at, requested_by, archive_path, holding_dir, external_roots,
 dependent_projects}`, one document per project. Written once, `concurrency="cas"` with
 `expect=Version.ABSENT`, by `request_project_removal`
-(`packages/tcip-mcp/src/tcip_mcp/project_removal.py:398`); deleted, at the version the
-completing walk read it at, by `complete_pending_removals` (`project_removal.py:503`).
+(`packages/tcip-mcp/src/tcip_mcp/project_removal.py:396`); deleted, at the version the
+completing walk read it at, by `complete_pending_removals` (`project_removal.py:501`).
 
 Readers: `pending_removal_record`/`pending_removal_or_none` (`workspace.py:247`, `:247`), the
 predicate `adoptable_project_root`, `ingest_images` and `tcip_web.paths.allowed_roots`'s
