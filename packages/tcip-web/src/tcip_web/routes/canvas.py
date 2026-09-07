@@ -19,11 +19,13 @@ debounce cycle), not durable review/annotation history, and a crash losing the l
 nothing, the next push repaints it.
 
 The write destination is the ``canvas_open_binding`` record, never the payload: a push names
-only the generation it was built against, ``/dataset/select`` is the record's ordinary writer
-and this route reads it and writes under its own ``root``. A push whose generation the record no
-longer carries (the GUI opened another project since the push was built, or
-``tcip_mcp.project_removal.release_project_binding`` bumped it releasing that project) answers
-409 rather than land under a root the payload never named and the pusher never chose.
+only the generation it was built against, and this route reads the record fresh on every push
+and writes under its own ``root``. ``/dataset/select`` and ``tcip_mcp.project_removal.
+release_project_binding`` are its two writers; a push whose generation the record no longer
+carries (the GUI opened another project since the push was built), or whose record now reads as
+nothing open (:func:`tcip_mcp.web_client.binding_released_or_absent`: absent, or a release
+marked it), answers 409 rather than land under a root the payload never named and the pusher
+never chose.
 """
 
 from __future__ import annotations
@@ -36,7 +38,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict
 import tcip_store as ts
 
-from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key, canvas_open_binding_key
+from tcip_mcp.web_client import (
+    binding_released_or_absent,
+    canvas_geometry_key,
+    canvas_meta_key,
+    canvas_open_binding_key,
+)
 from tcip_web.paths import assert_path_allowed
 
 router = APIRouter(prefix="/api/canvas", tags=["canvas"])
@@ -82,9 +89,14 @@ def _guard_project_root(project_root: str) -> str:
 def push_canvas_state(payload: CanvasStatePayload) -> dict:
     binding = ts.read(canvas_open_binding_key(create=False), default=None)
     current_generation = binding.get("generation") if binding is not None else None
-    if binding is None or payload.binding_generation != current_generation:
+    released = binding is not None and bool(binding.get("released"))
+    if binding_released_or_absent(binding) or payload.binding_generation != current_generation:
+        error = (
+            "the GUI's open project was released" if released
+            else "the GUI's open project has changed since this push was built"
+        )
         raise HTTPException(409, {
-            "error": "the GUI's open project has changed since this push was built",
+            "error": error,
             "generation": current_generation,
             "project_name": binding.get("project_name") if binding is not None else None,
         })

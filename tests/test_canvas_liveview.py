@@ -236,6 +236,31 @@ def test_select_refuses_a_project_root_pending_removal_and_the_binding_is_unchan
     assert current["generation"] == first["generation"]
 
 
+def test_push_answers_409_after_a_release_even_with_the_records_own_generation(client, tmp_path):
+    """A reconnecting browser adopts whatever generation the canvas_open_binding record now
+    carries (``StateStore.refresh_binding_generation_from_record``), released or not: a push
+    naming that generation must still be refused, since a released record names nothing open
+    even though its generation matches exactly."""
+    (tmp_path / ".tcip").mkdir()
+    _select(client, tmp_path)
+
+    resp = client.post("/api/projects/project/release-binding", json={"user": "tester"})
+    assert resp.status_code == 200, resp.text
+
+    from tcip_mcp.web_client import read_canvas_binding
+
+    released = read_canvas_binding()
+    assert released["released"] is True
+
+    push = client.post(
+        "/api/canvas/state",
+        json=_payload("C:/img/a.jpg", released["generation"], shapes=SHAPES),
+    )
+    assert push.status_code == 409
+    assert "released" in push.json()["detail"]["error"]
+    assert not (tmp_path / ".tcip" / "state" / "canvas_live.json").exists()
+
+
 def test_push_answers_409_on_no_binding_at_all(client, tmp_path):
     """The refusal's other half: a push before any select has ever run names a missing record,
     not a generation mismatch."""

@@ -44,7 +44,7 @@ from tcip_mcp.dataset_layout import (
 from tcip_mcp.pipelines.image_utils import (
     AmbiguousImageStem, list_logical_images, logical_image_name,
 )
-from tcip_mcp.web_client import canvas_open_binding_key
+from tcip_mcp.web_client import binding_released_or_absent, canvas_open_binding_key
 from tcip_web.label_annotations_cache import cached_label_annotations
 from tcip_web.paths import assert_path_allowed
 from tcip_web.state import DatasetSelection, store
@@ -214,16 +214,17 @@ def _write_canvas_binding(root: Path) -> int:
     same-project re-select or ordinary navigation never supersedes a sibling tab), and the write
     is staged in the same transaction so a concurrent select cannot land between the read and the
     write and have its own bump silently dropped. A released current record
-    (``tcip_mcp.project_removal.release_project_binding``) bumps regardless of whether ``root``
-    changed: its own root is not what the GUI has open, whatever it names, so the fresh select
-    this write makes never reuses a generation that release already retired.
+    (``tcip_mcp.project_removal.release_project_binding``, :func:`tcip_mcp.web_client.
+    binding_released_or_absent`) bumps regardless of whether ``root`` changed: its own root is not
+    what the GUI has open, whatever it names, so the fresh select this write makes never reuses a
+    generation that release already retired.
     """
     key = canvas_open_binding_key()
     root_str = str(root)
     project_name = workspace.workspace_project_name(root)
     with ts.transaction(key) as txn:
         current = txn.read(key, default=None)
-        same_root = current is not None and not current.get("released") and (
+        same_root = not binding_released_or_absent(current) and (
             ts.canonical_path(current["root"]) == ts.canonical_path(root_str)
         )
         if same_root:
