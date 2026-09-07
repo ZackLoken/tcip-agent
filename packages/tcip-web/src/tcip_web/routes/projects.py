@@ -15,9 +15,15 @@ Three doors write here. ``POST /active`` writes the active-project marker only, 
 line staying wherever the MCP tool's own caller emits one (this route emits none itself).
 ``GET /{name}/removal-preview`` writes nothing (:func:`tcip_mcp.project_removal.
 removal_preview`). ``POST /remove`` (:func:`tcip_mcp.project_removal.request_project_removal`)
-is GUI-only and, on success, leaves two lines in the open project's own log: the archive
-door's own line, then this request's own line, never a line in the target's own log until
-phase two's own completion line lands on it at the next backend start.
+is GUI-only and, on success, leaves three lines: the archive door's own line, then this
+request's own line, both in the open project's own log, and the removed project's own last
+line, naming the marker just written, in the target's own log; phase two's own completion
+line lands on the moved tree at the next backend start.
+
+``tcip_mcp.project_removal`` imports nothing from ``tcip_web``: this module resolves the
+requesting identity through :mod:`tcip_web.identity` and supplies :func:`_job_conflict`, the
+walk over the three job registries the door's own refusal chain calls through, as that door's
+required keyword arguments.
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ from pydantic import BaseModel
 
 from tcip_mcp import dataset_layout, project_removal, workspace
 from tcip_mcp.project_record import site_fields
+from tcip_web import identity
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -56,6 +63,9 @@ class ProjectSummary(BaseModel):
     # The first date's labels that would not read, naming the file; the project still lists, and
     # its subjects_by_date reports that date empty rather than aborting the scan.
     label_problem: str | None
+    # Why removal is disabled for this project, or null: project_removal.identity_conflict's own
+    # text, the same function the door's own refusal chain calls.
+    removal_refusal: str | None
 
 
 class ActiveProject(BaseModel):
@@ -101,6 +111,7 @@ def _summarize(project_dir: Path, active_name: str | None) -> ProjectSummary:
         site=site["site"],
         site_problem=site["site_problem"],
         label_problem=label_problem,
+        removal_refusal=project_removal.identity_conflict(project_dir),
     )
 
 
@@ -217,10 +228,31 @@ def activate_project(req: SetActiveRequest) -> ActiveProject:
     return ActiveProject(name=req.name, path=str(path))
 
 
+class DependentProject(BaseModel):
+    project: str
+    dataset_id: str | None = None
+    dataset_path: str | None = None
+    pending: bool | None = None
+    # Set instead of the three fields above when this project's own registry will not read;
+    # the removal still proceeds, and the dialog renders this as a warning, not a drop.
+    unreadable: str | None = None
+
+
+class ExternalRoot(BaseModel):
+    path: str
+    layouts: list[str]
+    # Whether the path still exists on disk: the preview can list a root under a project a
+    # prior removal already moved.
+    present: bool
+
+
 class RemovalPreview(BaseModel):
-    external_roots: list[dict]
-    dependent_projects: list[dict]
+    external_roots: list[ExternalRoot]
+    dependent_projects: list[DependentProject]
     refusal: str | None = None
+    # Set instead of an external_roots list when the target's own registry will not read;
+    # the request is still admitted, and the dialog renders this as a warning.
+    external_roots_unreadable: str | None = None
 
 
 class RemovalRequest(BaseModel):
@@ -233,19 +265,69 @@ class RemovalResponse(BaseModel):
     name: str
     archive_path: str
     holding_dir: str
-    external_roots: list[dict]
-    dependent_projects: list[dict]
+    external_roots: list[ExternalRoot]
+    dependent_projects: list[DependentProject]
     completes: str
     audit_scope: str
 
 
+def _job_conflict(target: Path) -> str | None:
+    """Every non-terminal job in the three registries whose ``platform_root`` is ``target``, or
+    whose server-recorded directories resolve under it. The client's own raw
+    ``requested_dataset_root`` is never consulted, only what the server itself resolved. Lives
+    here rather than in ``tcip_mcp.project_removal``: walking the job registries needs edges into
+    tcip-web's own routes, and that module imports nothing from this package."""
+    from tcip_mcp.registry_paths import nearest_containing_ancestor
+    from tcip_mcp.tools import training_tools
+
+    from tcip_web import jobstore
+    from tcip_web.routes import inference, review, tuning
+
+    def _under(value: str) -> bool:
+        if not value:
+            return False
+        return nearest_containing_ancestor(Path(value), target, tolerant=True) is not None
+
+    target_str = str(target)
+    for job in inference._registry.list():
+        if job.status in jobstore.TERMINAL_STATUSES:
+            continue
+        if job.platform_root == target_str or any(
+            _under(v) for v in (job.checkpoint_path, job.images_dir, job.output_dir)
+        ):
+            return (f"inference job {job.job_id!r} is not finished; ask the agent to cancel it "
+                     "or wait for it to finish")
+    for job in tuning._registry.list():
+        if job.status in jobstore.TERMINAL_STATUSES:
+            continue
+        if job.platform_root == target_str:
+            return (f"HPO sweep {job.sweep_id!r} is not finished; ask the agent to cancel it or "
+                     "wait for it to finish")
+        # A rehydrated job can carry an empty platform_root; never compose a sweep directory
+        # from an empty root string.
+        if job.platform_root and _under(
+            str(training_tools.sweep_dir(job.sweep_id, root=job.platform_root))
+        ):
+            return (f"HPO sweep {job.sweep_id!r} is not finished; ask the agent to cancel it or "
+                     "wait for it to finish")
+    for job in review._pq_registry.list():
+        if job.status in jobstore.TERMINAL_STATUSES:
+            continue
+        if job.platform_root == target_str or any(
+            _under(v) for v in (job.checkpoint_path, job.images_dir, job.dataset_root)
+        ):
+            return (f"a review priority-queue scoring pass ({job.job_id!r}) is not finished; "
+                    "wait for it to finish or restart the backend, which marks it interrupted")
+    return None
+
+
 @router.get("/{name}/removal-preview")
 def removal_preview_route(name: str) -> RemovalPreview:
-    """A snapshot of what removing ``name`` would answer: the refusal decision 5 would give (or
-    ``None``), every external root the project's own state reaches outside its tree, and every
-    other project's dataset registered under it. The dialog fetches this on open; the request
-    itself answers the same refusal fresh if anything changed meanwhile."""
-    return RemovalPreview(**project_removal.removal_preview(name))
+    """A snapshot of what removing ``name`` would answer: the refusal the door's own ordered
+    chain would give (or ``None``), every external root the project's own state reaches outside
+    its tree, and every other project's dataset registered under it. The dialog fetches this on
+    open; the request itself answers the same refusal fresh if anything changed meanwhile."""
+    return RemovalPreview(**project_removal.removal_preview(name, job_conflict=_job_conflict))
 
 
 @router.post("/remove")
@@ -253,7 +335,10 @@ def remove_project(req: RemovalRequest) -> RemovalResponse:
     """Archive ``name`` and mark it pending removal (:func:`tcip_mcp.project_removal.
     request_project_removal`); the only caller of that door. Refuses with the status the door
     itself names (400 malformed request, 404 no such project, 409 every other refusal)."""
-    result = project_removal.request_project_removal(req.name, req.confirm_name, req.user)
+    requested_by = identity.user_id(identity.resolve_user(req.user))
+    result = project_removal.request_project_removal(
+        req.name, req.confirm_name, requested_by=requested_by, job_conflict=_job_conflict,
+    )
     if "error" in result:
         raise HTTPException(result.get("status", 400), result["error"])
     return RemovalResponse(**result)

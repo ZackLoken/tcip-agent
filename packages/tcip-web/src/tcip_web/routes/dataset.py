@@ -233,23 +233,39 @@ def _write_canvas_binding(root: Path) -> int:
     return generation
 
 
+def _pending_removal_message(project_root: str, pending: dict) -> str:
+    return (
+        f"{project_root!r} is pending removal (requested {pending['requested_at']}); it moves "
+        "to the workspace's holding directory at the next backend start, or through "
+        "tcip complete-removals"
+    )
+
+
 @router.post("/select")
 async def select_dataset(req: SelectionRequest) -> dict:
     """Set the active dataset for the GUI; broadcasts a state delta.
 
-    Refuses (409, naming when the request was made) a ``project_root`` pending removal before
-    either guard resolves it or the binding write runs, so a refused select changes no binding
-    and bumps no generation.
+    A ``project_root`` pending removal is refused before the binding write, checked on the path
+    the guard resolves rather than the client's raw string. The guard's own excluded-roots check
+    (``assert_path_allowed``) already refuses a path under a pending project by identity, ahead
+    of everything else, with a 403; this route re-reads the marker to answer that same 403 with
+    the pending door's own message rather than the guard's generic one. When the guard admits the
+    root instead, this route reads the marker again on the guard's own resolved path and answers
+    409 the same way, so a refused select changes no binding and bumps no generation either way.
     """
-    pending = workspace.pending_removal_or_none(Path(req.project_root).expanduser().resolve())
+    try:
+        project_root = _guarded(req.project_root)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            pending = workspace.pending_removal_or_none(
+                Path(req.project_root).expanduser().resolve()
+            )
+            if pending is not None:
+                raise HTTPException(403, _pending_removal_message(req.project_root, pending)) from exc
+        raise
+    pending = workspace.pending_removal_or_none(project_root)
     if pending is not None:
-        raise HTTPException(
-            409,
-            f"{req.project_root!r} is pending removal (requested {pending['requested_at']}); "
-            "it moves to the workspace's holding directory at the next backend start, or "
-            "through tcip complete-removals",
-        )
-    project_root = _guarded(req.project_root)
+        raise HTTPException(409, _pending_removal_message(req.project_root, pending))
     root = _guarded(req.dataset_root)
     if not root.is_dir():
         raise HTTPException(404, f"dataset_root not found: {req.dataset_root}")
