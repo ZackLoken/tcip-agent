@@ -371,8 +371,8 @@ def test_restart_session_answers_503_after_the_process_dies_cleanly(
 ) -> None:
     """The died-cleanly path reaches ``start`` (unlike the survivor path, which short-circuits
     before it); the relaunch's own audit line then fails, and a cleanly terminated relaunch
-    carries none of the survivor wording. Coverage: the 503-after-a-failed-relaunch-line
-    behaviour came with the audit-gap family's first landing, not this test's own."""
+    carries none of the survivor wording. Coverage: the 503 on a failed relaunch line
+    predates this test, which pins the wording rather than guarding the status."""
     from tcip_web.routes import terminal as terminal_routes
 
     healthy_stub = _StubPty(survives=False)
