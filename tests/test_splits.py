@@ -347,14 +347,11 @@ def test_center_out_order_ties_resolve_in_declared_order():
     assert [name for name, _ in reversed_input] == ["test", "train", "val"]
 
 
-def test_spatial_strip_split_tied_shares_place_by_declared_order_not_seed():
-    """The center-out tie-break resolves equal shares by their position in the declared
-    ``split_names`` order, never by any seed: permuting which of the two tied names comes
-    second swaps which cardinal side that name lands on, mirroring the swap in the declared
-    order, and the returned split carries no ``seed`` field a caller could have varied instead.
-    ``spatial_strip_split`` no longer takes a ``seed`` keyword at all, so this cannot be run
-    against a baseline that still required one; it is coverage of the tie-break's declared-order
-    property, the producer-fed home the retired seed-pair comparison left."""
+def test_spatial_strip_split_tied_shares_place_by_declared_order():
+    """Coverage of the fixed tie-break: equal shares resolve center-out by their position in
+    the declared ``split_names`` order, so permuting which of the two tied names comes second
+    swaps which cardinal side that name lands on, mirroring the swap in the declared order, and
+    the returned split carries no ``seed`` field."""
     forward = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.6, 0.2, 0.2),
                                    split_names=("train", "val", "test"))
     swapped = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.6, 0.2, 0.2),
