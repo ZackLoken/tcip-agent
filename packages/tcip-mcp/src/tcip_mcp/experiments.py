@@ -1,5 +1,10 @@
 """Experiment tracking for ML training runs.
 
+An experiment is one run's immutable record: named by the caller before the run or minted at
+launch, and nothing groups runs into anything larger. A relaunch of a record that already has
+history forks a new record instead of reopening it, its ``parent_experiment`` naming the one it
+forked from.
+
 Stores experiment state in .tcip/experiments/<experiment_id>/:
   config.json, full training config snapshot
   metrics.jsonl, epoch-by-epoch metrics (append-only)
@@ -23,6 +28,8 @@ import hashlib
 import json
 import logging
 import math
+import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -417,6 +424,17 @@ def audit_refusal_reraising(experiment_id: str, op: str, detail: dict[str, Any],
     raise refusal
 
 
+def mint_experiment_id() -> str:
+    """A fresh, unclaimed experiment id: ``run_<epoch-seconds>_<6 hex chars>``.
+
+    The uuid suffix, not a counter, so two ids minted in the same process, or in two different
+    processes sharing one experiment store, never collide on the same clock second. The one
+    minting function: every id this platform assigns unprompted (a caller naming none at launch,
+    a relaunch's own fork of a record that already has history) comes from here.
+    """
+    return f"run_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+
+
 def create_experiment(
     experiment_id: str,
     config: dict[str, Any],
@@ -690,94 +708,56 @@ def complete_run(
             "model_weights_sha256": digest}
 
 
+class StampPreconditionFailed(RuntimeError):
+    """Raised by :func:`stamp_run_identity` when the record is not a fresh, unstamped one: its
+    state is not ``"created"``, or it already carries an ``output_dir``.
+
+    The launch calling this (``training_tools._ensure_experiment``) catches it only on the
+    pristine-reuse branch, where it means another launch won this record's stamp between the
+    pristine check and this one, and falls back to forking a fresh id instead; every other
+    caller lets it propagate, since a fresh or newly forked record failing this precondition is
+    not a race any caller should silently paper over.
+    """
+
+
 def stamp_run_identity(
-    experiment_id: str, run_id: str, output_dir: str, *, launched_by: dict[str, Any],
+    experiment_id: str, output_dir: str, *, launched_by: dict[str, Any],
 ) -> None:
-    """Record which ``run_id``/``output_dir`` produced this experiment, and who launched it, into
-    ``status.json``.
+    """Stamp a launch onto this experiment's ``status.json``, moving it to ``running`` in the
+    same write: ``output_dir`` (the real, caller-influenced artifact directory), ``launched_by``
+    (who launched it), and the ``state``/``heartbeat``/``started`` triple :func:`update_status`
+    writes for that transition.
 
-    Best-effort, like ``_touch_heartbeat``, a dropped stamp must not break the launch it's
-    recording. Called unconditionally by ``_ensure_experiment`` regardless of which of its three
-    branches resolved ``experiment_id`` (fresh creation, pristine pre-created-experiment reuse, or a
-    fresh-id conflict), those are the only paths that mint a real, running experiment, and this
-    is what makes the real artifact directory (``output_dir``, a separately-computed, caller-influenced
-    path that only coincides with the experiment directory by convention) discoverable from
-    ``experiment_id``/``run_id`` alone by a different process.
+    One compare-and-set transaction, requiring ``state == "created"`` and no ``output_dir``
+    already stamped: the record's own linearization point for a launch. Raises
+    :class:`StampPreconditionFailed` when that precondition fails, so two launches racing to
+    stamp one pristine record never both win it, and raises whatever the store itself raises on
+    any other write failure: no launch proceeds unstamped, and no failure here is logged and
+    swallowed the way a best-effort write would be.
 
-    ``launched_by`` is the run currently being stamped, resolved once by ``launch_training``
-    before ``_ensure_experiment`` runs: ``{"launcher": "agent", **agent_identity.audit_fields()}``
-    inside an MCP handshake, ``{"launcher": "gui"}`` for the Training tab's launch route,
-    ``{"launcher": "process"}`` for a caller with neither. Written whole, in the same transaction
-    as ``run_id``/``output_dir``, so a relaunch that re-stamps a pristine id never leaves it
-    disagreeing with the identity it was just re-stamped with. Provenance only: nothing reads it
-    to decide anything, since a best-effort field that can go missing cannot guard a decision. A
-    record with no ``launched_by`` at all is one that predates the field or whose stamp was
-    dropped; every reader treats the two cases the same, as "launcher not recorded".
+    ``launched_by`` is resolved once by ``launch_training`` before ``_ensure_experiment`` runs:
+    ``{"launcher": "agent", **agent_identity.audit_fields()}`` inside an MCP handshake,
+    ``{"launcher": "gui"}`` for the Training tab's launch route, ``{"launcher": "process"}`` for a
+    caller with neither. A record with no ``launched_by`` at all is one that predates the field or
+    whose stamp never reached this transaction; every reader treats the two cases the same, as
+    "launcher not recorded".
     """
     key = status_key(experiment_id)
-    if not store.exists(key):
-        return
-    try:
-        with store.transaction(key) as txn:
-            status = txn.read(key, default={})
-            status["run_id"] = run_id
-            status["output_dir"] = output_dir
-            status["launched_by"] = launched_by
-            txn.write(key, status)
-    except Exception:
-        logger.warning("stamp_run_identity failed for %s/%s", experiment_id, run_id, exc_info=True)
-
-
-def resolve_experiment_dir_for_run(run_id: str) -> Path | None:
-    """This run's experiment directory, or ``None`` when no record claims the run.
-
-    The identity question is answered by :func:`resolve_experiment_for_run`; this is the form
-    for a caller that then wants the run artifacts beside the record.
-    """
-    experiment_id = resolve_experiment_for_run(run_id)
-    return None if experiment_id is None else experiment_dir(experiment_id)
-
-
-def resolve_experiment_for_run(run_id: str, *, root: Path | str | None = None) -> str | None:
-    """Find the experiment id for ``run_id`` without assuming ``experiment_id == run_id``.
-
-    Tries the exact match first (the common case, ``experiment_id == run_id``). Then the
-    fresh-id relaunch format (``f"{experiment_id}_{run_id}"``, always suffixed ``_<run_id>``), by
-    the suffix. Neither naming convention covers a *custom-named* experiment (an agent/breeder
-    pre-created it via the standalone ``create_experiment`` tool, e.g. ``"exp-001-<crop>-<trait>-
-    det"``, before any ``run_id`` existed, then launched training against it later, a real, tested
-    workflow, not theoretical: ``_ensure_experiment``'s pristine-reuse branch), its id
-    bears no naming relationship to ``run_id`` at all. For that case, falls back to reading every
-    experiment's own stamped ``status.json["run_id"]`` (the authoritative fact
-    ``stamp_run_identity`` records, not a naming guess), a full scan, but reached only once both
-    naming shortcuts miss, and it's also what disambiguates the (negligible-probability, per
-    ``run_id``'s own timestamp+uuid entropy) case of more than one suffix match, rather than
-    refusing a resolvable run just because the fast path was ambiguous. Returns ``None`` only when no
-    record's stamped identity matches at all, the caller (``cancel_run``'s disk fallback,
-    ``reconstruct_run_status``) must then refuse honestly rather than act against an unverified path.
-
-    The candidates come from enumerating the status records, not from listing directories: what
-    names an experiment is a record the store holds, and a directory the store's own backend keeps
-    beside them is not a candidate id.
-
-    ``root`` names a platform root other than this process's own, for the web backend serving a
-    run of the project the browser has open.
-    """
-    try:
-        if store.exists(status_key(run_id, root=root)):
-            return run_id
-    except BadKey:
-        return None
-    candidates = experiment_ids_with_status(root)
-    matches = [name for name in candidates if name.endswith(f"_{run_id}")]
-    if len(matches) == 1:
-        return matches[0]
-
-    for name in candidates:
-        status = read_member(status_key(name, root=root), {})
-        if isinstance(status, dict) and status.get("run_id") == run_id:
-            return name
-    return None
+    with store.transaction(key) as txn:
+        status = txn.read(key, default={})
+        if status.get("state") != "created" or status.get("output_dir"):
+            raise StampPreconditionFailed(
+                f"experiment {experiment_id!r} is not a fresh, unstamped record "
+                f"(state={status.get('state')!r}, output_dir={status.get('output_dir')!r}); "
+                "another launch has already claimed it."
+            )
+        now = datetime.now(timezone.utc).isoformat()
+        status["output_dir"] = output_dir
+        status["launched_by"] = launched_by
+        status["state"] = "running"
+        status["heartbeat"] = now
+        status["started"] = now
+        txn.write(key, status)
 
 
 def experiment_ids_with_status(root: Path | str | None = None) -> list[str]:
@@ -795,17 +775,18 @@ def experiment_ids_with_status(root: Path | str | None = None) -> list[str]:
 
 def is_launched(status: dict[str, Any] | None) -> bool:
     """Whether a status record names a launched run rather than one only created: a stamped
-    ``run_id``, a state other than ``"created"``, or the ``metrics_logged`` marker
-    :func:`log_metrics` stamps before its first append, so a launch whose best-effort
-    :func:`stamp_run_identity` or status write was lost still counts. The one implementation of
-    "was this ever launched", shared by ``training_tools.py``'s own run enumeration and
+    ``output_dir``, a state other than ``"created"``, or the ``metrics_logged`` marker
+    :func:`log_metrics` stamps before its first append, so a record from before this stamp moved
+    to a single transaction, one whose ``output_dir`` landed but whose separate ``state``
+    write never reached ``"running"``, still counts. The one implementation of "was this ever
+    launched", shared by ``training_tools.py``'s own run enumeration and
     :func:`compare_experiments`, which consults it before deriving a heartbeat state at all: a
     pre-created, never-launched record carries a heartbeat of ``None`` and would otherwise derive
     to ``"interrupted"``, misreporting a run that never started as a crashed one.
     """
     if not isinstance(status, dict):
         return False
-    return bool(status.get("run_id")) or status.get("state") != "created" or bool(status.get("metrics_logged"))
+    return bool(status.get("output_dir")) or status.get("state") != "created" or bool(status.get("metrics_logged"))
 
 
 def derived_state(status: dict[str, Any], stale_seconds: float) -> str:
@@ -826,9 +807,9 @@ def reconstruct_from_status(
     experiment_id: str, status: dict[str, Any], *, stale_seconds: float, read_progress: bool,
 ) -> dict[str, Any]:
     """One record's run row, reconstructed from a status document the caller already read: the
-    shape :func:`reconstruct_run_status` returns for the one record it resolved a ``run_id`` to,
-    and the shape the run enumeration in ``training_tools.py`` builds per record without a
-    separate resolver round-trip. ``current_epoch``, ``best_metric`` and ``best_metric_name``
+    shape :func:`reconstruct_run_status` returns for the record it read, and the shape the run
+    enumeration in ``training_tools.py`` builds per record. ``current_epoch``, ``best_metric``
+    and ``best_metric_name``
     cost one metrics-log read and are included only when ``read_progress`` is true, read back
     through :func:`best_selection_from_log` from what the run itself stamped, never re-derived
     from the config.
@@ -851,7 +832,6 @@ def reconstruct_from_status(
         current_epoch = rows[-1].get("epoch") if rows else None
         best_metric_name, best_metric = best_selection_from_log(rows)
     return {
-        "run_id": status.get("run_id", experiment_id),
         "experiment_id": experiment_id,
         "status": derived_state(status, stale_seconds),
         "current_epoch": current_epoch,
@@ -864,21 +844,25 @@ def reconstruct_from_status(
     }
 
 
-def reconstruct_run_status(run_id: str, *, stale_seconds: float = 600.0) -> dict[str, Any] | None:
-    """Reconstruct a run's status from disk for a caller whose in-memory registry doesn't
-    have it, either it was never in this process (a different process launched it) or it was
-    subprocess-delegated and the in-memory record is stale by design.
+def reconstruct_run_status(
+    experiment_id: str, *, stale_seconds: float = 600.0,
+) -> dict[str, Any] | None:
+    """Reconstruct one experiment's status from disk for a caller whose in-memory registry
+    doesn't have it, either it was never in this process (a different process launched it) or it
+    was subprocess-delegated and the in-memory record is stale by design.
 
-    Returns ``None`` when the run can't be resolved on disk at all (an honestly unknown run, not a
-    guess). ``stale_seconds`` lets ``training_tools.py``'s own callers (``monitor_training``,
-    ``cancel_training``) pass their configured heartbeat window (``TCIP_HEARTBEAT_STALE_SECONDS``)
-    rather than being pinned to this module's default. The reconstruction itself is
-    :func:`reconstruct_from_status`, over the one record this function resolves ``run_id`` to.
+    Returns ``None`` when ``experiment_id`` names no record on disk, or names one no record could
+    ever carry (a path separator, an empty or dot name; ``BadKey`` folded to ``None`` the same way
+    an absent record is), an honestly unknown run either way, never a guess. ``stale_seconds``
+    lets ``training_tools.py``'s own callers (``monitor_training``, ``cancel_training``) pass
+    their configured heartbeat window (``TCIP_HEARTBEAT_STALE_SECONDS``) rather than being pinned
+    to this module's default. The reconstruction itself is :func:`reconstruct_from_status`.
     """
-    experiment_id = resolve_experiment_for_run(run_id)
-    if experiment_id is None:
+    try:
+        key = status_key(experiment_id)
+    except BadKey:
         return None
-    status = read_member(status_key(experiment_id))
+    status = read_member(key)
     if not isinstance(status, dict):
         return None
     return reconstruct_from_status(experiment_id, status, stale_seconds=stale_seconds,
@@ -1596,12 +1580,9 @@ def list_experiments() -> list[dict[str, Any]]:
 
     Covers a calibration experiment (id derived from a claim's content, unreconstructable any
     other way), a review-feedback lineage, a pre-created experiment never launched, and a
-    launched one whose ``run_id`` stamp was lost, none of which the tool door's
-    ``launched_only=True`` view (a launched record only) lists. The ids come from the same
-    status-record enumeration
-    :func:`resolve_experiment_for_run` resolves against, so a record the resolver finds is a
-    record this lists. ``run_id`` is the stamp :func:`stamp_run_identity` recorded, or ``None``
-    when a launch never reached it or the record was never launched at all;
+    launched one, none of which the tool door's ``launched_only=True`` view (a launched record
+    only) lists. The ids come from the status-record enumeration itself
+    (:func:`experiment_ids_with_status`), the whole set the store holds.
     ``has_model_source`` is whether the config carries a ``model_source`` (a training run) versus
     an experiment that tracks something else.
     """
@@ -1616,7 +1597,6 @@ def list_experiments() -> list[dict[str, Any]]:
                 "experiment_id": experiment_id,
                 "state": status.get("state", "unknown"),
                 "created": status.get("created"),
-                "run_id": status.get("run_id"),
                 "has_model_source": bool(isinstance(config, dict) and config.get(MODEL_SOURCE_KEY)),
             })
 

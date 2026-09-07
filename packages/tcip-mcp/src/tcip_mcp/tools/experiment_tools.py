@@ -85,9 +85,9 @@ def list_experiments(launched_only: bool = False) -> dict:
 
     Covers every experiment, not only a training run: a calibration experiment (its id is
     derived from a claim's content and cannot otherwise be reconstructed), a review-feedback
-    lineage, a pre-created experiment never launched, and a launched one whose ``run_id`` stamp
-    was lost. Use this to rediscover what the store holds after a session is lost, before
-    reaching for ``get_experiment`` (one record's full detail).
+    lineage, a pre-created experiment never launched, and a launched one. Use this to rediscover
+    what the store holds after a session is lost, before reaching for ``get_experiment`` (one
+    record's full detail).
 
     ``launched_only=True`` switches to the other view this door serves: every training run this
     platform can currently account for, merging this process's own in-memory registry with every
@@ -98,8 +98,8 @@ def list_experiments(launched_only: bool = False) -> dict:
 
     Returns:
         With ``launched_only=False`` (default), ``experiments``: a list of
-        ``{experiment_id, state, created, run_id, has_model_source}``, one per experiment.
-        ``run_id`` is ``None`` when no launch stamped one; ``has_model_source`` is whether the
+        ``{experiment_id, state, created, has_model_source}``, one per experiment.
+        ``has_model_source`` is whether the
         config carries a ``model_source`` (a training run) versus an experiment tracking
         something else. With ``launched_only=True``, ``runs``: the launched-run rows themselves,
         see :func:`tcip_mcp.tools.training_tools._all_training_runs`.
