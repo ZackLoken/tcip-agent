@@ -205,7 +205,10 @@ def test_select_refuses_a_project_root_pending_removal_and_the_binding_is_unchan
     client, tmp_path,
 ):
     """A select naming a pending project's root is refused ahead of the binding write: the
-    generation an earlier, ordinary select left in force is untouched by the refused one."""
+    generation an earlier, ordinary select left in force is untouched by the refused one. The
+    guard's excluded-roots check refuses the pending root first, so the answer is its 403
+    carrying the pending door's own message; the route's 409 is only the race between the
+    guard's marker read and the route's own."""
     import tcip_store as ts
     from tcip_mcp import workspace
 
@@ -224,7 +227,7 @@ def test_select_refuses_a_project_root_pending_removal_and_the_binding_is_unchan
         "/api/dataset/select",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
     )
-    assert resp.status_code == 409
+    assert resp.status_code == 403
     assert "20260304T120000Z" in resp.json()["detail"]
 
     from tcip_mcp.web_client import read_canvas_binding
