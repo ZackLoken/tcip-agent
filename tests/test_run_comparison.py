@@ -1,7 +1,7 @@
 """Backend coverage for side-by-side run comparison: compare_experiments' new columns
 (task/subject/status_error/split/registry), a no-longer-fabricated model builder, an honest
 same_dataset_fingerprint over an error column, the experiment_ids filter on best-model ranking,
-TrainRun's own experiment_id/experiment_error fields, and the /api/training/compare/best route.
+and the /api/training/compare/best route.
 """
 
 from __future__ import annotations
