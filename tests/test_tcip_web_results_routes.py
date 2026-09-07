@@ -1143,11 +1143,12 @@ def test_export_count_csv_answers_409_when_the_delivery_event_audit_line_cannot_
     def _broken(tool, arguments=None, **kwargs):
         raise audit_module.AuditEntryNotWritten(tool, RuntimeError("audit log unwritable"))
 
-    monkeypatch.setattr(audit_module, "record_event_or_raise", _broken)
-
     _seed_count_meaning(tmp_path)
     bucket = _count_bucket(tmp_path, validated=True)
     store.open_project(tmp_path.resolve())
+    # Patched only for the export call itself: the fixture setup above records its own
+    # validation event through the same emitter and must not be caught by this refusal.
+    monkeypatch.setattr(audit_module, "record_event_or_raise", _broken)
     resp = _export_count(client, {
         "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
