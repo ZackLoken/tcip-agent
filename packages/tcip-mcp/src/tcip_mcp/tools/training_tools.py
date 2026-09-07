@@ -2262,8 +2262,9 @@ def run_hyperparameter_search(
         param_space: Param-space dict (see ``hpo.get_default_space``); default when omitted.
             Every axis is checked against ``base_config``'s own resolved selection metric and
             direction (see above); an axis that would disagree at any sampled point is refused
-            rather than minted. A ``data.split.seed`` axis is refused outright at
-            ``split_draws`` of 1 or unset (see :func:`caller_split_seed_refusal`); above 1 it
+            rather than minted. A ``data.split.seed`` axis is refused outright whenever
+            ``split_draws`` draws at most one partition, unset, 1, zero or below (see
+            :func:`caller_split_seed_refusal`); above 1 it
             belongs to ``split_draws``/``split_draw_seeds`` instead, never to this dict.
         n_trials: Number of trials.
         output_dir: Base output directory for trial results (defaults under ``.tcip/hpo``).
@@ -2828,8 +2829,8 @@ def _split_draws_refusal(
     baseline_params: dict | None,
 ) -> str | None:
     """Every reason ``run_hyperparameter_search`` refuses ``split_draws`` above 1, checked before minting the
-    sweep. ``None`` when nothing here objects; every call at ``split_draws=1`` is one of them,
-    since split_draws itself governs nothing at its default. A caller-supplied
+    sweep. ``None`` when nothing here objects; every call at ``split_draws`` of one or below is
+    one of them, since split_draws governs nothing at or under its default. A caller-supplied
     ``data.split.seed`` axis at one draw is its sibling's own refusal, not this one's: see
     :func:`caller_split_seed_refusal`.
 
@@ -2969,28 +2970,26 @@ _SEED_AXIS_REMEDY = (
 
 def coerce_split_draws(split_draws: object) -> int | None:
     """``split_draws`` read the way a manifest of unknown provenance must be read: ``None``
-    stands for 1, the platform's own unset default; an ``int`` that is not a ``bool`` is read
-    directly, whatever its sign; a ``str`` or a finite ``float`` is read as the integer its
-    ``int()`` names when that integer equals the value it was given, so ``2`` and ``"2"`` and
-    ``2.0`` all read as ``2`` while ``2.5`` reads as ``None`` rather than silently truncating to
-    ``2``. This helper carries no lower bound of its own: a value at or below one, positive,
-    zero or negative alike, is not a draw count for it to refuse, since every consumer already
-    reads such a value as one draw (``_split_draws_refusal`` and
-    ``_base_config_for_split_draws`` both answer nothing below ``split_draws <= 1``), the same
-    way ``run_hyperparameter_search``'s own ``split_draws`` argument reads it; a refusal of such
-    a value belongs at the tool's own door, which this helper does not own. A ``bool``
-    (``int(True)`` would otherwise read as 1), a non-numeric string, a non-finite float and
-    anything else ``int()`` cannot read still answer ``None``. Shared by
+    stands for 1, the platform's own unset default; an ``int`` is read directly, whatever its
+    sign, a ``bool`` included, since ``run_hyperparameter_search``'s own ``split_draws``
+    argument reads ``True`` as 1 and ``False`` as 0; a ``str`` or a finite ``float`` is read as
+    the integer its ``int()`` names when that integer equals the value it was given, so ``2``
+    and ``"2"`` and ``2.0`` all read as ``2`` while ``2.5`` reads as ``None`` rather than
+    silently truncating to ``2``. This helper carries no lower bound of its own: a value at or
+    below one, positive, zero or negative alike, is not a draw count for it to refuse, since
+    every consumer already reads such a value as one draw (at ``split_draws <= 1``
+    ``_split_draws_refusal`` answers ``None`` and ``_base_config_for_split_draws`` answers the
+    config unchanged), the same way the tool's own argument reads it; a refusal of such a
+    value belongs at the tool's own door, which this helper does not own. A non-numeric
+    string, a non-finite float and anything else ``int()`` cannot read answer ``None``. Shared by
     :func:`caller_split_seed_refusal`, which treats an unreadable value as no refusal, and by the
     Tuning route's relaunch surface, which refuses a manifest recording one outright rather than
     replaying it into a crash or a silently reinterpreted value.
     """
     if split_draws is None:
         return 1
-    if isinstance(split_draws, bool):
-        return None
     if isinstance(split_draws, int):
-        return split_draws
+        return int(split_draws)
     if not isinstance(split_draws, (float, str)):
         return None
     try:
