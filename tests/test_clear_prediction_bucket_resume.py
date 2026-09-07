@@ -534,6 +534,36 @@ def test_review_state_landed_during_clear_is_reported(tmp_path, monkeypatch):
     assert result["review_state_landed_during_clear"] == 1
 
 
+def test_a_verdict_recorded_between_a_crash_and_the_resume_still_finishes_reporting_it(
+        tmp_path, monkeypatch):
+    """An interrupted clear that acquires review state between the crash and the resume must
+    still be finishable: the review-state refusal runs only on a fresh call, so the resume does
+    not re-check state it cannot undo, and reports what landed instead."""
+    from tcip_mcp.prediction_buckets import bucket_stems, review_state_dir_of
+    from tcip_mcp.tools.inference_tools import clear_prediction_bucket
+
+    built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expVerdictBetweenCalls")
+    _fix_stamp(monkeypatch)
+    destination = _expected_destination(built)
+    review_state_dir = review_state_dir_of(built["dataset_root"])
+
+    fault = inject_store_fault(monkeypatch, method_name="put_blob")
+    with pytest.raises(RuntimeError):
+        clear_prediction_bucket(str(built["bucket"]), "should crash after the stamps moved")
+    assert fault.fired
+
+    record_review_verdict(built["bucket"], review_state_dir, "img.png")
+
+    result = clear_prediction_bucket(
+        str(built["bucket"]), "resume after a verdict landed on the wreckage",
+        cleared_bucket=str(destination))
+    assert "error" not in result, result
+    assert result["resumed"] is True
+    assert result["review_state_landed_during_clear"] == 1
+    assert bucket_stems(built["bucket"]) == set()
+    assert bucket_stems(destination) == {"img"}
+
+
 def test_a_resume_naming_an_older_finished_archive_of_a_source_cleared_twice_refuses_naming_the_newest(
         tmp_path, monkeypatch):
     """A source cleared, republished and cleared again carries two cleared: artifacts on the same
