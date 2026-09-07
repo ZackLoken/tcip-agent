@@ -256,6 +256,76 @@ def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
     assert manifest["kept_test_tiles"] > 0
 
 
+def test_spatial_manifest_tied_val_test_fractions_place_by_declared_order_not_seed(
+    tmp_path: Path,
+):
+    """``val_ratio == test_ratio`` ties their shares in the center-out tie-break, so which
+    strip val lands on must come from declared (``split_names``) order alone, never from the
+    seed: at seeds 0 and 1, the pre-fix shuffle-then-stable-sort placed val on opposite
+    cardinal sides (found by scanning small seeds for a pair that disagreed), so the manifest's
+    train/val/test regions must be identical across them while the recorded seed still isn't."""
+    images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    manifests = {}
+    for seed in (0, 1):
+        data_cfg = {
+            "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+            "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+            "split": {"val_ratio": 0.2, "test_ratio": 0.2, "seed": seed},
+        }
+        train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+        assert val_ds is not None
+        manifests[seed] = data_cfg["split"]["spatial_manifest"]
+
+    assert manifests[0]["train_region"] == manifests[1]["train_region"]
+    assert manifests[0]["val_region"] == manifests[1]["val_region"]
+    assert manifests[0]["test_region"] == manifests[1]["test_region"]
+    assert manifests[0]["seed"] != manifests[1]["seed"]
+
+
+def test_spatial_manifest_tied_test_calibration_fractions_place_by_declared_order_not_seed(
+    tmp_path: Path,
+):
+    """``reserve_calibration_fraction == test_ratio`` ties their shares the same way; the
+    manifest's calibration/test regions must be identical across the same seed pair the
+    val/test tie above uses, while the recorded seed still differs."""
+    images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    manifests = {}
+    for seed in (0, 1):
+        data_cfg = {
+            "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+            "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+            "split": {"val_ratio": 0.25, "test_ratio": 0.15, "seed": seed,
+                      "reserve_calibration_fraction": 0.15},
+        }
+        train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+        assert val_ds is not None
+        manifests[seed] = data_cfg["split"]["spatial_manifest"]
+
+    assert manifests[0]["calibration_region"] == manifests[1]["calibration_region"]
+    assert manifests[0]["test_region"] == manifests[1]["test_region"]
+    assert manifests[0]["seed"] != manifests[1]["seed"]
+
+
+def test_spatial_manifest_distinct_fractions_layout_is_unaffected_by_the_fixed_tie_break(
+    tmp_path: Path,
+):
+    """Coverage, not a guard: with no tied shares (0.65/0.25/0.1), the fixed center-out order
+    picks exactly the layout the seed-shuffled tie-break always did too, since a seed only ever
+    broke ties. Regions pinned against this exact width/height/tile_size/overlap/fractions/seed."""
+    images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
+    }
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    assert val_ds is not None
+    manifest = data_cfg["split"]["spatial_manifest"]
+    assert manifest["train_region"] == [(1224, 0, 3494, 3000)]
+    assert manifest["val_region"] == [(0, 0, 1046, 3000)]
+    assert manifest["test_region"] == [(3672, 0, 3902, 3000)]
+
+
 def test_spatial_manifest_persists_train_and_val_regions_too(tmp_path: Path):
     """train_region/val_region are persisted the same way test_region already is: real rects, not
     just per-region tile identities, so a later geometric disjointness check has real geometry
@@ -445,11 +515,11 @@ def test_reserve_calibration_fraction_raises_on_infeasible_layout(tmp_path: Path
 
 def test_reserve_calibration_fraction_raises_on_empty_gt_bearing_side(tmp_path: Path):
     """Reason 3: the strip layout itself is feasible (every side gets kept tiles), but with
-    tiling.skip_empty set, a reserved side's tiles carrying no GT filter down to zero real
-    samples. At this exact width/tile_size/fractions/seed, spatial_strip_split places train at x
-    in [1275, 3175] and val at [3264, 3991] (verified directly against spatial_strip_split for
-    this test's own params); GT is placed only inside those two ranges, leaving test ([0, 421])
-    and calibration ([510, 1186]) both real, tiled, and entirely GT-free."""
+    tiling.skip_empty set, a side's tiles carrying no GT filter down to zero real samples. At
+    this exact width/tile_size/fractions/seed, spatial_strip_split places train at x in [1275,
+    3175] (verified directly against spatial_strip_split for this test's own params); GT is
+    placed only inside that range plus calibration's own [3264, 3991], leaving val ([510,
+    1186]) and test ([0, 421]) both real, tiled, and entirely GT-free."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
