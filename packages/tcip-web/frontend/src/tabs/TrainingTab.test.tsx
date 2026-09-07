@@ -70,6 +70,29 @@ describe("TrainingTab run list", () => {
     await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("train-agent-1"));
   });
 
+  it("shows a running row's own heartbeat age, the one liveness signal a record with no process id can offer", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [
+        run({
+          run_id: "train-stale",
+          status: "running",
+          external: true,
+          heartbeat: new Date(Date.now() - 3 * 60_000).toISOString(),
+        }),
+      ],
+    });
+
+    render(<TrainingTab />);
+    expect(await screen.findByText(/running, last heartbeat 3 min ago/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /train-stale running, last heartbeat 3 min ago/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel train-stale" })).toHaveAttribute(
+      "title",
+      "Reaches a live process only; a stale running row keeps this control until its heartbeat window lapses.",
+    );
+  });
+
   it("offers no stop control for a run in a terminal status, external or not", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [

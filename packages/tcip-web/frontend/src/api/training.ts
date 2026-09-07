@@ -27,6 +27,10 @@ export interface TrainingRunSummary {
   experiment_id?: string | null;
   /** Set when experiment tracking itself raised; null when it succeeded or never ran. */
   experiment_error?: string | null;
+  /** The status record's own last-heartbeat instant (ISO-8601), when the record carries one:
+   * no process id is persisted anywhere, so this is the one signal a stale ``running`` row
+   * (its process gone, read as live for the rest of the heartbeat window) can show. */
+  heartbeat?: string | null;
 }
 
 export interface TrainingRunDetail {
