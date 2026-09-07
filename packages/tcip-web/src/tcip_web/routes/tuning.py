@@ -398,6 +398,19 @@ def _missing_relaunch_fields(manifest: dict) -> list[str]:
     return sorted(f for f in _RELAUNCH_FIELDS if f not in manifest)
 
 
+def _invalid_split_draws_field(manifest: dict) -> Optional[str]:
+    """``"split_draws"`` when the manifest carries the key but its value is not a draw count
+    (:func:`training_tools.coerce_split_draws`), else ``None``. A manifest of unknown
+    provenance (hand-written, or written by an older build) can carry a value the worker's own
+    comparison cannot order against an int; caught here, before the worker starts, rather than
+    inside it."""
+    from tcip_mcp.tools.training_tools import coerce_split_draws
+
+    if "split_draws" not in manifest:
+        return None
+    return None if coerce_split_draws(manifest["split_draws"]) is not None else "split_draws"
+
+
 def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
     """``manifest``'s own ``run_hyperparameter_search`` arguments, read directly rather than defaulted: a caller
     checks :func:`_missing_relaunch_fields` first, so a key absent here would be a programming
@@ -405,7 +418,14 @@ def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
 
     ``split_draws``/``split_draw_seeds`` are the one exception, read with ``run_hyperparameter_search``'s own
     defaults (1, ``None``) rather than required: a manifest without the field carries neither
-    key, and must still relaunch."""
+    key, and must still relaunch. ``split_draws`` is read through
+    :func:`training_tools.coerce_split_draws`, the same coercion :func:`caller_split_seed_refusal`
+    applies, so a manifest recording it as a numeric string still relaunches as the int it names
+    rather than crashing the worker's own comparison; a caller checks
+    :func:`_invalid_split_draws_field` first, so the coercion here never reads ``None``."""
+    from tcip_mcp.tools.training_tools import coerce_split_draws
+
+    draws = coerce_split_draws(manifest.get("split_draws"))
     return _RelaunchSpec(
         base_config=manifest["base_config"],
         param_space=manifest["param_space"],
@@ -418,7 +438,7 @@ def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
         warm_start=bool(manifest["warm_start"]),
         baseline_params=manifest["baseline_params"],
         resources_per_trial=manifest["resources_per_trial"],
-        split_draws=manifest.get("split_draws", 1),
+        split_draws=draws if draws is not None else 1,
         split_draw_seeds=manifest.get("split_draw_seeds"),
     )
 
@@ -507,10 +527,11 @@ def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
     missing = _missing_relaunch_fields(manifest)
     if missing:
         raise HTTPException(409, f"this sweep's record is missing {missing}: cannot relaunch")
-    manifest_param_space = manifest.get("param_space")
-    if not isinstance(manifest_param_space, dict):
-        manifest_param_space = {}
-    seed_axis_refusal = caller_split_seed_refusal(manifest_param_space, manifest.get("split_draws"))
+    invalid_field = _invalid_split_draws_field(manifest)
+    if invalid_field is not None:
+        raise HTTPException(
+            409, f"this sweep's record's {invalid_field} is not a draw count: cannot relaunch")
+    seed_axis_refusal = caller_split_seed_refusal(manifest.get("param_space"), manifest.get("split_draws"))
     if seed_axis_refusal is not None:
         raise HTTPException(409, f"{seed_axis_refusal.reason} {seed_axis_refusal.remedy}")
 
