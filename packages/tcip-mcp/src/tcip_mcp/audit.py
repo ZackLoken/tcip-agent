@@ -190,16 +190,21 @@ def _entry(
 def _write_entry(entry: dict[str, Any], scope: str | Path | None = None) -> None:
     """Append one audit entry to the log ``scope`` names (lock-guarded + fsync'd), never raising.
 
-    What :func:`record_event` writes through, for the emitters that are not MCP tools. Its
-    remaining callers each have their own reason to stay best-effort rather than move to
-    :func:`record_event_or_raise`: the training envelope's open and close events
-    (``envelope.py:486``, ``:501``) bracket a body already running in a background thread, its
-    two ``model_registration_failed`` lines (``:588``, ``:596``) are themselves recording a
-    failure, the worker's crash path (``subprocess_worker.py:210``) is reconciling a
-    pre-training crash before its own ``training_run`` event can open, and the web
-    ``phenology_measurement`` view (``routes/results.py``) is a read, with no mutation to leave
-    unrecorded. None of them records after its own mutation the position :func:`audited` refuses
-    from; a caller that does uses :func:`record_event_or_raise` instead.
+    What :func:`record_event` writes through, for the emitters that are not MCP tools. Every GUI
+    mutation now records through :func:`record_event_or_raise`, reached from each route's own
+    helper via ``routes/audit_gap.record_committed``, so a lost line there raises rather than
+    staying silent. Its remaining callers, named by function rather than by line (a docstring
+    citation the architecture checker does not anchor rots the next time the function moves):
+    the training envelope's open event (``run_training_envelope``) brackets a body already
+    running in a background thread; its close event (``run_training_envelope``, in a ``finally``)
+    does record after its own mutation, ``_finalize_run`` having already closed the run and
+    registered the model, so a lost line there shows in the trail as a run with no close event
+    rather than as a raised error. Its two ``model_registration_failed`` lines
+    (``_finalize_run``) are themselves recording a registration failure. The worker's crash path
+    (``subprocess_worker.run``) likewise records after its own ``update_status`` call: a lost
+    line there shows as a run marked failed with no matching event, never a raised error, since
+    the crash it names already happened. The web ``phenology_measurement`` view
+    (``routes/results.py``) is a read, with no mutation to leave unrecorded.
     """
     try:
         append(_stamp_scope(entry, scope), entry)
