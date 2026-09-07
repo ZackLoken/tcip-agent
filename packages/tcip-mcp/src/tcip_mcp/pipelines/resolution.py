@@ -37,6 +37,7 @@ from tcip_store import (
     StoreDescriptor,
     StoreError,
     check_json_value,
+    finite_or_none,
     register_store,
 )
 from tcip_store.file_backend import RootedFileLocator
@@ -2319,12 +2320,63 @@ def _delivered_file_sha256(output_path: str | None) -> str | None:
     return hashlib.sha256(Path(output_path).read_bytes()).hexdigest()
 
 
+def _render_bindings(bindings: Mapping[str, StampBinding]) -> dict:
+    """A per-bucket ``StampBinding`` mapping as the stored record renders it, in ``documents`` and
+    in each ``document_reconciliations`` entry's own ``bindings``: the one rendering both sites
+    share, so a bucket's binding evidence reads the same wherever the record carries it."""
+    return {
+        bucket: {
+            "ok": b.ok, "claimed": b.claimed, "experiment_id": b.experiment_id,
+            "producing_experiment_id": b.producing_experiment_id,
+            "checkpoint_sha256": b.checkpoint_sha256, "record_digest": b.record_digest,
+            "note": b.note,
+        }
+        for bucket, b in bindings.items()
+    }
+
+
+def _render_reconciled_document(entry: Mapping) -> dict:
+    """One ``_reconcile_validity``-shaped mapping rendered to plain JSON values, run before
+    ``model_validate`` and the store write: ``_reconcile_validity`` admits any number for ``conf``
+    and ``confs`` (a hand-authored ``NaN`` a reader can decode but the canonical codec refuses),
+    so both pass through :func:`~tcip_store.finite_or_none` here rather than reach the codec."""
+    rendered = {
+        "validated": entry["validated"],
+        "on_disk_validated": entry["on_disk_validated"],
+        "missing_sidecars": list(entry.get("missing_sidecars", [])),
+        "unvalidated_buckets": list(entry.get("unvalidated_buckets", [])),
+        "binding_notes": dict(entry.get("binding_notes", {})),
+        "bindings": _render_bindings(entry.get("bindings", {})),
+        "conf": finite_or_none(entry.get("conf")),
+        "confs": {bucket: finite_or_none(v) for bucket, v in entry.get("confs", {}).items()},
+        "per_bucket": dict(entry.get("per_bucket", {})),
+    }
+    if "bound_validated" in entry:
+        rendered["bound_validated"] = entry["bound_validated"]
+    if "delivery_note" in entry:
+        rendered["delivery_note"] = entry["delivery_note"]
+    return rendered
+
+
+def _render_reconciled_dimension(entry: Mapping) -> dict:
+    """One ``reconcile_tile_size_validity``/``reconcile_claim_scope_validity``/
+    ``reconcile_scale_validity``-shaped mapping rendered to plain JSON values."""
+    return {
+        "operative": entry["operative"],
+        "validated": entry.get("validated"),
+        "per_bucket": dict(entry.get("per_bucket", {})),
+        "unvalidated_buckets": list(entry.get("unvalidated_buckets", [])),
+        "binding_notes": dict(entry.get("binding_notes", {})),
+    }
+
+
 def record_delivery_binding_event(
     door: str,
     output_path: str | None,
     pred_dirs: Sequence[str] | None,
-    bindings: Mapping[str, StampBinding],
     *,
+    document_reconciliations: Mapping[str, Mapping],
+    dimension_reconciliations: Mapping[str, Mapping],
     measurement_documents: Sequence[str],
     scale_document: str | None,
     acknowledgement: Acknowledgement | None,
@@ -2347,13 +2399,27 @@ def record_delivery_binding_event(
     unrecorded on the platform's canonical log.
 
     Beside that dataset-scoped audit line, a project-scoped ``delivery_events`` record is also
-    written, carrying the real per-bucket ``StampBinding`` evidence this call already computed
-    rather than a coarse gate stamp, so a delivery can be found again by the same ``trait``/
-    ``delivery_kind`` vocabulary an operationalization or a trait-spec statement is found by. This
-    second write, unlike the audit line above, stays best-effort on its own terms: a delivery
-    event is a fact recorded after the artifact it describes already shipped, not a confirmation,
-    so a lost line here is a provenance gap surfaced by a warning, never a reason to make an
-    already-completed delivery look retryable.
+    written, carrying every reconciliation the delivering door's gate actually ran rather than a
+    coarse gate stamp, so a delivery can be found again by the same ``trait``/``delivery_kind``
+    vocabulary an operationalization or a trait-spec statement is found by. This second write,
+    unlike the audit line above, stays best-effort on its own terms: a delivery event is a fact
+    recorded after the artifact it describes already shipped, not a confirmation, so a lost line
+    here is a provenance gap surfaced by a warning, never a reason to make an already-completed
+    delivery look retryable.
+
+    ``document_reconciliations`` and ``dimension_reconciliations`` are the ``_reconcile_validity``-
+    shaped and ``reconcile_tile_size_validity``-shaped mappings the door's own gate ran, keyed by
+    the sidecar document (``operating_point``, ``classifier_operating_point``, ...) or dimension
+    (``claim_scope``, ``tile_size``, ``scale``) each reconciled; a key is present exactly when the
+    door called that reconciler, and ``{}`` means none of that family ran. Both are required, never
+    defaulted, so a caller cannot silently omit what its own gate actually reconciled. The stored
+    ``documents`` and the audit line's ``verified_buckets``/``record_digests`` carry binding
+    integrity alone (``StampBinding.ok``, true even for a bucket with no stamp at all), while each
+    reconciliation's own ``per_bucket``/``validated`` carries the validity state that same bucket
+    can read ``false`` under; a reader of both is not left to infer why they differ. The record
+    carries what the door's gate reconciled, never what the delivered file's own columns say,
+    since a delivered column floors a dimension with no column of its own
+    (``DeliveryGateResult.owned_column_stamp``).
 
     ``project_root`` names the project this event belongs to, for a caller (a web route) whose
     process can serve more than one project: an MCP tool leaves it unset and gets the process-pinned
@@ -2366,7 +2432,14 @@ def record_delivery_binding_event(
     ``["operating_point", "classifier_operating_point"]``), and ``scale_document`` names
     ``"resolve_scale"`` when the delivery also rests on a physical scale, ``None`` otherwise. Both
     are required, never defaulted, so a caller cannot silently omit what its own gate actually
-    reconciled.
+    reconciled. When ``pred_dirs`` is non-empty, every document named in ``measurement_documents``
+    must have an entry in ``document_reconciliations``, checked beside ``model_validate`` below
+    and before the record is written: a caller stating what it reconciled but not reconciling it
+    is a deterministic defect in the caller, never an environmental failure, so it raises
+    ``ValueError`` naming the door and the missing document, with the audit line above already on
+    the log and no record built. When ``pred_dirs`` is empty no entry is required, and
+    ``documents``, the audit line's ``verified_buckets``/``record_digests`` and every rendered
+    reconciliation are empty, as they are today from the empty stub.
 
     ``acknowledgement`` is the breeder's own act of shipping this delivery unvalidated (the same
     ``Acknowledgement`` a passing ``check_delivery_gate`` call may have taken), or ``None`` when
@@ -2404,6 +2477,12 @@ def record_delivery_binding_event(
 
     roots = {_dataset_root_of(Path(d)) for d in (pred_dirs or [])}
     scope = roots.pop() if len(roots) == 1 else None
+
+    primary_document = measurement_documents[0] if measurement_documents else None
+    primary_bindings: Mapping[str, StampBinding] = (
+        document_reconciliations.get(primary_document, {}).get("bindings", {})
+        if primary_document is not None else {}
+    )
     record_event_or_raise(
         door,
         {"output_path": output_path, "pred_dirs": list(pred_dirs or [])},
@@ -2412,9 +2491,9 @@ def record_delivery_binding_event(
             bucket: {"verified": b.ok,
                      "record": f"{b.experiment_id}:{b.record_digest}" if b.claimed and b.ok else "",
                      "note": b.note}
-            for bucket, b in bindings.items()
+            for bucket, b in primary_bindings.items()
         },
-        record_digests=sorted({b.record_digest for b in bindings.values()
+        record_digests=sorted({b.record_digest for b in primary_bindings.values()
                                if b.ok and b.claimed and b.record_digest}),
     )
 
@@ -2432,19 +2511,28 @@ def record_delivery_binding_event(
         "acknowledged_by": acknowledgement.acknowledged_by if acknowledgement is not None else None,
         "acknowledgement_reason": acknowledgement.reason if acknowledgement is not None else None,
         "plant_mapping": plant_mapping,
-        "documents": {
-            bucket: {
-                "ok": b.ok, "claimed": b.claimed, "experiment_id": b.experiment_id,
-                "producing_experiment_id": b.producing_experiment_id,
-                "checkpoint_sha256": b.checkpoint_sha256, "record_digest": b.record_digest,
-                "note": b.note,
-            }
-            for bucket, b in bindings.items()
+        "documents": _render_bindings(primary_bindings),
+        "document_reconciliations": {
+            doc: _render_reconciled_document(entry)
+            for doc, entry in document_reconciliations.items()
+        },
+        "dimension_reconciliations": {
+            dim: _render_reconciled_dimension(entry)
+            for dim, entry in dimension_reconciliations.items()
         },
         "produced_at": now,
     }
     from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
 
+    if pred_dirs:
+        missing = [doc for doc in measurement_documents if doc not in document_reconciliations]
+        if missing:
+            raise ValueError(
+                f"{door}: pred_dirs names {len(list(pred_dirs))} bucket(s) but "
+                f"document_reconciliations carries no entry for {missing}; every document "
+                "measurement_documents declares must be reconciled before this delivery's "
+                "record is built."
+            )
     DeliveryEventRecord.model_validate(record)
     key = delivery_event_key(delivery_events_scope(project_root), event_id)
     try:
