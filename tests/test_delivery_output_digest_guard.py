@@ -19,7 +19,8 @@ def test_a_delivered_files_own_bytes_are_the_recorded_digest(tmp_path: Path) -> 
     out_csv.write_text("plant_id,count\nP1,3\n", encoding="utf-8")
 
     resolution.record_delivery_binding_event(
-        "test_door", str(out_csv), [], {}, measurement_documents=["operating_point"],
+        "test_door", str(out_csv), [], document_reconciliations={}, dimension_reconciliations={},
+        measurement_documents=["operating_point"],
         scale_document=None, acknowledgement=None, trait="astringency",
         delivery_kind="state_crossing_dates",
         project_root=tmp_path, plant_mapping=None,
