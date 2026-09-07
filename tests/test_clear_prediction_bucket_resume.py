@@ -530,8 +530,12 @@ def test_a_resume_naming_an_older_finished_archive_of_a_source_cleared_twice_ref
     its own second artifact (coverage: the pass-through baseline proceeds too), and a resume
     naming the older archive refuses, naming the newest instead of merging this clear's own
     reconciliation into a finished, earlier publication."""
+    import tcip_mcp.dataset_layout as dataset_layout_mod
     from tcip_mcp.prediction_buckets import bucket_stems
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket, run_inference
+
+    stamps = iter(["20260906T120000Z", "20260906T120001Z"])
+    monkeypatch.setattr(dataset_layout_mod, "current_cleared_stamp", lambda: next(stamps))
 
     exp_id = "expClearedTwice"
     built = build_published_bucket(tmp_path, monkeypatch, experiment_id=exp_id)
