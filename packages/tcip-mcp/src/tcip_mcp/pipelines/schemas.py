@@ -114,9 +114,8 @@ def evaluation_section(config: dict) -> dict:
     The returned block is the caller's own object, top-level or nested, never copied, when
     ``config`` is a plain dict. When ``config`` is a dict subclass whose ``get`` wraps a nested
     read (an HPO trial's access-tracking config), the returned block is that subclass's own
-    freshly wrapped copy of the nested dict instead, per its own stated limitation: a write
-    through it is never visible on ``config``. Either way, a caller that wants to keep the block
-    must not mutate it in place and expect the mutation to be seen elsewhere.
+    wrapped view of the nested dict, installed back onto ``config`` on first read, so a write
+    through it is visible on ``config`` from then on, the same as the plain-dict case.
     """
     top = config.get("evaluation", _NO_TOP_LEVEL_EVALUATION)
     if top is not _NO_TOP_LEVEL_EVALUATION:
