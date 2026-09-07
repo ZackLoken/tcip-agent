@@ -218,8 +218,9 @@ export type TrainingStreamMsg = TrainingMetricFrame | TrainingStatusFrame;
 /**
  * Open a live metrics stream for a training run, auto-reconnecting with capped backoff.
  * The server replays all rows from the start on each (re)connect, so the consumer must
- * dedupe by epoch/step. The ``status`` frame is always terminal, whether it carries a
- * known run's report or an unknown run's ``error``; once seen we stop reconnecting.
+ * dedupe by epoch/step. A ``status`` frame carrying a report is terminal; one carrying only
+ * ``error`` means the run's record does not exist yet (selected at its launch moment), and
+ * the socket keeps reconnecting under backoff until a report arrives.
  */
 export function openTrainingStream(
   project_root: string,
@@ -231,7 +232,10 @@ export function openTrainingStream(
   );
   const socket = createReconnectingSocket({
     url,
-    ...jsonFrameHandlers<TrainingStreamMsg>(onMessage, (frame) => frame.type === "status"),
+    ...jsonFrameHandlers<TrainingStreamMsg>(
+      onMessage,
+      (frame) => frame.type === "status" && frame.status != null,
+    ),
   });
   socket.start();
   return () => socket.stop();

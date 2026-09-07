@@ -823,6 +823,44 @@ describe("TrainingTab status toast", () => {
       expect(pushToast).toHaveBeenCalledWith("Training train-live-done: completed", "info"),
     );
   });
+
+  it("toasts a stream error once, then still charts a metric the reconnect delivers", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
+    }));
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-just-launched", status: "running" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
+    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+      onMessage({
+        type: "status",
+        run_id: runId,
+        status: null,
+        error: "unknown run: train-just-launched",
+      });
+      onMessage({
+        type: "status",
+        run_id: runId,
+        status: null,
+        error: "unknown run: train-just-launched",
+      });
+      onMessage({ type: "metric", run_id: runId, row: { epoch: 1, loss: 0.5 } });
+      return () => {};
+    });
+    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-just-launched"));
+
+    expect(
+      await screen.findByRole("img", { name: "Live metrics for train-just-launched: loss" }),
+    ).toBeInTheDocument();
+    expect(pushToast).toHaveBeenCalledWith(
+      "Training stream error: unknown run: train-just-launched",
+    );
+    expect(pushToast).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("TrainingTab switching between runs directly", () => {
