@@ -399,8 +399,8 @@ def export_detection_csv(
     # With no pred_dirs nothing on disk backs the count's validity, so the dimension floors to
     # unvalidated rather than trusting the caller's bare string (mirrors export_aggregated_csv).
     flags: dict[str, str | None] = {"operating_point": VALIDATED_FALSE}
-    operating_point_recon: dict = {"bindings": {}}
-    tile_recon: dict = {"operative": False, "validated": None, "binding_notes": {}}
+    operating_point_recon: dict | None = None
+    tile_recon: dict | None = None
     if pred_dirs:
         # Reconciled from the buckets' own sidecars, floored against the caller assertion, never
         # trusted from the string alone (mirrors export_aggregated_csv's count-trait gating).
@@ -413,8 +413,10 @@ def export_detection_csv(
 
     gate = check_delivery_gate(flags, acknowledgement=acknowledgement)
     if not gate.ok:
-        notes = binding_notes_text(
-            {**operating_point_recon.get("binding_notes", {}), **tile_recon.get("binding_notes", {})})
+        notes = binding_notes_text({
+            **(operating_point_recon or {}).get("binding_notes", {}),
+            **(tile_recon or {}).get("binding_notes", {}),
+        })
         raise DeliveryRefused(gate, notes)
 
     # A confirmation withdrawn or a field moved since the first check refuses here, before anything.
@@ -428,7 +430,7 @@ def export_detection_csv(
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    stamp = delivered_tail(provenance, operating_point_recon["bindings"], gate,
+    stamp = delivered_tail(provenance, (operating_point_recon or {}).get("bindings", {}), gate,
                            columns=_PROVENANCE_COLUMNS)
     fieldnames = (["image", "detection_count", "avg_confidence", "measurement_document"]
                  + _PROVENANCE_COLUMNS)
@@ -451,16 +453,23 @@ def export_detection_csv(
             })
 
     event_recorded = record_delivery_binding_event(
-        "export_detection_csv", output_path, pred_dirs, operating_point_recon["bindings"],
+        "export_detection_csv", output_path, pred_dirs,
+        document_reconciliations=(
+            {_MEASUREMENT_DOCUMENT: operating_point_recon} if operating_point_recon is not None
+            else {}
+        ),
+        dimension_reconciliations={"tile_size": tile_recon} if tile_recon is not None else {},
         measurement_documents=[_MEASUREMENT_DOCUMENT], scale_document=None,
         acknowledgement=gate.effective_acknowledgement(), trait=trait,
         delivery_kind=PER_IMAGE_COUNT, project_root=project_root)
     summary = {
         "stamp": gate.stamp,
         "unvalidated": gate.unvalidated,
-        "tile_size_operative": tile_recon["operative"],
-        "tile_size_validated": tile_recon.get("validated"),
-        "binding_notes": binding_notes_text(
-            {**operating_point_recon.get("binding_notes", {}), **tile_recon.get("binding_notes", {})}),
+        "tile_size_operative": (tile_recon or {}).get("operative", False),
+        "tile_size_validated": (tile_recon or {}).get("validated"),
+        "binding_notes": binding_notes_text({
+            **(operating_point_recon or {}).get("binding_notes", {}),
+            **(tile_recon or {}).get("binding_notes", {}),
+        }),
     }
     return output_path, stamp, summary, event_recorded
