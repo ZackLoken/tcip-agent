@@ -822,8 +822,8 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `author_trait_spec` | `trait_spec_authoring_tools.py:23` | yes | Register a trait that does not yet exist, and record why, in the breeder's terms. |
-| `revise_trait_spec` | `trait_spec_authoring_tools.py:128` | yes | Update one or more fields on an already-registered trait's spec. |
+| `author_trait_spec` | `trait_spec_authoring_tools.py:25` | yes | Register a trait that does not yet exist, and record why, in the breeder's terms. |
+| `revise_trait_spec` | `trait_spec_authoring_tools.py:130` | yes | Update one or more fields on an already-registered trait's spec. |
 
 ### orthomosaic_tools.py (1 tool)
 
@@ -1517,7 +1517,7 @@ dataset-scoped (`save_annotations`, `tools/annotation_tools.py:147`; `write_clas
 `propose_annotations`, `tools/proposal_tools.py:182`; `stage_proposals`, `tools/proposal_tools.py:752`)
 and two project-scoped
 (`state_trait_operationalization`, `tools/operationalization_tools.py:19`; `author_trait_spec`,
-`tools/trait_spec_authoring_tools.py:23`; `dataset_scope_of` admits a `project_root` argument the
+`tools/trait_spec_authoring_tools.py:25`; `dataset_scope_of` admits a `project_root` argument the
 same way it admits a dataset root, since both are directories carrying their own `.tcip/`). A
 resolution that answers "no dataset" leaves the call a platform event; a resolver that raises
 refuses the call rather than filing it there.
@@ -2515,22 +2515,22 @@ Phase 3 verdict: single. One read of the raw value survives outside the class, i
 ## S36. Count-objective vocabulary versus registered pickers
 
 Must agree: every named count objective has a registered picker function.
-Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:75` (`COUNT_OBJECTIVES`, over the three names declared at `traits.py:64-66` (`COUNT_UNBIASED = "count_unbiased"`)).
+Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:77` (`COUNT_OBJECTIVES`, over the three names declared at `traits.py:64-66` (`COUNT_UNBIASED = "count_unbiased"`)).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py:68` (`COUNT_OBJECTIVE_PICKERS`, with the reconciling `operating_point.py:73` (`assert set(COUNT_OBJECTIVE_PICKERS) == COUNT_OBJECTIVES,`)). A picker's provenance label, and the review-verdict variant it earns through `REVIEW_VERDICT_LABEL_SUFFIX`, `operating_point.py:77`, are read off that registry by `pipelines/derivations.py:640`, so registering a picker registers its labels.
 Phase 3 verdict: single.
 
 ## S37. traits.py trait specs against crops.yml controlled vocabulary
 
 Must agree: a registered trait's delivered phenotypes and units exist in the crops.yml vocabulary.
-Side A: `packages/tcip-mcp/src/tcip_mcp/knowledge/__init__.py:137` (`def crops_yml_path(`, the one placement of `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/crops.yml`), reached through `packages/tcip-mcp/src/tcip_mcp/traits.py:229` (`def crops_yml_path(`, delegating), loaded once for every reader of it by `_crops_traits`, `traits.py:236`.
-Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:300` (`_spec_from_config` cross-checks each spec against `_crops_vocab`, `traits.py:249`) and `tools/verify_skill_traits.py:46` (`load_vocab` checks a skill's trait tokens through that same read, and refuses an empty vocabulary rather than reporting a clean skill).
+Side A: `packages/tcip-mcp/src/tcip_mcp/knowledge/__init__.py:137` (`def crops_yml_path(`, the one placement of `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/crops.yml`), reached through `packages/tcip-mcp/src/tcip_mcp/traits.py:232` (`def crops_yml_path(`, delegating), loaded once for every reader of it by `_crops_traits`, `traits.py:239`.
+Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:303` (`_spec_from_config` cross-checks each spec against `_crops_vocab`, `traits.py:252`) and `tools/verify_skill_traits.py:46` (`load_vocab` checks a skill's trait tokens through that same read, and refuses an empty vocabulary rather than reporting a clean skill).
 Phase 3 verdict: single.
 
 ## S38. Per-project trait spec records .tcip/state/trait_specs/*.json
 
 Must agree: the MCP writer, the loader, and the GUI trait list agree on the spec fields and the reason a spec was skipped.
-Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:355` (`def trait_specs_dir(`, the one placement, with `TRAIT_SPECS_STORE`, `traits.py:396`, and `trait_spec_key`, `traits.py:412`, addressing one spec).
-Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:430` (`load_trait_specs_with_errors`, the one scan and the one skip-reason list) and `traits.py:483` (`write_trait_spec_fields`, the one write, reading and merging compare-and-set against the version it read). `packages/tcip-web/src/tcip_web/routes/results.py:443` and `packages/tcip-mcp/src/tcip_mcp/cli/doctor.py:588` name the project and let the placement resolve here.
+Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:358` (`def trait_specs_dir(`, the one placement, with `TRAIT_SPECS_STORE`, `traits.py:399`, and `trait_spec_key`, `traits.py:415`, addressing one spec).
+Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:433` (`load_trait_specs_with_errors`, the one scan and the one skip-reason list) and `traits.py:496` (`write_trait_spec_fields`, the one write, reading and merging compare-and-set against the version it read). `packages/tcip-web/src/tcip_web/routes/results.py:443` and `packages/tcip-mcp/src/tcip_mcp/cli/doctor.py:588` name the project and let the placement resolve here.
 Phase 3 verdict: single.
 
 ## S39. Phenology CSV column vocabulary
