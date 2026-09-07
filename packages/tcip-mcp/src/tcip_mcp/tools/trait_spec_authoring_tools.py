@@ -7,11 +7,10 @@ no MCP tool can reach. A single tool doing both authoring and confirmation would
 confirmation inside the agent's own tool surface and make honest attribution depend on the agent
 choosing not to fill a field. ``revise_trait_spec`` is the other door: it edits fields on a
 spec already on record, never creates one, and states or restates the trait-spec authoring
-statement when its edit calls for it, the door both the delivery precondition and
-``confirm_trait_spec``'s not-found message name for a spec with a stale statement or none at
-all. Authoring creates, field-editing merges, and the one documented restatement path (a spec on
-record whose statement never landed) is where the two doors overlap: both then write onto an
-already-registered spec.
+statement when its edit calls for it, the door named for a spec with a stale statement or none
+at all wherever a stated meaning needs the breeder's own confirmation. Authoring creates,
+field-editing merges, and the one documented restatement path (a spec on record whose statement
+never landed) is where the two doors overlap: both then write onto an already-registered spec.
 """
 
 from __future__ import annotations
