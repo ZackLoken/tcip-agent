@@ -482,14 +482,12 @@ export function TuningTab() {
                         <div className="text-tcip-fg mb-1">
                           Best: mean {cellText(sweepDraws.best.mean)}, std{" "}
                           {cellText(sweepDraws.best.std)}, min {cellText(sweepDraws.best.min)}, max{" "}
-                          {cellText(sweepDraws.best.max)}, seeds{" "}
+                          {cellText(sweepDraws.best.max)}, completed seeds{" "}
                           {sweepDraws.best.seeds_complete.map(cellText).join(", ")}
                         </div>
-                      ) : (
-                        <div className="text-tcip-muted mb-1">
-                          {sweepDraws.bestState ?? "no best recorded"}
-                        </div>
-                      )}
+                      ) : sweepDraws.bestReason ? (
+                        <div className="text-tcip-muted mb-1">{sweepDraws.bestReason}</div>
+                      ) : null}
                       {sweepDraws.groups.length > 0 && (
                         <div className="overflow-auto">
                           <table className="w-full text-left">

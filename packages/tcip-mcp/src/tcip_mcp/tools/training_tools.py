@@ -2530,16 +2530,16 @@ def run_hyperparameter_search(
         else:
             result["best_params"] = None
             result["best_value"] = None
-            result["best_value_state"] = (
+            result["best_value_reason"] = (
                 "no eligible point: every drawn point had an errored or never-answered draw"
             )
             result["best_value_spread"] = None
 
-    # best_value_state (stored_number's sibling for a non-finite best_value) rides along whenever the search produced one.
+    # best_value_state carries only stored_number's own token vocabulary; best_value_reason is the English sentence for why there is no best value at all.
     manifest_result = {k: result.get(k) for k in ("best_params", "best_value", "n_trials")}
     if "best_value_state" in result:
         manifest_result["best_value_state"] = result["best_value_state"]
-    for key in ("best_value_spread", "split_sensitivity", "n_points", "split_draws"):
+    for key in ("best_value_spread", "split_sensitivity", "n_points", "split_draws", "best_value_reason"):
         if key in result:
             manifest_result[key] = result[key]
     manifest.update(
