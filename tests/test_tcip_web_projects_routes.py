@@ -180,6 +180,30 @@ def test_set_active_rejects_unknown_project(client, workspace_dir):
     assert resp.status_code == 404
 
 
+def test_set_active_refuses_a_project_pending_removal(client, workspace_dir):
+    import tcip_store
+    from tcip_mcp import workspace
+
+    # Warm this client's first bind (which walks any already-pending removal) before writing
+    # the marker below, so the request meets one still pending, not one the warm-up moved.
+    assert client.get("/health").status_code == 200
+
+    proj = _make_project(workspace_dir, "sample_plot_alpha")
+    tcip_store.replace(
+        workspace.pending_removal_key(proj),
+        {"requested_at": "20260304T120000Z", "requested_by": "user:tester",
+         "archive_path": str(workspace_dir / ".removed" / "sample_plot_alpha-20260304T120000Z.zip"),
+         "holding_dir": str(workspace_dir / ".removed" / "sample_plot_alpha-20260304T120000Z"),
+         "external_roots": [], "dependent_projects": []},
+        expect=tcip_store.Version.ABSENT,
+    )
+
+    resp = client.post("/api/projects/active", json={"name": "sample_plot_alpha"})
+    assert resp.status_code == 409
+    assert "20260304T120000Z" in resp.json()["detail"]
+    assert workspace.read_active_project() is None
+
+
 def test_wrong_encoding_marker_does_not_break_the_front_door(client, workspace_dir):
     # Bound to the file backend: the claim is about raw bytes on disk no text codec decodes.
     import tcip_store

@@ -305,6 +305,12 @@ def ingest_images(
     except ValueError as exc:
         return {"error": str(exc)}
 
+    pending = workspace.pending_removal_or_none(dest_root)
+    if pending is not None:
+        return {"error": f"{dest_root} is pending removal (requested "
+                          f"{pending['requested_at']}); no image lands in a tree the archive "
+                          "has already left"}
+
     sources = list(_iter_source_images(source, recursive))
     if not sources:
         return {"error": f"No images found under {source!r}"}
