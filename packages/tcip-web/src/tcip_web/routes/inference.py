@@ -92,6 +92,9 @@ class InferenceJob:
     status: JobStatus = "pending"
     error: Optional[str] = None
     warning: Optional[str] = None
+    # Set when the worker's own audit line for this run could not be written: a distinct fact
+    # from warning, never reused for it. The predictions are on disk regardless.
+    audit_warning: Optional[str] = None
     # Detections dropped for a zero-extent box: no detection, so dropped rather than failing the
     # run. A rehydrated job's count is whatever the last persist wrote, never a live measurement.
     dropped_boxes: int = 0
@@ -111,7 +114,8 @@ def _summary(job: InferenceJob) -> dict:
     return {
         "job_id": job.job_id, "status": job.status, "done": job.done, "total": job.total,
         "images_dir": job.images_dir, "output_dir": job.output_dir, "error": job.error,
-        "warning": job.warning, "dropped_nonpositive_boxes": job.dropped_boxes,
+        "warning": job.warning, "audit_warning": job.audit_warning,
+        "dropped_nonpositive_boxes": job.dropped_boxes,
         "platform_root": job.platform_root,
     }
 
@@ -138,6 +142,7 @@ def _from_summary(s: dict, root: str) -> InferenceJob:
         status=jobstore.rehydrated_status(s),
         error=s.get("error"),
         warning=s.get("warning"),
+        audit_warning=s.get("audit_warning"),
         dropped_boxes=s.get("dropped_nonpositive_boxes", 0),
     )
 
@@ -197,6 +202,9 @@ def _list_images(images_dir: Path) -> list[Path | BandGroupRef]:
 
 
 def _worker(job: InferenceJob) -> None:
+    # Held through try/except, assigned to job.status only in finally, after the audit line is
+    # attempted. "running" (never a terminal read) until a branch below names the real outcome.
+    terminal_status: JobStatus = "running"
     try:
         job.status = "running"
         _persist()
@@ -216,7 +224,7 @@ def _worker(job: InferenceJob) -> None:
             checkpoint = load_registered_checkpoint(
                 job.checkpoint_path, project_path=job.platform_root)
         except UnregisteredCheckpoint as exc:
-            job.status = "failed"
+            terminal_status = "failed"
             job.error = str(exc)
             logger.warning("inference job %s refused: %s", job.job_id, job.error)
             return
@@ -269,7 +277,7 @@ def _worker(job: InferenceJob) -> None:
         tile_ref = tile_size_gate_flag(op_bundle.to_provenance()["operating_point"])
         gate = check_delivery_gate({"tile_size": tile_ref} if tile_ref is not None else {})
         if not gate.ok:
-            job.status = "failed"
+            terminal_status = "failed"
             tile_desc = f"{resolved_tile}px" if resolved_tile is not None else "no resolvable size"
             job.error = (
                 f"inference refused: unvalidated dimension(s) {list(gate.unvalidated)}. "
@@ -308,7 +316,7 @@ def _worker(job: InferenceJob) -> None:
         classified_refusal = unmapped_classified_run(
             {"subject": subject, "attribute": attribute}, id_map, images_dir=job.images_dir)
         if classified_refusal is not None:
-            job.status = "failed"
+            terminal_status = "failed"
             job.error = classified_refusal
             return
 
@@ -365,7 +373,7 @@ def _worker(job: InferenceJob) -> None:
 
                 unmapped = unmapped_label_ids(results, id_map)
                 if unmapped:
-                    job.status = "failed"
+                    terminal_status = "failed"
                     job.error = (
                         f"{img.stem}: this classified run decoded to id(s) {unmapped}, not keys "
                         f"of its recorded id_map ({sorted((id_map or {}).values())})."
@@ -377,36 +385,41 @@ def _worker(job: InferenceJob) -> None:
                 id_map=id_map, subject=subject, attribute=attribute)
             job.done += 1
 
-        if job.status != "failed":
+        if terminal_status != "failed":
             # Last, never beside where it is built, so a partway-dead pass leaves a bucket no reader mistakes for certified;
             # image_filenames names every enumerated image whether written or not, including one cancelled before its first write.
             write_sidecar(output_dir, provenance)
-            job.status = "cancelled" if job.cancel_event.is_set() else "completed"
+            terminal_status = "cancelled" if job.cancel_event.is_set() else "completed"
     except Exception as exc:
         logger.exception("inference job %s failed", job.job_id)
-        job.status = "failed"
+        terminal_status = "failed"
         job.error = str(exc)
     finally:
+        from tcip_mcp.audit import AuditEntryNotWritten
         from tcip_mcp.dataset_layout import dataset_root_of
         from tcip_web.routes.classes import _audit_dataset_write
 
         dataset_root = dataset_root_of(job.output_dir)
         if dataset_root is not None:
-            _audit_dataset_write(
-                str(dataset_root),
-                "gui_inference_run",
-                {
-                    "job_id": job.job_id,
-                    "checkpoint_path": job.checkpoint_path,
-                    "images_dir": job.images_dir,
-                    "output_dir": job.output_dir,
-                    "status": job.status,
-                    "images_written": job.done,
-                    "total": job.total,
-                    "error": job.error,
-                    "dropped_nonpositive_boxes": job.dropped_boxes,
-                },
-            )
+            try:
+                _audit_dataset_write(
+                    str(dataset_root),
+                    "gui_inference_run",
+                    {
+                        "job_id": job.job_id,
+                        "checkpoint_path": job.checkpoint_path,
+                        "images_dir": job.images_dir,
+                        "output_dir": job.output_dir,
+                        "status": terminal_status,
+                        "images_written": job.done,
+                        "total": job.total,
+                        "error": job.error,
+                        "dropped_nonpositive_boxes": job.dropped_boxes,
+                    },
+                )
+            except AuditEntryNotWritten as exc:
+                job.audit_warning = str(exc)
+        job.status = terminal_status
         _persist()
 
 
@@ -630,6 +643,7 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
                     "total": job.total,
                     "status": job.status,
                     "warning": job.warning,
+                    "audit_warning": job.audit_warning,
                 })
             # Terminate on any terminal state: a cancelled/interrupted job never
             # reaches completed/failed, so keying only on those spun this loop forever.
@@ -640,6 +654,7 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
                     "status": job.status,
                     "error": job.error,
                     "warning": job.warning,
+                    "audit_warning": job.audit_warning,
                     "dropped_nonpositive_boxes": job.dropped_boxes,
                 })
                 break
