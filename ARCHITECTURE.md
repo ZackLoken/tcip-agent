@@ -912,12 +912,12 @@ the response shape `tuning.py`'s trial-metrics route answers in, and `_body_comm
 `EmptyBodyPayload`, the empty body model six path-parameter-only routes now declare so the
 browser must send a preflighted request rather than reaching the handler as a simple one.
 
-Total HTTP routes at HEAD: 88 (5 on `app.py` plus 83 across the 17 route modules, both counts
+Total HTTP routes at HEAD: 89 (5 on `app.py` plus 84 across the 17 route modules, both counts
 obtained by grepping `@app.get/post(` and `@router.get/post(` and summing);
 websocket routes are counted separately, below, and excluded from this total. Each per-router
-heading's own route count (and their sum, 86) includes any websocket route it lists, since
+heading's own route count (and their sum, 87) includes any websocket route it lists, since
 `routes/inference.py`, `routes/terminal.py` and `routes/training.py` each carry one; net of
-those three, the 17 modules hold the 83 HTTP routes counted here.
+those three, the 17 modules hold the 84 HTTP routes counted here.
 
 Total WebSocket routes at HEAD: 5 (`/ws/state`, `/ws/panel/{panel}` on `app.py`;
 `/api/terminal/ws/{session_id}` on `routes/terminal.py`; `/api/inference/jobs/{job_id}/stream`  <!-- queued: P5-124 unify -->
@@ -951,7 +951,7 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/state` | `push_canvas_state` | `routes/canvas.py:81` |
+| POST | `/state` | `push_canvas_state` | `routes/canvas.py:82` |
 
 ### routes/classes.py, prefix `/api/classes` (6 routes)
 
@@ -980,8 +980,8 @@ registered at HEAD.
 | method | path | handler | line |
 |---|---|---|---|
 | GET | `/tree` | `get_dataset_tree` | `routes/dataset.py:152` |  <!-- queued: P5-83 unify -->
-| POST | `/select` | `select_dataset` | `routes/dataset.py:245` |
-| POST | `/nav` | `set_current_image` | `routes/dataset.py:387` |
+| POST | `/select` | `select_dataset` | `routes/dataset.py:251` |
+| POST | `/nav` | `set_current_image` | `routes/dataset.py:393` |
 
 ### routes/fs.py, prefix `/api/fs` (1 route)
 
@@ -1014,14 +1014,15 @@ registered at HEAD.
 | GET | `/reports` | `get_reports` | `routes/meta.py:36` |
 | GET | `/retrospectives` | `get_retrospectives` | `routes/meta.py:58` |
 
-### routes/projects.py, prefix `/api/projects` (4 routes)  <!-- queued: P5-88 unify -->
+### routes/projects.py, prefix `/api/projects` (5 routes)  <!-- queued: P5-88 unify -->
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `` (root) | `list_projects` | `routes/projects.py:121` |
-| POST | `/active` | `activate_project` | `routes/projects.py:191` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
-| GET | `/{name}/removal-preview` | `removal_preview_route` | `routes/projects.py:302` |
-| POST | `/remove` | `remove_project` | `routes/projects.py:311` |
+| GET | `` (root) | `list_projects` | `routes/projects.py:145` |
+| POST | `/active` | `activate_project` | `routes/projects.py:215` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
+| GET | `/{name}/removal-preview` | `removal_preview_route` | `routes/projects.py:348` |
+| POST | `/remove` | `remove_project` | `routes/projects.py:357` |
+| POST | `/{name}/release-binding` | `release_binding_route` | `routes/projects.py:371` |
 
 ### routes/results.py, prefix `/api/results` (15 routes)
 
@@ -1496,9 +1497,9 @@ log are one file at one key. That path is what the file backend places the log a
 `tcip export-store` writes back out; on the default database backend the rows live in that
 root's `.tcip/store.db` until they are exported.
 
-Writers: three write paths, `packages/tcip-mcp/src/tcip_mcp/audit.py:291` (`audited`),
-`audit.py:221` (`record_event`) and `audit.py:240` (`record_event_or_raise`), all resolving a
-caller's scope through one shared helper, `audit.py:138` (`_stamp_scope`), so the root a line's
+Writers: three write paths, `packages/tcip-mcp/src/tcip_mcp/audit.py:293` (`audited`),
+`audit.py:223` (`record_event`) and `audit.py:242` (`record_event_or_raise`), all resolving a
+caller's scope through one shared helper, `audit.py:140` (`_stamp_scope`), so the root a line's
 `scope` field names and the root its Key addresses are always the one resolution, never two
 independently taken. It stamps `entry["scope"]` with the resolved root only when the caller passed
 one; a call that took the platform default leaves `scope` unset. No line carries a
@@ -1507,7 +1508,7 @@ store.
 
 `audited` covers the platform's doors (every MCP tool in `tools/`, plus the script-invoked doors
 demoted from them): bare, a platform event; `@audited(scope_arg=...)` names the argument carrying
-a dataset or project location, resolved via `dataset_scope_of` (`audit.py:264`) (through the tool's own
+a dataset or project location, resolved via `dataset_scope_of` (`audit.py:266`) (through the tool's own
 canonicalizer when the declaration passes one as `scope_via`). Ten doors declare one: eight
 dataset-scoped (`save_annotations`, `tools/annotation_tools.py:146`; `write_class_map`,
 `tools/annotation_tools.py:512`; `redraw_calibration_holdout`, `tools/calibration_tools.py:25`;
@@ -1549,7 +1550,7 @@ project's once that root is an adopted project), while the web build route passe
 project root, which can differ.
 
 What a failed append means is where the three write paths part: `record_event` warns and
-returns, through `_write_entry`, `audit.py:190`, because its callers bracket work rather than follow a
+returns, through `_write_entry`, `audit.py:192`, because its callers bracket work rather than follow a
 mutation; `record_event_or_raise` raises `AuditEntryNotWritten`; the decorator raises
 `MutationCommittedWithoutAuditLine`, because its append runs after the tool body and a warning
 there invites a blind retry of a mutation already on disk.
@@ -1974,9 +1975,9 @@ No seam id in `seam-coverage.json`'s 67-entry inventory names `.tcip/datasets.js
 
 Path: `<workspace_root>/.active`, a workspace-root sibling, not inside `.tcip/`.
 
-Writer: `activate_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:408`.
+Writer: `activate_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:414`.
 
-Readers: `read_active_project`, `workspace.py:189`; `resolve_project_path`, `workspace.py:360`.
+Readers: `read_active_project`, `workspace.py:194`; `resolve_project_path`, `workspace.py:365`.
 
 Seam S02 ("Workspace root and the .active project marker"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_tcip_web_projects_routes.py:160`,
@@ -2164,17 +2165,17 @@ No seam id in `seam-coverage.json`'s inventory names this record.
 ## 29. `pending_removal.json`, per-project removal marker
 
 Path: `<project_path>/.tcip/pending_removal.json`, addressed by `pending_removal_key`
-(`packages/tcip-mcp/src/tcip_mcp/workspace.py:224`), on the store `PENDING_REMOVAL_STORE`
-(`workspace.py:209`), `frozen: true`, locator `RootedFileLocator(prefix=(".tcip",),
+(`packages/tcip-mcp/src/tcip_mcp/workspace.py:229`), on the store `PENDING_REMOVAL_STORE`
+(`workspace.py:214`), `frozen: true`, locator `RootedFileLocator(prefix=(".tcip",),
 suffix=".json")`, the same shape `dataset_registry` and `.tcip/project.json` (format 25) use.
 
 Shape: `{requested_at, requested_by, archive_path, holding_dir, external_roots,
 dependent_projects}`, one document per project. Written once, `concurrency="cas"` with
 `expect=Version.ABSENT`, by `request_project_removal`
-(`packages/tcip-mcp/src/tcip_mcp/project_removal.py:396`); deleted, at the version the
-completing walk read it at, by `complete_pending_removals` (`project_removal.py:501`).
+(`packages/tcip-mcp/src/tcip_mcp/project_removal.py:575`); deleted, at the version the
+completing walk read it at, by `complete_pending_removals` (`project_removal.py:845`).
 
-Readers: `pending_removal_record`/`pending_removal_or_none` (`workspace.py:247`, `:247`), the
+Readers: `pending_removal_record`/`pending_removal_or_none` (`workspace.py:252`, `:247`), the
 predicate `adoptable_project_root`, `ingest_images` and `tcip_web.paths.allowed_roots`'s
 excluded roots all consult, so an opener or a guarded route refuses a marked project from the
 moment this document lands.
@@ -2240,7 +2241,7 @@ Phase 3 verdict: single.
 ## S04. Panel-event panel vocabulary (VALID_PANELS)  <!-- queued: P5-324 unify -->
 
 Must agree: sender and receiver accept the same set of panel names.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:414` (`VALID_PANELS = frozenset(`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:429` (`VALID_PANELS = frozenset(`).
 Side B: `packages/tcip-web/src/tcip_web/app.py:41` (`VALID_PANELS,`).
 Phase 3 verdict: duplicated.
 
@@ -2257,12 +2258,12 @@ Must agree: mutations from any process land in the log the scope names, the plat
 default, a dataset's own for a record travelling with the data, a project's own for a record
 that is the project's, all with the same entry shape; and the project's own receipt gate
 (`plant_mapping.load_mapping`) trusts only what that project's own log actually recorded.
-Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:291` (`def audited(`, taking a declared
+Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:293` (`def audited(`, taking a declared
 `scope_arg` naming which tool argument carries the dataset or project a scoped tool mutates a
-record of) and `record_event` (`audit.py:221`)/`record_event_or_raise` (`audit.py:240`), the two emitters for code
+record of) and `record_event` (`audit.py:223`)/`record_event_or_raise` (`audit.py:242`), the two emitters for code
 that is neither an MCP tool nor a script-invoked door demoted from one; all three resolve a
-caller's scope through the one shared `_stamp_scope`, `audit.py:138`, and differ only in what a failed
-append means: `record_event` warns through `_write_entry`, `audit.py:190`; `record_event_or_raise`
+caller's scope through the one shared `_stamp_scope`, `audit.py:140`, and differ only in what a failed
+append means: `record_event` warns through `_write_entry`, `audit.py:192`; `record_event_or_raise`
 raises `AuditEntryNotWritten`; the decorator refuses (`MutationCommittedWithoutAuditLine`), since
 its append runs after the tool body.
 Side B: `packages/tcip-web/src/tcip_web/routes/review.py:96` (`def _audit(scope: str, tool: str,
@@ -2311,7 +2312,7 @@ Phase 3 verdict: single. An HPO trial with no experiment record still appends to
 
 Must agree: a job's own summary is written and reloaded against the root it launched under, not
 whatever root this process happens to have pinned when either side runs.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:264` (`def job_registry_key(`, the one address each registry is written and reloaded through, on the store `JOB_REGISTRY_STORE` declared at `packages/tcip-mcp/src/tcip_mcp/web_client.py:242` (`JOB_REGISTRY_STORE = "job_registry"`); an explicit `root` composes the key directly, and only its absence falls back to `current_root`, which itself resolves `platform_state_root`; `packages/tcip-web/src/tcip_web/jobstore.py:95` (`persist_to(job_registry_key(name, root=root), group)`) is the web side's call into it).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:271` (`def job_registry_key(`, the one address each registry is written and reloaded through, on the store `JOB_REGISTRY_STORE` declared at `packages/tcip-mcp/src/tcip_mcp/web_client.py:249` (`JOB_REGISTRY_STORE = "job_registry"`); an explicit `root` composes the key directly, and only its absence falls back to `current_root`, which itself resolves `platform_state_root`; `packages/tcip-web/src/tcip_web/jobstore.py:95` (`persist_to(job_registry_key(name, root=root), group)`) is the web side's call into it).
 Side B: `packages/tcip-web/src/tcip_web/routes/inference.py` (inference job registry, calls `jobstore.JobRegistry.persist`/`.rehydrate`, which call `persist_grouped`/`load` in turn).
 Phase 3 verdict: duplicated.
 
@@ -2325,8 +2326,8 @@ Phase 3 verdict: single.
 ## S11. Live canvas state files canvas_live.json / canvas_shapes.json, bound to one root by canvas_open_binding
 
 Must agree: which root the GUI currently has open, so the push route writes canvas_live.json/canvas_shapes.json under it and capture_live_canvas reads them from that same root rather than trusting its own pinned one to still be live. The filename half is closed (both sides address through one locator pair); the root half used to be open (the writer took the browser payload's own project_root as authority, Part 20's own rejected shape), and is now resolved through the canvas_open_binding record P5-274 added (docs/audit/remediation/batch8/p5-274-canvas-binding-design.md): a pinned-root refusal landed for the old shape and was reverted after a three-family review refuted its anchor (docs/audit/remediation/batch8/xf-canvas-root/), and this binding is the settled replacement.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:182` (`def canvas_open_binding_key(`, the one workspace-scoped record `{generation, root, project_name, issued_at}`, declared alongside `canvas_meta_key` (`web_client.py:146`)/`canvas_geometry_key` (`web_client.py:157`) addressing the two per-project documents the binding's root names) and `packages/tcip-web/src/tcip_web/routes/dataset.py:205` (`def _write_canvas_binding(`, the one writer, called from `select_dataset` at `routes/dataset.py:205` (`_write_canvas_binding`), before the selection is adopted; `generation` bumps only when `root` actually changes).
-Side B: `packages/tcip-web/src/tcip_web/routes/canvas.py:81` (`def push_canvas_state(`, reads the binding, verifies the payload's `binding_generation` against it, and writes both documents under the binding's own `root`, never a client-supplied one) and the binding's three MCP-side readers, each comparing a root it names against the record through the one predicate `packages/tcip-mcp/src/tcip_mcp/web_client.py:331` (`def gui_binding_matches(`): `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:731` (`def capture_live_canvas(`, beside its own pinned root, with a generation fence re-reading the binding after the documents through the same store-error contract so a switch mid-call cannot render a false live result) and `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:73` (`push_panel_event`) and `tools/gui_tools.py:137` (`focus_human_attention`), each against a caller-stated `project_root` rather than a process's own pin). A mismatch or absence on any of the three is named through the shared helper `packages/tcip-mcp/src/tcip_mcp/web_client.py:358` (`def binding_divergence(`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:182` (`def canvas_open_binding_key(`, the one workspace-scoped record `{generation, root, project_name, issued_at, released}`, declared alongside `canvas_meta_key` (`web_client.py:146`)/`canvas_geometry_key` (`web_client.py:157`) addressing the two per-project documents the binding's root names) and `packages/tcip-web/src/tcip_web/routes/dataset.py:205` (`def _write_canvas_binding(`, called from `select_dataset` before the selection is adopted; `generation` bumps when `root` actually changes or the current record was released) and `packages/tcip-mcp/src/tcip_mcp/project_removal.py:735` (`def release_project_binding(`, the record's second writer, marking it released and bumping `generation` without deleting it, for a project the marker or the binding names).
+Side B: `packages/tcip-web/src/tcip_web/routes/canvas.py:82` (`def push_canvas_state(`, reads the binding, verifies the payload's `binding_generation` against it, and writes both documents under the binding's own `root`, never a client-supplied one) and the binding's three MCP-side readers, each comparing a root it names against the record through the one predicate `packages/tcip-mcp/src/tcip_mcp/web_client.py:338` (`def gui_binding_matches(`): `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:731` (`def capture_live_canvas(`, beside its own pinned root, with a generation fence re-reading the binding after the documents through the same store-error contract so a switch mid-call cannot render a false live result) and `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:73` (`push_panel_event`) and `tools/gui_tools.py:137` (`focus_human_attention`), each against a caller-stated `project_root` rather than a process's own pin). A mismatch or absence on any of the three is named through the shared helper `packages/tcip-mcp/src/tcip_mcp/web_client.py:370` (`def binding_divergence(`).
 Phase 3 verdict: single. The current generation also rides the GuiState broadcast envelope (`packages/tcip-web/src/tcip_web/app.py:185` `SERVER_EPOCH`, read off `StateStore.binding_generation`, `packages/tcip-web/src/tcip_web/state.py:150`) and is adopted with the dataset in one client-side store update (`packages/tcip-web/frontend/src/store/slices/gui.ts:138` `applyRestoredDataset`, and `mergeSnapshot`), so the push's `binding_generation` and the reader's own comparison never straddle a stale identity.
 
 ## S12. Friction reports and retrospectives under .tcip/
@@ -2654,7 +2655,7 @@ Phase 3 verdict: duplicated. The prefix literals still stand on their own, but `
 ## S56. Tab-name vocabulary  <!-- queued: P5-290 unify -->
 
 Must agree: the tab a panel event targets, the tab the browser can restore, and the tab the backend persists are the same set of names.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:397` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` beside it, `tcip_web.state` importing both).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:412` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` beside it, `tcip_web.state` importing both).
 Side B: `packages/tcip-web/frontend/src/api/types.generated.ts:15` (`export const TAB_NAMES = [`, generated from the same declaration).
 Phase 3 verdict: duplicated.
 
