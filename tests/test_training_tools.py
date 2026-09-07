@@ -1323,9 +1323,9 @@ def test_run_hpo_trial_swept_dotted_evaluation_leaf_reached_via_get_is_not_repor
     monkeypatch, tmp_path,
 ):
     """A swept dotted ``evaluation.<leaf>`` axis, on a leaf the trial's own preamble never reads
-    (the preamble reads only ``evaluation``, ``evaluation.trait`` and
-    ``evaluation.selection_metric`` before dispatch, on every trial regardless of the swept
-    params), is marked consumed only by the training body's own read: the fake body's
+    (the preamble reads ``evaluation`` on every trial, and ``evaluation.trait`` and
+    ``evaluation.selection_metric`` whenever the merged config carries a truthy evaluation
+    block, before dispatch), is marked consumed only by the training body's own read: the fake body's
     ``evaluation_section(run.config).get(...)`` is the read that consumes it here. A literal
     top-level ``evaluation`` sweep (a dict value under that key) cannot guard this at all: the
     preamble's own ``evaluation_section(tracked_config)`` call marks the bare ``evaluation`` key
