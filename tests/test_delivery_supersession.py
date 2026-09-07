@@ -65,7 +65,8 @@ def test_a_delivered_csv_carries_the_written_files_own_digest(
 
 def test_a_fileless_event_carries_no_digest(tmp_path: Path) -> None:
     resolution.record_delivery_binding_event(
-        "test_door", None, [], {}, measurement_documents=["operating_point"],
+        "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
+        measurement_documents=["operating_point"],
         scale_document=None, acknowledgement=None, trait="astringency",
         delivery_kind="state_crossing_dates", project_root=tmp_path, plant_mapping=None,
     )
