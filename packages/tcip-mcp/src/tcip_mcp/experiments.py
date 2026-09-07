@@ -495,12 +495,10 @@ def is_pristine(state: str | None, metrics_logged: bool) -> bool:
     """Whether an experiment record with this ``state`` and ``metrics_logged`` may still take a
     full ``config.json`` rewrite: ``state == "created"`` and no metrics logged yet.
 
-    The one implementation of the pristine predicate. ``metrics_logged`` is the status record's
-    own field (see :func:`log_metrics`), read by both callers: :func:`overwrite_config_if_pristine`
-    reads it from inside the transaction that also reads ``state``; ``_ensure_experiment`` reads it
-    first, on its own outside read, to decide whether to attempt that overwrite at all, so a
-    relaunch under a non-pristine id mints its fresh id straight away instead of provoking (and
-    auditing) a refusal nothing needed.
+    The one implementation of the pristine predicate, read by :func:`overwrite_config_if_pristine`
+    from inside the transaction that also reads ``state``. :func:`stamp_run_identity`'s own
+    config-carrying precondition tests the identical fact inline rather than through this
+    function, since it already holds ``state`` and ``metrics_logged`` from its own read.
     """
     return state == "created" and not metrics_logged
 
@@ -508,8 +506,9 @@ def is_pristine(state: str | None, metrics_logged: bool) -> bool:
 def metrics_logged_of(status: dict[str, Any] | None) -> bool:
     """Whether a status record already carries the ``metrics_logged`` marker :func:`log_metrics`
     stamps before its first append: the one read of that field, shared by
-    :func:`overwrite_config_if_pristine`'s own transaction and ``_ensure_experiment``'s outside
-    read, rather than each re-deriving it from the record."""
+    :func:`overwrite_config_if_pristine`'s own transaction and :func:`stamp_run_identity`'s
+    precondition when it is given a config to write, rather than each re-deriving it from the
+    record."""
     return bool(status.get("metrics_logged")) if isinstance(status, dict) else False
 
 
@@ -521,11 +520,12 @@ def overwrite_config_if_pristine(
 
     A pre-created experiment's ``config.json`` is written once, at ``create_experiment`` time,
     before effective tiling geometry and the training seed are resolved (see
-    ``training_tools.launch_training``). Reusing that id via ``_ensure_experiment``'s pristine-reuse
-    branch would otherwise ship a permanently stale snapshot describing a config that was never
-    trained. Refuses (and audits the refusal) once :func:`is_pristine` says the record is no
-    longer pristine, a "created" record that already has metrics rows must stay protected too, not
-    just the terminal-state lock alone.
+    ``training_tools.launch_training``). The launch's own path to that same refresh is
+    :func:`stamp_run_identity`, given a ``config`` to write in the same transaction as the stamp;
+    this function stays the standalone primitive for a caller wanting the config rewrite alone,
+    with no stamp beside it. Refuses (and audits the refusal) once :func:`is_pristine` says the
+    record is no longer pristine, a "created" record that already has metrics rows must stay
+    protected too, not just the terminal-state lock alone.
 
     Both of :func:`is_pristine`'s inputs, ``state`` and ``metrics_logged``, are read from the
     same status record this opens one transaction over, closing the race a log-key read outside
@@ -710,11 +710,14 @@ def complete_run(
 
 class StampPreconditionFailed(RuntimeError):
     """Raised by :func:`stamp_run_identity` when the record is not a fresh, unstamped one: its
-    state is not ``"created"``, or it already carries an ``output_dir``.
+    state is not ``"created"``, it already carries an ``output_dir``, or (when the stamp was
+    given a config to write) it already carries a metrics row.
 
-    The launch calling this (``training_tools._ensure_experiment``) catches it only on the
-    pristine-reuse branch, where it means another launch won this record's stamp between the
-    pristine check and this one, and falls back to forking a fresh id instead; every other
+    ``training_tools._ensure_experiment`` catches it on both launch branches: the fresh-creation
+    branch, where it means another launch's pristine-reuse won this record between the creation
+    and this stamp, and the pristine-reuse branch, where it means another launch won the same
+    race first; either way the caller falls back to forking a fresh id instead of returning an
+    error, since losing that race is not a failure the launch itself should report. Every other
     caller lets it propagate, since a fresh or newly forked record failing this precondition is
     not a race any caller should silently paper over.
     """
@@ -722,18 +725,29 @@ class StampPreconditionFailed(RuntimeError):
 
 def stamp_run_identity(
     experiment_id: str, output_dir: str, *, launched_by: dict[str, Any],
+    config: dict[str, Any] | None = None,
 ) -> None:
     """Stamp a launch onto this experiment's ``status.json``, moving it to ``running`` in the
     same write: ``output_dir`` (the real, caller-influenced artifact directory), ``launched_by``
     (who launched it), and the ``state``/``heartbeat``/``started`` triple :func:`update_status`
     writes for that transition.
 
-    One compare-and-set transaction, requiring ``state == "created"`` and no ``output_dir``
-    already stamped: the record's own linearization point for a launch. Raises
-    :class:`StampPreconditionFailed` when that precondition fails, so two launches racing to
-    stamp one pristine record never both win it, and raises whatever the store itself raises on
-    any other write failure: no launch proceeds unstamped, and no failure here is logged and
-    swallowed the way a best-effort write would be.
+    One compare-and-set transaction, requiring ``state == "created"``, no ``output_dir`` already
+    stamped, and, when ``config`` is given, no metrics logged yet: the record's own
+    linearization point for a launch. Raises :class:`StampPreconditionFailed` when that
+    precondition fails, so two launches racing to stamp one pristine record never both win it,
+    and raises whatever the store itself raises on any other write failure: no launch proceeds
+    unstamped, and no failure here is logged and swallowed the way a best-effort write would be.
+
+    ``config``, given, is the pristine-reuse branch's own path: the transaction also spans
+    ``config_key``, written before ``status_key`` (a file-backend transaction applies its writes
+    in the order its keys were named), so the config actually launched lands in the pre-created
+    record's snapshot in the same write as the stamp. That closes the window a separate
+    ``overwrite_config_if_pristine`` call followed by this one would leave open: two launches
+    both passing the pristine check could otherwise interleave their config writes and their
+    stamps, leaving a record running under one launch's identity with the other's config
+    snapshot. Omitted (a fresh or forked record, which has no pre-created snapshot to refresh),
+    the transaction spans ``status_key`` alone.
 
     ``launched_by`` is resolved once by ``launch_training`` before ``_ensure_experiment`` runs:
     ``{"launcher": "agent", **agent_identity.audit_fields()}`` inside an MCP handshake,
@@ -743,14 +757,21 @@ def stamp_run_identity(
     "launcher not recorded".
     """
     key = status_key(experiment_id)
-    with store.transaction(key) as txn:
+    cfg_key = config_key(experiment_id) if config is not None else None
+    keys = (cfg_key, key) if cfg_key is not None else (key,)
+    with store.transaction(*keys) as txn:
         status = txn.read(key, default={})
-        if status.get("state") != "created" or status.get("output_dir"):
+        refused = status.get("state") != "created" or status.get("output_dir")
+        if config is not None:
+            refused = refused or metrics_logged_of(status)
+        if refused:
             raise StampPreconditionFailed(
                 f"experiment {experiment_id!r} is not a fresh, unstamped record "
                 f"(state={status.get('state')!r}, output_dir={status.get('output_dir')!r}); "
                 "another launch has already claimed it."
             )
+        if cfg_key is not None:
+            txn.write(cfg_key, config)
         now = datetime.now(timezone.utc).isoformat()
         status["output_dir"] = output_dir
         status["launched_by"] = launched_by
