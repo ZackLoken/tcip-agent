@@ -190,10 +190,14 @@ def _entry(
 def _write_entry(entry: dict[str, Any], scope: str | Path | None = None) -> None:
     """Append one audit entry to the log ``scope`` names (lock-guarded + fsync'd), never raising.
 
-    What :func:`record_event` writes through, for the emitters that are not MCP tools. Every GUI
-    mutation now records through :func:`record_event_or_raise`, reached from each route's own
-    helper via ``routes/audit_gap.record_committed``, so a lost line there raises rather than
-    staying silent. Its remaining callers, named by function rather than by line (a docstring
+    What :func:`record_event` writes through, for the emitters that are not MCP tools. The GUI's
+    mutation routes all reach :func:`record_event_or_raise` instead, so a lost line there raises
+    rather than staying silent: most through each route's own helper via
+    ``routes/audit_gap.record_committed``, ``routes/coverage.py``'s two routes through their own
+    ``_audit_or_answer_500`` answering a marked 500, and the two confirmation routes in
+    ``routes/results.py`` calling it inline and downgrading a failed append to an
+    ``audit_warning`` on an otherwise ordinary 200. Its remaining callers, named by function
+    rather than by line (a docstring
     citation the architecture checker does not anchor rots the next time the function moves):
     the training envelope's open event (``run_training_envelope``) brackets a body already
     running in a background thread; its close event (``run_training_envelope``, in a ``finally``)
