@@ -1239,7 +1239,7 @@ def _trait_spec_statement_body(project_root: Path, trait: str) -> dict:
 
     Mirrors ``_operationalization_body``: ``confirmed_current`` is read-time drift detection
     against the live spec (``traits.trait_spec_statement_current``, A1's own mechanism), so the
-    panel and any future delivery precondition cannot disagree about whether a confirmation still
+    panel and the delivery precondition cannot disagree about whether a confirmation still
     holds. ``statement_fields`` carries the authored ``TraitSpec`` fields exactly as the statement
     recorded them, a flat mapping the record itself already holds, never re-nested or re-derived
     here. Nothing stated yet reads as null statement fields with ``confirmed_current`` false.
