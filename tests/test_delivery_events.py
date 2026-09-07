@@ -74,6 +74,69 @@ def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_
         assert doc["record_digest"] == audit_verified[bucket]["record"].split(":")[-1]
 
 
+def test_a_record_predating_the_reconciliation_fields_validates_and_reads_back_with_both_keys_absent(
+    tmp_path: Path,
+) -> None:
+    """A record written before document_reconciliations/dimension_reconciliations existed still
+    validates against today's model and reads back through read_delivery_events with both keys
+    absent, never as None: read_delivery_events returns the stored dict itself, so a key this
+    record never carried is missing from it rather than present and null."""
+    event_id = "pre-field-record"
+    key = resolution.delivery_event_key(resolution.delivery_events_scope(tmp_path), event_id)
+    ts.replace(
+        key,
+        {
+            "event_id": event_id, "trait": "astringency", "delivery_kind": "state_crossing_dates",
+            "door": "test_door", "output_path": None, "output_sha256": None,
+            "measurement_documents": ["operating_point"], "scale_document": None,
+            "acknowledged_by": None, "acknowledgement_reason": None, "plant_mapping": None,
+            "documents": {}, "produced_at": "2026-02-03T12:00:00+00:00",
+        },
+        expect=ts.Version.ABSENT,
+    )
+
+    records = resolution.read_delivery_events(tmp_path)
+    assert len(records) == 1, records
+    record = records[0]
+    assert "document_reconciliations" not in record
+    assert "dimension_reconciliations" not in record
+
+
+def test_a_completed_crossing_delivery_reads_back_through_read_delivery_events_with_its_reconciliations(
+    tmp_path: Path,
+) -> None:
+    """The healthy round trip goes through the reader every other consumer uses
+    (list_delivery_events, _citing_delivery_event_ids), not the raw store this module's own
+    _delivery_event_records helper reads through: a real delivery's document_reconciliations and
+    dimension_reconciliations come back exactly as the door computed them."""
+    sha = record_producing_run(tmp_path, "exp-producer")
+    mapping_name, d1, d2 = _delivery_setup(
+        tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
+
+    res = deliver_phenology_milestones(
+        trait="bud_opening", mapping_name=mapping_name,
+        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
+    )
+    assert "error" not in res, res
+
+    records = [
+        r for r in resolution.read_delivery_events(tmp_path)
+        if r["door"] == "deliver_phenology_milestones"
+    ]
+    assert len(records) == 1, records
+    record = records[0]
+
+    assert set(record["document_reconciliations"]) == {
+        "operating_point", "classifier_operating_point"}
+    assert set(record["document_reconciliations"]["operating_point"]["bindings"]) == (
+        set(record["documents"]))
+    classifier_entry = record["document_reconciliations"]["classifier_operating_point"]
+    assert classifier_entry["bound_validated"] == classifier_entry["validated"]
+    assert record["dimension_reconciliations"]["tile_size"]["operative"] is False
+
+
 def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(
     tmp_path: Path,
 ) -> None:
@@ -173,7 +236,8 @@ def test_record_delivery_binding_event_reports_a_failed_store_write_without_rais
     monkeypatch.setattr(ts, "replace", _boom)
 
     recorded = resolution.record_delivery_binding_event(
-        "test_door", None, [], {}, measurement_documents=["operating_point"],
+        "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
+        measurement_documents=["operating_point"],
         scale_document=None, acknowledgement=None, trait="astringency",
         delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
     )
@@ -201,12 +265,67 @@ def test_record_delivery_binding_event_raises_and_writes_nothing_when_plant_mapp
 
     with pytest.raises(ValidationError):
         resolution.record_delivery_binding_event(
-            "test_door", None, [], {}, measurement_documents=["operating_point"],
+            "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
+            measurement_documents=["operating_point"],
             scale_document=None, acknowledgement=None, trait="astringency",
             delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=bad_mapping,
         )
 
     assert _delivery_event_records(tmp_path) == []
+
+
+def test_record_delivery_binding_event_refuses_when_the_declared_documents_entry_is_absent(
+    tmp_path: Path,
+) -> None:
+    """A caller stating what its gate reconciled in measurement_documents but not reconciling it
+    is a deterministic defect in the caller: pred_dirs is non-empty, the sole declared document
+    has no entry in document_reconciliations, and the writer refuses by name with the audit line
+    already on the log and no record built."""
+    d = str(tmp_path / "bucket")
+
+    with pytest.raises(ValueError, match="operating_point"):
+        resolution.record_delivery_binding_event(
+            "test_door", None, [d], document_reconciliations={}, dimension_reconciliations={},
+            measurement_documents=["operating_point"], scale_document=None, acknowledgement=None,
+            trait="astringency", delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path,
+            plant_mapping=None,
+        )
+
+    from tcip_mcp.audit import audit_log_key
+
+    events = ts.read_log(audit_log_key(tmp_path)).records
+    assert any(e["tool"] == "test_door" for e in events)
+    assert _delivery_event_records(tmp_path.resolve()) == []
+
+
+def test_record_delivery_binding_event_refuses_naming_the_classifier_document_when_only_the_count_is_given(
+    tmp_path: Path,
+) -> None:
+    """Every document measurement_documents declares is checked, not only the first: a two-
+    document delivery with the count entry alone still refuses, naming the missing classifier
+    document specifically."""
+    from tcip_mcp.pipelines.resolution import StampBinding
+
+    from tests._binding_fixtures import document_reconciliation
+
+    d = str(tmp_path / "bucket")
+    binding = StampBinding(ok=True, claimed=True, experiment_id="exp-1",
+                           producing_experiment_id="exp-1", checkpoint_sha256="0" * 64,
+                           record_digest="digest-1")
+    recon = document_reconciliation(
+        {d: binding}, validated="held_out_annotations", per_bucket={d: "held_out_annotations"},
+        unvalidated_buckets=[], missing_sidecars=[], on_disk_validated=True)
+
+    with pytest.raises(ValueError, match="classifier_operating_point"):
+        resolution.record_delivery_binding_event(
+            "test_door", None, [d], document_reconciliations={"operating_point": recon},
+            dimension_reconciliations={},
+            measurement_documents=["operating_point", "classifier_operating_point"],
+            scale_document=None, acknowledgement=None, trait="astringency",
+            delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
+        )
+
+    assert _delivery_event_records(tmp_path.resolve()) == []
 
 
 def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(tmp_path: Path) -> None:
