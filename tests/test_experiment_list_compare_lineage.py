@@ -325,7 +325,10 @@ def test_compare_experiments_finds_a_refusal_under_the_pinned_root(tmp_path, mon
     move) rather than a raw internal write. An output_dir naming a second root, even one whose
     store.db holds garbage bytes, does not make the field absent: a refusal lands only under the
     root that holds the record, so the platform log this reader scans is complete for an
-    experiment that resolves under it at all, and nothing about a second root ever gets read."""
+    experiment that resolves under it at all, and nothing about a second root ever gets read.
+    The direct write below is that field's own producer for this shape: a completed record
+    refuses stamp_run_identity's own precondition outright, so nothing in the platform writes
+    output_dir onto a terminal record."""
     root = tmp_path / "root"
     root.mkdir()
     monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
