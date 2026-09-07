@@ -534,12 +534,18 @@ The following sentences are checked against every in-repo Python import edge in 
 Non-zero cross-package edge counts at HEAD:
 
 - `tools` -> `tcip-annotation`: 0 import edges.
-- `tools` -> `tcip-mcp`: 15 import edges.
-- `tools` -> `tcip-web`: 17 import edges.
+- `tools` -> `tcip-mcp`: 20 import edges.
+- `tools` -> `tcip-web`: 18 import edges.
 - `tcip-mcp` -> `tcip-annotation`: 76 import edges.
-- `tcip-mcp` -> `tcip-web`: 0 import edges.
-- `tcip-web` -> `tcip-annotation`: 14 import edges.
-- `tcip-web` -> `tcip-mcp`: 105 import edges.
+- `tcip-mcp` -> `tcip-web`: 5 import edges, all of them `project_removal.py`'s function-body
+  imports of `tcip_web.jobstore`, `tcip_web.routes.inference`, `tcip_web.routes.review`,
+  `tcip_web.routes.tuning` and `tcip_web.identity` (the inventory walks the whole AST, so a
+  deferred import counts); `store_catalogue.py` imports nothing from `tcip-web`, and no other
+  module under `packages/tcip-mcp` does either. The ruling is that `tcip-mcp` imports nothing
+  from `tcip-web`, so these five are a defect of the project-removal family, open in its own
+  record until its fix-up removes them.
+- `tcip-web` -> `tcip-annotation`: 13 import edges.
+- `tcip-web` -> `tcip-mcp`: 118 import edges.
 
 `packages/tcip-web/frontend/src` (`tcip-web-frontend`) has zero in-repo import edges to any Python module in any of the five Python roots: `build_module_inventory.py` resolves a TypeScript specifier only against a relative path or the `@/` alias into `packages/tcip-web/frontend/src` itself (`tools/build_module_inventory.py:307-327`), so no specifier in the frontend source tree can resolve to a file outside that tree.
 
@@ -2292,7 +2298,7 @@ Phase 3 verdict: single. An HPO trial with no experiment record still appends to
 
 Must agree: a job's own summary is written and reloaded against the root it launched under, not
 whatever root this process happens to have pinned when either side runs.
-Side A: `packages/tcip-web/src/tcip_web/jobstore.py:95` (`def job_registry_key(`, the one address each registry is written and reloaded through, on the store `JOB_REGISTRY_STORE` declared at `packages/tcip-mcp/src/tcip_mcp/web_client.py:242` (`JOB_REGISTRY_STORE = "job_registry"`); an explicit `root` composes the key directly, and only its absence falls back to `current_root`, which itself resolves `platform_state_root`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:264` (`def job_registry_key(`, the one address each registry is written and reloaded through, on the store `JOB_REGISTRY_STORE` declared at `packages/tcip-mcp/src/tcip_mcp/web_client.py:242` (`JOB_REGISTRY_STORE = "job_registry"`); an explicit `root` composes the key directly, and only its absence falls back to `current_root`, which itself resolves `platform_state_root`; `packages/tcip-web/src/tcip_web/jobstore.py:95` (`persist_to(job_registry_key(name, root=root), group)`) is the web side's call into it).
 Side B: `packages/tcip-web/src/tcip_web/routes/inference.py` (inference job registry, calls `jobstore.JobRegistry.persist`/`.rehydrate`, which call `persist_grouped`/`load` in turn).
 Phase 3 verdict: duplicated.
 
