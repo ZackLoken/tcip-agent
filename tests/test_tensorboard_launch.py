@@ -6,8 +6,12 @@ lifecycle is exercised for real without depending on a TensorBoard install.
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
+from pathlib import Path
+
+import pytest
 
 
 def test_launch_reports_the_failure_when_the_process_exits_immediately(monkeypatch, tmp_path):
@@ -84,3 +88,27 @@ def test_launch_reports_the_tie_disabled_under_the_test_seam(monkeypatch, tmp_pa
         assert info["lifetime_tie"] == "none: disabled for test"
     finally:
         tb.stop_tensorboard(run_id="tie-disabled-run")
+
+
+def test_manager_refuses_to_import_when_the_grace_leaves_no_margin(tmp_path):
+    """The module-level check holds the grace-under-wait constraint in code, not only in
+    prose: a copy with the grace pushed past the margin fails at import."""
+    from tcip_mcp.pipelines.training import tensorboard_manager as tb
+
+    source = Path(tb.__file__).read_text(encoding="utf-8")
+    broken = source.replace(
+        "_GUARDIAN_TERM_GRACE_SECONDS = 2.0", "_GUARDIAN_TERM_GRACE_SECONDS = 4.5"
+    )
+    assert broken != source
+    module_path = tmp_path / "broken_tensorboard_manager.py"
+    module_path.write_text(broken, encoding="utf-8")
+
+    spec = importlib.util.spec_from_file_location("broken_tensorboard_manager", module_path)
+    module = importlib.util.module_from_spec(spec)
+    # the dataclass below needs its own module registered to resolve string annotations.
+    sys.modules[spec.name] = module
+    try:
+        with pytest.raises(RuntimeError, match="_GUARDIAN_TERM_GRACE_SECONDS"):
+            spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)

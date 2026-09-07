@@ -27,9 +27,9 @@ def _standin_pid(returned_pid: int, guardian_expected: bool) -> int:
     When a guardian is expected (POSIX with the tie enabled) the returned pid is the guardian's
     and its one child is the stand-in; this waits up to five seconds for that child to appear,
     since the guardian may not have spawned it yet, and exits naming the condition if it never
-    settles on exactly one. Otherwise (Windows, or the tie disabled under ``--no-tie``) nothing
-    sits in front of the stand-in, so the returned pid is used directly and children are never
-    consulted.
+    settles on exactly one, including the guardian itself having already died. Otherwise
+    (Windows, or the tie disabled under ``--no-tie``) nothing sits in front of the stand-in, so
+    the returned pid is used directly and children are never consulted.
     """
     if not guardian_expected:
         return returned_pid
@@ -38,7 +38,10 @@ def _standin_pid(returned_pid: int, guardian_expected: bool) -> int:
     deadline = time.monotonic() + 5.0
     children: list = []
     while time.monotonic() < deadline:
-        children = psutil.Process(returned_pid).children()
+        try:
+            children = psutil.Process(returned_pid).children()
+        except psutil.NoSuchProcess:
+            sys.exit(f"guardian pid {returned_pid} died before spawning its child")
         if len(children) == 1:
             return children[0].pid
         time.sleep(0.1)
