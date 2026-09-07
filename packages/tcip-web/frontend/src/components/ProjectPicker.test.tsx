@@ -925,12 +925,22 @@ describe("ProjectPicker removal", () => {
   });
 
   it.each([
-    [true, false, "as the default"],
-    [false, true, "as the open project"],
-    [true, true, "as the default and as the open project"],
-  ])(
-    "composes the release toast from marker_cleared=%s canvas_binding_released=%s as %s",
-    async (markerCleared, canvasBindingReleased, expectedBody) => {
+    [true, false, `Released ${PROJECTS[0].name} as the default.`, "success"],
+    [false, true, `Released ${PROJECTS[0].name} as the open project.`, "success"],
+    [
+      true, true,
+      `Released ${PROJECTS[0].name} as the default and as the open project.`,
+      "success",
+    ],
+    [
+      false, false,
+      `Nothing to release: ${PROJECTS[0].name} is not the default and the GUI does not have ` +
+        "it open.",
+      "info",
+    ],
+  ] as const)(
+    "composes the release toast from marker_cleared=%s canvas_binding_released=%s",
+    async (markerCleared, canvasBindingReleased, expectedMessage, expectedLevel) => {
       vi.mocked(api.projects.list).mockResolvedValue({
         workspace: "/ws",
         active: null,
@@ -964,10 +974,7 @@ describe("ProjectPicker removal", () => {
       fireEvent.click(releaseButton);
 
       await waitFor(() =>
-        expect(pushToast).toHaveBeenCalledWith(
-          `Released ${PROJECTS[0].name} ${expectedBody}.`,
-          "success",
-        ),
+        expect(pushToast).toHaveBeenCalledWith(expectedMessage, expectedLevel),
       );
     },
   );

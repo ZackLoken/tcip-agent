@@ -131,8 +131,7 @@ function RemovalDialog({
   function releaseToastBody(markerCleared: boolean, canvasReleased: boolean): string {
     if (markerCleared && canvasReleased) return "as the default and as the open project";
     if (markerCleared) return "as the default";
-    if (canvasReleased) return "as the open project";
-    return "as neither the default nor the open project: nothing named it any more";
+    return "as the open project";
   }
 
   async function releaseBinding() {
@@ -140,12 +139,21 @@ function RemovalDialog({
     setReleaseError(null);
     try {
       const res = await api.projects.releaseBinding(name, user);
-      useStore
-        .getState()
-        .pushToast(
-          `Released ${name} ${releaseToastBody(res.marker_cleared, res.canvas_binding_released)}.`,
-          "success",
-        );
+      if (res.marker_cleared || res.canvas_binding_released) {
+        useStore
+          .getState()
+          .pushToast(
+            `Released ${name} ${releaseToastBody(res.marker_cleared, res.canvas_binding_released)}.`,
+            "success",
+          );
+      } else {
+        useStore
+          .getState()
+          .pushToast(
+            `Nothing to release: ${name} is not the default and the GUI does not have it open.`,
+            "info",
+          );
+      }
       await loadPreview();
       onRefetchListing();
     } catch (e) {
