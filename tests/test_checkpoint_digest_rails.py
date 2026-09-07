@@ -535,7 +535,7 @@ def test_registration_failure_after_completion_is_recorded_in_the_audit_log(tmp_
     exp_id = "exp-rail11"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")
-    run = create_run({"data": {}}, str(tmp_path / "out"))
+    run = create_run({"data": {}}, str(tmp_path / "out"), id="auto-run-2")
     run.status = "completed"
     ckpt = tmp_path / "out" / "model_best.pt"
     ckpt.parent.mkdir(parents=True, exist_ok=True)
@@ -624,7 +624,7 @@ def test_ctx_save_checkpoint_refuses_a_state_naming_the_reserved_schema_version_
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.run_registry import create_run
 
-    run = create_run({"data": {}}, str(tmp_path / "out"))
+    run = create_run({"data": {}}, str(tmp_path / "out"), id="auto-run-3")
     ctx = TrainContext(run=run, train_loader=None)
 
     with pytest.raises(ValueError, match="schema_version"):
@@ -637,7 +637,7 @@ def test_ctx_save_checkpoint_admits_a_state_naming_no_reserved_key(tmp_path, mon
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.run_registry import create_run
 
-    run = create_run({"data": {}}, str(tmp_path / "out"))
+    run = create_run({"data": {}}, str(tmp_path / "out"), id="auto-run-4")
     ctx = TrainContext(run=run, train_loader=None)
 
     path = ctx.save_checkpoint({"model_state_dict": {}})

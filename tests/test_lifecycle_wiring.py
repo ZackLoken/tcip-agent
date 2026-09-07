@@ -88,7 +88,7 @@ def test_a_stock_trainer_run_registers_with_trainer_source_and_the_best_epochs_m
     }
     create_experiment("exp-trainer-source", config, data_source="imgs")
     update_status("exp-trainer-source", "running")
-    run = create_run(config, str(tmp_path / "out"))
+    run = create_run(config, str(tmp_path / "out"), id="auto-run-37")
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
                        task="regression", experiment_id="exp-trainer-source")
     run_training_envelope(ctx)
@@ -130,7 +130,7 @@ def _lifecycle_run(tmp_path, builder: str, experiment_id: str):
     }
     create_experiment(experiment_id, config, data_source="imgs")
     update_status(experiment_id, "running")
-    run = create_run(config, str(tmp_path / "out"))
+    run = create_run(config, str(tmp_path / "out"), id="auto-run-38")
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
                        task="regression", experiment_id=experiment_id)
     run_training_envelope(ctx)

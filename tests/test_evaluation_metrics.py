@@ -984,7 +984,7 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
                     "builder_kwargs": {"num_classes": 1, "min_size": IMG, "max_size": IMG * 2},
                     "task": "detection"}
-    run = create_run(_cfg(model_source), str(tmp_path / "out"))
+    run = create_run(_cfg(model_source), str(tmp_path / "out"), id="auto-run-23")
     run = train(run, loader, val_loader=loader, task="detection")  # no AttributeError on model.heads
 
     assert run.status == "completed", getattr(run, "error", run.status)
@@ -1018,7 +1018,7 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
                     "task": "detection"}
     cfg = _cfg(model_source)
     cfg["evaluation"] = {"trait": "bud_opening"}
-    run = create_run(cfg, str(tmp_path / "out"))
+    run = create_run(cfg, str(tmp_path / "out"), id="auto-run-24")
     run = train(run, loader, val_loader=loader, task="detection")
 
     assert run.status == "completed", getattr(run, "error", run.status)
@@ -1045,7 +1045,7 @@ def test_validate_classification_metrics(tmp_path):
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_classifier",
                     "builder_kwargs": {"num_classes": 2}, "task": "classification"}
-    run = create_run(_cfg(model_source), str(tmp_path / "out"))
+    run = create_run(_cfg(model_source), str(tmp_path / "out"), id="auto-run-25")
     run = train(run, loader, val_loader=loader, task="classification")
 
     assert run.status == "completed", getattr(run, "error", run.status)

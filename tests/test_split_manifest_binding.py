@@ -1255,7 +1255,7 @@ def test_worker_leaves_a_relaunched_spatial_runs_stale_binding_out_of_the_durabl
 
     monkeypatch.setattr(worker, "_resolve_run_id_map", stop)
     with pytest.raises(StopAfterSplit):
-        worker.run("run1", "exp_stale_spatial_relaunch", str(out), "")
+        worker.run("exp_stale_spatial_relaunch", str(out), "")
 
     durable_split = ts.read(config_key("exp_stale_spatial_relaunch"))["data"].get("split", {})
     assert "manifest_binding" not in durable_split
@@ -1400,7 +1400,7 @@ def test_evaluate_model_under_the_manifest_scores_exactly_calibration_universe_f
     assert expected_universe
 
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                               "subject": SUBJECT}}, str(tmp_path / "runs"))
+                               "subject": SUBJECT}}, str(tmp_path / "runs"), id="auto-run-69")
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
     registered_checkpoint(Path(run.output_dir), project_root=tmp_path, filename="model_best.pt")
 
@@ -1413,7 +1413,7 @@ def test_evaluate_model_under_the_manifest_scores_exactly_calibration_universe_f
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
 
-    res = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
+    res = evaluate_model(run.id, str(images_dir), str(labels_dir), task="detection",
                          split_manifest_dir=str(out))
 
     assert "error" not in res, res
@@ -1454,7 +1454,7 @@ def test_evaluate_model_under_manifest_writes_and_reads_back_test_results(
     assert expected_universe
 
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                               "subject": SUBJECT}}, str(tmp_path / "runs"))
+                               "subject": SUBJECT}}, str(tmp_path / "runs"), id="auto-run-70")
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
     ckpt_path = Path(run.output_dir) / "model_best.pt"
     torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, str(ckpt_path))
@@ -1466,7 +1466,7 @@ def test_evaluate_model_under_manifest_writes_and_reads_back_test_results(
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "map50": 0.5, "precision": 0.4, "recall": 0.5})
 
-    res = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
+    res = evaluate_model(run.id, str(images_dir), str(labels_dir), task="detection",
                          split_manifest_dir=str(out))
 
     assert "error" not in res, res
@@ -1513,7 +1513,7 @@ def test_evaluate_model_reads_confirmed_negatives_under_the_universes_own_date(
     ts.replace(split_manifest_key(out), manifest)
 
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                               "subject": SUBJECT}}, str(tmp_path / "runs"))
+                               "subject": SUBJECT}}, str(tmp_path / "runs"), id="auto-run-71")
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
     registered_checkpoint(Path(run.output_dir), project_root=tmp_path, filename="model_best.pt")
 
@@ -1526,7 +1526,7 @@ def test_evaluate_model_reads_confirmed_negatives_under_the_universes_own_date(
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
 
-    res = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
+    res = evaluate_model(run.id, str(images_dir), str(labels_dir), task="detection",
                          split_manifest_dir=str(out))
 
     assert "error" not in res, res
@@ -1548,7 +1548,7 @@ def test_evaluate_model_manifest_refuses_a_disagreeing_date(tmp_path: Path, monk
 
     images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                               "subject": SUBJECT}}, str(tmp_path / "runs"))
+                               "subject": SUBJECT}}, str(tmp_path / "runs"), id="auto-run-72")
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
     ckpt_path = str(Path(run.output_dir) / "model_best.pt")
     torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, ckpt_path)
@@ -1561,7 +1561,7 @@ def test_evaluate_model_manifest_refuses_a_disagreeing_date(tmp_path: Path, monk
         lambda ckpt, loader, device, task, output_dir, **kw:
             {"tiled": False, "eval_regime": "tile-level"})
 
-    result = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
+    result = evaluate_model(run.id, str(images_dir), str(labels_dir), task="detection",
                             split_manifest_dir=str(out), date=DATES[1])
 
     assert "error" in result and "disagrees" in result["error"]
@@ -1606,7 +1606,7 @@ def test_evaluate_model_scores_a_one_foreground_group_calibration_side_the_door_
     ts.replace(split_manifest_key(out), manifest)
 
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                               "subject": SUBJECT}}, str(tmp_path / "runs"))
+                               "subject": SUBJECT}}, str(tmp_path / "runs"), id="auto-run-73")
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
     registered_checkpoint(Path(run.output_dir), project_root=tmp_path, filename="model_best.pt")
 
@@ -1615,7 +1615,7 @@ def test_evaluate_model_scores_a_one_foreground_group_calibration_side_the_door_
         lambda ckpt, loader, device, task, output_dir, **kw:
             {"tiled": False, "eval_regime": "tile-level"})
 
-    res = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
+    res = evaluate_model(run.id, str(images_dir), str(labels_dir), task="detection",
                          split_manifest_dir=str(out))
     assert "error" not in res, res
 
@@ -1637,11 +1637,11 @@ def test_evaluate_model_manifest_refuses_a_subject_mismatch(tmp_path: Path):
 
     images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                               "subject": OTHER_SUBJECT}}, str(tmp_path / "runs"))
+                               "subject": OTHER_SUBJECT}}, str(tmp_path / "runs"), id="auto-run-74")
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
     registered_checkpoint(Path(run.output_dir), project_root=tmp_path, filename="model_best.pt")
 
-    result = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
+    result = evaluate_model(run.id, str(images_dir), str(labels_dir), task="detection",
                             split_manifest_dir=str(out))
 
     assert "error" in result and "subject" in result["error"]

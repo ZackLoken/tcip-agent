@@ -251,7 +251,7 @@ def test_status_error_names_a_diverged_run_reason(tmp_path, monkeypatch):
     }
     create_experiment("exp-diverged-cmp", config, data_source="imgs")
     update_status("exp-diverged-cmp", "running")
-    run = create_run(config, str(tmp_path / "out"))
+    run = create_run(config, str(tmp_path / "out"), id="exp-diverged-cmp")
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=None,
                        task="regression", experiment_id="exp-diverged-cmp")
     run_training_envelope(ctx)
@@ -274,90 +274,8 @@ def test_status_error_is_none_for_a_run_that_never_failed(tmp_path, monkeypatch)
     assert c["status_error"] is None
 
 
-# ── TrainRun.experiment_id/experiment_error: to_dict reads the run's own fields ────────────
-
-
-def test_to_dict_reports_none_not_the_configs_stale_parent_id_during_the_fork_window(tmp_path):
-    """Before this change, to_dict() read config["experiment_id"] directly: a relaunch's own
-    config carries the picked parent's id (set by the caller before _ensure_experiment mints a
-    fresh one), so a live row briefly reported the parent's id as if it were this run's own
-    resolved experiment. Now to_dict() reads the run's own experiment_id field, which
-    launch_training sets only once _ensure_experiment has actually resolved it."""
-    from tcip_mcp.pipelines.training.run_registry import create_run
-
-    config = {"model_source": {"builder": "m:f"}, "experiment_id": "parent-exp"}
-    run = create_run(config, str(tmp_path / "out"))
-
-    assert run.to_dict()["experiment_id"] is None
-
-
-def test_to_dict_reports_the_resolved_experiment_id_once_set(tmp_path):
-    from tcip_mcp.pipelines.training.run_registry import create_run
-
-    run = create_run({"model_source": {"builder": "m:f"}}, str(tmp_path / "out"))
-    run.experiment_id = "fresh-exp"
-
-    assert run.to_dict()["experiment_id"] == "fresh-exp"
-    assert run.to_dict()["experiment_error"] is None
-
-
-def test_to_dict_reports_experiment_error_when_tracking_failed(tmp_path):
-    from tcip_mcp.pipelines.training.run_registry import create_run
-
-    run = create_run({"model_source": {"builder": "m:f"}}, str(tmp_path / "out"))
-    run.experiment_error = "dataset_identity failed: boom"
-
-    d = run.to_dict()
-    assert d["experiment_id"] is None
-    assert d["experiment_error"] == "dataset_identity failed: boom"
-
-
-# ── _all_training_runs: the live row's own resolved id over a stale disk overlay ────────────
-
-
-def test_all_training_runs_keeps_the_live_rows_own_resolved_id_over_the_disk_overlay(
-    tmp_path, monkeypatch,
-):
-    """Before this change, the disk overlay's experiment_id overwrote the live row's own
-    unconditionally, whenever a pid-bearing row had any disk record at all keyed by its run_id
-    (the overlay lookup keys only by run_id, not by which experiment the live row itself
-    resolved). A live row that has already resolved its own experiment_id must keep it."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, stamp_run_identity, update_status
-    from tcip_mcp.pipelines.training.run_registry import create_run
-    from tcip_mcp.tools.training_tools import _all_training_runs
-
-    run = create_run({"model_source": {"builder": "m:f"}}, str(tmp_path / "out"))
-    run.experiment_id = "exp-live"
-    run.pid = 4242  # subprocess-delegated, so the merge takes the disk overlay at all
-
-    create_experiment("exp-disk", {"model_source": {"builder": "m:f"}}, data_source="imgs")
-    update_status("exp-disk", "running")
-    stamp_run_identity("exp-disk", run.run_id, str(tmp_path / "out"), launched_by={"launcher": "process"})
-
-    rows = _all_training_runs(read_progress=False)
-    row = next(r for r in rows if r["run_id"] == run.run_id)
-    assert row["experiment_id"] == "exp-live"
-
-
-def test_all_training_runs_takes_the_disk_overlays_id_when_the_live_row_has_none(
-    tmp_path, monkeypatch,
-):
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, stamp_run_identity, update_status
-    from tcip_mcp.pipelines.training.run_registry import create_run
-    from tcip_mcp.tools.training_tools import _all_training_runs
-
-    run = create_run({"model_source": {"builder": "m:f"}}, str(tmp_path / "out"))
-    run.pid = 4243  # experiment_id left unresolved (None)
-
-    create_experiment("exp-disk-2", {"model_source": {"builder": "m:f"}}, data_source="imgs")
-    update_status("exp-disk-2", "running")
-    stamp_run_identity("exp-disk-2", run.run_id, str(tmp_path / "out"), launched_by={"launcher": "process"})
-
-    rows = _all_training_runs(read_progress=False)
-    row = next(r for r in rows if r["run_id"] == run.run_id)
-    assert row["experiment_id"] == "exp-disk-2"
+# A run's id is always its experiment id now, so to_dict and _all_training_runs' merge have no
+# second, later-resolved id left to reconcile against a disk overlay.
 
 
 # ── experiment_ids filter: rank_registered_models / ModelRegistry.best_model ────────────────────

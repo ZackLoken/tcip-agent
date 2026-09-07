@@ -77,7 +77,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
     out_dir = tmp_path / "out"
     config = _config(out_dir, epochs=1, early_stopping={"enabled": False})
     create_experiment("exp-holdout", config)
-    run = create_run(config, str(out_dir))
+    run = create_run(config, str(out_dir), id="auto-run-75")
     # The production wiring: the trainer hands each row to the envelope's sink, which logs it
     # to the experiment's own record.
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
@@ -117,7 +117,7 @@ def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(tmp_path, 
     out_dir = tmp_path / "out"
     config = _config(out_dir, epochs=4,
                      early_stopping={"enabled": True, "patience": 1, "min_delta": 1e-4})
-    run = create_run(config, str(out_dir))
+    run = create_run(config, str(out_dir), id="auto-run-76")
     run = train(run, train_loader, val_loader=val_loader, task="regression")
 
     assert run.status == "completed", run.error

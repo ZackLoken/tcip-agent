@@ -1,4 +1,4 @@
-"""generic_trainer unit tests: run-id uniqueness, seed defaulting, terminal
+"""generic_trainer unit tests: minted-id uniqueness, seed defaulting, terminal
 status on setup failure, and atomic checkpoint writes."""
 
 import threading
@@ -10,19 +10,21 @@ torch = pytest.importorskip("torch")
 from tcip_mcp.pipelines.training import generic_trainer as gt
 from tcip_mcp.pipelines.training import run_registry as rr
 from tcip_mcp.pipelines.training.generic_trainer import train
-from tcip_mcp.pipelines.training.run_registry import create_run
+from tcip_mcp.pipelines.training.run_registry import create_run, draw_seed_if_unset
 
 
-# ====================================================================
-# create_run: run-id uniqueness (same-second and cross-thread)
-# ====================================================================
+# mint_experiment_id: id uniqueness (same-second and cross-thread)
 
-def test_create_run_ids_unique_within_one_second():
-    ids = {create_run({"model_source": {}}, "out").run_id for _ in range(50)}
+def test_mint_experiment_id_unique_within_one_second():
+    from tcip_mcp.experiments import mint_experiment_id
+
+    ids = {mint_experiment_id() for _ in range(50)}
     assert len(ids) == 50  # len(_RUNS)-suffixed ids would collide here
 
 
-def test_create_run_ids_unique_across_threads():
+def test_mint_experiment_id_unique_across_threads():
+    from tcip_mcp.experiments import mint_experiment_id
+
     n = 16
     barrier = threading.Barrier(n)
     results: list[str] = []
@@ -30,9 +32,9 @@ def test_create_run_ids_unique_across_threads():
 
     def make():
         barrier.wait()  # maximize same-instant contention
-        run = create_run({"model_source": {}}, "out")
+        minted = mint_experiment_id()
         with lock:
-            results.append(run.run_id)
+            results.append(minted)
 
     threads = [threading.Thread(target=make) for _ in range(n)]
     for t in threads:
@@ -41,41 +43,42 @@ def test_create_run_ids_unique_across_threads():
         t.join()
 
     assert len(set(results)) == n
-    # Every run must be retrievable under its own id (no silent overwrite).
-    for run_id in results:
-        assert rr.get_run(run_id) is not None
-        assert rr.get_run(run_id).run_id == run_id
+    # Every id, once registered, is retrievable under itself (no silent overwrite).
+    for minted in results:
+        run = create_run({"model_source": {}}, "out", id=minted)
+        assert rr.get_run(minted) is not None
+        assert rr.get_run(minted).id == minted
+        assert run.id == minted
 
 
-# ====================================================================
-# create_run: reproducibility, every run gets a recorded seed
-# ====================================================================
+# draw_seed_if_unset: reproducibility, every run gets a recorded seed
 
-def test_create_run_draws_and_records_seed_when_unset():
+def test_draw_seed_if_unset_draws_and_records_seed_when_unset():
     config = {"model_source": {}}
-    run = create_run(config, "out")
-    seed = run.config.get("seed")
+    draw_seed_if_unset(config)
+    seed = config.get("seed")
     assert isinstance(seed, int) and 0 <= seed < 2**31
-    # The caller's dict is mutated in place: launch_training snapshots this same
-    # dict into the experiment record *after* create_run, so the effective seed
-    # must land in it, not in a detached copy.
-    assert config["seed"] == seed
 
 
-def test_create_run_keeps_explicit_top_level_seed():
-    run = create_run({"model_source": {}, "seed": 123}, "out")
-    assert run.config["seed"] == 123
+def test_draw_seed_if_unset_keeps_explicit_top_level_seed():
+    config = {"model_source": {}, "seed": 123}
+    draw_seed_if_unset(config)
+    assert config["seed"] == 123
 
 
-def test_create_run_keeps_training_section_seed():
+def test_draw_seed_if_unset_keeps_training_section_seed():
     config = {"model_source": {}, "training": {"seed": 7}}
-    run = create_run(config, "out")
-    assert "seed" not in run.config  # no competing top-level override drawn
-    assert run.config["training"]["seed"] == 7
+    draw_seed_if_unset(config)
+    assert "seed" not in config  # no competing top-level override drawn
+    assert config["training"]["seed"] == 7
 
 
-def test_create_run_drawn_seeds_are_independent():
-    seeds = {create_run({"model_source": {}}, "out").config["seed"] for _ in range(8)}
+def test_draw_seed_if_unset_drawn_seeds_are_independent():
+    seeds = set()
+    for _ in range(8):
+        config = {"model_source": {}}
+        draw_seed_if_unset(config)
+        seeds.add(config["seed"])
     assert len(seeds) == 8  # OS entropy per run, not one fixed default
 
 
@@ -87,7 +90,9 @@ def test_train_applies_the_drawn_seed(tmp_path, monkeypatch):
         captured["deterministic"] = deterministic
 
     monkeypatch.setattr(gt, "set_seed", fake_set_seed)
-    run = create_run({"model_source": {}}, str(tmp_path / "out"))
+    config = {"model_source": {}}
+    draw_seed_if_unset(config)
+    run = create_run(config, str(tmp_path / "out"), id="auto-run-seed-applied")
     train(run, train_loader=None, task="classification")  # fails at build, after seeding
 
     assert captured["seed"] == run.config["seed"]
@@ -103,7 +108,7 @@ def test_train_with_unwritable_output_dir_marks_run_failed(tmp_path):
     blocker.write_text("I am a file, not a directory")
 
     # output_dir nests under an existing *file*, so out_dir.mkdir() raises.
-    run = create_run({"model_source": {}}, str(blocker / "out"))
+    run = create_run({"model_source": {}}, str(blocker / "out"), id="auto-run-unwritable")
     run = train(run, train_loader=None, task="classification")
 
     assert run.status == "failed"  # not stuck at "running"

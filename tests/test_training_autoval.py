@@ -516,7 +516,7 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
         "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
         "early_stopping": {"enabled": False},
     }
-    run = create_run(cfg, str(tmp_path / "out"))
+    run = create_run(cfg, str(tmp_path / "out"), id="auto-run-77")
     run = train(run, train_loader, val_loader=val_loader, task="detection")
 
     assert run.status == "completed", getattr(run, "error", run.status)

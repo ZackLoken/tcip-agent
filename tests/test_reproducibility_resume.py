@@ -88,7 +88,7 @@ def test_seeded_train_reproducible(tmp_path):
     def run_once(out):
         ds = build_dataset("classification", images_dir=images_dir, csv_path=csv_path, num_classes=2)
         loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
-        run = create_run(_cfg([{"freeze_to": -1, "epochs": 1}], seed=7), str(out))
+        run = create_run(_cfg([{"freeze_to": -1, "epochs": 1}], seed=7), str(out), id="auto-run-51")
         run = train(run, loader, task="classification")
         return run.metrics_history[0]["train_loss"]
 
@@ -101,11 +101,11 @@ def test_resume_continues_epochs(tmp_path):
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
     cfg = _cfg([{"freeze_to": -1, "epochs": 2}])
 
-    train(create_run(cfg, str(tmp_path / "out")), loader, task="classification")
+    train(create_run(cfg, str(tmp_path / "out"), id="auto-run-52"), loader, task="classification")
     ckpt = tmp_path / "out" / "checkpoint_epoch_1.pt"
     assert ckpt.is_file()
 
-    run2 = create_run(cfg, str(tmp_path / "out2"))
+    run2 = create_run(cfg, str(tmp_path / "out2"), id="auto-run-53")
     run2 = train(run2, loader, task="classification", resume_from=str(ckpt))
     assert run2.status == "completed"
     assert run2.current_epoch == 2          # continued global epoch count
@@ -119,11 +119,11 @@ def test_resume_skips_completed_stage_and_restores_optimizer(tmp_path):
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
     cfg = _cfg([{"freeze_to": -1, "epochs": 1}, {"freeze_to": 0, "epochs": 1}])
 
-    train(create_run(cfg, str(tmp_path / "out")), loader, task="classification")
+    train(create_run(cfg, str(tmp_path / "out"), id="auto-run-54"), loader, task="classification")
     ckpt = tmp_path / "out" / "checkpoint_epoch_1.pt"  # end of stage 0
     assert ckpt.is_file()
 
-    run2 = create_run(cfg, str(tmp_path / "out2"))
+    run2 = create_run(cfg, str(tmp_path / "out2"), id="auto-run-55")
     run2 = train(run2, loader, task="classification", resume_from=str(ckpt))
     assert run2.status == "completed"
     assert run2.current_stage == 1          # stage 0 skipped, stage 1 ran
@@ -149,11 +149,11 @@ def test_resume_restores_rng_state_not_just_reseeds(tmp_path):
     cfg = _cfg([{"freeze_to": -1, "epochs": 2}], seed=11)
 
     # Straight-through baseline: both epochs in one uninterrupted run.
-    straight = train(create_run(cfg, str(tmp_path / "straight")), build_loader(), task="classification")
+    straight = train(create_run(cfg, str(tmp_path / "straight"), id="auto-run-56"), build_loader(), task="classification")
     baseline_epoch2_loss = straight.metrics_history[1]["train_loss"]
 
     # Split run: epoch 1 checkpointed, global RNG deliberately corrupted, then resumed for epoch 2.
-    train(create_run(cfg, str(tmp_path / "out")), build_loader(), task="classification")
+    train(create_run(cfg, str(tmp_path / "out"), id="auto-run-57"), build_loader(), task="classification")
     ckpt = tmp_path / "out" / "checkpoint_epoch_1.pt"
     assert ckpt.is_file()
     assert "torch_rng_state" in torch.load(ckpt, weights_only=False)
@@ -162,7 +162,7 @@ def test_resume_restores_rng_state_not_just_reseeds(tmp_path):
     np.random.seed(999)
     random.seed(999)
 
-    resumed = train(create_run(cfg, str(tmp_path / "out2")), build_loader(),
+    resumed = train(create_run(cfg, str(tmp_path / "out2"), id="auto-run-58"), build_loader(),
                     task="classification", resume_from=str(ckpt))
     assert resumed.rng_state_restored is True
     resumed_epoch2_loss = resumed.metrics_history[0]["train_loss"]  # the one epoch this run ran
@@ -179,14 +179,14 @@ def test_resume_from_checkpoint_without_rng_state_degrades_gracefully(tmp_path):
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
     cfg = _cfg([{"freeze_to": -1, "epochs": 2}])
 
-    train(create_run(cfg, str(tmp_path / "out")), loader, task="classification")
+    train(create_run(cfg, str(tmp_path / "out"), id="auto-run-59"), loader, task="classification")
     ckpt_path = tmp_path / "out" / "checkpoint_epoch_1.pt"
     ckpt = torch.load(ckpt_path, weights_only=False)
     for key in ("torch_rng_state", "numpy_rng_state", "python_rng_state", "cuda_rng_state"):
         ckpt.pop(key, None)
     torch.save(ckpt, ckpt_path)  # simulate a checkpoint saved before RNG state was captured
 
-    run2 = create_run(cfg, str(tmp_path / "out2"))
+    run2 = create_run(cfg, str(tmp_path / "out2"), id="auto-run-60")
     run2 = train(run2, loader, task="classification", resume_from=str(ckpt_path))
     assert run2.status == "completed"
     assert run2.rng_state_restored is False
@@ -249,11 +249,11 @@ def test_resume_from_non_resumable_checkpoint_fails_loudly(tmp_path):
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
     cfg = _cfg([{"freeze_to": -1, "epochs": 1}])
 
-    train(create_run(cfg, str(tmp_path / "out")), loader, task="classification")
+    train(create_run(cfg, str(tmp_path / "out"), id="auto-run-61"), loader, task="classification")
     best = tmp_path / "out" / "model_best.pt"   # has model_state_dict but no optimizer_state_dict
     assert best.is_file()
 
-    run2 = create_run(cfg, str(tmp_path / "out2"))
+    run2 = create_run(cfg, str(tmp_path / "out2"), id="auto-run-62")
     run2 = train(run2, loader, task="classification", resume_from=str(best))
     assert run2.status == "failed"
     assert "resume" in (run2.error or "").lower()

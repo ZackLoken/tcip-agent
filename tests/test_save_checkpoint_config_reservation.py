@@ -15,7 +15,7 @@ from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 
 
 def _ctx(tmp_path, config: dict) -> TrainContext:
-    run = create_run(config, str(tmp_path / "out"))
+    run = create_run(config, str(tmp_path / "out"), id="auto-run-68")
     return TrainContext(run=run, train_loader=None, val_loader=None, task="detection")
 
 

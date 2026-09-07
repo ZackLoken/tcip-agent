@@ -173,7 +173,7 @@ def test_monotonic_unfreeze_guard_fails(tmp_path: Path):
     loader = _classification_loader(tmp_path)
     # Stage 0 fully unfreezes; stage 1 re-freezes the backbone -> guard must fire.
     cfg = _cfg([{"freeze_to": 0, "epochs": 1}, {"freeze_to": -1, "epochs": 1}])
-    run = create_run(cfg, str(tmp_path / "out"))
+    run = create_run(cfg, str(tmp_path / "out"), id="auto-run-46")
     run = train(run, loader, val_loader=None, task="classification")
     assert run.status == "failed"
     assert "Non-decreasing unfreeze" in run.error
@@ -185,7 +185,7 @@ def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path):
         [{"freeze_to": -1, "epochs": 1}, {"freeze_to": 0, "epochs": 2}],
         stage_warmup_epochs=2,
     )
-    run = create_run(cfg, str(tmp_path / "out"))
+    run = create_run(cfg, str(tmp_path / "out"), id="auto-run-47")
     run = train(run, loader, val_loader=None, task="classification")
     assert run.status == "completed", getattr(run, "error", run.status)
 
@@ -203,7 +203,7 @@ def test_lr_scaling_applied(tmp_path: Path):
     # batch_size 2 * accum 2 -> eff_batch 4. ref 4 -> mult 1.0.
     loader_a = _classification_loader(tmp_path / "a", batch_size=2)
     cfg_a = _cfg(stages, lr_scaling={"enabled": True, "reference_effective_batch": 4, "scale_power": 0.5})
-    run_a = train(create_run(cfg_a, str(tmp_path / "a" / "out")), loader_a, task="classification")
+    run_a = train(create_run(cfg_a, str(tmp_path / "a" / "out"), id="auto-run-48"), loader_a, task="classification")
     assert run_a.status == "completed", getattr(run_a, "error", run_a.status)
     assert run_a.metrics_history[0]["eff_batch"] == 4
     assert run_a.metrics_history[0]["lr"] == pytest.approx(BASE_BB_LR * 1.0)
@@ -211,14 +211,14 @@ def test_lr_scaling_applied(tmp_path: Path):
     # ref 1 -> mult (4/1)^0.5 == 2.0.
     loader_b = _classification_loader(tmp_path / "b", batch_size=2)
     cfg_b = _cfg(stages, lr_scaling={"enabled": True, "reference_effective_batch": 1, "scale_power": 0.5})
-    run_b = train(create_run(cfg_b, str(tmp_path / "b" / "out")), loader_b, task="classification")
+    run_b = train(create_run(cfg_b, str(tmp_path / "b" / "out"), id="auto-run-49"), loader_b, task="classification")
     assert run_b.metrics_history[0]["lr"] == pytest.approx(BASE_BB_LR * 2.0)
 
 
 def test_two_stage_handoff_smoke(tmp_path: Path):
     loader = _classification_loader(tmp_path)
     cfg = _cfg([{"freeze_to": -1, "epochs": 1}, {"freeze_to": 0, "epochs": 1}])
-    run = create_run(cfg, str(tmp_path / "out"))
+    run = create_run(cfg, str(tmp_path / "out"), id="auto-run-50")
     run = train(run, loader, val_loader=None, task="classification")
     assert run.status == "completed", getattr(run, "error", run.status)
     assert all(math.isfinite(m["train_loss"]) for m in run.metrics_history)

@@ -9,13 +9,13 @@ def test_cancel_run_helper_and_tool():
     from tcip_mcp.pipelines.training.run_registry import cancel_run, create_run
     from tcip_mcp.tools.training_tools import cancel_training
 
-    run = create_run({"model_source": {"builder": "x:y"}}, "out")
-    assert cancel_run(run.run_id) is True
+    run = create_run({"model_source": {"builder": "x:y"}}, "out", id="cancel-run-1")
+    assert cancel_run(run.id) is True
     assert run.cancel_event.is_set()
     assert cancel_run("no-such-run") is False
 
-    res = cancel_training(run.run_id)
-    assert res["cancel_requested"] is True and res["run_id"] == run.run_id
+    res = cancel_training(run.id)
+    assert res["cancel_requested"] is True and res["experiment_id"] == run.id
     assert "error" in cancel_training("missing-run")
 
 
@@ -46,7 +46,7 @@ def test_cancel_before_training_yields_cancelled(tmp_path):
         "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 3}],
         "mixed_precision": False, "early_stopping": {"enabled": False},
     }
-    run = create_run(cfg, str(tmp_path / "out"))
+    run = create_run(cfg, str(tmp_path / "out"), id="cancel-run-2")
     run.cancel_event.set()  # request cancellation before any epoch runs
     run = train(run, loader, task="classification")
 

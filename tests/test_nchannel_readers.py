@@ -64,5 +64,5 @@ def test_grayscale_classification_end_to_end(tmp_path):
                     "task": "classification", "in_chans": 1}
     cfg = {"model_source": model_source, "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 1}],
            "mixed_precision": False, "early_stopping": {"enabled": False}}
-    run = train(create_run(cfg, str(tmp_path / "out")), loader, task="classification")
+    run = train(create_run(cfg, str(tmp_path / "out"), id="auto-run-39"), loader, task="classification")
     assert run.status == "completed"  # 1-channel data + 1-channel model trains end to end

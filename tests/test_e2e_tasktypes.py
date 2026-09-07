@@ -105,7 +105,7 @@ def test_detection_e2e(tmp_path: Path):
 
     model_source = _model_source("build_bespoke_detection", num_classes=1,
                                  min_size=IMG, max_size=IMG * 2)
-    run = create_run(_train_config(model_source), str(tmp_path / "out"))
+    run = create_run(_train_config(model_source), str(tmp_path / "out"), id="auto-run-15")
     run = train(run, loader, val_loader=None, task="detection")
     _assert_trained(run, tmp_path / "out")
 
@@ -136,7 +136,7 @@ def test_instance_seg_e2e(tmp_path: Path):
 
     model_source = _model_source("build_bespoke_instance_seg", num_classes=1,
                                  min_size=IMG, max_size=IMG * 2)
-    run = create_run(_train_config(model_source), str(tmp_path / "out"))
+    run = create_run(_train_config(model_source), str(tmp_path / "out"), id="auto-run-16")
     run = train(run, loader, val_loader=None, task="instance_seg")
     _assert_trained(run, tmp_path / "out")
 
@@ -164,7 +164,7 @@ def test_semantic_seg_e2e(tmp_path: Path):
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("semantic_seg"))
 
     model_source = _model_source("build_bespoke_semantic_seg", num_classes=2)
-    run = create_run(_train_config(model_source), str(tmp_path / "out"))
+    run = create_run(_train_config(model_source), str(tmp_path / "out"), id="auto-run-17")
     run = train(run, loader, val_loader=None, task="semantic_seg")
     _assert_trained(run, tmp_path / "out")
 
@@ -191,7 +191,7 @@ def test_ordinal_e2e(tmp_path: Path):
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("ordinal"))
 
     model_source = _model_source("build_bespoke_ordinal", num_ranks=3)
-    run = create_run(_train_config(model_source), str(tmp_path / "out"))
+    run = create_run(_train_config(model_source), str(tmp_path / "out"), id="auto-run-18")
     run = train(run, loader, val_loader=None, task="ordinal")
     _assert_trained(run, tmp_path / "out")
 
@@ -213,7 +213,7 @@ def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
 
     loader = DataLoader(dataset, batch_size=7, collate_fn=task_collate("ordinal"))
     model_source = _model_source("build_bespoke_ordinal", num_ranks=dataset.num_classes)
-    run = create_run(_train_config(model_source), str(tmp_path / "out"))
+    run = create_run(_train_config(model_source), str(tmp_path / "out"), id="auto-run-19")
     run = train(run, loader, val_loader=None, task="ordinal")
     _assert_trained(run, tmp_path / "out")
 
@@ -278,7 +278,7 @@ def test_regression_e2e(tmp_path: Path):
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("regression"))
 
     model_source = _model_source("build_bespoke_regressor")
-    run = create_run(_train_config(model_source), str(tmp_path / "out"))
+    run = create_run(_train_config(model_source), str(tmp_path / "out"), id="auto-run-20")
     run = train(run, loader, val_loader=None, task="regression")
     _assert_trained(run, tmp_path / "out")
 
@@ -303,7 +303,7 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
         "ordinal", images_dir=str(images_dir), csv_path=str(csv_path), num_ranks=3)
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("ordinal"))
     model_source = _model_source("build_bespoke_ordinal", num_ranks=3)
-    run = create_run(_train_config(model_source), str(tmp_path / "out"))
+    run = create_run(_train_config(model_source), str(tmp_path / "out"), id="auto-run-21")
     run = train(run, loader, val_loader=None, task="ordinal")
     _assert_trained(run, tmp_path / "out")
 
@@ -335,7 +335,7 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     dataset = build_dataset("regression", images_dir=str(images_dir), csv_path=str(csv_path))
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("regression"))
     model_source = _model_source("build_bespoke_regressor")
-    run = create_run(_train_config(model_source), str(tmp_path / "out"))
+    run = create_run(_train_config(model_source), str(tmp_path / "out"), id="auto-run-22")
     run = train(run, loader, val_loader=None, task="regression")
     _assert_trained(run, tmp_path / "out")
 

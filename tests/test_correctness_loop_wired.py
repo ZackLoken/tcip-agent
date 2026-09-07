@@ -256,7 +256,7 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
 def _ctx_for(task: str, builder: str, **builder_kwargs):
     config = {"model_source": {"builder": builder, "builder_kwargs": builder_kwargs, "task": task},
               "device": "cpu"}
-    run = create_run(config, "out")
+    run = create_run(config, "out", id="auto-run-6")
     return TrainContext(run=run, train_loader=None, val_loader=None, task=task)
 
 
@@ -273,7 +273,7 @@ def test_ctx_apply_stage_freeze_matches_trainer_guard():
     from tcip_mcp.pipelines.training.generic_trainer import apply_stage_freeze
 
     model = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.Linear(4, 2))
-    ctx = TrainContext(run=create_run({}, "out"), train_loader=None, task="classification")
+    ctx = TrainContext(run=create_run({}, "out", id="auto-run-7"), train_loader=None, task="classification")
     full = ctx.apply_stage_freeze(model, 0)
     assert full == sum(p.numel() for p in model.parameters())
     # A shrink relative to the previous stage violates the monotonic guard.

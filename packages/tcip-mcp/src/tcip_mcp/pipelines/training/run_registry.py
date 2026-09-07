@@ -8,7 +8,6 @@ import logging
 import random
 import threading
 import time
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,7 +22,7 @@ run's own directory); the two never share a name."""
 
 @dataclass
 class TrainRun:
-    run_id: str
+    id: str
     config: dict
     status: str = "created"
     current_epoch: int = 0
@@ -50,10 +49,6 @@ class TrainRun:
     # None means the loop runs in-process (cancel_event alone is authoritative); set once the
     # parent spawns the subprocess a run's body executes in, when should_cancel polls the sentinel.
     pid: int | None = None
-    # Set by launch_training once _ensure_experiment resolves the tracked id; None while unresolved.
-    experiment_id: str | None = None
-    # Set by launch_training when experiment tracking itself raised; None when it succeeded or never ran.
-    experiment_error: str | None = None
 
     def should_cancel(self) -> bool:
         """True if cancellation was requested, in-process (``cancel_event``) or via the sentinel
@@ -72,7 +67,7 @@ class TrainRun:
 
     def to_dict(self) -> dict:
         return {
-            "run_id": self.run_id,
+            "id": self.id,
             "status": self.status,
             "current_epoch": self.current_epoch,
             "current_stage": self.current_stage,
@@ -82,8 +77,6 @@ class TrainRun:
             "origin": self.origin,
             "elapsed_seconds": (self.end_time or time.time()) - self.start_time if self.start_time else 0,
             "pid": self.pid,
-            "experiment_id": self.experiment_id,
-            "experiment_error": self.experiment_error,
         }
 
 
@@ -91,42 +84,51 @@ _RUNS: dict[str, TrainRun] = {}
 _RUNS_LOCK = threading.Lock()
 
 
-def create_run(config: dict, output_dir: str, origin: str = "training") -> TrainRun:
-    # uuid suffix (not len(_RUNS)): same-second launches from this process, or from a
-    # different process sharing the experiments dir, must never collide on one run_id.
-    run_id = f"run_{int(time.time())}_{uuid.uuid4().hex[:6]}"
-    # Never start an unseeded run: draw one from OS entropy if the caller set none.
-    if config.get("seed", config.get("training", {}).get("seed")) is None:
-        # Written into the config in place: launch_training's post-create_run snapshot and
-        # every checkpoint both embed it, so the drawn seed is always on record and rerun-exact.
-        config["seed"] = random.SystemRandom().randrange(2**31)
-        logger.info("Run %s: no seed configured; drew seed=%d.", run_id, config["seed"])
-    run = TrainRun(run_id=run_id, config=config, output_dir=output_dir, origin=origin)
-    with _RUNS_LOCK:
-        _RUNS[run_id] = run
-    return run
+def draw_seed_if_unset(config: dict) -> None:
+    """Draw a seed from OS entropy into ``config`` in place, unless the caller already set one.
 
-
-def attach_run(run_id: str, config: dict, output_dir: str, origin: str = "training") -> TrainRun:
-    """Construct a ``TrainRun`` for an id the caller already owns, unlike ``create_run``,
-    which unconditionally mints a fresh random id, this never mints one. Used by the subprocess
-    worker to adopt the exact ``run_id`` the parent already returned to its own caller and baked
-    into ``output_dir``/``env.json``/audit events; ``create_run`` cannot do that.
-
-    Does not draw a seed: the parent already called ``create_run`` (which does) before spawning,
-    so ``config`` (read back from the persisted ``config.json``) already carries the resolved seed.
-    Inserts into *this process's own* ``_RUNS``, safe even though the id may already be a key in a
-    different process's registry, since that's different process memory entirely.
+    Never start an unseeded run. Called by ``launch_training`` before the experiment record is
+    written (so the record's snapshot and a pristine reuse's config refresh both carry the seed
+    the run actually trains with) and by the HPO trial dispatch on its own tracking config
+    object, before that trial's own ``create_run``, so a swept ``seed`` still reads as consumed by
+    the trainer.
     """
-    run = TrainRun(run_id=run_id, config=config, output_dir=output_dir, origin=origin)
+    if config.get("seed", config.get("training", {}).get("seed")) is None:
+        config["seed"] = random.SystemRandom().randrange(2**31)
+        logger.info("no seed configured; drew seed=%d.", config["seed"])
+
+
+def create_run(config: dict, output_dir: str, *, id: str, origin: str = "training") -> TrainRun:
+    """Register a run under ``id``, the caller's own: this mints nothing and draws no seed,
+    both resolved by the caller before this is called (:func:`draw_seed_if_unset` for the seed;
+    an experiment id, minted or caller-named, for ``id``). ``id`` is a training run's own
+    experiment id, or an HPO trial's resolved trial-directory path; either way the caller
+    supplies it, since nothing here can tell the two apart.
+    """
+    run = TrainRun(id=id, config=config, output_dir=output_dir, origin=origin)
     with _RUNS_LOCK:
-        _RUNS[run_id] = run
+        _RUNS[id] = run
     return run
 
 
-def get_run(run_id: str) -> TrainRun | None:
+def attach_run(id: str, config: dict, output_dir: str, origin: str = "training") -> TrainRun:
+    """Construct a ``TrainRun`` for an id the caller already owns, exactly the shape
+    ``create_run`` returns. Used by the subprocess worker to adopt the exact experiment id the
+    parent already resolved and baked into ``output_dir``/``env.json``/audit events; nothing
+    here draws a seed, since ``config`` (read back from the persisted ``config.json``) already
+    carries the one the parent resolved. Inserts into *this process's own* ``_RUNS``, safe even
+    though the id may already be a key in a different process's registry, since that's different
+    process memory entirely.
+    """
+    run = TrainRun(id=id, config=config, output_dir=output_dir, origin=origin)
     with _RUNS_LOCK:
-        return _RUNS.get(run_id)
+        _RUNS[id] = run
+    return run
+
+
+def get_run(id: str) -> TrainRun | None:
+    with _RUNS_LOCK:
+        return _RUNS.get(id)
 
 
 def list_runs(include_hpo_trials: bool = False) -> list[dict]:
@@ -142,7 +144,7 @@ def list_runs(include_hpo_trials: bool = False) -> list[dict]:
     ]
 
 
-def cancel_run(run_id: str) -> bool:
+def cancel_run(id: str) -> bool:
     """Request a graceful cancellation of a training run. Returns False if unknown.
 
     A run whose training body executes in a subprocess (``run.pid is not None``) can't be
@@ -150,13 +152,15 @@ def cancel_run(run_id: str) -> bool:
     sentinel file at ``<output_dir>/<CANCEL_SENTINEL>`` instead, which ``TrainRun.should_cancel()``
     polls in the child. When this process has no local record of the run at all (it was launched by
     a *different* process, e.g. the web backend cancelling a run the agent's MCP server's
-    subprocess is running), falls back to the run's own status record for the real output directory
-    rather than guessing one; an unresolvable run is refused (``False``), never a silent write to a
-    path nobody polls. The record is read through the store the launching process wrote it to, so a
-    live run is still cancellable when that store is a database rather than a file beside the run.
+    subprocess is running), falls back to reading the experiment record's own status directly for
+    the real output directory rather than guessing one, an id no record could ever carry (a path
+    separator, an empty or dot name) folding to the same refusal an absent record gets; an
+    unresolvable run is refused (``False``), never a silent write to a path nobody polls. The
+    record is read through the store the launching process wrote it to, so a live run is still
+    cancellable when that store is a database rather than a file beside the run.
     """
     with _RUNS_LOCK:
-        run = _RUNS.get(run_id)
+        run = _RUNS.get(id)
     if run is not None:
         if run.pid is None:
             run.cancel_event.set()
@@ -165,12 +169,15 @@ def cancel_run(run_id: str) -> bool:
             (Path(run.output_dir) / CANCEL_SENTINEL).touch()
         return True
 
-    from tcip_mcp.experiments import read_member, resolve_experiment_for_run, status_key
+    from tcip_store import BadKey
 
-    experiment_id = resolve_experiment_for_run(run_id)
-    if experiment_id is None:
+    from tcip_mcp.experiments import read_member, status_key
+
+    try:
+        key = status_key(id)
+    except BadKey:
         return False
-    status = read_member(status_key(experiment_id), {})
+    status = read_member(key, {})
     output_dir = status.get("output_dir") if isinstance(status, dict) else None
     if not output_dir:
         return False

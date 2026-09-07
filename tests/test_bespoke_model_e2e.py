@@ -103,7 +103,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     out = tmp_path / "out"
     create_experiment("expBespoke", config, data_source=str(images_dir))
     update_status("expBespoke", "running")
-    run = create_run(config, str(out))
+    run = create_run(config, str(out), id="auto-run-1")
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
                        task="detection", experiment_id="expBespoke")
 
@@ -159,7 +159,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert metric_rows and all("train_loss" in r for r in metric_rows)
     events = _audit_events(tmp_path)
     assert [e["status"] for e in events] == ["running", "completed"]  # opened + closed around the body
-    assert events[-1]["arguments"]["run_id"] == run.run_id
+    assert events[-1]["arguments"]["experiment_id"] == "expBespoke"
 
     # ---- completion registered the bespoke model into the immutable registry ----
     entry = ModelRegistry(str(tmp_path)).get_model("expBespoke")
