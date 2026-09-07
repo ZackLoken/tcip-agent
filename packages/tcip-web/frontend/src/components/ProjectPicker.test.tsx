@@ -1079,7 +1079,7 @@ describe("ProjectPicker removal", () => {
     );
     expect(screen.queryByText(/dataset ds1/)).not.toBeInTheDocument();
     expect(screen.queryByText(/dataset ds2/)).not.toBeInTheDocument();
-    await screen.findByText(/its dataset registry could not be read \(not json\)/);
+    await screen.findByText(/its dataset registry cannot be used as it stands \(not json\)/);
   });
 
   it("groups a dependent's own multiple datasets under one target into one card sentence", async () => {

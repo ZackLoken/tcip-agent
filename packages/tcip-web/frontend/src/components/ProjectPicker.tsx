@@ -157,7 +157,7 @@ function RemovalDialog({
 
   function dependentLine(d: DependentProject): string {
     if (d.unreadable) {
-      return `${d.project}: its dataset registry has an entry the platform cannot name: ${d.unreadable}`;
+      return `${d.project}: its dataset registry cannot be used as it stands: ${d.unreadable}`;
     }
     return `${d.project} registers images from this project as dataset ${d.dataset_id}`;
   }
@@ -572,7 +572,7 @@ export function ProjectPicker() {
                       ))}
                       {p.dependency_problem && (
                         <span className="text-[11px] text-tcip-fp">
-                          its dataset registry could not be read ({p.dependency_problem})
+                          its dataset registry cannot be used as it stands ({p.dependency_problem})
                         </span>
                       )}
                       {/* Signature: the project's captures across the season, each date labelled. */}

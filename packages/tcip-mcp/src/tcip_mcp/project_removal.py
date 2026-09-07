@@ -442,7 +442,7 @@ def _ordered_refusal(
     try:
         pending = workspace.pending_removal_record(project)
     except (tcip_store.StoreError, tcip_store.DecodeError, tcip_store.SchemaVersionRefused) as exc:
-        return _Refusal(409, f"{name!r}'s pending-removal marker could not be read: {exc}")
+        return _Refusal(409, f"{name}'s pending-removal marker could not be read: {exc}")
     if pending is not None:
         return _Refusal(
             409,
@@ -863,13 +863,13 @@ def release_project_binding(name: str, *, released_by: str) -> dict:
                 scope=project,
             )
         except audit.AuditEntryNotWritten as exc:
-            return {"error": f"{name!r}'s binding was cleared (marker_cleared={marker_cleared}, "
+            return {"error": f"{name}'s binding was cleared (marker_cleared={marker_cleared}, "
                               f"canvas_binding_released={canvas_binding_released}) but the line "
                               f"was not written: {exc}",
                     "status": 409}
 
     if canvas_failure is not None:
-        return {"error": f"releasing {name!r}'s canvas-open binding failed: {canvas_failure}. "
+        return {"error": f"releasing {name}'s canvas-open binding failed: {canvas_failure}. "
                           f"marker_cleared={marker_cleared}.",
                 "status": 409}
 
