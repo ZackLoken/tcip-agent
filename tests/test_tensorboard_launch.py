@@ -209,6 +209,35 @@ def test_launch_reports_the_tie_disabled_under_the_test_seam(monkeypatch, tmp_pa
         tb.stop_tensorboard(key="tie-disabled-run")
 
 
+def test_a_record_id_spelled_like_a_sweeps_key_runs_its_own_board_beside_it(monkeypatch, tmp_path):
+    """A run passes launch_tensorboard no key at all, so it is keyed by its own resolved log
+    directory, always path-shaped; a sweep's or a trial's key is a bare identifier with no path
+    separator (routes/tuning.py's f"sweep_{sweep_id}"). The two keyspaces cannot intersect by
+    construction, so a record id spelled exactly like a sweep's own key still runs its own board
+    beside it: coverage of that construction, not a race."""
+    from tcip_mcp.pipelines.training import tensorboard_manager as tb
+
+    real_popen = subprocess.Popen
+
+    def living_popen(cmd, **kwargs):
+        return real_popen([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
+
+    monkeypatch.setattr(tb.subprocess, "Popen", living_popen)
+
+    sweep_key = "sweep_abc123"
+    sweep_info = tb.launch_tensorboard(str(tmp_path / "sweep"), key=sweep_key)
+    run_logdir = tmp_path / sweep_key / "tensorboard"
+    run_info = tb.launch_tensorboard(str(run_logdir))
+    try:
+        assert "url" in sweep_info and "url" in run_info
+        assert run_info["logdir"] != sweep_key
+        keys = {entry["key"] for entry in tb.list_tensorboard()}
+        assert keys == {sweep_key, str(run_logdir.resolve())}
+    finally:
+        tb.stop_tensorboard(key=sweep_key)
+        tb.stop_tensorboard(key=str(run_logdir.resolve()))
+
+
 def test_manager_refuses_to_import_when_the_grace_leaves_no_margin(tmp_path):
     """The module-level check holds the grace-under-wait constraint in code, not only in
     prose: a copy with the grace pushed past the margin fails at import."""
