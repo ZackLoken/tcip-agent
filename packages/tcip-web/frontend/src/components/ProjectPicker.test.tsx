@@ -388,6 +388,8 @@ describe("ProjectPicker", () => {
     expect(card).toHaveAttribute("aria-pressed", "true");
   });
 
+  // jsdom does not lay out CSS, so this proves the aria-describedby wiring reaches the
+  // block's text, not that display: contents keeps its children out of the box model.
   it("describes the card with its site and counts, without folding them into its name", async () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
@@ -401,6 +403,24 @@ describe("ProjectPicker", () => {
     expect(card).toHaveAccessibleName("crop_a_subject_a_valley-farm");
     expect(card).toHaveAccessibleDescription(/north orchard/);
     expect(card).toHaveAccessibleDescription(/42 image\(s\)/);
+  });
+
+  it("names and describes a card correctly when the project name carries a space", async () => {
+    const spaced: ProjectSummary = {
+      ...PROJECTS[0],
+      name: "crop a subject a valley farm",
+    };
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: [spaced, PROJECTS[1]],
+    });
+    render(<ProjectPicker />);
+
+    const card = await screen.findByRole("button", { name: "crop a subject a valley farm" });
+    expect(card).toHaveAccessibleName("crop a subject a valley farm");
+    expect(card).toHaveAccessibleDescription(/north orchard/);
   });
 
   it("gives the Open project button the full width of its action row", async () => {
