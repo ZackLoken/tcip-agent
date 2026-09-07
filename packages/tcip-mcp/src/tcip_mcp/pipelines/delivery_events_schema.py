@@ -172,7 +172,7 @@ def is_mapping_disclosure(pm: object) -> TypeGuard[dict]:
 class DocumentBinding(BaseModel):
     """One bucket's binding evidence, exactly as ``record_delivery_binding_event`` renders a
     :class:`tcip_mcp.pipelines.resolution.StampBinding` into the stored record's ``documents``
-    mapping."""
+    mapping and into each :class:`ReconciledDocument`'s own ``bindings``."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -183,6 +183,49 @@ class DocumentBinding(BaseModel):
     checkpoint_sha256: Optional[str]
     record_digest: Optional[str]
     note: str
+
+
+class ReconciledDocument(BaseModel):
+    """One sidecar document's reconciled validity, exactly as
+    :func:`tcip_mcp.pipelines.resolution._reconcile_validity` returns it (the shared body behind
+    ``reconcile_operating_point_validity`` and ``reconcile_classifier_validity``) and
+    ``record_delivery_binding_event`` stores it keyed by the document name.
+
+    ``bound_validated`` and ``delivery_note`` are set only on the classifier entry: the
+    delivery-level state ``bind_classifier_validity`` returned (the one the gate actually used),
+    kept beside the reconciler's own ``validated`` above since the two differ when the binding
+    floors a validated stamp.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    validated: str
+    on_disk_validated: bool
+    missing_sidecars: list[str]
+    unvalidated_buckets: list[str]
+    binding_notes: dict[str, str]
+    bindings: dict[str, DocumentBinding]
+    conf: Optional[float]
+    confs: dict[str, Optional[float]]
+    per_bucket: dict[str, str]
+    bound_validated: Optional[str] = None
+    delivery_note: Optional[str] = None
+
+
+class ReconciledDimension(BaseModel):
+    """One geometry or scope dimension's reconciled validity (``claim_scope``, ``tile_size`` or
+    ``scale``), exactly as ``reconcile_claim_scope_validity``, ``reconcile_tile_size_validity``
+    and ``reconcile_scale_validity`` (``resolution.py``) return it. ``validated`` is ``None``
+    when ``operative`` is ``False``: never operative for this delivery, not a failed reference.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    operative: bool
+    validated: Optional[str]
+    per_bucket: dict[str, str]
+    unvalidated_buckets: list[str]
+    binding_notes: dict[str, str]
 
 
 class DeliveryEventRecord(BaseModel):
@@ -208,6 +251,9 @@ class DeliveryEventRecord(BaseModel):
         Union[PlantMappingDisclosure, PlantRegistryDisclosure, CanopySegmentDisclosure]
     ]
     documents: dict[str, DocumentBinding]
+    # Keyed by the reconciler the delivering door's gate ran; None on a record predating these.
+    document_reconciliations: Optional[dict[str, ReconciledDocument]] = None
+    dimension_reconciliations: Optional[dict[str, ReconciledDimension]] = None
     produced_at: str
 
 
