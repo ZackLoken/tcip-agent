@@ -89,7 +89,8 @@ DELIVERY_TRAIT_BY_PHENOTYPE = {
 
 
 def write_spec(project_root: Path, spec: TraitSpec) -> None:
-    """Author a spec record into a project's own registry, the way an authoring tool would.
+    """Write a spec record into a project's own registry, bypassing both authoring doors and
+    the trait-spec statement they carry.
 
     Routes through the platform's shared validate-encode-write entry, so a fixture spec is
     proven to clear the same crops.yml cross-check every authored spec goes through.
@@ -102,6 +103,33 @@ def write_spec(project_root: Path, spec: TraitSpec) -> None:
     validated, reason = traits._validate_and_write_spec(key, data, expect=current.version)
     if validated is None:
         raise ValueError(f"fixture spec {spec.name!r} does not clear crops.yml: {reason}")
+
+
+def confirm_spec_statement(project_root: Path, trait: str) -> dict[str, Any]:
+    """Give a registered trait's own trait-spec statement a confirmed, current record, the way
+    the breeder's own confirmation would leave it.
+
+    States or restates the spec on file through the revision door (a no-op write when a current
+    statement is already on record) and confirms unless it already is, so a direct
+    ``state_operationalization`` call the tests below make finds the precondition
+    ``state_trait_operationalization`` now checks already cleared. Idempotent: a fixture may call
+    this more than once over the same trait.
+    """
+    traits.write_trait_spec_fields(
+        trait, {}, project_root=project_root,
+        rationale="fixture restatement so the trait's own trait-spec statement stays current",
+    )
+    scope = traits.trait_spec_statements_scope(project_root)
+    key = traits.trait_spec_statement_key(scope, trait)
+    record = read_versioned(key, default=None).value or {}
+    if record.get("confirmed_by"):
+        return record
+    return traits.confirm_trait_spec(
+        project_root, trait,
+        user="fixture-breeder",
+        record_seen=traits.trait_spec_statement_seen_hash(record),
+        identity_from_request=False,
+    )
 
 
 def seed_positive_class(project_root: Path, subject_name: str, positive_class_name: str) -> cr.ClassRegistry:
@@ -137,7 +165,9 @@ def seed_project(project_root: Path) -> Path:
     """A project whose registry carries both fixture traits, and whose class registry declares the
     crossing fixture's positive class for the subject it states its crossing operationalization of."""
     write_spec(project_root, CROSSING_SPEC)
+    confirm_spec_statement(project_root, CROSSING_TRAIT)
     write_spec(project_root, COUNT_SPEC)
+    confirm_spec_statement(project_root, COUNT_TRAIT)
     seed_positive_class(project_root, "flower", CROSSING_SPEC.positive_class_name)
     return Path(project_root)
 
@@ -148,6 +178,7 @@ def state_crossing(project_root: Path, **overrides: Any) -> dict[str, Any]:
     Passes the project's own class registry (as :func:`seed_project` left it, or as a caller
     updated it since) to the writer, the registry a crossing statement is checked against.
     """
+    confirm_spec_statement(project_root, CROSSING_TRAIT)
     fields: dict[str, Any] = {
         "statement": "the date each plant reached the state the breeder scores in the field",
         "mechanism": "the calibrated state classifier over the isolated flowers of one plant",
@@ -163,6 +194,7 @@ def state_crossing(project_root: Path, **overrides: Any) -> dict[str, Any]:
 
 def state_count(project_root: Path, **overrides: Any) -> dict[str, Any]:
     """A stated, unconfirmed per-image count record for the fixture count trait."""
+    confirm_spec_statement(project_root, COUNT_TRAIT)
     fields: dict[str, Any] = {
         "statement": "how many stems the model finds in one frame",
         "mechanism": "the calibrated detector over whole frames at the derived operating point",
@@ -175,6 +207,7 @@ def state_count(project_root: Path, **overrides: Any) -> dict[str, Any]:
 
 def state_aggregate(project_root: Path, delivery_kind: str, **overrides: Any) -> dict[str, Any]:
     """A stated, unconfirmed per-plant aggregate record for the fixture count trait."""
+    confirm_spec_statement(project_root, COUNT_TRAIT)
     fields: dict[str, Any] = {
         "statement": "the aggregated value the breeder records for one plant",
         "mechanism": "the calibrated detector's per-plant assignment at the derived operating point",
@@ -224,6 +257,7 @@ def seed_delivery_traits(project_root: Path) -> Path:
     """Register every trait the count and aggregate delivery tests deliver under."""
     for spec in DELIVERY_SPECS:
         write_spec(project_root, spec)
+        confirm_spec_statement(project_root, spec.name)
     return Path(project_root)
 
 
@@ -256,6 +290,7 @@ def confirm_aggregate(
     itself rather than deriving either, so a test whose subject is the derivation can seed a record
     without going through it.
     """
+    confirm_spec_statement(project_root, trait)
     fields: dict[str, Any] = {
         "statement": f"the {delivered_phenotype} the breeder records for one plant",
         "mechanism": "the calibrated model's per-plant assignment at the derived operating point",
@@ -306,6 +341,7 @@ def seed_confirmed_crossing(project_root: Path, trait: str, **overrides: Any) ->
     """
     from tcip_mcp.traits import get_trait_for
 
+    confirm_spec_statement(project_root, trait)
     spec = get_trait_for(trait, project_root)
     fields: dict[str, Any] = {
         "statement": f"the date each plant reached the state {trait} scores in the field",
