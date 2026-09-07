@@ -594,6 +594,48 @@ export interface DeliverySupersession {
   superseded_at: string;
 }
 
+/** One bucket's binding evidence, as `record_delivery_binding_event` (resolution.py) renders a
+ *  StampBinding into `documents` and into each ReconciledDocument's own `bindings`. */
+export interface DocumentBinding {
+  ok: boolean;
+  claimed: boolean;
+  experiment_id: string | null;
+  producing_experiment_id: string | null;
+  checkpoint_sha256: string | null;
+  record_digest: string | null;
+  note: string;
+}
+
+/** One sidecar document's reconciled validity, as `_reconcile_validity` (resolution.py) returns
+ *  it and `record_delivery_binding_event` stores it keyed by the document name. `bound_validated`
+ *  and `delivery_note` are set only on the classifier entry: the delivery-level state
+ *  `bind_classifier_validity` returned (the one the gate used), beside the reconciler's own
+ *  `validated`, which the two differ from when the binding floors a validated stamp. */
+export interface ReconciledDocument {
+  validated: string;
+  on_disk_validated: boolean;
+  missing_sidecars: string[];
+  unvalidated_buckets: string[];
+  binding_notes: Record<string, string>;
+  bindings: Record<string, DocumentBinding>;
+  conf: number | null;
+  confs: Record<string, number | null>;
+  per_bucket: Record<string, string>;
+  bound_validated?: string | null;
+  delivery_note?: string | null;
+}
+
+/** One geometry or scope dimension's reconciled validity (claim_scope, tile_size, scale), as the
+ *  matching `reconcile_*_validity` function (resolution.py) returns it. `validated` is null when
+ *  `operative` is false: never operative for this delivery, not a failed reference. */
+export interface ReconciledDimension {
+  operative: boolean;
+  validated: string | null;
+  per_bucket: Record<string, string>;
+  unvalidated_buckets: string[];
+  binding_notes: Record<string, string>;
+}
+
 /** One completed delivery: what shipped, under which trait and kind, and the real per-bucket
  *  verification evidence the delivering door reconciled at the time. Read-only; a delivery event
  *  is a fact recorded after an artifact already shipped, not a statement to confirm. */
@@ -605,6 +647,10 @@ export interface DeliveryEventRecord {
   output_path: string | null;
   output_sha256: string | null;
   documents: Record<string, unknown>;
+  // Every reconciliation the delivering door's gate ran, keyed by the document or dimension it
+  // reconciled; undefined/null on a record written before these fields existed.
+  document_reconciliations?: Record<string, ReconciledDocument> | null;
+  dimension_reconciliations?: Record<string, ReconciledDimension> | null;
   produced_at: string;
   // Who acknowledged this delivery unvalidated, and why; null on both when nothing was.
   acknowledged_by: string | null;
