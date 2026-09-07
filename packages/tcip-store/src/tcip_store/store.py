@@ -5,6 +5,8 @@ the call rather than around it, so there is no write form that can skip the lock
 module functions hold the rules that must mean the same thing on every backend (kind and
 key validation, the concurrency policy, the transaction-misuse rules) and delegate the
 storage itself to the bound backend, so each operation has exactly one implementation.
+The one exception is :func:`close_connections`: a process-lifecycle operation over every
+key the bound backend has ever touched, never one key of its own.
 """
 
 from __future__ import annotations
@@ -93,6 +95,8 @@ class Store(Protocol):
 
     def capabilities(self) -> Capabilities: ...
 
+    def close(self) -> None: ...
+
 
 _bound: Store | None = None
 _open_transaction = threading.local()
@@ -132,6 +136,31 @@ def capabilities() -> Capabilities:
     return _backend().capabilities()
 
 
+def close_connections() -> None:
+    """Close every connection the bound backend holds, on every thread.
+
+    A process-lifecycle operation, not a per-key one: the two callers are an entry point
+    closing the instance its own startup opened before another instance takes over
+    (``tcip_web/__main__.py``), and a console command that walks a workspace and renames
+    project directories out from under a backend that must hold no open handle while a
+    rename is in flight (``tcip_mcp.project_removal.complete_pending_removals``). Refuses
+    with ``TransactionMisuse`` inside an open transaction, the same rule ``replace`` and
+    ``delete`` hold, since a transaction's own connection cannot be closed out from under it.
+
+    The sqlite backend closes every connection of every root and every thread: a connection
+    is opened with ``check_same_thread=False``, so closing one while another thread is
+    inside a statement on it kills the process, and a thread that fetched a connection from
+    the slot cache just before this call meets a ``ProgrammingError`` on its next use. The
+    caller guarantees no other thread is inside the seam for the call's duration; the
+    thread-local transaction guard here sees only the calling thread's own transaction and
+    cannot check that guarantee for it. The file backend holds nothing between operations, so
+    its own ``close`` releases nothing; both exist so a binder has one lifecycle method to call
+    regardless of which backend is bound.
+    """
+    _refuse_inside_transaction("close_connections", _CLOSES_UNDER_ANOTHER_THREAD)
+    _backend().close()
+
+
 def _active_txn() -> Txn | None:
     return getattr(_open_transaction, "txn", None)
 
@@ -146,6 +175,11 @@ _LOGS_ARE_NOT_TRANSACTIONAL = (
     "close the transaction first. A transaction holds records, so a log key cannot be named "
     "in one, and an append inside a transaction would join it on a database backend and roll "
     "back with the body, while append returns only once the entry has survived"
+)
+
+_CLOSES_UNDER_ANOTHER_THREAD = (
+    "close the transaction first. Closing every connection while this thread holds one open "
+    "inside a transaction would close the connection out from under its own commit"
 )
 
 
@@ -482,6 +516,7 @@ __all__ = [
     "blob_path",
     "capabilities",
     "clear_log",
+    "close_connections",
     "delete",
     "exists",
     "keys",

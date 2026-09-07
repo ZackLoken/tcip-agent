@@ -3,6 +3,11 @@
 Reads ``TCIP_WEB_HOST`` / ``TCIP_WEB_PORT`` for network binding (default
 127.0.0.1:8765) and writes the chosen port to ``.tcip/state/web_port.txt``
 so MCP tools in other processes can discover the backend.
+
+The instance the port write binds is closed once that write returns, before uvicorn imports
+the app and binds its own: the process ends up holding one backend's connections rather than
+two, so a project-removal rename at the next start is never blocked by a handle this entry
+point forgot to release.
 """
 
 from __future__ import annotations
@@ -61,13 +66,16 @@ def _write_port_file(port: int) -> None:
 def main() -> None:
     # The port handoff is written here, before uvicorn imports the app (which binds its own
     # storage backend at import; the served app pins the platform-state root later).
-    bind_default()
+    instance = bind_default()
     # A non-loopback host binds, and the app's trust boundary then serves this machine's own
     # connections and refuses network ones until the operator opts in (tcip_web.trust_boundary).
     host = os.environ.get("TCIP_WEB_HOST", DEFAULT_HOST)
     requested = int(os.environ.get("TCIP_WEB_PORT", str(DEFAULT_PORT)))
     port = _pick_port(host, requested)
     _write_port_file(port)
+    # The app's import below binds its own instance; this one holds only the port write's
+    # connection and is closed so the process ends up holding one backend's connections.
+    instance.close()
     reload = os.environ.get("TCIP_WEB_RELOAD", "0") == "1"
     uvicorn.run("tcip_web.app:app", host=host, port=port, reload=reload)
 

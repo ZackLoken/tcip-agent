@@ -186,6 +186,32 @@ def store(request, tmp_path, monkeypatch):
         backend.close()
 
 
+# ── process lifecycle ───────────────────────────────────────────────────────────
+
+
+def test_close_connections_releases_a_handle_so_the_root_can_be_renamed(store):
+    """``close_connections`` is the seam's one process-lifecycle operation: on a single thread,
+    it releases whatever a prior read opened so the root directory can be renamed out from under
+    the bound backend. This proves the single-threaded contract only, nothing about a connection
+    another thread is mid-statement on; the denial assertion has content only on the sqlite
+    backend under Windows, where CI's own job selects this test by node id.
+    """
+    key = store.key(LWW, "before-close")
+    ts.replace(key, {"n": 1})
+    assert ts.read(key) == {"n": 1}
+
+    moved = store.root.parent / f"{store.root.name}-moved"
+    if store.name == SQLITE and os.name == "nt":
+        with pytest.raises(OSError):
+            os.rename(str(store.root), str(moved))
+
+    ts.close_connections()
+
+    os.rename(str(store.root), str(moved))
+    moved_key = ts.Key(key.store, str(moved), key.parts)
+    assert ts.read(moved_key) == {"n": 1}
+
+
 # ── atomicity and durability ────────────────────────────────────────────────────
 
 
