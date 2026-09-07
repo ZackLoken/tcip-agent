@@ -43,7 +43,8 @@ def test_a_failed_audit_append_raises_and_writes_no_delivery_events_record(
 
     with pytest.raises(AuditEntryNotWritten) as caught:
         resolution.record_delivery_binding_event(
-            "test_door", None, [], {}, measurement_documents=["operating_point"],
+            "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
+            measurement_documents=["operating_point"],
             scale_document=None, acknowledgement=None, trait="bud_opening",
             delivery_kind="test_kind", project_root=tmp_path, plant_mapping=None,
         )
@@ -61,7 +62,8 @@ def test_an_ordinary_call_still_records_both_the_audit_line_and_the_delivery_eve
     import tcip_store as ts
 
     recorded = resolution.record_delivery_binding_event(
-        "test_door", None, [], {}, measurement_documents=["operating_point"],
+        "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
+        measurement_documents=["operating_point"],
         scale_document=None, acknowledgement=None, trait="bud_opening",
         delivery_kind="test_kind", project_root=tmp_path, plant_mapping=None,
     )
