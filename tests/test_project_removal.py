@@ -735,6 +735,128 @@ def test_an_unreadable_sibling_registry_is_listed_as_such(client, tmp_path):
     assert entry.get("unreadable") is not None
 
 
+# ── dependency_warnings and _workspace_child_of ──────────────────────────────
+
+
+def test_workspace_child_of_a_missing_path_the_workspace_an_external_root_and_the_holding_dir(
+    tmp_path, tmp_path_factory,
+):
+    from tcip_mcp.project_removal import _workspace_child_of
+
+    ws = tmp_path.parent
+    ws.mkdir(exist_ok=True)
+    child = _init(ws, "sample_plot_child")
+
+    missing = child / "gone" / "deeper"
+    assert _workspace_child_of(missing, ws) == child
+    assert _workspace_child_of(ws, ws) is None
+
+    external = tmp_path_factory.mktemp("external_root")
+    assert _workspace_child_of(external, ws) is None
+
+    holding = ws / ".removed" / "sample_plot_child-20260304T120000Z"
+    holding.mkdir(parents=True)
+    assert _workspace_child_of(holding, ws) is None
+
+
+def test_dependency_warnings_present_true_while_pending_then_false_after_the_move(
+    client, tmp_path,
+):
+    """coverage: dependency_warnings does not exist at the baseline."""
+    from tcip_mcp.project_removal import dependency_warnings
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    dependent = _init(ws, "sample_plot_warn-dep")
+    reg = register_dataset(str(target), crop="black locust", project_root=str(dependent))
+    assert "error" not in reg, reg
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    warnings, problem = dependency_warnings(dependent)
+    assert problem is None
+    assert len(warnings) == 1
+    assert warnings[0]["present"] is True
+    assert warnings[0]["target"] == "sample_plot_target"
+    assert warnings[0]["dataset_id"] == reg["id"]
+
+    project_removal.complete_pending_removals(ws)
+
+    warnings2, _ = dependency_warnings(dependent)
+    assert len(warnings2) == 1
+    assert warnings2[0]["present"] is False
+
+    holding = Path(resp.json()["holding_dir"])
+    renamed = holding.parent / "renamed_by_hand"
+    holding.rename(renamed)
+    warnings3, _ = dependency_warnings(dependent)
+    assert warnings3 == warnings2
+
+
+def test_dependency_warnings_empty_for_an_entry_under_a_live_project(tmp_path):
+    from tcip_mcp.project_removal import dependency_warnings
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    ws = tmp_path.parent
+    ws.mkdir(exist_ok=True)
+    live = _init(ws, "sample_plot_live")
+    dependent = _init(ws, "sample_plot_live-dep")
+    reg = register_dataset(str(live), crop="black locust", project_root=str(dependent))
+    assert "error" not in reg, reg
+
+    warnings, problem = dependency_warnings(dependent)
+    assert warnings == []
+    assert problem is None
+
+
+def test_dependency_warnings_clears_once_reregistered_from_the_moved_tree(client, tmp_path):
+    from tcip_mcp.project_removal import dependency_warnings
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    dependent = _init(ws, "sample_plot_reregister-dep")
+    reg = register_dataset(str(target), crop="black locust", project_root=str(dependent))
+    assert "error" not in reg, reg
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
+    project_removal.complete_pending_removals(ws)
+    holding_dir = Path(resp.json()["holding_dir"])
+
+    reg2 = register_dataset(str(holding_dir), crop="black locust", project_root=str(dependent))
+    assert "error" not in reg2, reg2
+
+    warnings, _ = dependency_warnings(dependent)
+    assert warnings == []
+
+
+def test_dependency_problem_named_for_a_damaged_registry(tmp_path):
+    from tests._record_damage_fixtures import damage_record
+
+    from tcip_mcp.project_removal import dependency_warnings
+    from tcip_mcp.tools.project_tools import dataset_registry_key, register_dataset
+
+    ws = tmp_path.parent
+    ws.mkdir(exist_ok=True)
+    project = _init(ws, "sample_plot_damaged-self")
+    reg = register_dataset(str(project), crop="black locust", project_root=str(project))
+    assert "error" not in reg, reg
+    damage_record(dataset_registry_key(project), b"not json")
+
+    warnings, problem = dependency_warnings(project)
+    assert warnings == []
+    assert problem is not None
+
+
 def test_a_canvas_binding_with_no_project_name_is_read_as_no_binding(client, tmp_path):
     """A canvas binding carrying neither ``project_name`` nor ``root`` reads as no binding,
     rather than raising, in both the preview and the door."""
