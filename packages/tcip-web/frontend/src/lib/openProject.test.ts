@@ -59,6 +59,9 @@ describe("openProjectByName", () => {
       active: null,
       active_path: null,
       projects: [p],
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
 
     await openProjectByName("hz");
@@ -84,6 +87,9 @@ describe("openProjectByName", () => {
       active: null,
       active_path: null,
       projects: [p],
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
 
     await openProjectByName("fresh");
@@ -107,6 +113,9 @@ describe("openProjectByName", () => {
       active: null,
       active_path: null,
       projects: [p],
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
 
     await openProjectByName("hz2");
@@ -130,6 +139,9 @@ describe("openProjectByName", () => {
       active: null,
       active_path: null,
       projects: [p],
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
 
     await openProjectByName("site-a");
@@ -145,6 +157,9 @@ describe("openProjectByName", () => {
       active: null,
       active_path: null,
       projects: [],
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     expect(await openProjectByName("nope")).toBeNull();
     expect(api.dataset.select).not.toHaveBeenCalled();
@@ -157,6 +172,9 @@ describe("openProjectByName", () => {
       active: null,
       active_path: null,
       projects: [p],
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
 
     await openProjectByName("hz");
@@ -173,6 +191,9 @@ describe("adoptProjectByName", () => {
       active: null,
       active_path: null,
       projects: [p],
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
 
     await adoptProjectByName("hz");
@@ -187,6 +208,9 @@ describe("adoptProjectByName", () => {
       active: null,
       active_path: null,
       projects: [],
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
 
     expect(await adoptProjectByName("nope")).toBeNull();

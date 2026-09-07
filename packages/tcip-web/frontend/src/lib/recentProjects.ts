@@ -35,3 +35,15 @@ export function recordRecentProject(name: string, path: string): void {
     /* private mode / disabled storage: the fast-track just won't remember */
   }
 }
+
+/** Drop a project from this browser's own recents (by name) after it is removed: a per-browser
+ *  convenience list, never the authoritative record the workspace listing is. */
+export function forgetRecentProject(name: string): void {
+  if (!name) return;
+  try {
+    const list = loadRecentProjects().filter((p) => p.name !== name);
+    localStorage.setItem(KEY, JSON.stringify(list));
+  } catch {
+    /* private mode / disabled storage: nothing to forget */
+  }
+}

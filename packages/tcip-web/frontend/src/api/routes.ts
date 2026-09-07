@@ -23,6 +23,8 @@ export const ROUTES = {
   getMetaReports: "/api/meta/reports",
   getMetaRetrospectives: "/api/meta/retrospectives",
   getProjects: "/api/projects",
+  getProjectsByNameRemovalPreview: (name: string) =>
+    `/api/projects/${encodeURIComponent(name)}/removal-preview`,
   getResultsDeliveryEvents: "/api/results/delivery-events",
   getResultsModelsRegistered: "/api/results/models/registered",
   getResultsOperationalization: "/api/results/operationalization",
@@ -69,6 +71,7 @@ export const ROUTES = {
     `/api/inference/jobs/${encodeURIComponent(jobId)}/cancel`,
   postInferenceLaunch: "/api/inference/launch",
   postProjectsActive: "/api/projects/active",
+  postProjectsRemove: "/api/projects/remove",
   postResultsExportCountCsv: "/api/results/export_count_csv",
   postResultsExportCsv: "/api/results/export_csv",
   postResultsOperationalizationConfirm: "/api/results/operationalization/confirm",
