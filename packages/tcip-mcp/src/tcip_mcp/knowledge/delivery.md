@@ -134,6 +134,12 @@ uncharacterized, which is a claim about a quantity that has been defined.
   it from `dataset_root` (given explicitly, or the project root's own registry when that project is
   unambiguously one dataset), and a positive class the registry does not declare for the measured
   subject refuses at the statement, or supersedes an existing confirmation at delivery.
+- Before any of that, `state_trait_operationalization` refuses unless the trait's own trait-spec
+  statement (what the trait itself measures, authored with `author_trait_spec` and revised with
+  `revise_trait_spec`) is confirmed and current: the breeder confirms what a trait is before the
+  agent states what its delivered number means, and the refusal names the door that clears
+  whichever of the three states applies (no statement, a stale one, or a current one nobody has
+  confirmed).
 
 ## The delivery gate (measurement integrity)
 
