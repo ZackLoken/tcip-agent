@@ -2397,6 +2397,30 @@ REGISTERED = {
              "ok": True, "claimed": True, "experiment_id": EXPERIMENT,
              "producing_experiment_id": EXPERIMENT, "checkpoint_sha256": "0" * 64,
              "record_digest": "7f3a1b9c2d4e5f60", "note": ""}},
+         "document_reconciliations": {
+             "operating_point": {
+                 "validated": "held_out_annotations", "on_disk_validated": True,
+                 "missing_sidecars": [], "unvalidated_buckets": [], "binding_notes": {},
+                 "bindings": {"predictions/live/2026-03-04": {
+                     "ok": True, "claimed": True, "experiment_id": EXPERIMENT,
+                     "producing_experiment_id": EXPERIMENT, "checkpoint_sha256": "0" * 64,
+                     "record_digest": "7f3a1b9c2d4e5f60", "note": ""}},
+                 "conf": 0.42, "confs": {"predictions/live/2026-03-04": 0.42},
+                 "per_bucket": {"predictions/live/2026-03-04": "held_out_annotations"}},
+             "classifier_operating_point": {
+                 "validated": "held_out_annotations", "on_disk_validated": True,
+                 "missing_sidecars": [], "unvalidated_buckets": [], "binding_notes": {},
+                 "bindings": {"predictions/live/2026-03-04": {
+                     "ok": True, "claimed": True, "experiment_id": EXPERIMENT,
+                     "producing_experiment_id": EXPERIMENT, "checkpoint_sha256": "0" * 64,
+                     "record_digest": "7f3a1b9c2d4e5f60", "note": ""}},
+                 "conf": None, "confs": {"predictions/live/2026-03-04": None},
+                 "per_bucket": {"predictions/live/2026-03-04": "held_out_annotations"},
+                 "bound_validated": "held_out_annotations", "delivery_note": ""}},
+         "dimension_reconciliations": {
+             "tile_size": {
+                 "operative": False, "validated": None, "per_bucket": {},
+                 "unvalidated_buckets": [], "binding_notes": {}}},
          "produced_at": "2026-03-04T12:00:00+00:00"},
         lambda root: resolution.delivery_event_key(
             resolution.delivery_events_scope(root), EVENT_ID_UNDER_TEST),
