@@ -28,6 +28,7 @@ exercised by no CI leg.
 
 from __future__ import annotations
 
+import math
 import os
 import signal
 import subprocess
@@ -80,8 +81,9 @@ def _run(parent_pid: int, term_grace: float, argv: list[str]) -> int:
 
 def _parse_args(argv: list[str]) -> tuple[int, float, list[str]]:
     """``--parent`` and ``--term-grace`` may come in either order, both before ``--``; either
-    missing, no argv left after it, a non-integer parent, or a non-numeric or negative
-    term-grace is a usage error rather than a traceback."""
+    missing, no argv left after it, a non-integer or non-positive parent, or a non-numeric,
+    non-finite (``nan``, ``inf``) or negative term-grace is a usage error rather than a
+    traceback, since none of those names a pid to watch or a duration to wait on."""
     parent_pid: int | None = None
     term_grace: float | None = None
     i = 0
@@ -91,13 +93,15 @@ def _parse_args(argv: list[str]) -> tuple[int, float, list[str]]:
                 parent_pid = int(argv[i + 1])
             except ValueError:
                 raise SystemExit(_USAGE) from None
+            if parent_pid <= 0:
+                raise SystemExit(_USAGE)
             i += 2
         elif argv[i] == "--term-grace" and i + 1 < len(argv):
             try:
                 term_grace = float(argv[i + 1])
             except ValueError:
                 raise SystemExit(_USAGE) from None
-            if term_grace < 0:
+            if not math.isfinite(term_grace) or term_grace < 0:
                 raise SystemExit(_USAGE)
             i += 2
         elif argv[i] == "--":
