@@ -25,21 +25,21 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 13cad0ee.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 61503290.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 13cad0ee has 434 modules across the six scanned roots (141539 total lines):
+HEAD 61503290 has 434 modules across the six scanned roots (141636 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 137 | 62859 |
+| tcip-mcp | 137 | 62919 |
 | tcip-annotation | 12 | 4299 |
-| tcip-web | 40 | 13850 |
+| tcip-web | 40 | 13829 |
 | tcip-store | 13 | 5282 |
-| tcip-web-frontend | 215 | 50302 |
+| tcip-web-frontend | 215 | 50360 |
 | tools | 17 | 4947 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
@@ -524,7 +524,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | tools/verify_skill_tools.py | Guardrail: hold every tool name in agent-facing prose to the registry. | 3 | 0 |
 | tools/verify_skill_traits.py | Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in crops.yml. | 1 | 0 |
 
-## Package-level dependency rules holding at HEAD e20375c3
+## Package-level dependency rules holding at HEAD 61503290
 
 The following sentences are checked against every in-repo Python import edge in the regenerated module inventory (an edge is counted only when both the importing file and the imported file resolve to a file inside this repo; stdlib and third-party imports are excluded by `build_module_inventory.py`, see docstring at `tools/build_module_inventory.py:9-20`).
 
