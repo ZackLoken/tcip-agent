@@ -27,12 +27,17 @@ describe("unset-value placeholder sweep", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("keeps a file rendering the bare glyph as option text beside an aria-label, as coverage only: a static sweep cannot see which JSX branch renders", () => {
+  it("gives every <option> whose only child is the bare glyph an aria-label", () => {
+    const glyphOptionPattern = new RegExp(
+      `<option\\b[^>]*>\\s*\\{${UNSET_GLYPH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\}\\s*</option>`,
+      "g",
+    );
     const offenders = Object.entries(sourceFiles)
       .filter(([path]) => !path.endsWith(".test.tsx"))
-      .filter(([, content]) => content.includes(`>${UNSET_GLYPH}<`))
-      .filter(([, content]) => !content.includes("aria-label"))
-      .map(([path]) => path);
+      .flatMap(([path, content]) => {
+        const matches = content.match(glyphOptionPattern) ?? [];
+        return matches.filter((tag) => !tag.includes("aria-label")).map(() => path);
+      });
     expect(offenders).toEqual([]);
   });
 });
