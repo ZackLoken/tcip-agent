@@ -10,7 +10,9 @@ from tcip_annotation.json_io import write_annotations
 from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
 
 from tcip_mcp.dataset_layout import models_with_predictions, prediction_dir
-from tcip_mcp.prediction_buckets import bucket_key_of, resolve_prediction_bucket
+from tcip_mcp.prediction_buckets import (
+    bucket_key_of, resolve_prediction_bucket, review_state_count, verdict_count,
+)
 
 DATE = "2026-02-11"
 
@@ -171,3 +173,30 @@ def test_verdict_exhaustion_refuses_by_name_with_the_document_keyword_off(tmp_pa
         resolve_writable_bucket(review_state_dir, "baseline", _dirs_for, max_variants=max_variants)
     assert type(excinfo.value).__name__ == "BucketHasVerdicts"
     assert excinfo.value.suggested is None
+
+
+def test_review_state_count_counts_review_decisions_verdict_count_does_not(tmp_path):
+    """review_state_count is bucket-wide over the engine's own image states: a bulk-accepted
+    image and a reviewed image whose document has since been removed both count for it, and for
+    neither does verdict_count, which counts detection entries alone. A not_started shard an
+    unmark leaves behind, and an image reviewed under another bucket, count for neither."""
+    dataset_root = tmp_path / "data"
+    review_state_dir = tmp_path / "state"
+    for stem in ("bulk_accepted", "not_started_shard", "reviewed_elsewhere", "doc_removed"):
+        _write_bucket(dataset_root, "baseline", stem)
+    bucket_dir = prediction_dir(dataset_root, "baseline", DATE)
+    bucket_key = bucket_key_of(bucket_dir)
+    other_bucket_dir = prediction_dir(dataset_root, "other", DATE)
+    other_bucket_dir.mkdir(parents=True, exist_ok=True)
+
+    engine = ReviewEngine(review_state_dir)
+    engine.mark_image_reviewed(bucket_key, "bulk_accepted.json")
+    engine.mark_image_reviewed(bucket_key, "not_started_shard.json")
+    engine.unmark_image_reviewed(bucket_key, "not_started_shard.json")
+    engine.mark_image_reviewed(bucket_key, "doc_removed.json")
+    (bucket_dir / "doc_removed.json").unlink()
+    engine.mark_image_reviewed(bucket_key_of(other_bucket_dir), "reviewed_elsewhere.json")
+
+    names = {"bulk_accepted", "not_started_shard", "reviewed_elsewhere", "doc_removed"}
+    assert verdict_count(review_state_dir, bucket_key, names) == 0
+    assert review_state_count(review_state_dir, bucket_key) == 2
