@@ -564,8 +564,9 @@ def test_inference_worker_persists_terminal_status_when_dataset_root_of_raises(t
 
     assert job.status == "completed"
 
+    from tcip_mcp.web_client import INFERENCE_JOBS
     from tcip_web.jobstore import load
-    rows = {row["job_id"]: row for row in load("inference_jobs")}
+    rows = {row["job_id"]: row for row in load(INFERENCE_JOBS)}
     assert rows["j-root-raise"]["status"] == "completed"
 
 
