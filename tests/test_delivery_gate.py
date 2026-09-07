@@ -253,16 +253,25 @@ def test_export_detection_csv_refuses_the_retired_acknowledge_unvalidated_keywor
 def test_export_detection_csv_records_the_gates_effective_acknowledgement(tmp_path):
     """A real ``Acknowledgement`` on an otherwise-unvalidated call clears the gate and both
     columns carry it; the same call on a validated bucket (mirrored below) carries neither,
-    since the gate discards an acknowledgement that cleared nothing."""
+    since the gate discards an acknowledgement that cleared nothing. With no pred_dirs the tile
+    reconciler never ran, so the summary reads tile_size_operative false, the same thing that key
+    already means for an untiled bucket."""
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
-    _path, tail, _summary, event_recorded = export_detection_csv(
+    _path, tail, summary, event_recorded = export_detection_csv(
         [{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
         acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="a look now"))
     assert tail["acknowledged_by"] == "user:tester"
     assert tail["acknowledgement_reason"] == "a look now"
     assert tail["operating_point_validated"] == VALIDATED_FALSE
     assert event_recorded is True
+    assert summary["tile_size_operative"] is False
+    assert summary["tile_size_validated"] is None
+
+    records = [r for r in res.read_delivery_events(tmp_path) if r["door"] == "export_detection_csv"]
+    assert len(records) == 1, records
+    assert records[0]["document_reconciliations"] == {}
+    assert records[0]["dimension_reconciliations"] == {}
 
 
 def test_delivery_skill_documents_the_real_per_image_csv_schema(tmp_path):
@@ -430,6 +439,30 @@ def test_export_detection_csv_pred_dirs_gates_fabricated_tile_size(tmp_path):
                              operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
 
 
+def test_export_detection_csv_records_operating_point_and_tile_size(tmp_path):
+    """A tiled, validated bucket's recorded event carries both reconciliations the door ran:
+    document_reconciliations keyed operating_point, dimension_reconciliations keyed tile_size."""
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+    from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY
+
+    bucket = _detection_bucket(
+        tmp_path, "preds", validated=True,
+        tile_size_prov={"value": 224, "requires_validation": True,
+                        "validation_kind": "geometry",
+                        "validated_against": VALIDATED_PERSISTED_GEOMETRY},
+    )
+    export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
+                         trait=fx.COUNT_TRAIT, pred_dirs=[bucket])
+
+    records = [r for r in res.read_delivery_events(tmp_path) if r["door"] == "export_detection_csv"]
+    assert len(records) == 1, records
+    record = records[0]
+    assert set(record["document_reconciliations"]) == {"operating_point"}
+    assert set(record["dimension_reconciliations"]) == {"tile_size"}
+    assert record["dimension_reconciliations"]["tile_size"]["validated"] == (
+        VALIDATED_PERSISTED_GEOMETRY)
+
+
 def test_export_detection_csv_refusal_merges_the_tile_reconciler_binding_notes(tmp_path, monkeypatch):
     """The typed refusal carries both reconcilers' binding notes, merging what the success
     summary already merges: a refusal must not drop a tile-dimension binding note the same call's
@@ -541,7 +574,9 @@ def test_export_aggregated_csv_refuses_the_retired_acknowledge_unvalidated_keywo
 def test_export_aggregated_csv_records_the_gates_effective_acknowledgement(tmp_path):
     """A real ``Acknowledgement`` on an otherwise-unvalidated per-plant aggregate clears the gate
     and both columns carry it; a validated delivery posted with one (mirrored below) carries
-    neither, since the gate discards an acknowledgement that cleared nothing."""
+    neither, since the gate discards an acknowledgement that cleared nothing. With no pred_dirs
+    at all, no reconciler ran, so the recorded event's document_reconciliations and
+    dimension_reconciliations are both empty rather than carrying a stand-in entry."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     _path, tail, event_recorded = export_aggregated_csv(
@@ -553,6 +588,11 @@ def test_export_aggregated_csv_records_the_gates_effective_acknowledgement(tmp_p
     assert tail["acknowledgement_reason"] == "a look now"
     assert tail["operating_point_validated"] == VALIDATED_FALSE
     assert event_recorded is True
+
+    records = [r for r in res.read_delivery_events(tmp_path) if r["door"] == "export_aggregated_csv"]
+    assert len(records) == 1, records
+    assert records[0]["document_reconciliations"] == {}
+    assert records[0]["dimension_reconciliations"] == {}
 
 
 def test_export_aggregated_csv_discards_an_acknowledgement_that_cleared_nothing(tmp_path):
@@ -609,6 +649,32 @@ def test_export_aggregated_csv_ordinal_trait_ships_when_sidecar_validated(tmp_pa
         pred_dirs=[bucket])
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
+
+
+def test_export_aggregated_csv_ordinal_trait_records_the_ordinal_key_and_claim_scope_alone(
+    tmp_path,
+):
+    """The aggregate door runs the tile reconciler only for the operating_point document, so an
+    ordinal delivery's dimension_reconciliations carries claim_scope alone (never operative here,
+    since an ordinal bucket carries no operating_point.json for claim_scope to read); its own
+    document reconciliation is keyed by the document it actually reconciled,
+    ordinal_operating_point."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    bucket = _scalar_bucket(tmp_path, "preds", "ordinal", validated=True, trait="astringency")
+    out = tmp_path / "o.csv"
+    export_aggregated_csv(
+        [{"plant_id": "p1", "value": 2, "observations": 3, "value_key": "astringency",
+         "plant_attribution": "image", "measurement_document": "ordinal_operating_point"}],
+        str(out), delivered_phenotype="astringency", operating_point_validated=VALIDATED_HELD_OUT,
+        pred_dirs=[bucket])
+
+    records = [r for r in res.read_delivery_events(tmp_path) if r["door"] == "export_aggregated_csv"]
+    assert len(records) == 1, records
+    record = records[0]
+    assert set(record["document_reconciliations"]) == {"ordinal_operating_point"}
+    assert set(record["dimension_reconciliations"]) == {"claim_scope"}
+    assert record["dimension_reconciliations"]["claim_scope"]["operative"] is False
 
 
 def test_export_aggregated_csv_regression_trait_ships_when_sidecar_validated(tmp_path):
@@ -1377,6 +1443,64 @@ def test_export_aggregated_csv_ships_dimensional_value_with_a_validated_scale(tm
     assert rows[0]["scale_document"] == "resolve_scale"
 
 
+def test_export_aggregated_csv_records_every_reconciliation_the_gate_ran(tmp_path):
+    """A delivery whose gate reconciled the count operating point, claim scope, tile geometry and
+    physical scale together stores every one of them: the recorded delivery event's
+    document_reconciliations carries the operating_point entry the gate ran (GUARDS the new key),
+    dimension_reconciliations carries claim_scope, tile_size and scale, each validated equal to
+    what the gate's own flags held, documents equal to the operating_point entry's own bindings,
+    and the audit line's verified_buckets unchanged from today."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_PERSISTED_GEOMETRY,
+        VALIDATED_PHYSICAL_MEASUREMENT,
+        VALIDATED_SAME_MOSAIC_IDENTITY,
+    )
+
+    root = tmp_path / "ds"
+    d = root / "predictions" / "preds"
+    write_prediction(d, "img_a")
+    op = {
+        "conf": {"value": 0.4, "requires_validation": True, "validation_kind": "annotations",
+                 "validated_against": VALIDATED_HELD_OUT},
+        "tile_size": _tile(VALIDATED_PERSISTED_GEOMETRY, 224),
+    }
+    stamp = {
+        "validated": True, "trait": "plant_surface_area", "operating_point": op,
+        "subject": fx.COUNT_SUBJECT, "attribute": None,
+        "claim_scope_validated": VALIDATED_SAME_MOSAIC_IDENTITY,
+    }
+    write_bound_sidecar(d, stamp, dataset_root=root, experiment_id="exp-preds")
+    _write_scale_sidecar(d, validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
+                         trait="plant_surface_area")
+
+    out = tmp_path / "o.csv"
+    export_aggregated_csv(_DIM_RESULTS, str(out), delivered_phenotype="plant_surface_area",
+                          pred_dirs=[str(d)], images_dir=str(root / "images"))
+
+    records = [r for r in res.read_delivery_events(tmp_path) if r["door"] == "export_aggregated_csv"]
+    assert len(records) == 1, records
+    record = records[0]
+
+    assert set(record["document_reconciliations"]) == {"operating_point"}
+    op_entry = record["document_reconciliations"]["operating_point"]
+    assert op_entry["validated"] == VALIDATED_HELD_OUT
+    assert op_entry["bindings"] == record["documents"]
+
+    dims = record["dimension_reconciliations"]
+    assert set(dims) == {"claim_scope", "tile_size", "scale"}
+    assert dims["claim_scope"]["validated"] == VALIDATED_SAME_MOSAIC_IDENTITY
+    assert dims["tile_size"]["validated"] == VALIDATED_PERSISTED_GEOMETRY
+    assert dims["scale"]["validated"] == VALIDATED_PHYSICAL_MEASUREMENT
+
+    audit_rows = _audit_rows(root, "export_aggregated_csv")
+    assert len(audit_rows) == 1, audit_rows
+    assert audit_rows[0]["verified_buckets"] == {
+        str(d): {"verified": True, "record": f"exp-preds:{op_entry['bindings'][str(d)]['record_digest']}",
+                 "note": ""}
+    }
+
+
 def test_export_aggregated_csv_refuses_a_dimensional_delivery_with_no_scale_sidecar(tmp_path):
     """A dimensional CSV must not ship stamped validated when its physical scale was never checked
     against anything, even though the count operating point beside it is genuinely validated: this
@@ -1734,6 +1858,27 @@ def test_the_delivery_records_what_it_verified_in_the_dataset_own_log(tmp_path):
     assert _audit_rows(tmp_path, "export_aggregated_csv") == []
 
 
+def test_a_non_tiled_unit_free_count_delivery_records_claim_scope_and_a_non_operative_tile_size(
+    tmp_path,
+):
+    """The tile reconciler always runs for an operating_point-document delivery, whether or not
+    any bucket was tiled: an untiled bucket's tile_size entry carries operative false, the same
+    thing that key already means for it, rather than the key being absent."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
+    export_aggregated_csv(_COUNT_RESULTS, str(tmp_path / "o.csv"), delivered_phenotype="stem_count",
+                          pred_dirs=[d])
+
+    records = [r for r in res.read_delivery_events(tmp_path) if r["door"] == "export_aggregated_csv"]
+    assert len(records) == 1, records
+    dims = records[0]["dimension_reconciliations"]
+    assert set(dims) == {"claim_scope", "tile_size"}
+    assert dims["claim_scope"]["operative"] is False
+    assert dims["tile_size"]["operative"] is False
+    assert dims["tile_size"]["validated"] is None
+
+
 def test_an_unbound_bucket_records_why_it_was_not_verified(tmp_path):
     """The same event on the failing side: a reader of the log sees which bucket floored the
     delivery and the reason, not only that a CSV was written. Pinned directly against
@@ -1742,12 +1887,18 @@ def test_an_unbound_bucket_records_why_it_was_not_verified(tmp_path):
     StampBinding rather than a full door's setup."""
     from tcip_mcp.pipelines.resolution import StampBinding, record_delivery_binding_event
 
+    from tests._binding_fixtures import document_reconciliation
+
     d = _write_bucket(tmp_path, "unbound", conf_ref=VALIDATED_HELD_OUT, validated=False)
     binding = StampBinding(ok=False, claimed=False,
                            note="a hand-forged claim with no validated_by")
     (tmp_path / "o.csv").write_text("plant_id,count\n", encoding="utf-8")
+    recon = document_reconciliation(
+        {d: binding}, validated=VALIDATED_FALSE, per_bucket={d: VALIDATED_FALSE},
+        unvalidated_buckets=[d], missing_sidecars=[], on_disk_validated=False)
     record_delivery_binding_event(
-        "export_aggregated_csv", str(tmp_path / "o.csv"), [d], {d: binding},
+        "export_aggregated_csv", str(tmp_path / "o.csv"), [d],
+        document_reconciliations={"operating_point": recon}, dimension_reconciliations={},
         measurement_documents=["operating_point"], scale_document=None, acknowledgement=None,
         trait=fx.COUNT_TRAIT, delivery_kind=op.PER_PLANT_COUNT_AGGREGATE)
 
