@@ -630,8 +630,6 @@ def test_a_concurrent_revision_to_other_values_abandons(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _confirmed_leaf(tmp_path)
-    directory = traits.trait_specs_dir(str(tmp_path))
-    spec_key = traits.trait_spec_key(directory, "leaf")
     scope = traits.trait_spec_statements_scope(tmp_path)
     statement_key = traits.trait_spec_statement_key(scope, "leaf")
 
