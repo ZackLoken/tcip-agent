@@ -483,8 +483,10 @@ def _register_entry(
     mode's caller has already confirmed the file), ``ValueError``/``TypeError`` for a
     ``config``/``metrics`` JSON cannot hold or a ``metrics_source`` pairing that disagrees with
     whether ``metrics`` is empty, :class:`EntryOwnedByRun` for a replace the eviction rail
-    refuses, and ``AuditEntryNotWritten`` when ``_audit_entry_replace`` cannot append the
-    replacement's own line after the transaction has already closed.
+    refuses whose own refusal line lands, and ``AuditEntryNotWritten`` from either of two
+    places: after a committed replace, when ``_audit_entry_replace`` cannot append its own line,
+    or from ``_audit_refused`` inside the ``EntryOwnedByRun`` handler, when nothing committed
+    and the refusal's own line could not be written either, replacing ``EntryOwnedByRun`` itself.
     """
     check_json_value(config, path="config")
     check_json_value(metrics or {}, path="metrics")
@@ -846,9 +848,12 @@ class ModelRegistry:
                 ``ValueError`` also covers ``metrics_source`` disagreeing with whether
                 ``metrics`` is empty.
             EntryOwnedByRun: ``name`` already names an entry a run's completion bound to a
-                different (or, for a pre-field entry, an unrecorded) run.
-            AuditEntryNotWritten: the replacement committed but its own audit line could not
-                be appended.
+                different (or, for a pre-field entry, an unrecorded) run, and that refusal's
+                own audit line landed.
+            AuditEntryNotWritten: from either of two places: the replacement committed but its
+                own audit line could not be appended, or nothing committed because the
+                eviction rail refused and that refusal's own line also could not be appended,
+                replacing ``EntryOwnedByRun`` itself.
         """
         entry = _register_entry(
             self._project_path, name=name, checkpoint_path=checkpoint_path, config=config,
