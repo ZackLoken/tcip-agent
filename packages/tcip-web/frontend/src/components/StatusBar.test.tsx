@@ -48,6 +48,24 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+describe("StatusBar agent activity footer", () => {
+  it("names the declared harness, not a generic Agent label", async () => {
+    useStore
+      .getState()
+      .pushAgentActivity("annotate", "labels_written", { stem: "IMG_1" }, "claude-code 2.1.238");
+    render(<StatusBar />);
+
+    expect(await screen.findByText(/claude-code 2\.1\.238: labels_written/)).toBeInTheDocument();
+  });
+
+  it("reads Process for a write the sender declared no harness on", async () => {
+    useStore.getState().pushAgentActivity("annotate", "labels_written", { stem: "IMG_1" }, null);
+    render(<StatusBar />);
+
+    expect(await screen.findByText(/Process: labels_written/)).toBeInTheDocument();
+  });
+});
+
 describe("StatusBar review readout", () => {
   it("reports the outcome counts the route computed, not a recount of the detections on screen", () => {
     // A type or class filter narrows the detection list without narrowing the image's own outcome

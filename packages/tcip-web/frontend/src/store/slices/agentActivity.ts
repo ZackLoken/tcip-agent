@@ -8,12 +8,20 @@ export interface AgentActivity {
   panel: string;
   eventType: string;
   data: Record<string, unknown>;
+  /** The harness that declared itself on this push (``agent_client_name``, its version appended
+   * when declared), or null when the sender declared none: a plain process's own write. */
+  actor: string | null;
 }
 
 export interface AgentActivitySlice {
   /** Last panel event pushed by the MCP agent (via /ws/panel subscription). */
   agentActivity: AgentActivity | null;
-  pushAgentActivity: (panel: string, eventType: string, data: Record<string, unknown>) => void;
+  pushAgentActivity: (
+    panel: string,
+    eventType: string,
+    data: Record<string, unknown>,
+    actor: string | null,
+  ) => void;
 }
 
 export const createAgentActivitySlice: StateCreator<AppState, [], [], AgentActivitySlice> = (
@@ -21,8 +29,8 @@ export const createAgentActivitySlice: StateCreator<AppState, [], [], AgentActiv
 ) => ({
   agentActivity: null,
 
-  pushAgentActivity: (panel, eventType, data) =>
+  pushAgentActivity: (panel, eventType, data, actor) =>
     set((s) => ({
-      agentActivity: { seq: (s.agentActivity?.seq ?? 0) + 1, panel, eventType, data },
+      agentActivity: { seq: (s.agentActivity?.seq ?? 0) + 1, panel, eventType, data, actor },
     })),
 });

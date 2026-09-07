@@ -37,6 +37,18 @@ import { ReviewTab } from "@/tabs/ReviewTab";
 // "app", handled by its own subscription below).
 const TAB_PANELS: readonly TabName[] = TAB_NAMES;
 
+/** The harness a panel event declared, from its own identity fields: the client name with its
+ * version appended when declared, or null when the sender declared none (a plain process's own
+ * write, never a guess at who that process was). */
+function panelEventActor(ev: {
+  agent_client_name?: string | null;
+  agent_client_version?: string | null;
+}): string | null {
+  const name = ev.agent_client_name;
+  if (!name) return null;
+  return ev.agent_client_version ? `${name} ${ev.agent_client_version}` : name;
+}
+
 // Code-split the recharts-heavy tabs (recharts + its d3 deps are ~5MB unpacked and used only
 // here) so the Annotate/Review workflow (the primary use) paints without them. App mounts
 // exactly one tab at a time, so deferring these chunks costs no UX.
@@ -103,7 +115,9 @@ function App() {
           return;
         }
         if (ev.panel === "annotate") {
-          useStore.getState().pushAgentActivity(ev.panel, ev.event_type, ev.data);
+          useStore
+            .getState()
+            .pushAgentActivity(ev.panel, ev.event_type, ev.data, panelEventActor(ev));
         }
       }),
     );
