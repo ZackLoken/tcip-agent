@@ -143,13 +143,18 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
 
     ``PREDICTION_BUCKET``: two sources, since a bucket's own directory is never named by a fixed
     convention alone. Every model directory and its date subdirectories under each dataset's own
-    ``predictions/`` tree (:func:`tcip_mcp.dataset_layout.prediction_bucket_dirs`, the same walk
-    the ``doctor`` command's registry check reads through), for a bucket that lives under a
-    registered dataset; and each experiment's own ``lineage.json["predictions"]``
+    ``predictions/`` tree, live and cleared alike
+    (:func:`tcip_mcp.dataset_layout.prediction_bucket_dirs` with ``include_cleared=True``, the
+    same walk the ``doctor`` command's registry check reads through), for a bucket that lives
+    under a registered dataset; and each experiment's own ``lineage.json["predictions"]``
     (:mod:`tcip_mcp.tools.inference_tools`'s own ``update_lineage`` call), for a bucket an
     inference run wrote outside any registered dataset's tree. A recorded lineage bucket since
     deleted is skipped the same way as a moved run output directory; the walk under a registered
-    dataset's own tree only ever names directories that exist.
+    dataset's own tree only ever names directories that exist. A cleared bucket's own archive
+    (``predictions/.cleared/<model>@<stamp>[/<date>]``, populated only by
+    :func:`~tcip_mcp.tools.inference_tools.clear_prediction_bucket`) is enumerated here too, so
+    its own records travel through ``tcip adopt-store``/``tcip export-store`` the way a live
+    bucket's do.
     """
     root = Path(project_root).absolute()
     roots: list[tuple[str, str]] = []
@@ -194,7 +199,7 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
         dataset_root = project_tools.dataset_entry_path(root, dataset_entry).absolute()
         _add(roots, seen, dataset_root, ROOT)
         _add(roots, seen, dataset_root / ".tcip" / "state", STATE)
-        for bucket in dataset_layout.prediction_bucket_dirs(dataset_root):
+        for bucket in dataset_layout.prediction_bucket_dirs(dataset_root, include_cleared=True):
             _add(roots, seen, bucket.absolute(), PREDICTION_BUCKET)
 
     return tuple(roots)

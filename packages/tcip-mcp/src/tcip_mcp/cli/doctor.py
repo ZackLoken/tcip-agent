@@ -376,6 +376,9 @@ def check_registry(root: Path, findings: list) -> None:
     """Flag registered models whose checkpoint is missing or points into a test/temp tree, and
     every prediction bucket whose stamp names a checkpoint digest no registry entry carries.
 
+    The bucket walk includes the cleared archive (``include_cleared=True``): a de-registered
+    checkpoint behind a cleared bucket's own stamp is still a fact worth a warning, on every run.
+
     A checkpoint resolving under the project root never triggers the temp-tree marker scan, even
     when the root itself sits under one (a fixture, a sandboxed workspace): a marker anywhere in
     that path is then a fact about the root's own location, not the checkpoint's, and the project
@@ -435,7 +438,7 @@ def check_registry(root: Path, findings: list) -> None:
     # A bucket predating the checkpoint-digest rail may name a digest no entry carries; visible
     # here, never floored. The sidecar is read through the store seam, not a plain-file glob.
     registered_shas = {m.get("sha256") for m in entry_list}
-    for bucket in prediction_bucket_dirs(root):
+    for bucket in prediction_bucket_dirs(root, include_cleared=True):
         sha = (read_operating_point_sidecar(bucket) or {}).get("checkpoint_sha256")
         if sha and sha not in registered_shas:
             findings.append(("warn", f"{bucket.relative_to(root)}: prediction bucket's "

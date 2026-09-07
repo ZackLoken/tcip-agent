@@ -131,11 +131,15 @@ def bucket_dirs_under(dataset_root: Path) -> list[Path]:
     by ``is_bucket_name``, since a hidden directory is never a bucket this command repairs.
     ``_looks_like_bucket`` then keeps only a directory actually holding a stamp or prediction
     documents, this command's own definition of a bucket.
+
+    Walks live buckets alone (``include_cleared=False``): a bucket
+    :func:`~tcip_mcp.tools.inference_tools.clear_prediction_bucket` has moved into the cleared
+    archive is never a target this command conforms or rewrites.
     """
     root = prediction_root(dataset_root)
     if not root.is_dir():
         return []
-    return [d for d in prediction_bucket_dirs(dataset_root)
+    return [d for d in prediction_bucket_dirs(dataset_root, include_cleared=False)
             if is_bucket_name(d.name) and _looks_like_bucket(d)]
 
 
