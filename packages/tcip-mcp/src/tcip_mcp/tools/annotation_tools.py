@@ -67,10 +67,11 @@ def _ann_dict(a: Annotation) -> dict:
     on-disk schema uses, so a prompt/keypoint reads back as itself instead of as a geometry-less label.
 
     Provenance travels out under the schema's own key names, and only where the record holds it, so
-    who authored a label and who accepted it are readable here rather than write-only. A reference's
-    admissibility turns on exactly those two fields
+    who authored a label, who accepted it, and which rule (if any) pre-admitted it are readable
+    here rather than write-only. A reference's admissibility turns on these fields
     (:func:`tcip_annotation.json_io.require_reference_ground_truth`), so a reader that dropped them
-    could not tell agent-authored ground truth from a person's.
+    could not tell agent-authored ground truth from a person's, or an unsigned rule admission from
+    a signed one.
     """
     d: dict = {"subject": a.subject, "attributes": dict(a.attributes)}
     if isinstance(a.geometry, BBox):
