@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 
 import tcip_store
 from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
+from tcip_mcp.web_client import annotation_stats_key
 from tcip_web.app import app
-from tcip_web.routes.sessions import annotation_stats_key
 
 
 @pytest.fixture

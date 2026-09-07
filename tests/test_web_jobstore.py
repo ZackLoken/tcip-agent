@@ -8,8 +8,8 @@ def test_job_registry_documents_each_match_the_job_registry_claim():
     ``tcip_store.layout_claims`` cannot enumerate ``JOB_REGISTRY_DOCUMENTS`` itself; this test
     holds the agreement from this side, so a document added to the tuple without a matching
     claim template fails here rather than going unclaimed by the conform rail."""
+    from tcip_mcp.web_client import JOB_REGISTRY_DOCUMENTS
     from tcip_store.layout_claims import PLATFORM_CLAIMS, matches_template
-    from tcip_web.jobstore import JOB_REGISTRY_DOCUMENTS
 
     templates = PLATFORM_CLAIMS["job_registry"].templates
     for name in JOB_REGISTRY_DOCUMENTS:
@@ -105,8 +105,9 @@ def test_load_roundtrips_persist_grouped_and_defaults_empty(tmp_path, monkeypatc
 def test_persist_grouped_writes_each_root_under_its_own_key(tmp_path, monkeypatch):
     """A snapshot spanning two roots must land two files, not one mixed one."""
     monkeypatch.chdir(tmp_path)
-    from tcip_web.jobstore import job_registry_key, persist_grouped
+    from tcip_mcp.web_client import job_registry_key
     from tcip_store import read
+    from tcip_web.jobstore import persist_grouped
 
     here_root = tmp_path.resolve()
     other_root = (tmp_path.parent / "other_root").resolve()
@@ -174,7 +175,7 @@ def test_inference_jobs_persist_list_and_rehydrate_per_root_across_a_repin(tmp_p
     from tcip_store import read
 
     from tcip_mcp import workspace
-    from tcip_web.jobstore import job_registry_key
+    from tcip_mcp.web_client import job_registry_key
     from tcip_web.routes import inference
 
     def _job(job_id: str) -> inference.InferenceJob:
@@ -263,7 +264,7 @@ def test_review_priority_queue_persists_lists_and_rehydrates_per_root_across_a_r
     from tcip_store import read
 
     from tcip_mcp import workspace
-    from tcip_web.jobstore import job_registry_key
+    from tcip_mcp.web_client import job_registry_key
     from tcip_web.routes import review
 
     def _job(job_id: str) -> review.PriorityQueueJob:
@@ -348,7 +349,7 @@ def test_tuning_sweeps_persist_list_and_rehydrate_per_root_across_a_repin(tmp_pa
     from tcip_store import read
 
     from tcip_mcp import workspace
-    from tcip_web.jobstore import job_registry_key
+    from tcip_mcp.web_client import job_registry_key
     from tcip_web.routes import tuning
 
     job_a = tuning.HPOJob(sweep_id="hpo-a1")
@@ -512,7 +513,8 @@ def test_rehydrate_bounds_the_whole_dict_across_every_root_it_adopts(tmp_path, m
     single job here, must not grow this process's memory by MAX_JOBS per root: rehydrate
     bounds the dict the same way registering a job already does."""
     from tcip_mcp import workspace
-    from tcip_web.jobstore import MAX_JOBS, job_registry_key, persist_to
+    from tcip_mcp.web_client import job_registry_key
+    from tcip_web.jobstore import MAX_JOBS, persist_to
     from tcip_web.routes import inference
 
     names = ("root_x", "root_y", "root_z")
@@ -714,8 +716,8 @@ def test_registered_job_summaries_persist_byte_stable_through_job_registry(tmp_p
 
 def test_inference_rehydrate_refuses_a_summary_carrying_no_platform_root(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    from tcip_mcp.web_client import job_registry_key
     from tcip_store import replace
-    from tcip_web.jobstore import job_registry_key
     from tcip_web.routes import inference
 
     replace(job_registry_key("inference_jobs"), [
@@ -731,8 +733,8 @@ def test_review_priority_queue_rehydrate_refuses_a_summary_carrying_no_platform_
     tmp_path, monkeypatch,
 ):
     monkeypatch.chdir(tmp_path)
+    from tcip_mcp.web_client import job_registry_key
     from tcip_store import replace
-    from tcip_web.jobstore import job_registry_key
     from tcip_web.routes import review
 
     replace(job_registry_key("review_priority_jobs"), [
@@ -746,8 +748,8 @@ def test_review_priority_queue_rehydrate_refuses_a_summary_carrying_no_platform_
 
 def test_tuning_rehydrate_refuses_a_summary_carrying_no_platform_root(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    from tcip_mcp.web_client import job_registry_key
     from tcip_store import replace
-    from tcip_web.jobstore import job_registry_key
     from tcip_web.routes import tuning
 
     replace(job_registry_key("hpo_sweeps"), [
@@ -815,8 +817,9 @@ def test_job_registry_persist_refuses_to_overwrite_a_document_it_could_not_fully
     silently rewrite the document down to just the summaries that did load: the stored document
     survives byte-for-byte, since no operator door repairs the missing key in place."""
     monkeypatch.chdir(tmp_path)
+    from tcip_mcp.web_client import job_registry_key
     from tcip_store import read, replace
-    from tcip_web.jobstore import JobRegistry, job_registry_key, require_platform_root
+    from tcip_web.jobstore import JobRegistry, require_platform_root
 
     root = str(tmp_path.resolve())
     (tmp_path / ".tcip").mkdir(exist_ok=True)

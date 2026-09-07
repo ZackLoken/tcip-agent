@@ -168,13 +168,14 @@ def test_workspace_mode_never_writes_anything(tmp_path):
 
 def test_capture_hook_appends_and_never_raises(tmp_path, monkeypatch):
     import tcip_store as ts
+    from tcip_mcp.web_client import learning_capture_key
     from tcip_web import agent_learning_capture
 
     monkeypatch.setattr(sys, "stdin",
                         io.StringIO(json.dumps({"session_id": "s1", "cwd": str(tmp_path), "reason": "clear"})))
     agent_learning_capture.main()
 
-    key = agent_learning_capture.learning_capture_key(tmp_path)
+    key = learning_capture_key(tmp_path)
     records = ts.read_log(key).records
     assert len(records) == 1
     assert records[0]["session_id"] == "s1"
@@ -188,6 +189,7 @@ def test_capture_hook_stamps_the_workspace_active_project(tmp_path, monkeypatch)
     """Entries pool in one platform-level file, so each stamps which workspace project was
     adopted at session end; no marker stamps None rather than guessing."""
     import tcip_store as ts
+    from tcip_mcp.web_client import learning_capture_key
     from tcip_mcp.workspace import active_project_key
     from tcip_web import agent_learning_capture
 
@@ -199,7 +201,7 @@ def test_capture_hook_stamps_the_workspace_active_project(tmp_path, monkeypatch)
                         io.StringIO(json.dumps({"session_id": "s2", "cwd": str(tmp_path)})))
     agent_learning_capture.main()
 
-    key = agent_learning_capture.learning_capture_key(tmp_path)
+    key = learning_capture_key(tmp_path)
     entry = ts.read_log(key).records[0]
     assert entry["active_project"] == "currant_buds_valley-farm"
 

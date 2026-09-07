@@ -181,14 +181,14 @@ def _read_captures(project_root: Path) -> list[dict]:
     """Every SessionEnd capture entry for this project's root, through the store the hook
     (`agent_learning_capture.py`) appends through, under whichever backend this process bound.
 
-    Importing the hook's module registers the log's store descriptor as a side effect, the
-    same way ``tcip_mcp.store_catalogue`` does for the commands that must cover every store.
+    Importing ``tcip_mcp.web_client`` registers the log's store descriptor as a side effect,
+    the same way ``tcip_mcp.store_catalogue`` does for the commands that must cover every store.
     An undecodable entry is excluded from what ``read_log`` returns here exactly as the old
     direct file read skipped one it could not parse; that page also carries a `corrupt` count
     of such entries this worksheet does not otherwise surface.
     """
     from tcip_store import read_log
-    from tcip_web.agent_learning_capture import learning_capture_key
+    from tcip_mcp.web_client import learning_capture_key
 
     page = read_log(learning_capture_key(project_root))
     return [dict(r) for r in page.records]

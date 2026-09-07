@@ -25,72 +25,13 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any, Literal
 
-from tcip_store import (
-    RECORD_JSON,
-    DecodeError,
-    Key,
-    StoreDescriptor,
-    read,
-    register_store,
-    replace,
-)
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import DecodeError, Key, read, replace
 
-from tcip_mcp.project_paths import platform_state_root
+from tcip_mcp.web_client import current_root, job_registry_key
 
 logger = logging.getLogger(__name__)
-
-_REGISTRY_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
-"""One registry document per job kind, one per platform root."""
-
-INFERENCE_JOBS = "inference_jobs"
-REVIEW_PRIORITY_JOBS = "review_priority_jobs"
-HPO_SWEEPS = "hpo_sweeps"
-
-JOB_REGISTRY_DOCUMENTS: tuple[str, ...] = (INFERENCE_JOBS, REVIEW_PRIORITY_JOBS, HPO_SWEEPS)
-"""Every document name a job registry persists under ``.tcip/state/<name>.json``.
-
-The one spelling of each name: routes/inference.py, routes/review.py and routes/tuning.py each
-hold their own registry constant from here rather than typing the string again. tcip-store
-cannot import tcip-web, so the ``job_registry`` claim in ``tcip_store.layout_claims`` cannot
-enumerate this tuple itself; a test asserts every name here matches one of that claim's own
-templates, holding the agreement from this side.
-"""
-
-JOB_REGISTRY_STORE = "job_registry"
-register_store(
-    StoreDescriptor(
-        name=JOB_REGISTRY_STORE,
-        kind="record",
-        key_fields=("registry",),
-        frozen=True,
-        cannot_carry_field="a top-level JSON array of entries, with no object to hold the field; "
-                            "a future bump wraps this into {schema_version, entries}",
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
-        locator=_REGISTRY_DOC,
-    )
-)
-
-
-def current_root() -> str:
-    """This process's platform-state root, resolved: the value a job's own ``platform_root``
-    field carries and :func:`job_registry_key`'s default group."""
-    return str(platform_state_root().resolve())
-
-
-def job_registry_key(name: str, *, root: str | Path | None = None) -> Key:
-    """One job registry's persisted summaries, under ``root`` (default: :func:`current_root`).
-
-    ``last_writer_wins``: one root's own group of a registry is written whole from the live
-    jobs that carry it, so the file is a snapshot of that root's state rather than a document
-    writers merge into.
-    """
-    resolved = str(Path(root).resolve()) if root is not None else current_root()
-    return Key(JOB_REGISTRY_STORE, resolved, (name,))
 
 
 def require_platform_root(summary: dict, *, name: str, root: str) -> str:
@@ -296,7 +237,8 @@ class JobRegistry:
         from_summary: Callable[[dict, str], Any] | None = None,
         id_field: str = "job_id",
     ) -> None:
-        """``name`` is the persisted registry (one of :data:`JOB_REGISTRY_DOCUMENTS`) this
+        """``name`` is the persisted registry (one of
+        :data:`tcip_mcp.web_client.JOB_REGISTRY_DOCUMENTS`) this
         registry reads and writes through :func:`persist_grouped`/:func:`load`; ``None`` for a
         registry with no root concept of its own that persists nothing (images.py's overview
         builds), which needs neither codec below and so refuses neither.

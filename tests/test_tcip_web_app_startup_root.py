@@ -266,7 +266,7 @@ def test_a_binding_set_before_the_first_request_is_not_replaced(tmp_path, monkey
 def test_lifespan_binds_before_rehydrate_reads_a_registry(tmp_path, monkeypatch):
     import tcip_store
 
-    from tcip_web import jobstore
+    from tcip_mcp.web_client import current_root
     from tcip_web.routes import inference
 
     ws = tmp_path / "ws"
@@ -281,7 +281,7 @@ def test_lifespan_binds_before_rehydrate_reads_a_registry(tmp_path, monkeypatch)
     real_rehydrate = inference.rehydrate_for_current_root
 
     def _record_then_rehydrate():
-        seen_roots.append(jobstore.current_root())
+        seen_roots.append(current_root())
         real_rehydrate()
 
     monkeypatch.setattr(inference, "rehydrate_for_current_root", _record_then_rehydrate)
@@ -298,6 +298,7 @@ def test_a_refused_rehydrate_does_not_block_the_other_two_registries(tmp_path, m
     recorded for the workspace status route rather than only logged."""
     import tcip_store
 
+    from tcip_mcp.web_client import INFERENCE_JOBS
     from tcip_web import jobstore
     from tcip_web.routes import inference, review, tuning
 
@@ -334,7 +335,7 @@ def test_a_refused_rehydrate_does_not_block_the_other_two_registries(tmp_path, m
     assert called == ["tuning", "review"]
     refusals = jobstore.startup_refusals()
     assert len(refusals) == 1
-    assert refusals[0]["registry"] == jobstore.INFERENCE_JOBS
+    assert refusals[0]["registry"] == INFERENCE_JOBS
     assert "no operator door" in refusals[0]["error"]
     assert resp.json()["job_registry_startup_refusals"] == refusals
 

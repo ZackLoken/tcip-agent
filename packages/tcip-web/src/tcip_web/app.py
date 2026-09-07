@@ -32,9 +32,12 @@ from pydantic import BaseModel
 from tcip_store.binding import bind_default
 
 from tcip_mcp.web_client import (
+    HPO_SWEEPS,
+    INFERENCE_JOBS,
     PANEL_EVENT_ACTIVE_PROJECT_CHANGED,
     PANEL_EVENT_ANNOTATE_FOCUS,
     PANEL_EVENT_REVIEW_FOCUS,
+    REVIEW_PRIORITY_JOBS,
     VALID_PANELS,
 )
 from tcip_mcp.workspace import configured_workspace
@@ -65,9 +68,9 @@ async def _lifespan(_app: FastAPI):
 
         # One try per registry, so a refused rehydrate never skips the other two.
         for registry_name, rehydrate in (
-            (jobstore.INFERENCE_JOBS, inference.rehydrate_for_current_root),
-            (jobstore.HPO_SWEEPS, tuning.rehydrate_for_current_root),
-            (jobstore.REVIEW_PRIORITY_JOBS, review.rehydrate_for_current_root),
+            (INFERENCE_JOBS, inference.rehydrate_for_current_root),
+            (HPO_SWEEPS, tuning.rehydrate_for_current_root),
+            (REVIEW_PRIORITY_JOBS, review.rehydrate_for_current_root),
         ):
             try:
                 rehydrate()

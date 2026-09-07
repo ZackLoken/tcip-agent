@@ -19,6 +19,7 @@ from tcip_mcp.model_registry import (
     registry_index_key,
 )
 from tcip_mcp.tools.project_tools import DATASET_REGISTRY_STORE, read_datasets, register_dataset
+from tcip_mcp.web_client import JOB_REGISTRY_STORE, job_registry_key
 from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
 from tcip_store.store import _backend
 from tcip_web import jobstore
@@ -45,7 +46,7 @@ def _damage_record(key: ts.Key, data: bytes) -> None:
 
 
 def _cannot_carry_stores() -> tuple[str, ...]:
-    return (DATASET_REGISTRY_STORE, jobstore.JOB_REGISTRY_STORE)
+    return (DATASET_REGISTRY_STORE, JOB_REGISTRY_STORE)
 
 
 def test_every_still_array_topped_store_declares_cannot_carry_with_the_array_top_wording():
@@ -109,9 +110,9 @@ def test_dataset_registry_composes_with_its_own_declaration(tmp_path: Path):
 
 
 def test_job_registry_composes_with_its_own_declaration(tmp_path: Path):
-    key = jobstore.job_registry_key("inference_jobs", root=tmp_path)
+    key = job_registry_key("inference_jobs", root=tmp_path)
     jobstore.persist_to(key, [{"id": "job-1", "state": "completed"}])
 
     entries = jobstore.load("inference_jobs")
     assert entries and isinstance(entries, list)
-    ts.check_schema_version(ts.get_descriptor(jobstore.JOB_REGISTRY_STORE), entries)
+    ts.check_schema_version(ts.get_descriptor(JOB_REGISTRY_STORE), entries)
