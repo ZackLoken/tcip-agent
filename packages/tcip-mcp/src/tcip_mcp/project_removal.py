@@ -791,8 +791,9 @@ def release_project_binding(name: str, *, released_by: str) -> dict:
     ``root`` names ``name`` by identity it is rewritten with ``generation + 1``, ``released: True``
     and a fresh ``issued_at``, ``root`` and ``project_name`` kept. Any ``tcip_store.StoreError``
     the transaction raises reading or writing the record (``StoreBusy``, ``VersionConflict``, a
-    ``DecodeError`` or ``SchemaVersionRefused`` on a damaged record) is caught and answered after
-    the marker's own outcome is settled, never silently.
+    ``DecodeError`` or ``SchemaVersionRefused`` on a damaged record, or a record naming ``name``
+    that carries no ``generation`` field) is caught and answered after the marker's own outcome
+    is settled, never silently.
 
     When either binding actually changed, ``project_binding_released`` is recorded under the
     project's own root before any answer, naming ``released_by``, ``marker_cleared`` and
@@ -846,6 +847,11 @@ def release_project_binding(name: str, *, released_by: str) -> dict:
         with tcip_store.transaction(canvas_key) as txn:
             current = txn.read(canvas_key, default=None)
             if current is not None and _same_path(project, current.get("root")):
+                if "generation" not in current:
+                    raise tcip_store.DecodeError(
+                        f"the canvas-open binding record for {current.get('root')!r} carries no "
+                        "generation field"
+                    )
                 txn.write(canvas_key, {
                     "generation": current["generation"] + 1,
                     "root": current["root"],
