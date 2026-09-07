@@ -123,5 +123,6 @@ def test_worker_writes_every_prediction_file_and_the_sidecar_on_a_full_pass(tmp_
     assert sidecar["image_filenames"] == {"a": "a.jpg", "b": "b.jpg"}
 
     assert set(_summary(job)) == {"job_id", "status", "done", "total", "images_dir", "output_dir",
-                                 "error", "warning", "dropped_nonpositive_boxes", "platform_root"}
+                                 "error", "warning", "audit_warning", "dropped_nonpositive_boxes",
+                                 "platform_root"}
     assert [Path(p).stem for p in written] == ["a", "b"]
