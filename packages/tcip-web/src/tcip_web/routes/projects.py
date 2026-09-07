@@ -44,6 +44,15 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp"}
 
 
+class DependencyWarning(BaseModel):
+    dataset_id: str | None = None
+    dataset_path: str
+    # The dependency's own workspace-child name.
+    target: str
+    # False once the dependency's own directory no longer exists at the location named.
+    present: bool
+
+
 class ProjectSummary(BaseModel):
     name: str
     path: str
@@ -52,9 +61,8 @@ class ProjectSummary(BaseModel):
     dates: list[str]
     subjects: list[str]
     models: list[str]
-    # Per-date availability: which subjects actually have labels / which models actually
-    # have predictions on each date. The subject/model pickers filter to these so a date
-    # with no labels for a subject doesn't offer it (which would open an empty canvas).
+    # Per-date availability: which subjects have labels / which models have predictions on each
+    # date, so the pickers never offer a date with nothing there (an empty canvas).
     subjects_by_date: dict[str, list[str]]
     models_by_date: dict[str, list[str]]
     image_count: int
@@ -65,9 +73,13 @@ class ProjectSummary(BaseModel):
     # The first date's labels that would not read, naming the file; the project still lists, and
     # its subjects_by_date reports that date empty rather than aborting the scan.
     label_problem: str | None
-    # Why removal is disabled for this project, or null: project_removal.identity_conflict's own
-    # text, the same function the door's own refusal chain calls.
+    # project_removal.identity_conflict's own text, or null.
     removal_refusal: str | None
+    # Every dataset this project registered under another workspace project now pending
+    # removal or gone.
+    dependency_warnings: list[DependencyWarning]
+    # Set instead of an empty dependency_warnings list when this project's own registry won't read.
+    dependency_problem: str | None
 
 
 class ActiveProject(BaseModel):
@@ -100,6 +112,7 @@ def _summarize(
     dates = dataset_layout.list_dates(project_dir)
     site = site_fields(project_dir)
     subjects_by_date, label_problem = _subjects_by_date(project_dir, dates)
+    warnings, dependency_problem = project_removal.dependency_warnings(project_dir)
     return ProjectSummary(
         name=project_dir.name,
         path=str(project_dir),
@@ -116,6 +129,8 @@ def _summarize(
         site_problem=site["site_problem"],
         label_problem=label_problem,
         removal_refusal=project_removal.identity_conflict(project_dir, open_state),
+        dependency_warnings=[DependencyWarning(**w) for w in warnings],
+        dependency_problem=dependency_problem,
     )
 
 

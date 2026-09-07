@@ -232,6 +232,101 @@ def identity_conflict(target: Path, state: OpenProjectState) -> Optional[str]:
     return _open_project_conflict(target, state)
 
 
+def _workspace_child_of(path: Path, workspace_root: Path) -> Optional[Path]:
+    """The workspace's own top-level child ``path`` sits under, one level below
+    ``workspace_root`` on the ancestor chain :func:`~tcip_mcp.registry_paths.
+    nearest_containing_ancestor` walks (``tolerant=True``, so a missing leaf still resolves
+    through parents that do exist): ``None`` for a path outside the workspace (no such ancestor),
+    for the workspace root itself (checked by :func:`_same_path` up front, so a path equal to the
+    workspace never has to be indexed), and for a path resolving into the workspace's own holding
+    directory (:data:`REMOVED_DIRNAME`, never a project). Every other path answers the directory
+    name immediately below the workspace root, whether or not that directory, or ``path`` itself,
+    still exists on disk. Shared by :func:`dependency_warnings` and by :func:`_preview`'s own
+    dependent scan, so the scan that lists a dependent before a request and the card that warns
+    about it afterward agree on one containment rule; the one case they can still differ on is a
+    hand-edited registry entry whose containment is visible only through a link the stored path
+    preserves, which :func:`~tcip_mcp.tools.project_tools.registry_path_for`'s own resolved
+    storage never produces.
+    """
+    from tcip_mcp.registry_paths import nearest_containing_ancestor
+
+    if _same_path(path, workspace_root):
+        return None
+    chain = [path, *path.parents]
+    anchor = nearest_containing_ancestor(path, workspace_root, tolerant=True)
+    if anchor is None or anchor not in chain:
+        return None
+    idx = chain.index(anchor)
+    if idx == 0:
+        return None
+    child = chain[idx - 1]
+    if child.name == REMOVED_DIRNAME:
+        return None
+    return child
+
+
+def dependency_warnings(project_root: Path) -> tuple[list[dict], Optional[str]]:
+    """Every warning ``project_root``'s own registry earns from a dataset it registered under
+    another workspace project that is now pending removal or gone, plus the registry's own
+    problem when it will not read at all.
+
+    Reads through :func:`~tcip_mcp.tools.project_tools.read_datasets_raw`; a registry that will
+    not read (``StoreError``, ``DecodeError``, ``SchemaVersionRefused``, or a fingerprint
+    ``ValueError``) answers ``([], <message>)`` rather than raising, so one damaged registry costs
+    the listing one project's warnings, never the whole page. Each entry carrying a ``path`` is
+    resolved through :func:`~tcip_mcp.tools.project_tools.dataset_entry_path` and named to its
+    workspace child through :func:`_workspace_child_of`; an entry ``_workspace_child_of`` answers
+    ``None`` for (outside the workspace, the holding directory) and an entry whose child is
+    ``project_root`` itself (a project's own dataset registered under its own tree, compared by
+    :func:`_same_path`) earn no warning, since neither names a dependency on another project. The
+    condition is the entry itself, never the holding directory an eventual move leaves behind: a
+    child directory that no longer exists on disk is a warning with ``present`` false, whatever
+    ``.removed/`` holds, since the holding directory is not state this platform owns and a project
+    gone by any means leaves the entry dangling the same way; a child directory that still exists,
+    still carries ``.tcip``, and carries a pending-removal marker
+    (:func:`~tcip_mcp.workspace.pending_removal_or_none`) is a warning with ``present`` true;
+    every other entry earns none. Q46's lifetime is met as the registry can express it: no door
+    removes an entry, and ``register_dataset`` refreshes an entry's own path by id, so a warning
+    stands while the entry's path resolves under a pending or absent workspace child and clears
+    once the entry is refreshed to a path that resolves elsewhere, or the child is present again;
+    a project re-created under the removed one's own name resolves the entry into an unrelated
+    tree and clears the warning too, which the dataset-identity rail (the fingerprint the entry
+    carries against the data actually there) catches at training time and this function does not.
+    Each warning is ``{dataset_id, dataset_path, target, present}``, ``target`` the dependency's
+    own workspace-child name.
+    """
+    from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets_raw
+
+    ws = workspace.workspace_root(create=False)
+    try:
+        entries = read_datasets_raw(project_root)
+    except (tcip_store.StoreError, tcip_store.DecodeError,
+            tcip_store.SchemaVersionRefused, ValueError) as exc:
+        return [], str(exc)
+
+    warnings: list[dict] = []
+    for entry in entries:
+        if not entry.get("path"):
+            continue
+        try:
+            entry_path = dataset_entry_path(project_root, entry)
+        except ValueError:
+            continue
+        child = _workspace_child_of(entry_path, ws)
+        if child is None or _same_path(child, project_root):
+            continue
+        if not child.exists():
+            warnings.append({"dataset_id": entry.get("id"), "dataset_path": str(entry_path),
+                              "target": child.name, "present": False})
+            continue
+        if not (child / ".tcip").is_dir():
+            continue
+        if workspace.pending_removal_or_none(child) is not None:
+            warnings.append({"dataset_id": entry.get("id"), "dataset_path": str(entry_path),
+                              "target": child.name, "present": True})
+    return warnings, None
+
+
 def _live_run_conflict(target: Path) -> Optional[str]:
     from tcip_mcp import experiments
     from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS
@@ -335,7 +430,9 @@ def _preview(
     dataset registry entry that resolves under this project's tree, pending ones included and
     marked ``pending``; a project whose own registry will not read is listed as
     ``{project, unreadable}`` rather than dropped, the same treatment a matching entry that
-    carries a path but no id gets, naming the path rather than a null id.
+    carries a path but no id gets, naming the path rather than a null id. Containment is decided
+    through :func:`_workspace_child_of`, the same helper :func:`dependency_warnings` calls, so the
+    scan that lists a dependent here and the card that warns about it afterward agree on one rule.
 
     Reads the target's experiment records (the live-run refusal check), which opens its database
     on this request's thread and keeps it open for the process's life: previewing and cancelling
@@ -389,7 +486,8 @@ def _preview(
                 entry_path = dataset_entry_path(child, entry)
             except ValueError:
                 continue
-            if nearest_containing_ancestor(entry_path, project, tolerant=True) is None:
+            entry_child = _workspace_child_of(entry_path, ws)
+            if entry_child is None or not _same_path(entry_child, project):
                 continue
             dataset_id = entry.get("id")
             if not dataset_id:
