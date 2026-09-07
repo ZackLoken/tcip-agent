@@ -200,17 +200,15 @@ def _open_project_conflict(target: Path, state: OpenProjectState) -> Optional[st
     return None
 
 
-def identity_conflict(target: Path, state: Optional[OpenProjectState] = None) -> Optional[str]:
+def identity_conflict(target: Path, state: OpenProjectState) -> Optional[str]:
     """The no-project-open case and the three spellings of "the open project"
     (:func:`_open_project_conflict`): the cheap identity checks in :func:`_ordered_refusal`'s own
     chain, none of them the live-run or job-registry scans that open a database connection.
     Shared verbatim by the door's own refusal chain and by the workspace listing's own
     per-project ``removal_refusal``, so the two answer with the same string rather than each
-    composing its own. ``state`` is the marker/binding/canvas triple a caller checking several
-    projects reads once (:func:`read_open_project_state`) and passes in for each; a caller with
-    none of its own gets one built for this single call."""
-    if state is None:
-        state = read_open_project_state()
+    composing its own. ``state`` is the marker/binding/canvas triple every caller reads once
+    (:func:`read_open_project_state`) and passes in, per project when checking several, so no
+    call pays the reads on its own."""
     open_name = (
         workspace.workspace_project_name(state.binding_root) if state.binding_root is not None else None
     )
