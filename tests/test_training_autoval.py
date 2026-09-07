@@ -262,8 +262,7 @@ def test_spatial_manifest_tied_val_test_fractions_place_by_declared_order(tmp_pa
     source_split`` fixes that order itself (``("train", "val", "test")``), so this pins the
     resulting regions against the fixed order's own layout, the way the distinct-fractions
     test above pins its own regions; the placement half is coverage. The manifest carries no
-    ``seed`` key, guarded against ``45bab2c1`` on its own assertion, since ``auto_train_val``'s
-    signature is unchanged and the baseline writes the key."""
+    ``seed`` key; the assertion guards that absence alone."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
@@ -285,7 +284,7 @@ def test_spatial_manifest_tied_test_calibration_fractions_place_by_declared_orde
     """``reserve_calibration_fraction == test_ratio`` ties their shares the same way; the
     fixed declared order (``("train", "val", "test", "calibration")``) pins the calibration/test
     regions the same way the val/test tie above pins its own, coverage of the placement, and the
-    manifest carries no ``seed`` key, guarded against ``45bab2c1`` on its own assertion."""
+    manifest carries no ``seed`` key; the assertion guards that absence alone."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
