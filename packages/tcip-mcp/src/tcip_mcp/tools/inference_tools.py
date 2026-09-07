@@ -8,6 +8,7 @@ import logging
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
+from tcip_annotation.json_io import SIDECAR_FILENAMES
 from tcip_store import RECORD_JSON, BadKey, Key, StoreDescriptor, Version, register_store, store
 from tcip_store.file_backend import RootedFileLocator
 
@@ -1399,11 +1400,13 @@ def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, tr
 
 # --- clearing a terminal experiment's bucket for re-publication ---
 
-_OTHER_STAMP_DOCUMENTS = ("classifier_operating_point", "ordinal_operating_point",
-                          "regression_operating_point", "resolve_scale")
-"""The four sidecar stamps beside ``operating_point``, sorted: the door reconciles ``operating_point``
-first, by its own value-aware rule, then each of these by the plain copy-or-refuse rule every
-other stamp and every document share."""
+_OTHER_STAMP_DOCUMENTS = tuple(sorted(
+    Path(name).stem for name in SIDECAR_FILENAMES if name != "operating_point.json"))
+"""Every sidecar stamp beside ``operating_point``, derived from
+:data:`~tcip_annotation.json_io.SIDECAR_FILENAMES` so a sixth stamp store registered there is
+reconciled by this door too rather than left stranded at a half-cleared source. The door reconciles
+``operating_point`` first, by its own value-aware rule, then each of these by the plain
+copy-or-refuse rule every other stamp and every document share."""
 
 
 def _reconcile_op_stamp(source: Path, destination: Path) -> tuple[bool, dict | None]:
@@ -1619,13 +1622,20 @@ def clear_prediction_bucket(
 
     The review-state refusal is a preflight over the state present when this call resolved the
     bucket, bucket-wide (a detection verdict or a bulk-accepted image alike, whether or not the
-    image's own document still exists), never scoped to the stems a document exists for today.
-    Review state that lands on the source between that preflight and the last document's delete is
-    not caught by it: the moved documents cannot be unmoved once moved, and it is counted once more
-    after the last delete and reported in ``review_state_landed_during_clear`` instead. The
-    resolver's own document-guard publishers (``resolve_writable_bucket``) count a detection
-    verdict alone until a separate, owner-gated family widens that guard, so refusing here is not
-    yet a platform-wide lock against writing beside review state; it is this door's own gate. A
+    image's own document still exists), never scoped to the stems a document exists for today; it
+    runs only on a fresh call, never on a resume (``cleared_bucket`` given), since an interrupted
+    clear that already acquired review state must still be finishable. Review state that lands on
+    the source between that preflight and the last document's delete is not caught by it either:
+    the moved documents cannot be unmoved once moved, and it is counted once more after the last
+    delete and reported in ``review_state_landed_during_clear`` instead. The resolver's own
+    document-guard publishers (``resolve_writable_bucket``) count a detection verdict alone until a
+    separate, owner-gated family widens that guard, so refusing here is not yet a platform-wide
+    lock against writing beside review state; it is this door's own gate. A publisher that resolved
+    this bucket clean before the clear began can still write into it during or after: its document
+    and stamp writes are unconditional, and a resume that finds a fresh ``operating_point`` stamp
+    beside documents the clear had not yet moved reads it as a re-publication and leaves those
+    documents where they landed, since this door's own compare-and-set steps catch only a change
+    between one of its own reads and its own write, never a fresh publisher's disjoint one. A
     person who deletes the source's remaining documents by hand during an interrupted clear (never
     through an audited door) defeats the resume's own "does the destination hold a document"
     conjunct below, since a hand deletion is outside every door this platform ships.
@@ -1633,9 +1643,12 @@ def clear_prediction_bucket(
     The move goes through the storage seam one key at a time (``operating_point`` first, then
     every other stamp present, then the documents), the artifact recorded on the experiment before
     any write, so a crash at any point leaves a state this door itself can finish: call again,
-    naming ``cleared_bucket`` as the archive path this call (or an earlier refusal) reports. A
+    naming ``cleared_bucket`` as the archive path this call (or an earlier refusal) reports; a
+    resume creates the destination directory itself when a crash left it not yet made. A
     keyword-less call this door's own record shows as interrupted refuses naming that remedy
-    instead of starting a second clear.
+    instead of starting a second clear. A conditional write inside a reconcile step that lands on
+    a version another writer changed is refused naming that key, with everything this call already
+    moved standing and the same ``cleared_bucket`` remedy named.
 
     Bypasses ``write_sidecar`` and ``write_annotations`` on purpose for the move itself: each
     value already passed its writer's own checks when it was first written, so a stamp moves by
@@ -1665,7 +1678,7 @@ def clear_prediction_bucket(
     from tcip_mcp.prediction_buckets import (
         bucket_content_digest, bucket_key_of, bucket_stems, review_state_count, review_state_dir_of,
     )
-    from tcip_store import StoreError
+    from tcip_store import StoreError, VersionConflict
 
     if not (reason or "").strip():
         return {"error": "clear_prediction_bucket needs a non-empty reason: the confirmation "
@@ -1710,17 +1723,22 @@ def clear_prediction_bucket(
         if resolved is None or not _cleared_artifact_matches(str(destination), dataset_root, model, date):
             return {"error": f"{cleared_bucket!r} does not name {source}'s own cleared "
                              "destination."}
+        try:
+            dest_op = store.read_versioned(sidecar_key(destination, "operating_point"), default=None)
+        except StoreError as exc:
+            return {"error": f"{destination}: operating_point.json will not decode ({exc})."}
         if source_op.value is not None:
             live_stamp, live_bucket = source_op.value, source
         else:
-            try:
-                dest_op = store.read_versioned(sidecar_key(destination, "operating_point"), default=None)
-            except StoreError as exc:
-                return {"error": f"{destination}: operating_point.json will not decode ({exc})."}
             if dest_op.value is None:
                 return {"error": f"operating_point.json is present at neither {source} nor "
                                  f"{destination}: a store written past this door."}
             live_stamp, live_bucket = dest_op.value, destination
+        for document in _OTHER_STAMP_DOCUMENTS:
+            try:
+                store.read_versioned(sidecar_key(destination, document), default=None)
+            except StoreError as exc:
+                return {"error": f"{destination}: {document}.json will not decode ({exc})."}
     else:
         live_stamp, live_bucket = source_op.value, source
 
@@ -1779,12 +1797,13 @@ def clear_prediction_bucket(
                              f"no document yet). Call again with "
                              f"cleared_bucket={unfinished['path']!r} to finish it."}
 
-    count = review_state_count(review_state_dir, source_key)
-    if count:
-        noun = "entry" if count == 1 else "entries"
-        return {"error": f"{source} carries {count} review {noun} (a detection verdict or a "
-                         "bulk-accepted image); this door refuses a bucket carrying review "
-                         "state, not only its documents."}
+    if not resuming:
+        count = review_state_count(review_state_dir, source_key)
+        if count:
+            noun = "entry" if count == 1 else "entries"
+            return {"error": f"{source} carries {count} review {noun} (a detection verdict or a "
+                             "bulk-accepted image); this door refuses a bucket carrying review "
+                             "state, not only its documents."}
 
     source_digest_before_call = bucket_content_digest(source)
     cleared_artifact_recorded = True
@@ -1792,8 +1811,8 @@ def clear_prediction_bucket(
     if not resuming:
         destination = cleared_prediction_dir(dataset_root, model, date, current_cleared_stamp())
         if destination.exists():
-            return {"error": f"{destination} already exists; pass cleared_bucket={str(destination)!r} "
-                             "if it is this clear's own destination, or wait a second and retry."}
+            return {"error": f"{destination} already exists (a same-second collision with "
+                             "another clear); wait a second and retry."}
         from tcip_mcp.pipelines.resolution import bucket_relative_key
 
         relative_key = bucket_relative_key(destination, dataset_root, document="cleared")
@@ -1801,45 +1820,55 @@ def clear_prediction_bucket(
         if "error" in artifact:
             return {"error": f"could not record the cleared artifact on {experiment_id!r}: "
                              f"{artifact['error']}"}
-        destination.mkdir(parents=True, exist_ok=True)
+
+    destination.mkdir(parents=True, exist_ok=True)
 
     stamps_moved_this_call: list[str] = []
     documents_moved_this_call = 0
     source_republished = False
 
-    if len(bucket_stems(destination)) == 0:
-        moved, refusal = _reconcile_op_stamp(source, destination)
-        if refusal is not None:
-            return refusal
-        if moved:
-            stamps_moved_this_call.append("operating_point")
-        for document in _OTHER_STAMP_DOCUMENTS:
-            moved, refusal = _reconcile_secondary_stamp(source, destination, document)
+    try:
+        if len(bucket_stems(destination)) == 0:
+            moved, refusal = _reconcile_op_stamp(source, destination)
             if refusal is not None:
                 return refusal
             if moved:
-                stamps_moved_this_call.append(document)
-        for stem in sorted(bucket_stems(source) | bucket_stems(destination)):
-            moved, refusal = _reconcile_document(source, destination, stem)
-            if refusal is not None:
-                return refusal
-            if moved:
-                documents_moved_this_call += 1
-    elif store.read(sidecar_key(source, "operating_point"), default=None) is not None:
-        source_republished = True
-    else:
-        for document in _OTHER_STAMP_DOCUMENTS:
-            moved, refusal = _reconcile_secondary_stamp(source, destination, document)
-            if refusal is not None:
-                return refusal
-            if moved:
-                stamps_moved_this_call.append(document)
-        for stem in sorted(bucket_stems(source) | bucket_stems(destination)):
-            moved, refusal = _reconcile_document(source, destination, stem)
-            if refusal is not None:
-                return refusal
-            if moved:
-                documents_moved_this_call += 1
+                stamps_moved_this_call.append("operating_point")
+            for document in _OTHER_STAMP_DOCUMENTS:
+                moved, refusal = _reconcile_secondary_stamp(source, destination, document)
+                if refusal is not None:
+                    return refusal
+                if moved:
+                    stamps_moved_this_call.append(document)
+            for stem in sorted(bucket_stems(source) | bucket_stems(destination)):
+                moved, refusal = _reconcile_document(source, destination, stem)
+                if refusal is not None:
+                    return refusal
+                if moved:
+                    documents_moved_this_call += 1
+        elif store.read(sidecar_key(source, "operating_point"), default=None) is not None:
+            source_republished = True
+        else:
+            for document in _OTHER_STAMP_DOCUMENTS:
+                moved, refusal = _reconcile_secondary_stamp(source, destination, document)
+                if refusal is not None:
+                    return refusal
+                if moved:
+                    stamps_moved_this_call.append(document)
+            for stem in sorted(bucket_stems(source) | bucket_stems(destination)):
+                moved, refusal = _reconcile_document(source, destination, stem)
+                if refusal is not None:
+                    return refusal
+                if moved:
+                    documents_moved_this_call += 1
+    except VersionConflict as exc:
+        moved_note = (
+            f"{len(stamps_moved_this_call)} stamp(s) ({', '.join(stamps_moved_this_call)}) and "
+            f"{documents_moved_this_call} document(s) already moved this call"
+        )
+        return {"error": f"{exc.key.store}{list(exc.key.parts)} changed under the door while "
+                         f"clearing {source} into {destination}: {moved_note} stand. Call again "
+                         f"with cleared_bucket={str(destination)!r} to finish it."}
 
     if not source_republished:
         arrived = bucket_stems(source)

@@ -170,6 +170,66 @@ def test_fault_after_last_source_delete_reports_republication_on_resume(tmp_path
     assert bucket_stems(destination) == {"img"}
 
 
+def test_a_version_conflict_during_reconcile_refuses_naming_the_key_and_what_moved(tmp_path, monkeypatch):
+    """A conflicting write lands under the door mid-move (monkeypatched onto the door's own store
+    attribute, never the seam itself): the VersionConflict a reconcile step's own conditional write
+    raises is caught and turned into a refusal naming the key that changed and what this call had
+    already moved, which stands, rather than propagating out of the audited envelope."""
+    from tcip_annotation.json_io import ANNOTATION_RECORDS_STORE, annotation_record_key
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+    from tcip_mcp.prediction_buckets import bucket_stems
+    from tcip_mcp.tools.inference_tools import clear_prediction_bucket
+    from tcip_store import Version, VersionConflict
+
+    built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expVersionConflict")
+    _fix_stamp(monkeypatch)
+    destination = _expected_destination(built)
+
+    conflicting_key = annotation_record_key(destination, "img")
+    conflict = VersionConflict(conflicting_key, Version.ABSENT, Version("stale-token"))
+    fault = inject_store_fault(
+        monkeypatch, method_name="put_blob",
+        predicate=key_in_store(ANNOTATION_RECORDS_STORE), exc=conflict)
+
+    result = clear_prediction_bucket(str(built["bucket"]), "should refuse: version conflict")
+    assert "error" in result
+    assert fault.fired
+    assert "img" in result["error"]
+    assert "already moved this call stand" in result["error"]
+    # the stamps moved before the conflicting document write still stand at the destination.
+    assert read_operating_point_sidecar(destination) is not None
+    assert read_operating_point_sidecar(built["bucket"]) is None
+    assert bucket_stems(destination) == set()
+
+
+def test_an_undecodable_stamp_at_the_destination_refuses_by_name_on_resume(tmp_path, monkeypatch):
+    """A stamp already moved to the destination before a crash, then corrupted there: the resume
+    preflights the destination's five stamps the way it preflights the source's, refusing by name
+    instead of raising a bare StoreError out of the reconcilers."""
+    from tcip_mcp.pipelines.resolution import sidecar_key, write_sidecar
+    from tcip_mcp.tools.inference_tools import clear_prediction_bucket
+    from tests._record_damage_fixtures import damage_record
+
+    built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expDestUndecodable")
+    write_sidecar(built["bucket"], {"conf": {"value": 0.1}}, document="resolve_scale")
+    _fix_stamp(monkeypatch)
+    destination = _expected_destination(built)
+
+    fault = inject_store_fault(monkeypatch, method_name="put_blob")
+    with pytest.raises(RuntimeError):
+        clear_prediction_bucket(str(built["bucket"]), "should crash after the stamps moved")
+    assert fault.fired
+
+    key = sidecar_key(destination, "resolve_scale")
+    damage_record(key, b"{not json")
+
+    result = clear_prediction_bucket(
+        str(built["bucket"]), "resume over a corrupted destination stamp",
+        cleared_bucket=str(destination))
+    assert "error" in result
+    assert "resolve_scale.json will not decode" in result["error"]
+
+
 def test_unfinished_clear_no_destination_content_refuses_a_keyword_less_call(tmp_path, monkeypatch):
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
 

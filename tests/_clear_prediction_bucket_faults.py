@@ -45,13 +45,17 @@ class _StoreFaultProxy:
 
 def inject_store_fault(
     monkeypatch, *, method_name: str, predicate: Callable[[tuple, dict], bool] | None = None,
+    exc: Exception | None = None,
 ) -> _StoreFaultProxy:
     """Rebind ``tcip_mcp.tools.inference_tools.store`` to a proxy that raises once on the first
-    call to ``method_name`` matching ``predicate``, restoring ordinary behavior after."""
+    call to ``method_name`` matching ``predicate``, restoring ordinary behavior after. ``exc``
+    defaults to a bare ``RuntimeError``; a caller proving the door's own ``VersionConflict``
+    handling passes a real one instead, so the fault reads exactly as a concurrent write the seam
+    itself would raise."""
     import tcip_mcp.tools.inference_tools as inference_tools_mod
     from tcip_store import store as real_store
 
-    proxy = _StoreFaultProxy(real_store, method_name, predicate=predicate)
+    proxy = _StoreFaultProxy(real_store, method_name, predicate=predicate, exc=exc)
     monkeypatch.setattr(inference_tools_mod, "store", proxy)
     return proxy
 
