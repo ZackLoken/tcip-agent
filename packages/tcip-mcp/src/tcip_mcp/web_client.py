@@ -3,12 +3,14 @@
 MCP tools call ``post_panel_event`` to ship a panel event to the running FastAPI GUI over HTTP,
 never through a file on disk.
 
-The stores the two packages share are declared here rather than in the web package: the
-backend's port handoff, the GUI snapshot, and the live-canvas pair. MCP tools read all of them
-and cannot import ``tcip_web``, so the web side imports the declarations from here, which is the
-legal dependency direction and the same one ``VALID_PANELS`` already takes. A declaration on
-each side would be two stores wearing one name, and whichever imported first would decide where
-the documents land.
+Every store the web package owns is declared here rather than in the web package: the backend's
+port handoff, the GUI snapshot, the live-canvas pair, the canvas-open binding, the SessionEnd
+learning-capture log, the async job registry, and the per-project annotation-timing stats. Some of
+these MCP tools read directly and cannot import ``tcip_web``; others the web package alone reads
+and writes. Either way the declaration lives here so ``tcip_mcp.store_catalogue`` can see every
+store the platform declares without importing ``tcip_web``, which is the legal dependency
+direction and the same one ``VALID_PANELS`` already takes. A declaration on each side would be two
+stores wearing one name, and whichever imported first would decide where the documents land.
 
 The tab vocabulary (``ActiveTab``/``TAB_NAMES``) lives here for the same reason: the agent's own
 ``focus_human_attention`` tool takes a tab name over the wire, so the vocabulary is the protocol's,

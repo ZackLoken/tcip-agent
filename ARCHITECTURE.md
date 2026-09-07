@@ -537,10 +537,7 @@ Non-zero cross-package edge counts at HEAD:
 - `tools` -> `tcip-mcp`: 15 import edges.
 - `tools` -> `tcip-web`: 17 import edges.
 - `tcip-mcp` -> `tcip-annotation`: 76 import edges.
-- `tcip-mcp` -> `tcip-web`: 5 import edges, all from `store_catalogue.py`'s own module-level
-  imports of `tcip_web.agent_learning_capture`, `tcip_web.jobstore`, `tcip_web.routes.canvas`,
-  `tcip_web.routes.sessions` and `tcip_web.state`; no other module under `packages/tcip-mcp`
-  imports from `tcip-web`.
+- `tcip-mcp` -> `tcip-web`: 0 import edges.
 - `tcip-web` -> `tcip-annotation`: 14 import edges.
 - `tcip-web` -> `tcip-mcp`: 105 import edges.
 

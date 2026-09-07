@@ -6,7 +6,8 @@ imports this module first: a running MCP server already has every store register
 own tool imports, but a caller invoked on its own (a console command, a focused test) must not
 silently see fewer stores than the server does. The operator commands that import
 :func:`bootstrapped_stores` (``export-store``, ``adopt-store``) and the tests that exercise the
-catalogue directly import it from here.
+catalogue directly import it from here. Every store the web package owns is reached through
+:mod:`tcip_mcp.web_client`, never through ``tcip_web`` itself.
 
 Where each store's entries sit under a root is not here: that is :mod:`tcip_store.layout_claims`,
 which the conform rail reads without importing any owning module.
@@ -48,9 +49,6 @@ from tcip_mcp.tools import (  # noqa: F401
     proposal_tools,
     training_tools,
 )
-from tcip_web import agent_learning_capture, jobstore  # noqa: F401
-from tcip_web import state as web_state  # noqa: F401
-from tcip_web.routes import canvas, sessions  # noqa: F401
 
 
 def bootstrapped_stores() -> tuple[str, ...]:
