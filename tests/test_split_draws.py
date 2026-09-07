@@ -997,3 +997,188 @@ def test_tune_search_split_draws_end_to_end_pairs_every_point_with_every_seed(tm
     groups = group_split_draws(result["all_trials"], [42, 43])
     eligible = [g for g in groups if g["eligible"]]
     assert len(eligible) == 2
+
+
+# -- the single-source spatial-strip leg -----------------------------------------
+
+
+def _one_source_tiled_cfg(images_dir, labels_dir) -> dict:
+    """A base config wrapping a one-source tiled mosaic, the shape ``auto_train_val`` takes
+    into ``spatial_single_source_split`` when tiling is on and fewer than two stems are
+    admitted, given a ``model_source`` block the way ``real_hpo_base_config`` gives its own."""
+    return {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {
+            "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+            "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+            "split": {"val_ratio": 0.2, "test_ratio": 0.1},
+        },
+    }
+
+
+def test_run_hyperparameter_search_refuses_split_draws_over_a_single_source_spatial_split(
+    tmp_path, monkeypatch,
+):
+    """One admitted source under a built-in detection config with tiling on takes the
+    single-source spatial-strip path, whose partition no draw of data.split.seed varies:
+    split_draws above 1 refuses, naming the one admitted source and the path, and never
+    reaches the search."""
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    import tcip_mcp.tools.training_tools as tt
+    from tests.test_training_autoval import _big_single_source
+
+    images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    cfg = _one_source_tiled_cfg(images_dir, labels_dir)
+
+    ran = []
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
+
+    result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
+                        scheduler="none", split_draws=2)
+
+    assert "error" in result
+    assert "one trainable source" in result["error"]
+    assert "spatial strip path" in result["error"]
+    assert not ran
+
+
+def test_run_hyperparameter_search_admits_a_single_source_spatial_config_at_one_draw(
+    tmp_path, monkeypatch,
+):
+    """The leg sits behind split_draws's own <= 1 return: the identical single-source config
+    that refuses above 1 is admitted at split_draws=1, since split_draws governs nothing there."""
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    import tcip_mcp.tools.training_tools as tt
+    from tests.test_training_autoval import _big_single_source
+
+    images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    cfg = _one_source_tiled_cfg(images_dir, labels_dir)
+
+    def fake_search(**kw):
+        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
+                "study_name": kw["study_name"], "all_trials": []}
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+
+    result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
+                        scheduler="none", split_draws=1)
+
+    assert "error" not in result
+
+
+def test_run_hyperparameter_search_admits_split_draws_over_a_two_source_tiled_config(
+    tmp_path, monkeypatch,
+):
+    """The rail-admits-valid-work proof: an unbound, built-in detection config with tiling on
+    that admits two or more sources never reaches this leg's own single-source branch, so
+    split_draws above 1 mints the sweep."""
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    import tcip_mcp.tools.training_tools as tt
+    from tests.test_training_autoval import _detection_dataset
+
+    images_dir, labels_dir, _stems = _detection_dataset(tmp_path / "ds")
+    cfg = _one_source_tiled_cfg(images_dir, labels_dir)
+
+    def fake_search(**kw):
+        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
+                "study_name": kw["study_name"], "all_trials": []}
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+
+    result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
+                        scheduler="none", split_draws=2)
+
+    assert "error" not in result
+
+
+def test_run_hyperparameter_search_admits_split_draws_over_a_bespoke_dataset_source(
+    tmp_path, monkeypatch,
+):
+    """A bespoke dataset_source is excluded from this leg outright, whatever its own admitted
+    count: the builder here answers exactly one stem, the shape the built-in leg would refuse,
+    but the leg never counts a bespoke builder's admitted set at all, since it may depend on
+    the transforms it is built with and this door builds with none."""
+    pytest.importorskip("torch")
+    import tcip_mcp.tools.training_tools as tt
+
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {
+            "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+            "split": {"val_ratio": 0.2, "test_ratio": 0.1},
+            "dataset_source": {
+                "builder": "tests.test_dataset_source_seam:build_bespoke_ds",
+                "builder_kwargs": {"stems": ["only_one"]},
+            },
+        },
+    }
+
+    def fake_search(**kw):
+        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
+                "study_name": kw["study_name"], "all_trials": []}
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+
+    result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
+                        scheduler="none", split_draws=2)
+
+    assert "error" not in result
+
+
+def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
+    tmp_path, real_hpo_base_config, monkeypatch,
+):
+    """A config an earlier leg already refuses (here, an explicit data.val_images_dir) reads
+    that leg's own reason, never this one's: the spatial-strip leg runs last and is never
+    reached for a config an earlier leg already rejected."""
+    import tcip_mcp.tools.training_tools as tt
+
+    ran = []
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
+
+    cfg = dict(real_hpo_base_config)
+    cfg["data"] = {**cfg["data"], "val_images_dir": str(tmp_path / "val"),
+                   "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2}}
+    result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
+                        scheduler="none", split_draws=2)
+
+    assert "error" in result and "val_images_dir" in result["error"]
+    assert "spatial strip path" not in result["error"]
+    assert not ran
+
+
+def test_run_hyperparameter_search_over_a_misrouted_coco_is_not_refused_by_this_leg(
+    tmp_path, monkeypatch,
+):
+    """A dataset-level COCO document misrouted as data.labels_dir raises inside
+    checked_label_format, a caller-config error this leg answers with no refusal of its own
+    (the trial or the preflight that follows reports it in its own words), never folded into
+    this leg's own single-source message."""
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    import json
+
+    import tcip_mcp.tools.training_tools as tt
+    from tests.test_training_autoval import _save_png
+
+    images_dir, labels_dir = tmp_path / "ds" / "images", tmp_path / "ds" / "detect"
+    labels_dir.mkdir(parents=True)
+    _save_png(images_dir / "img0.png")
+    (labels_dir / "dataset.json").write_text(json.dumps(
+        {"images": [{"id": 1, "file_name": "img0.png"}], "annotations": [], "categories": []}))
+    cfg = _one_source_tiled_cfg(images_dir, labels_dir)
+
+    ran = []
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
+
+    result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
+                        scheduler="none", split_draws=2)
+
+    if "error" in result:
+        assert "one trainable source" not in result["error"]
+        assert "spatial strip path" not in result["error"]

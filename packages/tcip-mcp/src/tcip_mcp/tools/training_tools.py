@@ -2255,9 +2255,12 @@ def run_hyperparameter_search(
     ``selection_metric`` key in sight. Also refuses, whatever the sampler, a ``param_space``
     axis naming ``data.split.seed`` while ``split_draws`` draws at most one partition (see
     :func:`caller_split_seed_refusal`): the paired grid above one draw is the way to sweep the
-    split seed itself. ``cancel_hyperparameter_search`` requested against this study before or
-    during the run instead ends the sweep ``{"status": "cancelled", ...}``, the manifest
-    recording the same, rather than a completed result.
+    split seed itself. Also refuses ``split_draws`` above 1 on an unbound, built-in detection
+    config with tiling on that admits exactly one trainable source under ``data.labels_dir``:
+    that config's own single-source spatial-strip path pairs no distinct partition with any
+    draw (see :func:`_split_draws_refusal`). ``cancel_hyperparameter_search`` requested against
+    this study before or during the run instead ends the sweep ``{"status": "cancelled", ...}``,
+    the manifest recording the same, rather than a completed result.
 
     Args:
         base_config: Base training config each trial modifies.
@@ -2298,10 +2301,12 @@ def run_hyperparameter_search(
             ``split_draw_seeds`` (default: the base config's own ``data.split.seed``, else 42,
             plus the draw index), paired with every sampled point through Ray's own
             ``BasicVariantGenerator(constant_grid_search=True)`` so each point trains once per
-            seed, a blocked comparison of the split's own sensitivity. On the single-source
-            spatial strip path the strip layout no longer varies with ``data.split.seed`` at
-            all, so every draw there trains on the same partition and the report's split
-            sensitivity reflects training-seed noise, not a split's. ``base_config`` bound to
+            seed, a blocked comparison of the split's own sensitivity. Refused outright on a
+            built-in detection config with tiling on that admits exactly one trainable source
+            under ``data.labels_dir``: that config's own single-source spatial-strip path places
+            every strip by declared order alone, so no draw would hold a different partition out
+            and the report's split sensitivity would be training-seed noise, not a split's.
+            ``base_config`` bound to
             a split manifest is admitted, not refused: its own copy gains
             ``data.split.redraw_within_manifest: true``, defaulting ``data.split.seed`` to 42
             when the bound config carries none, the same default an unset-seed drawn config
@@ -2844,6 +2849,12 @@ def _split_draws_refusal(
     branch binds ahead of both), so those two legs are skipped for it; in their place, the
     manifest's own distinct-groups check runs once here so a sweep whose every trial would
     starve a side is refused before minting rather than after every trial fails the same way.
+
+    An unbound config gets its own last leg (:func:`_unbound_single_source_spatial_issue`): a
+    built-in detection build with tiling on that admits exactly one trainable source under
+    ``data.labels_dir`` takes ``auto_train_val``'s single-source spatial-strip path, whose
+    partition no draw of ``data.split.seed`` varies, so ``split_draws`` above 1 there would
+    only multiply cost and report training-seed noise as a split spread.
     """
     if split_draws <= 1:
         return None
@@ -2896,7 +2907,7 @@ def _split_draws_refusal(
                 "draw k would no longer be the same partition for every point.")
     if bound:
         return _bound_redraw_starvation_issue(data_cfg, split_cfg)
-    return None
+    return _unbound_single_source_spatial_issue(task, data_cfg, split_draws)
 
 
 def _bound_redraw_starvation_issue(data_cfg: dict, split_cfg: dict) -> str | None:
@@ -2934,6 +2945,63 @@ def _bound_redraw_starvation_issue(data_cfg: dict, split_cfg: dict) -> str | Non
     )
 
 
+def _unbound_single_source_spatial_issue(task: str, data_cfg: dict, split_draws: int) -> str | None:
+    """Whether ``split_draws`` above 1 would redraw the identical partition on every trial: an
+    unbound config with exactly one admitted source takes ``auto_train_val``'s single-source
+    spatial-strip branch (:func:`~tcip_mcp.pipelines.data.split_construction.
+    spatial_single_source_split`), which places every strip by declared order and share alone,
+    never by ``data.split.seed``, or trains with no validation, or fails outright on a reserved
+    calibration fraction; no draw of that path holds a different partition out.
+
+    Only for a built-in detection build: a bespoke ``dataset_source`` is excluded, since its
+    admitted set may depend on the transforms it is built with and this door builds with none,
+    so counting over it would not be a fact this run's own trials share. Counts the stems
+    ``base_config`` admits the same way ``auto_train_val`` does
+    (:func:`~tcip_mcp.pipelines.data.split_construction.checked_label_format`, then
+    :func:`~tcip_mcp.pipelines.data.split_construction.build_full_admitted_dataset`), inside one
+    handler answering no refusal on any exception: a dataset-level COCO misrouted as
+    ``data.labels_dir``, or an unreadable label document, is a caller-config error the trial or
+    the preflight that follows reports in its own words, never this leg's to fold in. ``None``
+    when ``task`` is not ``"detection"``, ``data.tiling`` is absent, not a mapping, or disabled,
+    a bespoke ``dataset_source`` is named, the admitted count could not be resolved, or more than
+    one source is admitted: a built-in detection build never admits zero
+    (``require_samples`` raises inside the split's own degrading handler), so this leg never
+    names a path a run does not take.
+    """
+    if task != "detection":
+        return None
+    from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
+
+    if data_cfg.get(DATASET_SOURCE_KEY):
+        return None
+    tiling = data_cfg.get("tiling")
+    if not isinstance(tiling, dict) or not tiling or not tiling.get("enabled", True):
+        return None
+
+    from tcip_mcp.pipelines.data.split_construction import (
+        build_full_admitted_dataset, checked_label_format,
+    )
+
+    src = _dataset_source_kwargs(task, data_cfg)
+    try:
+        detected_label_format = checked_label_format(task, data_cfg, src)
+        _full_ds, stems, _build_src = build_full_admitted_dataset(
+            task, data_cfg, src, None, detected_label_format)
+    except Exception:
+        return None
+    if len(stems) != 1:
+        return None
+    return (
+        f"split_draws={split_draws} redraws the split, and base_config admits one trainable "
+        "source under data.labels_dir: a detection sweep with tiling on takes the single-source "
+        "spatial strip path, whose partition is placed by declared order and does not vary with "
+        "data.split.seed, or trains with no validation, or fails on a reserved calibration "
+        "fraction; in every case no draw holds a different partition out and the spread would be "
+        "training-seed noise. Run at split_draws=1, or sweep a dataset with two or more admitted "
+        "sources or a config bound to a split manifest."
+    )
+
+
 class SeedAxisRefusal(NamedTuple):
     """Why a caller-supplied ``data.split.seed`` axis in ``param_space`` refuses at one draw:
     ``reason`` names the fact and the breeder's own next step, in the register of the Tuning
@@ -2963,9 +3031,12 @@ _SEED_AXIS_REMEDY = (
     "data.val_images_dir and keeps auto_val on; the task is one with drawn splits; search_alg "
     "is one the native generator builds (random, grid, variant_generator, or unset); scheduler "
     "prunes nothing (none, fifo, or unset); split_draw_seeds is one per draw and distinct; no "
-    "baseline_params names the seed under a warm start; and no other data.* axis is in "
-    "param_space. A single fixed seed belongs in base_config's own data.split.seed: the drawn "
-    "path's partition depends on it, and the single-source spatial path's, a config with "
+    "baseline_params names the seed under a warm start; no other data.* axis is in param_space; "
+    "and, for a built-in detection config with tiling on, more than one trainable source is "
+    "admitted under data.labels_dir (a single admitted source's own single-source spatial-strip "
+    "path pairs no distinct partition with any draw). A single fixed seed belongs in "
+    "base_config's own data.split.seed: the drawn path's partition depends on it, and the "
+    "single-source spatial path's, a config with "
     "data.val_images_dir's, or a manifest-bound config's without redraw_within_manifest never "
     "does (the spatial path still records the config's value on the split record, a different "
     "fact, not claimed here)."
