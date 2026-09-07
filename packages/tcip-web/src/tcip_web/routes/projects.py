@@ -49,7 +49,7 @@ _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp"}
 
 
 class DependencyWarning(BaseModel):
-    dataset_id: str | None = None
+    dataset_id: str
     dataset_path: str
     # The dependency's own workspace-child name.
     target: str
