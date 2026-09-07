@@ -325,10 +325,14 @@ def test_all_training_runs_reads_launched_by_from_the_record_not_the_live_row(tm
 
 def test_a_pid_bearing_live_row_takes_launched_by_from_its_disk_overlay(tmp_path, monkeypatch):
     """A pid-bearing row's launched_by is the disk overlay's own reconstructed value, not a
-    second independent read of the record: the overlay is made to carry a different launcher
-    than the record on disk, and the row renders the overlay's value."""
+    second independent read of the record: the record this id actually resolves to is stamped
+    process (what a second, independent read would answer), while the overlay row is
+    reconstruct_from_status's own shape built on a different record stamped gui, and the merged
+    row renders the overlay's value rather than the record's own."""
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, stamp_run_identity, update_status
+    from tcip_mcp.experiments import (
+        create_experiment, read_member, reconstruct_from_status, stamp_run_identity, status_key,
+    )
     from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools import training_tools
 
@@ -339,22 +343,375 @@ def test_a_pid_bearing_live_row_takes_launched_by_from_its_disk_overlay(tmp_path
     create_experiment("exp-overlay-wins", {"model_source": {"builder": "x:y"}})
     stamp_run_identity("exp-overlay-wins", str(tmp_path / "out"),
                         launched_by={"launcher": "process"})
-    update_status("exp-overlay-wins", "running")
 
-    overlay_row = {
-        "experiment_id": "exp-overlay-wins",
-        "status": "running",
-        "current_epoch": None,
-        "best_metric": None,
-        "best_metric_name": None,
-        "output_dir": str(tmp_path / "out"),
-        "error": None,
-        "launched_by": {"launcher": "gui"},
-        "heartbeat": None,
-        "external": True,
-    }
+    create_experiment("exp-overlay-source", {"model_source": {"builder": "x:y"}})
+    stamp_run_identity("exp-overlay-source", str(tmp_path / "out"),
+                        launched_by={"launcher": "gui"})
+    other_status = read_member(status_key("exp-overlay-source"))
+    overlay_row = reconstruct_from_status("exp-overlay-wins", other_status, stale_seconds=600.0,
+                                          read_progress=False)
+    overlay_row["external"] = True
     monkeypatch.setattr(training_tools, "_launched_training_runs", lambda **kwargs: [overlay_row])
 
     rows = training_tools._all_training_runs(read_progress=False)
     row = next(r for r in rows if r["experiment_id"] == run.id)
     assert row["launched_by"] == {"launcher": "gui"}
+
+
+def test_stamp_run_identity_with_config_refuses_once_metrics_are_logged(tmp_path, monkeypatch):
+    """The config-carrying precondition adds metrics_logged to state and output_dir: a record
+    still formally "created" but already carrying a metrics row is not pristine, and a refused
+    stamp leaves config.json exactly as create_experiment wrote it."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import (
+        StampPreconditionFailed, config_key, create_experiment, log_metrics, read_member,
+        stamp_run_identity,
+    )
+
+    create_experiment("exp-metrics-before-stamp", {"a": 1})
+    log_metrics("exp-metrics-before-stamp", 1, {"loss": 0.5})
+
+    with pytest.raises(StampPreconditionFailed):
+        stamp_run_identity("exp-metrics-before-stamp", "out", launched_by={"launcher": "process"},
+                           config={"a": 2})
+
+    assert read_member(config_key("exp-metrics-before-stamp")) == {"a": 1}
+
+
+def test_two_launches_racing_a_pristine_record_never_split_the_winners_config_from_its_stamp(
+    tmp_path, monkeypatch,
+):
+    """The pristine-reuse branch used to be two store transactions
+    (overwrite_config_if_pristine, then stamp_run_identity): two launches that both passed the
+    pristine check could interleave A-overwrite, B-overwrite, A-stamp, B-stamp, leaving the
+    record running under A's stamp with B's config snapshot. Forces that exact interleaving
+    with timed wrapper waits around both functions; the overwrite wrapper is never reached on
+    the fixed tree (the stamp itself carries the config), so its own wait times out rather than
+    deadlocking the other thread. Both launches must still return without error, one id is the
+    pre-created record's own and the other a fresh fork naming it as parent, and for each
+    returned id the config snapshot and the launch config the run actually trains from carry
+    the identical seed."""
+    monkeypatch.chdir(tmp_path)
+    import threading
+
+    from tcip_mcp import experiments as experiments_mod
+    from tcip_mcp.experiments import config_key, create_experiment, lineage_key, read_member
+    from tcip_mcp.tools import training_tools
+    from tcip_mcp.tools.training_tools import launch_config_key
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    _seed_one_image(images_dir, labels_dir)
+    _fake_popen(monkeypatch, [])
+
+    create_experiment("exp-concurrent-pristine", {"a": 1})
+    order = ["a_overwrite", "b_overwrite", "a_stamp", "b_stamp"]
+    events = {name: threading.Event() for name in order}
+
+    def _wait_turn(name):
+        idx = order.index(name)
+        if idx > 0:
+            events[order[idx - 1]].wait(timeout=5)
+
+    real_overwrite = experiments_mod.overwrite_config_if_pristine
+    real_stamp = experiments_mod.stamp_run_identity
+
+    def fake_overwrite(experiment_id, config, *, root=None):
+        name = f"{threading.current_thread().name}_overwrite"
+        _wait_turn(name)
+        try:
+            return real_overwrite(experiment_id, config, root=root)
+        finally:
+            events[name].set()
+
+    def fake_stamp(experiment_id, output_dir, *, launched_by, config=None):
+        name = f"{threading.current_thread().name}_stamp"
+        _wait_turn(name)
+        try:
+            if config is not None:
+                return real_stamp(experiment_id, output_dir, launched_by=launched_by,
+                                  config=config)
+            return real_stamp(experiment_id, output_dir, launched_by=launched_by)
+        finally:
+            events[name].set()
+
+    monkeypatch.setattr(experiments_mod, "overwrite_config_if_pristine", fake_overwrite,
+                        raising=False)
+    monkeypatch.setattr(experiments_mod, "stamp_run_identity", fake_stamp, raising=False)
+
+    results = {}
+
+    def _launch(name, out_dir):
+        threading.current_thread().name = name
+        cfg = _detection_cfg(images_dir, labels_dir, "exp-concurrent-pristine")
+        cfg["marker"] = name
+        results[name] = training_tools.launch_training(cfg, str(out_dir))
+
+    t_a = threading.Thread(target=_launch, args=("a", tmp_path / "outA"))
+    t_b = threading.Thread(target=_launch, args=("b", tmp_path / "outB"))
+    t_a.start()
+    t_b.start()
+    t_a.join(timeout=15)
+    t_b.join(timeout=15)
+
+    result_a, result_b = results["a"], results["b"]
+    assert "error" not in result_a, result_a
+    assert "error" not in result_b, result_b
+
+    ids = {result_a["experiment_id"], result_b["experiment_id"]}
+    assert "exp-concurrent-pristine" in ids
+    forked_id = next(i for i in ids if i != "exp-concurrent-pristine")
+    assert forked_id.startswith("exp-concurrent-pristine_")
+
+    lineage = read_member(lineage_key(forked_id))
+    assert lineage["parent_experiment"] == "exp-concurrent-pristine"
+
+    for result in (result_a, result_b):
+        eid = result["experiment_id"]
+        recorded_seed = read_member(config_key(eid))["seed"]
+        launched_seed = read_member(launch_config_key(result["output_dir"]))["seed"]
+        assert recorded_seed == launched_seed
+
+
+def test_launch_refuses_a_dataset_identity_above_the_readers_ceiling(tmp_path, monkeypatch):
+    """launch_training reads dataset_identity outside any wrapper: a version-refused document
+    refuses the launch by name, before any record exists and before Popen is ever reached. The
+    document is written through the store's own put_blob, the platform's own producer for a
+    schema_version this reader does not accept (a document register_dataset itself never writes,
+    since it always writes the current version). The admitting half (a legal id and a readable
+    identity) is test_a_bare_launch_writes_launcher_process above."""
+    monkeypatch.chdir(tmp_path)
+    import tcip_store as ts
+
+    from tcip_mcp.dataset_layout import dataset_identity_key
+    from tcip_mcp.experiments import experiment_ids_with_status
+    from tcip_mcp.tools import training_tools
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    _seed_one_image(images_dir, labels_dir)
+    captured: list[list[str]] = []
+    _fake_popen(monkeypatch, captured)
+
+    key = dataset_identity_key(tmp_path)
+    document = {"crop": "test-crop", "id": "abc123", "fingerprint": "v1:deadbeef",
+                "schema_version": 2}
+    ts.put_blob(key, ts.RECORD_JSON.encode(document))
+
+    result = training_tools.launch_training(
+        _detection_cfg(images_dir, labels_dir, "exp-identity-refused"), str(tmp_path / "out"))
+
+    assert result["error"].startswith(
+        "launch_training: dataset identity is unreadable at this reader's ceiling, refusing to "
+        "train against it untracked:")
+    assert captured == []
+    assert "exp-identity-refused" not in experiment_ids_with_status()
+
+
+def test_launch_refuses_an_experiment_id_that_is_not_a_legal_directory_name(tmp_path, monkeypatch):
+    """The id becomes the run's own artifact directory: a path separator refuses by name,
+    before any process starts."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import experiment_ids_with_status
+    from tcip_mcp.tools import training_tools
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    _seed_one_image(images_dir, labels_dir)
+    captured: list[list[str]] = []
+    _fake_popen(monkeypatch, captured)
+
+    result = training_tools.launch_training(
+        _detection_cfg(images_dir, labels_dir, "not/legal"), str(tmp_path / "out"))
+
+    assert result["error"] == (
+        "launch_training: experiment_id 'not/legal' is not a legal directory "
+        "name (a path separator, a drive, an empty name or '.'/'..'), and the id "
+        "becomes the run's own artifact directory.")
+    assert captured == []
+    assert experiment_ids_with_status() == []
+
+
+def test_launch_refuses_when_the_record_write_raises(tmp_path, monkeypatch):
+    """Any exception out of _ensure_experiment's record writes refuses the launch by name,
+    before create_run, the launch config or the subprocess, and no status record survives it."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp import experiments as experiments_mod
+    from tcip_mcp.experiments import experiment_ids_with_status
+    from tcip_mcp.tools import training_tools
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    _seed_one_image(images_dir, labels_dir)
+    captured: list[list[str]] = []
+    _fake_popen(monkeypatch, captured)
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("store unavailable")
+
+    monkeypatch.setattr(experiments_mod, "create_experiment", _raise)
+
+    result = training_tools.launch_training(
+        _detection_cfg(images_dir, labels_dir, "exp-write-raises"), str(tmp_path / "out"))
+
+    assert result["error"] == (
+        "launch_training: could not record this run's experiment: store unavailable")
+    assert captured == []
+    assert experiment_ids_with_status() == []
+
+
+def test_fresh_launch_records_the_seed_it_trains_with(tmp_path, monkeypatch):
+    """No seed in the caller's config: the seed drawn before the record is written and the seed
+    the run actually trains from (its own launch config) are the identical value."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import config_key, read_member
+    from tcip_mcp.tools import training_tools
+    from tcip_mcp.tools.training_tools import launch_config_key
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    _seed_one_image(images_dir, labels_dir)
+    _fake_popen(monkeypatch, [])
+
+    result = training_tools.launch_training(
+        _detection_cfg(images_dir, labels_dir, "exp-fresh-seed"), str(tmp_path / "out"))
+    assert "error" not in result, result
+
+    recorded = read_member(config_key(result["experiment_id"]))
+    launched = read_member(launch_config_key(result["output_dir"]))
+    assert recorded["seed"] == launched["seed"]
+
+
+def test_pristine_reuse_launch_records_the_seed_it_trains_with(tmp_path, monkeypatch):
+    """A pre-created record's own snapshot carries no seed (written before the launch that
+    reuses it draws one): the refreshed snapshot and the launch config carry the identical
+    drawn value."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import config_key, create_experiment, read_member
+    from tcip_mcp.tools import training_tools
+    from tcip_mcp.tools.training_tools import launch_config_key
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    _seed_one_image(images_dir, labels_dir)
+    _fake_popen(monkeypatch, [])
+
+    create_experiment("exp-pristine-seed", {"a": 1})
+    result = training_tools.launch_training(
+        _detection_cfg(images_dir, labels_dir, "exp-pristine-seed"), str(tmp_path / "out"))
+    assert "error" not in result, result
+    assert result["experiment_id"] == "exp-pristine-seed"
+
+    recorded = read_member(config_key("exp-pristine-seed"))
+    launched = read_member(launch_config_key(result["output_dir"]))
+    assert recorded["seed"] == launched["seed"]
+
+
+def test_launch_refuses_when_the_forks_own_fresh_id_is_already_taken(tmp_path, monkeypatch):
+    """mint_experiment_id is pinned so the fork branch's own fresh id is predictable, and that
+    id is pre-created before the relaunch runs: the fork's create_experiment call finds it
+    already exists, and the launch refuses by name rather than silently training under a record
+    this launch never created. exp-fork-taken carries recorded history, so a relaunch against it
+    can only reach the fork branch."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp import experiments as experiments_mod
+    from tcip_mcp.experiments import create_experiment, log_metrics, update_status
+    from tcip_mcp.tools import training_tools
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    _seed_one_image(images_dir, labels_dir)
+    _fake_popen(monkeypatch, [])
+
+    create_experiment("exp-fork-taken", {"a": 1})
+    update_status("exp-fork-taken", "running")
+    log_metrics("exp-fork-taken", 1, {"loss": 0.5})
+
+    monkeypatch.setattr(experiments_mod, "mint_experiment_id", lambda: "pinned-fork-id")
+    create_experiment("exp-fork-taken_pinned-fork-id", {"already": "here"})
+
+    result = training_tools.launch_training(
+        _detection_cfg(images_dir, labels_dir, "exp-fork-taken"), str(tmp_path / "out"))
+
+    assert "error" in result
+    assert "exp-fork-taken_pinned-fork-id" in result["error"]
+
+
+def test_all_training_runs_answers_launched_by_none_for_a_malformed_live_id(tmp_path, monkeypatch):
+    """create_run reached directly (never through launch_training's own directory-name refusal)
+    can register an id no record could ever carry; _all_training_runs answers it the way
+    reconstruct_run_status and cancel_run already fold BadKey, rather than raising it out of the
+    whole merge."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.pipelines.training.run_registry import create_run
+    from tcip_mcp.tools.training_tools import _all_training_runs
+
+    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"),
+                     id="not/a/single/name")
+
+    rows = _all_training_runs(read_progress=False)
+    row = next(r for r in rows if r["experiment_id"] == run.id)
+    assert row["launched_by"] is None
+
+
+def test_spawn_failure_after_the_stamp_leaves_a_running_record_that_forks_on_relaunch(
+    tmp_path, monkeypatch,
+):
+    """No cooperative grace period covers the spawn itself: a Popen failure after the stamp
+    propagates out of launch_training uncaught (nothing wraps the spawn), the record it stamped
+    is left running with no process, reads interrupted once its heartbeat window has passed, and
+    a relaunch against the same id forks rather than reusing a record with no recorded history
+    of its own."""
+    monkeypatch.chdir(tmp_path)
+    import subprocess
+
+    from tcip_mcp.experiments import reconstruct_run_status
+    from tcip_mcp.tools import training_tools
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    _seed_one_image(images_dir, labels_dir)
+
+    def _raise_popen(*args, **kwargs):
+        raise OSError("no such executable")
+
+    monkeypatch.setattr(subprocess, "Popen", _raise_popen)
+
+    with pytest.raises(OSError):
+        training_tools.launch_training(
+            _detection_cfg(images_dir, labels_dir, "exp-spawn-fails"), str(tmp_path / "out"))
+
+    disk = reconstruct_run_status("exp-spawn-fails", stale_seconds=0.0)
+    assert disk["status"] == "interrupted"
+
+    _fake_popen(monkeypatch, [])
+    relaunch = training_tools.launch_training(
+        _detection_cfg(images_dir, labels_dir, "exp-spawn-fails"), str(tmp_path / "out2"))
+    assert "error" not in relaunch, relaunch
+    assert relaunch["experiment_id"].startswith("exp-spawn-fails_")
+
+
+def test_a_store_refused_stamp_leaves_the_record_pristine_and_the_launch_refuses(
+    tmp_path, monkeypatch,
+):
+    """A store failure during the stamp (not a StampPreconditionFailed, a real write refusal)
+    propagates out of _ensure_experiment as the exception it is, caught only by
+    launch_training's own except Exception; the record it tried to stamp is left exactly as
+    create_experiment wrote it, since the stamp's own transaction never applied a write."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_store import StoreError
+
+    from tcip_mcp import experiments as experiments_mod
+    from tcip_mcp.experiments import read_member, status_key
+    from tcip_mcp.tools import training_tools
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    _seed_one_image(images_dir, labels_dir)
+    _fake_popen(monkeypatch, [])
+
+    def _raise(*args, **kwargs):
+        raise StoreError("disk full")
+
+    monkeypatch.setattr(experiments_mod, "stamp_run_identity", _raise)
+
+    result = training_tools.launch_training(
+        _detection_cfg(images_dir, labels_dir, "exp-stamp-store-error"), str(tmp_path / "out"))
+
+    assert result["error"] == (
+        "launch_training: could not record this run's experiment: disk full")
+
+    status = read_member(status_key("exp-stamp-store-error"))
+    assert status["state"] == "created"
+    assert "output_dir" not in status
