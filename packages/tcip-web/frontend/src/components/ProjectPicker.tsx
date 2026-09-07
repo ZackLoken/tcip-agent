@@ -69,9 +69,10 @@ function RemovalDialog({
     };
   }, [name]);
 
-  // previewSettled means the preview itself answered; a failed preview never settles it.
-  // The name field is never disabled: a refusal only ever blocks the confirm control.
+  // A failed preview never settles (confirm stays disabled) but does end the check, so the
+  // dialog stops being busy; the name field is never disabled, a refusal only blocks confirm.
   const previewSettled = preview !== null;
+  const checking = !previewSettled && previewError === null;
   const refusal = submitError ?? preview?.refusal ?? null;
   const canConfirm = previewSettled && !refusal && confirmText === name && !submitting;
 
@@ -112,10 +113,10 @@ function RemovalDialog({
   }
 
   return (
-    <ConfirmDialog heading={`Remove ${name}`} onClose={onClose} busy={!previewSettled}>
+    <ConfirmDialog heading={`Remove ${name}`} onClose={onClose} busy={checking}>
       <div className="flex flex-col gap-3 text-[12px]">
         <div className="flex flex-col gap-3" aria-live="polite">
-          {!previewSettled && !previewError && (
+          {checking && (
             <p className="text-tcip-muted">Checking this project&apos;s dependents and refusals…</p>
           )}
           {previewError && (
