@@ -1556,9 +1556,9 @@ class _AccessTrackingConfig(dict):
     being hidden behind the block it lives in, and a write through that nested read
     (``cfg["model_source"]["builder_kwargs"]["width"] = 8``) lands on the same tree ``cfg`` itself
     holds, not a throwaway copy. A value already wrapped by an earlier read is answered untouched
-    on a later one, carrying whatever tracker and prefix it was built with; every wrap today
-    shares this same instance's own ``accessed`` set and prefix, since only one construction
-    site ever builds one.
+    on a later one, carrying the ``accessed`` set and the dotted prefix it was built with; since
+    ``_wrap`` is the only code that installs a wrapper into a tracked tree, every wrapper such a
+    read meets shares this instance's ``accessed`` set under its own key's prefix.
 
     Real, stated limitations (never gates the run, warn-only, so a false positive costs a log
     line, not a failed trial): a C-level copy (``dict(cfg)``, ``**cfg``) bypasses the overrides
