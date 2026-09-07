@@ -159,7 +159,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/generic_trainer.py | Task-agnostic training loop for a bespoke ``model_source`` model. | 13 | 6 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/hpo.py | HPO, hyperparameter optimization on Ray Tune. | 7 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/optimizer_factory.py | Optimizer factory with differential learning rate support. | 0 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/training/run_registry.py | In-process registry of live training runs: ``TrainRun``, its cancel-sentinel protocol, and the create/attach/get/list/cancel operations over the process-global ``_RUNS`` map. | 1 | 3 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/training/run_registry.py | In-process registry of live training runs: ``TrainRun``, its cancel-sentinel protocol, and the create/attach/get/list/cancel operations over the process-global ``_RUNS`` map. | 2 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py | The subprocess entry point ``launch_training`` spawns to run one bespoke training run's actual body, dataset/loader construction, the audited envelope, ``run_training_envelope()``, in an isolated OS process, so a leak/OOM/hang in one run can't take down the launching process or any other concurrent run's process. | 15 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/tensorboard_guardian.py | The subprocess entry point ``tensorboard_manager`` spawns on Linux and macOS to keep one TensorBoard child tied to the life of the process that launched it. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/tensorboard_manager.py | TensorBoard process management for training and HPO runs. | 0 | 3 |
@@ -490,7 +490,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/tabs/ReviewTab.test.tsx | (none found) | 9 | 0 |
 | packages/tcip-web/frontend/src/tabs/ReviewTab.tsx | (none found) | 34 | 2 |
 | packages/tcip-web/frontend/src/tabs/RunMonitorLayout.tsx | The shell the Training and Tuning tabs share: a fixed-width scrolling sidebar of runs beside a detail region. | 0 | 2 |
-| packages/tcip-web/frontend/src/tabs/TrainingTab.test.tsx | (none found) | 6 | 0 |
+| packages/tcip-web/frontend/src/tabs/TrainingTab.test.tsx | (none found) | 5 | 0 |
 | packages/tcip-web/frontend/src/tabs/TrainingTab.tsx | (none found) | 17 | 2 |
 | packages/tcip-web/frontend/src/tabs/TuningTab.test.tsx | (none found) | 6 | 0 |
 | packages/tcip-web/frontend/src/tabs/TuningTab.tsx | (none found) | 14 | 2 |
@@ -498,7 +498,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/tabs/agentPrompts.ts | Plain-language requests the run tabs stage for the agent, editable before they're sent. | 0 | 3 |
 | packages/tcip-web/frontend/src/tabs/chartTheme.ts | Recharts takes literal colour strings (not Tailwind classes), so the field-station tokens are mirrored here as hex. | 0 | 3 |
 | packages/tcip-web/frontend/src/tabs/trainingMetrics.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/tabs/trainingMetrics.ts | Metric-stream helpers for the Training tab (kept out of the .tsx so they're unit-testable). | 1 | 7 |
+| packages/tcip-web/frontend/src/tabs/trainingMetrics.ts | Metric-stream helpers for the Training tab (kept out of the .tsx so they're unit-testable). | 1 | 6 |
 | packages/tcip-web/frontend/src/test/coverageOutbox.ts | Test-only reset for the shared coverage-outbox singleton: never a method on the shipped singleton itself. | 1 | 3 |
 | packages/tcip-web/frontend/src/test/setup.ts | Extends Vitest's `expect` with jest-dom matchers (toBeInTheDocument, etc.) and registers automatic cleanup after each test. | 0 | 0 |
 
@@ -916,7 +916,7 @@ those three, the 17 modules hold the 75 HTTP routes counted here.
 
 Total WebSocket routes at HEAD: 5 (`/ws/state`, `/ws/panel/{panel}` on `app.py`;
 `/api/terminal/ws/{session_id}` on `routes/terminal.py`; `/api/inference/jobs/{job_id}/stream`  <!-- queued: P5-124 unify -->
-on `routes/inference.py`; `/api/training/runs/{run_id}/stream` on `routes/training.py`).
+on `routes/inference.py`; `/api/training/runs/{experiment_id}/stream` on `routes/training.py`).
 
 Tables below group by defining module. Column "line" is the handler's `def`/`async def` line,
 the same convention the tool tables use; the `@router.*`/`@app.*` decorator carrying the method
@@ -1075,13 +1075,13 @@ registered at HEAD.
 | GET | `/configs/{experiment_id}/splits` | `list_split_choices_route` | `routes/training.py:56` |
 | POST | `/runs` | `relaunch_config_route` | `routes/training.py:75` |
 | GET | `/runs` | `list_runs_route` | `routes/training.py:133` |
-| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:147` |
-| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:154` |
-| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:195` |
+| GET | `/runs/{experiment_id}` | `get_run` | `routes/training.py:147` |
+| POST | `/runs/{experiment_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:154` |
+| POST | `/runs/{experiment_id}/cancel` | `cancel_run_route` | `routes/training.py:195` |
 | POST | `/compare` | `compare_runs_route` | `routes/training.py:215` |
 | POST | `/compare/best` | `compare_best_route` | `routes/training.py:229` |
 | GET | `/metric-directions` | `metric_directions_route` | `routes/training.py:282` |
-| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:374` |
+| WS | `/runs/{experiment_id}/stream` (full path `/api/training/runs/{experiment_id}/stream`) | `training_stream_ws` | `routes/training.py:374` |
 
 ### routes/tuning.py, prefix `/api/tuning` (10 routes)
 
@@ -1606,8 +1606,8 @@ are listed here with the rest rather than taking numbers of their own.
 - `status.json` (`status_key`, `experiments.py:144`): written by `create_experiment` (`experiments.py:420`),
   `update_status`, `experiments.py:553` (`def update_status(`), `stamp_run_identity`
   (`experiments.py:693`), `_touch_heartbeat`, `experiments.py:920` (`def _touch_heartbeat(`).
-  Read by `get_experiment` (`experiments.py:1551`), `reconstruct_run_status`, `experiments.py:867`
-  (`def reconstruct_run_status(`), `resolve_experiment_dir_for_run` (`experiments.py:731`).
+  Read by `get_experiment` (`experiments.py:1555`), `reconstruct_run_status`, `experiments.py:867`
+  (`def reconstruct_run_status(`).
   `state` is terminal-locked once `"completed"`/`"failed"`.
 - `lineage.json` (`lineage_key`, `experiments.py:177`): written by `create_experiment` (`experiments.py:420`),
   `complete_run`,
@@ -2608,7 +2608,7 @@ Phase 3 verdict: duplicated.
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
 
 Must agree: the status payload the MCP tool returns is renderable by the browser's training view.
-Side A: `packages/tcip-web/src/tcip_web/routes/training.py:373` (`@router.websocket("/runs/{run_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/training.py:373` (`@router.websocket("/runs/{experiment_id}/stream")`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`monitor_training` supplies the status payload).
 Phase 3 verdict: duplicated.
 

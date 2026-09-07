@@ -125,8 +125,8 @@ naming why. Whole-frame training and whole-decode sources gain nothing from it; 
 | Tool | Purpose |
 |------|---------|
 | `launch_training` | Start async training run (smokes the builder first, auto-launches TensorBoard); runs `training_tools.preflight_config` (`smoke=True` also builds + contract-smokes the model), a library call, not a tool of its own |
-| `monitor_training(run_id=...)` | Check run progress, metrics, and TensorBoard URL |
-| `monitor_training(sweep_id=...)` | Check one sweep's manifest and per-trial state from disk, exactly one of `run_id`/`sweep_id` |
+| `monitor_training(experiment_id=...)` | Check run progress, metrics, and TensorBoard URL |
+| `monitor_training(sweep_id=...)` | Check one sweep's manifest and per-trial state from disk, exactly one of `experiment_id`/`sweep_id` |
 | `list_experiments(launched_only=True)` | List all runs in session |
 | `cancel_training` | Request graceful cancellation of a running run; stops at the next batch/epoch boundary, still saves `model_final.pt` |
 | `cancel_hyperparameter_search` | Request cooperative cancellation of a running sweep: the running trial stops at its next batch boundary and reports the losing side, new trials report without training, the manifest records `cancelled`; Ray's hard stop is only the fallback after the heartbeat window |
