@@ -745,6 +745,7 @@ describe("AnnotateTab point tool", () => {
         created_at: null,
         accepted_by: null,
         accepted_at: null,
+        accepted_by_rule: null,
       },
     ]);
   });
@@ -1729,6 +1730,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
         created_at: null,
         accepted_by: null,
         accepted_at: null,
+        accepted_by_rule: null,
       },
     ]);
   });

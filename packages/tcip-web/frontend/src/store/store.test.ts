@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { canvasToAnnotations } from "@/lib/labelSerde";
 import { useStore } from "@/store";
 import type { ImageLabels } from "@/store/types";
 
@@ -181,6 +182,7 @@ describe("splitPolygon", () => {
           created_at: "2024-01-01T00:00:00Z",
           accepted_by: "user:jordan",
           accepted_at: "2024-01-02T00:00:00Z",
+          accepted_by_rule: "exp-1:0123456789abcdef",
           // The shape the load route actually produces for an accepted tool prediction
           // (authorship_of: created_by a model plus accepted_by set derives "tool_accepted").
           authorship: "tool_accepted",
@@ -206,12 +208,22 @@ describe("splitPolygon", () => {
       expect(piece.created_at).toBe("2024-01-01T00:00:00Z");
       expect(piece.accepted_by).toBeNull();
       expect(piece.accepted_at).toBeNull();
+      expect(piece.accepted_by_rule).toBeNull();
       // The sign-off dropped: the parent's tool_accepted reads as unreviewed tool work again.
       expect(piece.authorship).toBe("tool");
     }
     expect(s().canvas.selectedPolygonIdx).toBe(0); // the first piece
     expect(s().annotateUi.hoveredPolygonIdx).toBeNull();
     expect(s().canvas.dirty).toBe(true);
+
+    // The save payload carries the dropped marker too, not just the in-memory pieces.
+    const payload = canvasToAnnotations({
+      boxes: s().canvas.boxes,
+      polygons: s().canvas.polygons.slice(0, 2),
+      points: [],
+      imageAnnotations: [],
+    });
+    for (const p of payload) expect(p.accepted_by_rule).toBeNull();
   });
 
   it("copies every other authorship value unchanged (only tool_accepted maps to tool)", () => {

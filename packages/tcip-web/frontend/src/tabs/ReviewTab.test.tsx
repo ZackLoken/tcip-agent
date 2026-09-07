@@ -156,7 +156,11 @@ beforeEach(() => {
     .mockResolvedValue({ statuses: {}, detection_stems: ["img1", "img2"], unreadable: [] });
   // Default: no recorded generation confidence -> no Conf >= censoring warning. Tests exercising
   // the warning override this per-case.
-  vi.spyOn(api.review, "generationConf").mockResolvedValue({ generation_conf: null });
+  vi.spyOn(api.review, "generationConf").mockResolvedValue({
+    generation_conf: null,
+    admission_rule: null,
+    admission_reason: "",
+  });
   // The priority-queue model picker fetches this on every render with a project open. Default
   // empty; the priority-queue describe block below overrides per-case.
   vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({ models: [] });
@@ -583,7 +587,11 @@ describe("ReviewTab audit-gap handling", () => {
 
 describe("ReviewTab Conf >= filter censoring warning", () => {
   it("shows no warning today when the filter sits at or below generation confidence (fail-before baseline)", async () => {
-    vi.spyOn(api.review, "generationConf").mockResolvedValue({ generation_conf: 0.5 });
+    vi.spyOn(api.review, "generationConf").mockResolvedValue({
+      generation_conf: 0.5,
+      admission_rule: null,
+      admission_reason: "",
+    });
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
     await waitFor(() => expect(screen.getAllByText(/Conf ≥ 0\.25/).length).toBeGreaterThan(0));
@@ -591,7 +599,11 @@ describe("ReviewTab Conf >= filter censoring warning", () => {
   });
 
   it("warns when the filter has been raised above the bucket's own generation confidence", async () => {
-    vi.spyOn(api.review, "generationConf").mockResolvedValue({ generation_conf: 0.1 });
+    vi.spyOn(api.review, "generationConf").mockResolvedValue({
+      generation_conf: 0.1,
+      admission_rule: null,
+      admission_reason: "",
+    });
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText(/⚠ Conf ≥ 0\.25/)).toBeInTheDocument());
@@ -599,7 +611,11 @@ describe("ReviewTab Conf >= filter censoring warning", () => {
   });
 
   it("warns when the bucket has no recorded generation confidence (always conf-censored, per _conf_censored's own None branch)", async () => {
-    vi.spyOn(api.review, "generationConf").mockResolvedValue({ generation_conf: null });
+    vi.spyOn(api.review, "generationConf").mockResolvedValue({
+      generation_conf: null,
+      admission_rule: null,
+      admission_reason: "",
+    });
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText(/⚠ Conf ≥ 0\.25/)).toBeInTheDocument());
@@ -608,7 +624,11 @@ describe("ReviewTab Conf >= filter censoring warning", () => {
 
   it("stays silent when there is no predictions directory selected at all", async () => {
     setupDataset({ predDir: null });
-    vi.spyOn(api.review, "generationConf").mockResolvedValue({ generation_conf: null });
+    vi.spyOn(api.review, "generationConf").mockResolvedValue({
+      generation_conf: null,
+      admission_rule: null,
+      admission_reason: "",
+    });
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
     expect(screen.queryByText(/conf-censored/)).not.toBeInTheDocument();
@@ -1391,6 +1411,202 @@ describe("ReviewTab symbology", () => {
     ]);
     // Both parts share the under-review symbology: one shape, one verdict.
     expect(lines.every((l) => l.getAttribute("data-dashed") === "true")).toBe(true);
+  });
+});
+
+describe("ReviewTab confirm-admitted", () => {
+  function ruleConf(conf: number) {
+    return {
+      generation_conf: conf,
+      admission_rule: { conf, experiment_id: "exp-1", record_digest: "0123456789abcdef" },
+      admission_reason: "",
+    };
+  }
+
+  it("marks an admitted prediction's corner, none below the rule's conf and none on an fn", async () => {
+    vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.5));
+    matchesSpy.mockResolvedValue(
+      matchesRes(
+        [
+          det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] }),
+          det({ det_type: "fp", gt_idx: null, pred_idx: 1, conf: 0.3, bbox: [50, 50, 70, 70] }),
+          det({ det_type: "fn", pred_idx: null, gt_idx: 0, conf: null, bbox: [90, 90, 110, 110] }),
+        ],
+        {
+          gt: [{ subject: "subject_a", bbox: [90, 90, 110, 110], attributes: {} }],
+          preds: [
+            { subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
+            { subject: "subject_a", bbox: [50, 50, 70, 70], attributes: {}, score: 0.3 },
+          ],
+        },
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 3")).toBeInTheDocument());
+
+    // The admitted mark is its own Rect with no stroke, distinct from every outcome box (which
+    // always carries one); only the fp scored at or above the rule's own conf gets one.
+    const marks = screen.getAllByTestId("k-rect").filter((r) => !r.hasAttribute("data-stroke"));
+    expect(marks).toHaveLength(1);
+    expect(marks[0]).toHaveAttribute("data-x", "10");
+    expect(marks[0]).toHaveAttribute("data-y", "10");
+  });
+
+  it("marks nothing and shows no legend note under a classified scope", async () => {
+    vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.5));
+    matchesSpy.mockResolvedValue(
+      matchesRes(
+        [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
+        {
+          attribute: "state",
+          subject: "bud",
+          preds: [
+            { subject: "open", bbox: [10, 10, 30, 30], attributes: { state: "open" }, score: 0.9 },
+          ],
+        },
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    const marks = screen.getAllByTestId("k-rect").filter((r) => !r.hasAttribute("data-stroke"));
+    expect(marks).toHaveLength(0);
+    expect(screen.queryByText(/Pre-admitted by count/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Corner mark at a prediction's top-left corner/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the visible caveat sentence and the legend note once the bucket's rule resolves", async () => {
+    vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.5));
+    matchesSpy.mockResolvedValue(
+      matchesRes(
+        [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
+        { preds: [{ subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 }] },
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText(/Pre-admitted by count/)).toBeInTheDocument());
+    expect(screen.getByText(/Corner mark at a prediction's top-left corner/)).toBeInTheDocument();
+  });
+
+  it("names the count of admitted, unreviewed detections on the button", async () => {
+    vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.5));
+    matchesSpy.mockResolvedValue(
+      matchesRes(
+        [
+          det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] }),
+          det({
+            det_type: "tp",
+            gt_idx: 0,
+            pred_idx: 1,
+            conf: 0.8,
+            bbox: [40, 40, 60, 60],
+            reviewed: true,
+          }),
+        ],
+        {
+          gt: [{ subject: "subject_a", bbox: [40, 40, 60, 60], attributes: {} }],
+          preds: [
+            { subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
+            { subject: "subject_a", bbox: [40, 40, 60, 60], attributes: {}, score: 0.8 },
+          ],
+        },
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("✓ Confirm 1 admitted")).toBeInTheDocument());
+  });
+
+  it("disables the button and names the reason when there is no rule", async () => {
+    matchesSpy.mockResolvedValue(
+      matchesRes(
+        [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
+        { preds: [{ subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 }] },
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("✓ Confirm 0 admitted")).toBeInTheDocument());
+    const btn = screen.getByText("✓ Confirm 0 admitted").closest("button")!;
+    expect(btn).toBeDisabled();
+  });
+
+  it("confirms every admitted, unreviewed detection in sequence with rule_admitted true", async () => {
+    vi.spyOn(api.review, "backupLabels").mockResolvedValue({ status: "ok", files_backed_up: 0 });
+    vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.5));
+    const fp1 = det({
+      det_type: "fp",
+      gt_idx: null,
+      pred_idx: 0,
+      conf: 0.9,
+      bbox: [10, 10, 30, 30],
+    });
+    const fp2 = det({
+      det_type: "fp",
+      gt_idx: null,
+      pred_idx: 1,
+      conf: 0.85,
+      bbox: [50, 50, 70, 70],
+    });
+    const preds: Annotation[] = [
+      { subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
+      { subject: "subject_a", bbox: [50, 50, 70, 70], attributes: {}, score: 0.85 },
+    ];
+    matchesSpy.mockResolvedValue(matchesRes([fp1, fp2], { preds }));
+
+    let resolveFirst!: (v: unknown) => void;
+    const firstResponse = new Promise((r) => {
+      resolveFirst = r;
+    });
+    const actionSpy = vi
+      .spyOn(api.review, "action")
+      .mockImplementationOnce(() => firstResponse as ReturnType<typeof api.review.action>)
+      .mockResolvedValueOnce({
+        status: "ok",
+        image_status: "completed",
+        annotation_status: "partial",
+        matches: matchesRes(
+          [
+            { ...fp1, reviewed: true, reviewed_action: "accepted" },
+            { ...fp2, reviewed: true, reviewed_action: "accepted" },
+          ],
+          { preds },
+        ),
+      });
+
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("✓ Confirm 2 admitted")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("✓ Confirm 2 admitted"));
+
+    await waitFor(() => expect(actionSpy).toHaveBeenCalledTimes(1));
+    expect(actionSpy.mock.calls[0][0]).toMatchObject({
+      pred_idx: 0,
+      det_type: "fp",
+      rule_admitted: true,
+    });
+    await waitFor(() => expect(screen.getByText(/Confirming 0 of 2/)).toBeInTheDocument());
+
+    resolveFirst({
+      status: "ok",
+      image_status: "started",
+      annotation_status: "partial",
+      matches: matchesRes([{ ...fp1, reviewed: true, reviewed_action: "accepted" }, fp2], {
+        preds,
+      }),
+    });
+    await waitFor(() => expect(actionSpy).toHaveBeenCalledTimes(2));
+    expect(actionSpy.mock.calls[1][0]).toMatchObject({
+      pred_idx: 1,
+      det_type: "fp",
+      rule_admitted: true,
+    });
+
+    await waitFor(() =>
+      expect(useStore.getState().toasts.map((t) => t.message)).toContainEqual(
+        expect.stringContaining("Confirmed 2 admitted"),
+      ),
+    );
+    expect(useStore.getState().review.matches!.detections.every((d) => d.reviewed)).toBe(true);
   });
 });
 

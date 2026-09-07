@@ -320,6 +320,7 @@ describe("labelSerde points", () => {
         created_at: null,
         accepted_by: null,
         accepted_at: null,
+        accepted_by_rule: null,
         authorship: null,
       },
     ]);
