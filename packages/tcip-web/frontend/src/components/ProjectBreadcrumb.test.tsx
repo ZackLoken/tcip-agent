@@ -77,7 +77,6 @@ beforeEach(() => {
     active_path: null,
     projects: [summary("alpha"), summary("beta")],
     pending_removal: [],
-    open_project_names: { marker: null, platform_root: null, canvas_binding: null },
     removal_startup_outcomes: [],
   });
   openOn("alpha");
@@ -208,7 +207,6 @@ describe("switching date", () => {
       active_path: null,
       projects: [{ ...summary("alpha"), dates: ["2026-01-01", "2026-02-02"] }],
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     render(<ProjectBreadcrumb />);

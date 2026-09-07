@@ -85,7 +85,9 @@ def _subjects_by_date(project_dir: Path, dates: list[str]) -> tuple[dict[str, li
     return _dataset_subjects_by_date(project_dir, dates)
 
 
-def _summarize(project_dir: Path, active_name: str | None) -> ProjectSummary:
+def _summarize(
+    project_dir: Path, active_name: str | None, open_state: project_removal.OpenProjectState,
+) -> ProjectSummary:
     st = project_dir.stat()
     images_dir = dataset_layout.image_root(project_dir)
     image_count = 0
@@ -111,32 +113,8 @@ def _summarize(project_dir: Path, active_name: str | None) -> ProjectSummary:
         site=site["site"],
         site_problem=site["site_problem"],
         label_problem=label_problem,
-        removal_refusal=project_removal.identity_conflict(project_dir),
+        removal_refusal=project_removal.identity_conflict(project_dir, open_state),
     )
-
-
-def _open_project_names() -> dict:
-    """The three spellings the removal door compares a target against: the marker's raw name
-    (whether or not it is adoptable), this backend's own platform root's name, and the GUI's
-    canvas-open binding's project name. An illegible binding is told apart from none through
-    ``canvas_binding_problem``, beside a ``null`` ``canvas_binding``."""
-    from tcip_mcp.project_paths import root_binding
-    from tcip_mcp.web_client import GuiBindingUnreadable, read_canvas_binding
-
-    binding = root_binding()
-    result: dict = {
-        "marker": workspace.read_active_project(),
-        "platform_root": (
-            workspace.workspace_project_name(binding.root) if binding is not None else None
-        ),
-    }
-    try:
-        canvas = read_canvas_binding()
-        result["canvas_binding"] = canvas.get("project_name") if canvas else None
-    except GuiBindingUnreadable as exc:
-        result["canvas_binding"] = None
-        result["canvas_binding_problem"] = str(exc)
-    return result
 
 
 @router.get("")
@@ -152,10 +130,9 @@ def list_projects() -> dict:
     (:func:`tcip_mcp.project_paths.root_binding`, populated once the app has served its first
     request or repinned via ``activate_project``, never merely imported): the backend's own
     platform-state root, so the GUI can show it disagreeing with ``active``/``active_path`` in
-    the window before a repin lands. ``open_project_names`` names the three spellings the
-    removal door compares a request against (see :func:`_open_project_names`).
-    ``removal_startup_outcomes`` carries the last ``complete_pending_removals`` run's own
-    outcomes (:func:`tcip_mcp.project_removal.startup_outcomes`).
+    the window before a repin lands. ``removal_startup_outcomes`` carries the last
+    ``complete_pending_removals`` run's own outcomes
+    (:func:`tcip_mcp.project_removal.startup_outcomes`).
 
     ``job_registry_startup_refusals`` names every job-registry rehydrate this process has
     refused (an unconformed document, :func:`tcip_web.jobstore.startup_refusals`), each error
@@ -169,6 +146,7 @@ def list_projects() -> dict:
     found = workspace.active_project_if_present()
     active = found[0] if found else None
     active_path = str(found[1]) if found else None
+    open_state = project_removal.read_open_project_state()
     projects: list[ProjectSummary] = []
     pending_removal: list[dict] = []
     for child in root.iterdir():
@@ -184,7 +162,7 @@ def list_projects() -> dict:
             })
             continue
         try:
-            projects.append(_summarize(child, active))
+            projects.append(_summarize(child, active, open_state))
         except OSError:
             # A project deleted/renamed mid-listing must not 500 the whole list.
             continue
@@ -196,7 +174,6 @@ def list_projects() -> dict:
         "projects": [p.model_dump() for p in projects],
         "job_registry_startup_refusals": jobstore.startup_refusals(),
         "pending_removal": pending_removal,
-        "open_project_names": _open_project_names(),
         "removal_startup_outcomes": project_removal.startup_outcomes(),
     }
     binding = root_binding()

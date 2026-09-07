@@ -165,15 +165,6 @@ export interface PendingRemovalEntry {
   holding_dir: string;
 }
 
-/** The three spellings the removal door compares a target against, each a workspace project
- *  name or null; an illegible canvas binding carries its own message instead of a name. */
-export interface OpenProjectNames {
-  marker: string | null;
-  platform_root: string | null;
-  canvas_binding: string | null;
-  canvas_binding_problem?: string;
-}
-
 /** One outcome of the last `complete_pending_removals` run this backend reported at startup. */
 export interface RemovalOutcome {
   name: string;
@@ -195,7 +186,6 @@ export const api = {
         active_path: string | null;
         projects: ProjectSummary[];
         pending_removal: PendingRemovalEntry[];
-        open_project_names: OpenProjectNames;
         removal_startup_outcomes: RemovalOutcome[];
       }>(ROUTES.getProjects),
     setActive: (name: string) =>
