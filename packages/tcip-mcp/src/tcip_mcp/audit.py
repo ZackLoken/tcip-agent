@@ -193,8 +193,9 @@ def _write_entry(entry: dict[str, Any], scope: str | Path | None = None) -> None
     What :func:`record_event` writes through, for the emitters that are not MCP tools. The GUI's
     mutation routes all reach :func:`record_event_or_raise` instead, so a lost line there raises
     rather than staying silent: most through each route's own helper via
-    ``routes/audit_gap.record_committed``, ``routes/coverage.py``'s two routes through their own
-    ``_audit_or_answer_500`` answering a marked 500, and the two confirmation routes in
+    ``routes/audit_gap.record_committed``, ``routes/coverage.py``'s three routes (grid zoom,
+    coverage, completeness) through their own ``_audit_or_answer_500`` answering a marked 500,
+    and the two confirmation routes in
     ``routes/results.py`` calling it inline and downgrading a failed append to an
     ``audit_warning`` on an otherwise ordinary 200. Its remaining callers, named by function
     rather than by line (a docstring

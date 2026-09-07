@@ -179,10 +179,10 @@ def _require_completeness_subject(subject: Optional[str]) -> str:
 def _audit_or_answer_500(tool: str, arguments: dict, root: str) -> None:
     """Emit one audit line through the raising emitter (``record_event_or_raise``), after a
     write has already committed, and turn a failed append into the marked 500
-    (``AUDIT_ENTRY_NOT_WRITTEN``) both ``post_coverage`` and ``post_completeness`` answer with:
-    the write landed, its line did not, and a retry of the same payload recovers neither. The
-    one place either route appends its audit line, so the two can never drift on how a failed
-    append is reported."""
+    (``AUDIT_ENTRY_NOT_WRITTEN``) that ``post_grid_zoom``, ``post_coverage`` and
+    ``post_completeness`` all answer with: the write landed, its line did not, and a retry of
+    the same payload recovers neither. The one place any of the three appends its audit line,
+    so they can never drift on how a failed append is reported."""
     from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
 
     try:
