@@ -177,6 +177,195 @@ def test_ws_rejects_cross_site_origin(client):
             pass
 
 
+# ── the terminate/restart survivor branch (unit-level: no real process needed) ──
+
+
+class _StubPty:
+    """Stands in for a real process whose termination outcome the test controls, so the
+    survivor branch is reachable without racing an actual OS process."""
+
+    def __init__(self, *, survives: bool) -> None:
+        self._alive = True
+        self._survives = survives
+        self.terminate_calls = 0
+
+    def isalive(self) -> bool:
+        return self._alive
+
+    def terminate(self) -> None:
+        self.terminate_calls += 1
+        if not self._survives:
+            self._alive = False
+
+
+def test_terminate_reports_a_survivor_and_restores_the_pty() -> None:
+    from tcip_web.routes.terminal import TerminalSession
+
+    session = TerminalSession("term_survivor")
+    session._pty = _StubPty(survives=True)
+
+    assert session.terminate() is False
+    assert session.alive() is True
+
+
+def test_terminate_reports_a_clean_stop() -> None:
+    from tcip_web.routes.terminal import TerminalSession
+
+    session = TerminalSession("term_clean")
+    session._pty = _StubPty(survives=False)
+
+    assert session.terminate() is True
+    assert session.alive() is False
+
+
+def test_restart_on_a_survivor_answers_an_error_without_calling_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A survivor of ``terminate()`` must never reach ``start()``: that call would find
+    ``self._pty`` alive again and report success with nothing actually spawned."""
+    from tcip_web.routes.terminal import TerminalSession
+
+    session = TerminalSession("term_restart_survivor")
+    session._pty = _StubPty(survives=True)
+
+    def _fail_if_called(rows: int, cols: int) -> None:
+        raise AssertionError("start() must not run on a survivor")
+
+    monkeypatch.setattr(session, "start", _fail_if_called)
+    err = session.restart(24, 80)
+    assert err is not None
+    assert "could not be stopped" in err
+    assert session.alive() is True
+
+
+def test_restart_on_a_died_cleanly_process_calls_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tcip_web.routes.terminal import TerminalSession
+
+    session = TerminalSession("term_restart_clean")
+    session._pty = _StubPty(survives=False)
+    calls = {"n": 0}
+
+    def _record(rows: int, cols: int) -> None:
+        calls["n"] += 1
+        return None
+
+    monkeypatch.setattr(session, "start", _record)
+    err = session.restart(24, 80)
+    assert err is None
+    assert calls["n"] == 1
+
+
+def test_shutdown_all_logs_a_survivor(monkeypatch: pytest.MonkeyPatch, caplog) -> None:
+    from tcip_web.routes import terminal as terminal_routes
+
+    session = terminal_routes.TerminalSession("term_shutdown_survivor")
+    session._pty = _StubPty(survives=True)
+    terminal_routes._SESSIONS[session.id] = session
+    try:
+        with caplog.at_level("WARNING"):
+            terminal_routes.shutdown_all()
+        assert any("survived" in r.message for r in caplog.records)
+    finally:
+        terminal_routes._SESSIONS.pop(session.id, None)
+
+
+def _wire_stub_spawn(monkeypatch: pytest.MonkeyPatch, stub: "_StubPty") -> None:
+    from tcip_web import terminal as pty_host
+
+    monkeypatch.setattr(pty_host, "spawn_pty", lambda *a, **kw: stub)
+    monkeypatch.setattr(pty_host, "start_reader", lambda *a, **kw: None)
+
+
+def _lenient_client() -> TestClient:
+    """A baseline run's ``start()`` has no ``try/except`` around ``_record_start`` at all, so a
+    forced raise there reaches the ASGI layer uncaught; ``raise_server_exceptions=False`` turns
+    that into a real (failing) response instead of an error the test can't assert on."""
+    return TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
+
+
+def test_create_session_registers_a_survivor_and_answers_503(
+    client, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_record_start``'s audit line fails after the process spawned; the spawned process
+    survives its own termination attempt, so the session must stay reachable rather than
+    orphaning a live process no later request can attach to."""
+    from tcip_web.routes import terminal as terminal_routes
+
+    stub = _StubPty(survives=True)
+    _wire_stub_spawn(monkeypatch, stub)
+
+    from tcip_mcp.audit import AuditEntryNotWritten
+
+    def _refuse_record_start(session_id: str, launched: dict) -> None:
+        raise AuditEntryNotWritten("agent_terminal_started", RuntimeError("audit log unwritable"))
+
+    monkeypatch.setattr(terminal_routes, "_record_start", _refuse_record_start)
+
+    resp = _lenient_client().post("/api/terminal/sessions", json={})
+    assert resp.status_code == 503
+    assert "stays attached" in resp.json()["detail"]
+    assert len(terminal_routes._SESSIONS) == 1
+    (session,) = terminal_routes._SESSIONS.values()
+    assert session.alive() is True
+
+
+def test_restart_session_answers_503_on_a_survivor_with_no_new_spawn(
+    client, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tcip_web.routes import terminal as terminal_routes
+
+    healthy_stub = _StubPty(survives=False)
+    _wire_stub_spawn(monkeypatch, healthy_stub)
+    sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
+    session = terminal_routes._SESSIONS[sid]
+
+    survivor_stub = _StubPty(survives=True)
+    monkeypatch.setattr(session, "_pty", survivor_stub)
+
+    def _refuse_record_start(session_id: str, launched: dict) -> None:
+        from tcip_mcp.audit import AuditEntryNotWritten
+        raise AuditEntryNotWritten(
+            "agent_terminal_started", RuntimeError("audit log unwritable"))
+
+    monkeypatch.setattr(terminal_routes, "_record_start", _refuse_record_start)
+
+    resp = _lenient_client().post(f"/api/terminal/sessions/{sid}/restart", json={})
+    assert resp.status_code == 503
+    assert "stays attached" in resp.json()["detail"]
+    assert session._pty is survivor_stub  # no new process spawned over it
+
+
+def test_restart_session_answers_503_after_the_process_dies_cleanly(
+    client, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The died-cleanly path reaches ``start`` (unlike the survivor path, which short-circuits
+    before it); the relaunch's own audit line then fails, and a cleanly terminated relaunch
+    carries none of the survivor wording. GUARDS: today this answers 200."""
+    from tcip_web.routes import terminal as terminal_routes
+
+    healthy_stub = _StubPty(survives=False)
+    _wire_stub_spawn(monkeypatch, healthy_stub)
+    sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
+    session = terminal_routes._SESSIONS[sid]
+
+    died_stub = _StubPty(survives=False)
+    monkeypatch.setattr(session, "_pty", died_stub)
+
+    relaunch_stub = _StubPty(survives=False)
+    _wire_stub_spawn(monkeypatch, relaunch_stub)
+
+    def _refuse_record_start(session_id: str, launched: dict) -> None:
+        from tcip_mcp.audit import AuditEntryNotWritten
+        raise AuditEntryNotWritten(
+            "agent_terminal_started", RuntimeError("audit log unwritable"))
+
+    monkeypatch.setattr(terminal_routes, "_record_start", _refuse_record_start)
+
+    resp = _lenient_client().post(f"/api/terminal/sessions/{sid}/restart", json={})
+    assert resp.status_code == 503
+    assert "stays attached" not in resp.json()["detail"]
+
+
 def test_create_503_when_unavailable(client, monkeypatch):
     monkeypatch.delenv("TCIP_TERMINAL_CMD", raising=False)
     monkeypatch.setenv("TCIP_TERMINAL_CLI", "definitely-not-a-real-cli-xyz")

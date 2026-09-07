@@ -768,6 +768,12 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
     registry = register_plant_registry_for([plant_csv])
     store.open_project(tmp_path.resolve())
 
+    # A real 200 body to compare the refused-append pass's own ``committed`` against, taken
+    # before the audit log is locked below.
+    healthy = build_plant_mapping(
+        name="untouched", images_root=str(images_root), plant_registry=registry)
+    assert "error" not in healthy, healthy
+
     audit_path = tmp_path / ".tcip" / "audit.jsonl"
     audit_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -788,17 +794,100 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
         })
         assert resp.status_code == 409, resp.text
         detail = resp.json()["detail"]
-        assert detail["error"] == "audit_entry_not_written"
-        assert "plant_mapping_built" in detail["message"]
+        assert isinstance(detail, dict), detail
+        assert detail.get("error") == "audit_entry_not_written"
+        assert "plant_mapping_built" in (detail.get("message") or "")
         # The record write itself lands before the receipt append is attempted, so the
         # read-back confirms it and the 409 carries the same body a 200 would.
-        committed = detail["committed"]
+        committed = detail.get("committed")
+        assert isinstance(committed, dict), committed
         assert set(committed) == {"mapping", "summary", "unreadable", "nn_tolerance_m",
                                   "max_match_distance_m"}
         assert committed["nn_tolerance_m"]["source"] == "grid_pitch"
+        assert {k: v for k, v in committed.items() if k not in ("mapping", "summary")} == {
+            k: v for k, v in healthy.items()
+            if k in committed and k not in ("mapping", "summary")
+        }
     finally:
         release.set()
         holder.join(30)
+
+
+def _cite_mapping(tmp_path: Path, name: str) -> None:
+    """A real, schema-valid ``delivery_events`` record citing the mapping under ``name``, through
+    the platform's own writer rather than a hand-filed store record: no bucket evidence and no
+    trait is needed for a citation, only the mapping's own disclosure."""
+    from tcip_mcp.pipelines.postprocessing import plant_mapping as pm_module
+    from tcip_mcp.pipelines.resolution import record_delivery_binding_event
+
+    build = pm_module.load_mapping(tmp_path, name)
+    assert build is not None
+    disclosure = build.delivery_disclosure(
+        {"captures_unverified": [], "plant_csvs_unverified": []}, build.dates)
+    record_delivery_binding_event(
+        "test_delivery_door", None, None, {},
+        measurement_documents=[], scale_document=None, acknowledgement=None,
+        plant_mapping=disclosure, project_root=tmp_path,
+    )
+
+
+def test_the_web_build_route_answers_409_null_when_the_supersede_archive_receipt_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rebuild that supersedes a cited mapping archives the old record first, then appends its
+    own receipt for the archive, then writes the new record. When that archive receipt is the
+    call refused, the new record is never written (the old one under ``name`` stays exactly as
+    it was), so the route cannot say what committed: ``committed`` is null, and the message
+    names the archived copy on disk and ``supersede=True`` as the recovery."""
+    from fastapi.testclient import TestClient
+    from tcip_web.app import app
+    from tcip_web.state import store
+
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, _preds_by_date = _write_scene(dataset_root)
+    registry = register_plant_registry_for([plant_csv])
+    store.open_project(tmp_path.resolve())
+
+    client = TestClient(app, base_url="http://127.0.0.1")
+    first = client.post("/api/results/plant_mapping/build", json={
+        "name": "valley", "images_root": str(images_root), "plant_registry": registry,
+    })
+    assert first.status_code == 200, first.text
+    old_record = ts.read(plant_mapping.plant_mapping_key(tmp_path, "valley"))
+
+    # A delivery event citing this build, so the rebuild below is the supersede path: an
+    # uncited rebuild never reaches the archive-receipt append at all.
+    _cite_mapping(tmp_path, "valley")
+
+    import tcip_mcp.audit as audit_module
+    real_append = audit_module.append
+    calls = {"n": 0}
+
+    def _refuse_first(*args: object, **kwargs: object) -> object:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("audit log unwritable")
+        return real_append(*args, **kwargs)
+
+    monkeypatch.setattr(audit_module, "append", _refuse_first)
+    resp = client.post("/api/results/plant_mapping/build", json={
+        "name": "valley", "images_root": str(images_root), "plant_registry": registry,
+        "supersede": True,
+    })
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["error"] == "audit_entry_not_written"
+    assert detail["committed"] is None
+    assert "supersede=True" in detail["message"]
+    assert "archived" in detail["message"]
+
+    # The old record under "valley" is untouched: the new record write never ran.
+    assert ts.read(plant_mapping.plant_mapping_key(tmp_path, "valley")) == old_record
+    archived_digest = plant_mapping.record_digest(old_record)
+    archived = ts.read(
+        plant_mapping.plant_mapping_key(tmp_path, f"valley@{archived_digest[:12]}"))
+    assert archived is not None
 
 
 # ── rails 9, 10: the full round trip through the platform's own producers ───────────────

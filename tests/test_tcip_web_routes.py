@@ -925,7 +925,8 @@ def test_annotate_save_with_no_dataset_root_audits_the_platform_log(
     assert resp.status_code == 200
 
     entries = _audit_entries(tmp_path)
-    entry = next(e for e in entries if e.get("tool") == "gui_save_labels")
+    entry = next((e for e in entries if e.get("tool") == "gui_save_labels"), None)
+    assert entry is not None, entries
     assert "scope" not in entry
 
 
@@ -940,13 +941,20 @@ def _refuse_append(*args: object, **kwargs: object) -> None:
 def test_annotate_save_answers_409_with_the_committed_body_on_a_lost_audit_line(
     client: TestClient, dataset_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The label write already committed; a lost audit line answers the gap, not the 200 body."""
+    """The label write already committed; a lost audit line answers the gap, not the 200 body.
+    An identical resave with no ``base_mtime`` check is idempotent but for its own token, so the
+    refused-append pass's ``committed`` is compared field by field (``base_mtime`` excepted)
+    against the first pass's real 200 body."""
     import tcip_mcp.audit as audit_module
 
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = tmp_path / "labels" / "IMG_0000.json"
-    monkeypatch.setattr(audit_module, "append", _refuse_append)
 
+    healthy = _save_box(client, img_path, label_path)
+    assert healthy.status_code == 200, healthy.text
+    healthy_body = healthy.json()
+
+    monkeypatch.setattr(audit_module, "append", _refuse_append)
     resp = _save_box(client, img_path, label_path)
     assert resp.status_code == 409
     detail = resp.json()["detail"]
@@ -955,6 +963,9 @@ def test_annotate_save_answers_409_with_the_committed_body_on_a_lost_audit_line(
     assert committed["status"] == "ok"
     assert committed["image_path"] == str(img_path)
     assert committed["n_annotations"] == 1
+    assert {k: v for k, v in committed.items() if k != "base_mtime"} == {
+        k: v for k, v in healthy_body.items() if k != "base_mtime"
+    }
     anns = read_annotations(str(label_path))
     assert len(anns) == 1
 
@@ -1477,7 +1488,10 @@ def test_review_action_answers_409_with_the_committed_body_on_a_lost_audit_line(
     client: TestClient, dataset_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The verdict and any GT write already committed; a client that adopts ``committed`` reaches
-    the state a 200 would have, never re-rejecting a detection whose GT this call already wrote."""
+    the state a 200 would have, never re-rejecting a detection whose GT this call already wrote.
+    An accept-TP verdict leaves GT untouched, so replaying the identical call is idempotent and
+    its second, refused-append pass is compared field by field against the first call's real
+    200 body."""
     import tcip_mcp.audit as audit_module
 
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
@@ -1485,29 +1499,57 @@ def test_review_action_answers_409_with_the_committed_body_on_a_lost_audit_line(
     _write_gt(gt, [(40, 32, 60, 48)])
     pred = tmp_path / "pred.json"
     _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    payload = {
+        "dataset_root": str(dataset_root),
+        "image_name": "IMG_0000.JPG",
+        "image_path": str(img_path),
+        "gt_path": str(gt),
+        "pred_path": str(pred),
+        "det_type": "tp", "class_name": "bud", "conf": 0.9, "iou": 0.95,
+        "gt_idx": 0, "pred_idx": 0,
+        "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
+    }
+
+    healthy = client.post("/api/review/action", json=payload)
+    assert healthy.status_code == 200, healthy.text
+    healthy_body = healthy.json()
 
     monkeypatch.setattr(audit_module, "append", _refuse_append)
-    resp = client.post(
-        "/api/review/action",
-        json={
-            "dataset_root": str(dataset_root),
-            "image_name": "IMG_0000.JPG",
-            "image_path": str(img_path),
-            "gt_path": str(gt),
-            "pred_path": str(pred),
-            "det_type": "tp", "class_name": "bud", "conf": 0.9, "iou": 0.95,
-            "gt_idx": 0, "pred_idx": 0,
-            "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
-        },
-    )
+    resp = client.post("/api/review/action", json=payload)
     assert resp.status_code == 409
     detail = resp.json()["detail"]
     assert detail["error"] == "audit_entry_not_written"
     committed = detail["committed"]
     assert committed["status"] == "ok"
     assert committed["matches"]["n_tp"] == 1
+    assert committed == healthy_body
     state = _shard_state(dataset_root / ".tcip" / "state", "IMG_0000.JPG")
     assert state["detections"][0]["action"] == "accepted"
+
+
+def test_review_action_requires_dataset_root(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    """No read or write happens before the refusal: an empty ``dataset_root`` is named rather
+    than resolving to the process cwd."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    pred = tmp_path / "pred.json"
+    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    resp = client.post(
+        "/api/review/action",
+        json={
+            "dataset_root": "",
+            "image_name": "IMG_0000.JPG",
+            "image_path": str(img_path),
+            "gt_path": None,
+            "pred_path": str(pred),
+            "det_type": "tp", "class_name": "bud", "conf": 0.9, "iou": 0.95,
+            "gt_idx": 0, "pred_idx": 0,
+            "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
+        },
+    )
+    assert resp.status_code == 400
+    assert "dataset root" in resp.json()["detail"]
 
 
 def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> None:
@@ -1531,25 +1573,41 @@ def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> 
 def test_review_mark_complete_answers_409_with_the_committed_body_on_a_lost_audit_line(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A repeat mark_complete on an already-completed image is idempotent, so the refused-append
+    pass's ``committed`` is compared field by field against the first pass's real 200 body."""
     import tcip_mcp.audit as audit_module
 
     dataset_root = tmp_path / "data"
-    monkeypatch.setattr(audit_module, "append", _refuse_append)
+    payload = {"dataset_root": str(dataset_root), "image_name": "IMG_9.JPG"}
 
-    resp = client.post(
-        "/api/review/mark_complete",
-        json={"dataset_root": str(dataset_root), "image_name": "IMG_9.JPG"},
-    )
+    healthy = client.post("/api/review/mark_complete", json=payload)
+    assert healthy.status_code == 200, healthy.text
+    healthy_body = healthy.json()
+
+    monkeypatch.setattr(audit_module, "append", _refuse_append)
+    resp = client.post("/api/review/mark_complete", json=payload)
     assert resp.status_code == 409
     detail = resp.json()["detail"]
     assert detail["error"] == "audit_entry_not_written"
     assert detail["committed"]["image_status"] == "completed"
+    assert detail["committed"] == healthy_body
 
     status = client.get(
         "/api/review/image_statuses",
         params={"dataset_root": str(dataset_root)},
     )
     assert status.json()["statuses"]["IMG_9.JPG"] == "completed"
+
+
+def test_review_mark_complete_requires_dataset_root(client: TestClient) -> None:
+    """No read or write happens before the refusal: an empty ``dataset_root`` is named rather
+    than resolving to the process cwd."""
+    resp = client.post(
+        "/api/review/mark_complete",
+        json={"dataset_root": "", "image_name": "IMG_9.JPG"},
+    )
+    assert resp.status_code == 400
+    assert "dataset root" in resp.json()["detail"]
 
 
 def test_review_mark_complete_refuses_an_unreadable_gt(

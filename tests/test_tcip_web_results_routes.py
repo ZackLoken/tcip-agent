@@ -998,10 +998,11 @@ def test_export_csv_answers_409_when_the_delivery_event_audit_line_cannot_be_app
                        json={**body, "payload": "milestones", "filename": "unaudited.csv"})
     assert resp.status_code == 409
     detail = resp.json()["detail"]
+    assert isinstance(detail, dict), detail
     saved = tmp_path / "results_export" / "unaudited.csv"
-    assert detail["error"] == "audit_entry_not_written"
-    assert detail["committed"] == {"saved_path": str(saved), "delivery_event_recorded": False}
-    assert "could not be written" in detail["message"]
+    assert detail.get("error") == "audit_entry_not_written"
+    assert detail.get("committed") == {"saved_path": str(saved), "delivery_event_recorded": False}
+    assert "could not be written" in (detail.get("message") or "")
     assert saved.exists()
 
 
@@ -1154,10 +1155,11 @@ def test_export_count_csv_answers_409_when_the_delivery_event_audit_line_cannot_
     })
     assert resp.status_code == 409
     detail = resp.json()["detail"]
+    assert isinstance(detail, dict), detail
     saved = tmp_path / "results_export" / "unaudited_counts.csv"
-    assert detail["error"] == "audit_entry_not_written"
-    assert detail["committed"] == {"saved_path": str(saved), "delivery_event_recorded": False}
-    assert "could not be written" in detail["message"]
+    assert detail.get("error") == "audit_entry_not_written"
+    assert detail.get("committed") == {"saved_path": str(saved), "delivery_event_recorded": False}
+    assert "could not be written" in (detail.get("message") or "")
     assert saved.exists()
 
 

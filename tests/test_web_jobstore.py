@@ -251,7 +251,8 @@ def test_inference_rehydrate_restores_audit_warning(tmp_path, monkeypatch):
     try:
         inference.rehydrate_for_current_root()
         jobs = {j["job_id"]: j for j in inference.list_jobs()["jobs"]}
-        assert jobs["j-audit-warn"]["audit_warning"] == job.audit_warning
+        restored = jobs.get("j-audit-warn", {})
+        assert restored.get("audit_warning") == job.audit_warning
     finally:
         inference._registry.jobs.clear()
 
@@ -438,6 +439,7 @@ def test_inference_worker_sets_audit_warning_on_a_lost_audit_line(tmp_path, monk
     monkeypatch.chdir(tmp_path)
     from PIL import Image
 
+    from tcip_web.routes import inference
     from tcip_web.routes.inference import InferenceJob, _register, _worker
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -470,10 +472,128 @@ def test_inference_worker_sets_audit_warning_on_a_lost_audit_line(tmp_path, monk
     _register(job)
 
     _worker(job)
-    assert job.status == "completed"
-    assert job.audit_warning is not None
-    assert "gui_inference_run" in job.audit_warning
+    jobs = {j["job_id"]: j for j in inference.list_jobs()["jobs"]}
+    served = jobs.get("j-audit", {})
+    assert served.get("status") == "completed"
+    warning = served.get("audit_warning")
+    assert warning is not None
+    assert "gui_inference_run" in warning
     assert (output_dir / "img.json").exists()
+
+
+def test_inference_worker_healthy_run_serves_audit_warning_none(tmp_path, monkeypatch):
+    """Coverage: a run whose own audit line lands carries no gap on the served body."""
+    pytest.importorskip("fastapi")
+    monkeypatch.chdir(tmp_path)
+    from PIL import Image
+
+    from tcip_web.routes import inference
+    from tcip_web.routes.inference import InferenceJob, _register, _worker
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    Image.new("RGB", (16, 16)).save(images_dir / "img.jpg")
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+
+    class FakePredictor:
+        def __init__(self, checkpoint_path=None, **kw):
+            pass
+
+        def predict_batch(self, paths, **kw):
+            return [{"boxes": [], "scores": [], "labels": [], "width": 16, "height": 16}]
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
+
+    output_dir = tmp_path / "ds" / "predictions" / "model" / "2026-01-01"
+    job = InferenceJob(job_id="j-healthy", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+                       output_dir=str(output_dir), tile=False, conf=0.25, iou=0.7,
+                       slice_hw=(640, 640), overlap=0.2)
+    _register(job)
+
+    _worker(job)
+    jobs = {j["job_id"]: j for j in inference.list_jobs()["jobs"]}
+    served = jobs.get("j-healthy", {})
+    assert served.get("status") == "completed"
+    assert served.get("audit_warning") is None
+
+
+def test_inference_stream_final_frame_never_precedes_the_audit_attempt(tmp_path, monkeypatch):
+    """The worker's terminal status must not become visible to the stream before the audit
+    attempt for this run resolves: a frame that read the status while the append was still in
+    flight would carry a terminal status with no ``audit_warning`` yet, and the stream closes on
+    any terminal status, so that frame would be the last one the client ever sees."""
+    pytest.importorskip("fastapi")
+    monkeypatch.chdir(tmp_path)
+    import threading
+
+    from fastapi.testclient import TestClient
+    from PIL import Image
+
+    from tcip_web.app import app
+    from tcip_web.routes.inference import InferenceJob, _register, _worker
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    Image.new("RGB", (16, 16)).save(images_dir / "img.jpg")
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+
+    class FakePredictor:
+        def __init__(self, checkpoint_path=None, **kw):
+            pass
+
+        def predict_batch(self, paths, **kw):
+            return [{"boxes": [], "scores": [], "labels": [], "width": 16, "height": 16}]
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
+
+    import tcip_mcp.audit as audit_module
+
+    about_to_append = threading.Event()
+    release_append = threading.Event()
+
+    def _blocking_refusal(*args: object, **kwargs: object) -> None:
+        about_to_append.set()
+        release_append.wait(10)
+        raise RuntimeError("audit log unwritable")
+
+    monkeypatch.setattr(audit_module, "append", _blocking_refusal)
+
+    output_dir = tmp_path / "ds" / "predictions" / "model" / "2026-01-01"
+    job = InferenceJob(job_id="j-stream-order", checkpoint_path=str(ckpt),
+                       images_dir=str(images_dir), output_dir=str(output_dir), tile=False,
+                       conf=0.25, iou=0.7, slice_hw=(640, 640), overlap=0.2)
+    _register(job)
+
+    worker_thread = threading.Thread(target=_worker, args=(job,))
+    worker_thread.start()
+    try:
+        assert about_to_append.wait(10)
+        assert job.status == "running"
+
+        client = TestClient(app, base_url="http://127.0.0.1")
+        with client.websocket_connect(
+            f"ws://127.0.0.1/api/inference/jobs/{job.job_id}/stream"
+        ) as ws:
+            first = ws.receive_json()
+            assert first["type"] == "progress"
+            assert first["status"] == "running"
+            release_append.set()
+            frame = None
+            for _ in range(50):
+                frame = ws.receive_json()
+                if frame["type"] == "final":
+                    break
+                assert frame["status"] == "running"
+            assert frame is not None and frame["type"] == "final"
+            assert frame["audit_warning"] is not None
+            assert "gui_inference_run" in frame["audit_warning"]
+    finally:
+        release_append.set()
+        worker_thread.join(10)
 
 
 def test_inference_cancel_reaches_a_job_launched_under_a_previous_root(tmp_path, monkeypatch):
