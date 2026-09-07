@@ -41,6 +41,7 @@ function summary(name: string): ProjectSummary {
     site: "north orchard",
     site_problem: null,
     label_problem: null,
+    removal_refusal: null,
   };
 }
 

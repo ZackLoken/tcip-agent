@@ -28,6 +28,7 @@ function project(overrides: Partial<ProjectSummary> & { name: string }): Project
     site: "north orchard",
     site_problem: null,
     label_problem: null,
+    removal_refusal: null,
     ...overrides,
   };
 }

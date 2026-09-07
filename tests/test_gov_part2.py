@@ -140,6 +140,27 @@ def test_build_workspace_worksheet_ignores_non_project_dirs(tmp_path):
     assert "No projects with a `.tcip/` directory" in ws
 
 
+def test_build_workspace_worksheet_skips_a_pending_project(tmp_path):
+    import tcip_store as ts
+    from tcip_mcp import workspace
+
+    distill = _load_distill()
+    (tmp_path / "proj_open").mkdir()
+    _seed_report(tmp_path / "proj_open", "r", {"category": "unexpected_behavior", "detail": "x"})
+
+    (tmp_path / "proj_pending").mkdir()
+    _seed_report(tmp_path / "proj_pending", "r", {"category": "unexpected_behavior", "detail": "y"})
+    ts.replace(workspace.pending_removal_key(tmp_path / "proj_pending"), {
+        "requested_at": "20260304T120000Z", "requested_by": "user:tester",
+        "archive_path": "archive.zip", "holding_dir": "holding",
+        "external_roots": [], "dependent_projects": [],
+    }, expect=ts.Version.ABSENT)
+
+    ws = distill.build_workspace_worksheet(tmp_path)
+    assert "proj_open" in ws
+    assert "proj_pending" not in ws
+
+
 def test_workspace_mode_never_writes_anything(tmp_path):
     """A --workspace run gathers and writes nothing, the invariant this governance surface rests on.
 

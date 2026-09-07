@@ -220,7 +220,7 @@ def test_refuses_the_markers_own_project_then_admits_a_different_one(client, tmp
         json={"name": "sample_plot_open", "confirm_name": "sample_plot_open", "user": "t"},
     )
     assert resp.status_code == 409
-    assert "marker" in resp.json()["detail"]
+    assert "opens by default" in resp.json()["detail"]
 
     resp2 = client.post(
         "/api/projects/remove",
@@ -264,6 +264,127 @@ def test_refuses_the_canvas_open_binding_then_admits_a_different_project(client,
         json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
     )
     assert resp2.status_code == 200
+
+
+def test_external_roots_present_flag_is_false_for_a_moved_root(client, tmp_path):
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    external = _init(ws, "sample_plot_external")
+    _add_image(external)
+
+    reg = register_dataset(str(external), crop="black locust", project_root=str(target))
+    assert "error" not in reg, reg
+
+    preview_before = client.get("/api/projects/sample_plot_target/removal-preview").json()
+    entry_before = next(r for r in preview_before["external_roots"] if r["path"] == str(external))
+    assert entry_before["present"] is True
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_external", "confirm_name": "sample_plot_external", "user": "t"},
+    )
+    assert resp.status_code == 200
+    project_removal.complete_pending_removals(ws)
+    assert not external.exists()
+
+    preview_after = client.get("/api/projects/sample_plot_target/removal-preview").json()
+    entry_after = next(r for r in preview_after["external_roots"] if r["path"] == str(external))
+    assert entry_after["present"] is False
+
+
+def test_external_roots_unreadable_is_named_and_the_request_still_admitted(client, tmp_path):
+    from tests._record_damage_fixtures import damage_record
+
+    from tcip_mcp.tools.project_tools import dataset_registry_key, register_dataset
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    external = _init(ws, "sample_plot_external")
+    _add_image(external)
+    reg = register_dataset(str(external), crop="black locust", project_root=str(target))
+    assert "error" not in reg, reg
+
+    damage_record(dataset_registry_key(target), b"not json")
+
+    preview = client.get("/api/projects/sample_plot_target/removal-preview").json()
+    assert preview["external_roots"] == []
+    assert preview.get("external_roots_unreadable")
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 200
+
+
+def test_two_concurrent_requests_produce_one_archive_and_one_marker(client, tmp_path):
+    import threading
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+
+    responses: list = []
+
+    def _post() -> None:
+        responses.append(client.post(
+            "/api/projects/remove",
+            json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+        ))
+
+    threads = [threading.Thread(target=_post) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    statuses = sorted(r.status_code for r in responses)
+    assert statuses == [200, 409]
+    zips = list((ws / ".removed").glob("sample_plot_target-*.zip"))
+    assert len(zips) == 1
+
+
+def test_dependent_project_is_listed_and_never_refused(client, tmp_path):
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    dependent = _init(ws, "sample_plot_dependent")
+
+    reg = register_dataset(str(target), crop="black locust", project_root=str(dependent))
+    assert "error" not in reg, reg
+
+    preview = client.get("/api/projects/sample_plot_target/removal-preview").json()
+    assert preview["refusal"] is None
+    names = {d["project"] for d in preview["dependent_projects"]}
+    assert "sample_plot_dependent" in names
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 200
+    names2 = {d["project"] for d in resp.json()["dependent_projects"]}
+    assert "sample_plot_dependent" in names2
+
+
+def test_an_unreadable_sibling_registry_is_listed_as_such(client, tmp_path):
+    from tests._record_damage_fixtures import damage_record
+
+    from tcip_mcp.tools.project_tools import dataset_registry_key, register_dataset
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    sibling = _init(ws, "sample_plot_damaged")
+    reg = register_dataset(str(sibling), crop="black locust", project_root=str(sibling))
+    assert "error" not in reg, reg
+
+    damage_record(dataset_registry_key(sibling), b"not json")
+
+    preview = client.get("/api/projects/sample_plot_target/removal-preview").json()
+    entry = next(d for d in preview["dependent_projects"] if d["project"] == "sample_plot_damaged")
+    assert entry.get("unreadable") is not None
 
 
 def test_a_canvas_binding_with_no_project_name_is_read_as_no_binding(client, tmp_path):
@@ -349,6 +470,102 @@ def test_refuses_a_non_terminal_inference_job_then_admits_once_terminal(client, 
     finally:
         with _registry.lock:
             _registry.jobs.pop("j1", None)
+
+
+def test_refuses_a_non_terminal_tuning_job_then_admits_once_terminal(client, tmp_path):
+    from tcip_web.routes.tuning import HPOJob, _registry
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    job = HPOJob(sweep_id="sw1", status="running", platform_root=str(target))
+    _registry.register(job.sweep_id, job, job_root=job.platform_root)
+    try:
+        resp = client.post(
+            "/api/projects/remove",
+            json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+        )
+        assert resp.status_code == 409
+        assert "sw1" in resp.json()["detail"]
+
+        job.status = "completed"
+        resp2 = client.post(
+            "/api/projects/remove",
+            json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+        )
+        assert resp2.status_code == 200
+    finally:
+        with _registry.lock:
+            _registry.jobs.pop("sw1", None)
+
+
+def test_refuses_a_non_terminal_review_priority_queue_job_then_admits_once_terminal(client, tmp_path):
+    from tcip_web.routes.review import PriorityQueueJob, _pq_registry
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    job = PriorityQueueJob(
+        job_id="pq1", checkpoint_path="model.pt", images_dir="images/2026-03-04",
+        dataset_root=str(target), status="running", platform_root=str(target),
+    )
+    _pq_registry.register(job.job_id, job, job_root=job.platform_root)
+    try:
+        resp = client.post(
+            "/api/projects/remove",
+            json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+        )
+        assert resp.status_code == 409
+        assert "pq1" in resp.json()["detail"]
+
+        job.status = "completed"
+        resp2 = client.post(
+            "/api/projects/remove",
+            json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+        )
+        assert resp2.status_code == 200
+    finally:
+        with _pq_registry.lock:
+            _pq_registry.jobs.pop("pq1", None)
+
+
+def test_job_conflict_skips_a_rehydrated_job_with_an_empty_platform_root(client, tmp_path):
+    """A rehydrated ``HPOJob`` can carry an empty ``platform_root``; the scan must never compose
+    a sweep directory from it (``training_tools.sweep_dir`` on an empty root)."""
+    from tcip_web.routes.tuning import HPOJob, _registry
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    job = HPOJob(sweep_id="sw-empty", status="running", platform_root="")
+    with _registry.lock:
+        _registry.jobs["sw-empty"] = job
+    try:
+        resp = client.post(
+            "/api/projects/remove",
+            json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+        )
+        assert resp.status_code == 200
+    finally:
+        with _registry.lock:
+            _registry.jobs.pop("sw-empty", None)
+
+
+def test_refuses_a_case_variant_spelling_of_the_open_project(client, tmp_path):
+    """A case-insensitive filesystem resolves the marker's own project under a case-variant
+    spelling to the same directory; the door's samefile comparison catches it as the marker's
+    own project rather than a naive string compare admitting it."""
+    ws = tmp_path.parent
+    _seed(ws)
+    try:
+        same = os.path.samefile(ws / "SAMPLE_PLOT_OPEN", ws / "sample_plot_open")
+    except OSError:
+        pytest.skip("this filesystem does not fold case, nothing to prove here")
+    if not same:
+        pytest.skip("this filesystem does not fold case, nothing to prove here")
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "SAMPLE_PLOT_OPEN", "confirm_name": "SAMPLE_PLOT_OPEN", "user": "t"},
+    )
+    assert resp.status_code == 409
 
 
 def test_a_linked_project_is_refused_before_any_write(client, tmp_path):
@@ -441,6 +658,35 @@ def test_an_unwritten_route_line_answers_409_naming_the_marker_already_written(
     assert pending is not None
     target_lines = _audit_lines(target)
     assert target_lines[-1]["tool"] == "project_removal_requested"
+
+
+def test_select_dataset_refuses_a_pending_root_with_generation_unchanged(client, tmp_path):
+    from tcip_mcp.web_client import read_canvas_binding
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+
+    sel = client.post(
+        "/api/dataset/select",
+        json={"project_root": str(open_project), "dataset_root": str(open_project)},
+    )
+    assert sel.status_code == 200
+    before = read_canvas_binding()
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 200
+
+    sel2 = client.post(
+        "/api/dataset/select", json={"project_root": str(target), "dataset_root": str(target)},
+    )
+    assert sel2.status_code == 403
+    assert "pending removal" in sel2.json()["detail"]
+
+    after = read_canvas_binding()
+    assert after["generation"] == before["generation"]
 
 
 # ── the completion ────────────────────────────────────────────────────────────
