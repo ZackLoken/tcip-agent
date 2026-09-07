@@ -88,15 +88,29 @@ function launcherDescription(launchedBy: TrainingRunSummary["launched_by"]): str
   return `This run's record names its own launcher: ${launcher}.`;
 }
 
+/** How long ago a status record's own heartbeat instant was stamped, in whole minutes; null
+ * for a missing or unparseable instant so a caller shows nothing rather than a wrong age. No
+ * process id is persisted anywhere, so this is the one liveness signal a "running" row has. */
+function heartbeatAge(heartbeat: string | null | undefined): string | null {
+  if (typeof heartbeat !== "string") return null;
+  const then = Date.parse(heartbeat);
+  if (Number.isNaN(then)) return null;
+  const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
+  return mins < 1 ? "last heartbeat under a minute ago" : `last heartbeat ${mins} min ago`;
+}
+
 /** The row's own select control name: id, its experiment id when the two differ (exactly as the
- * visible row states it), status and the record's own launcher sentence, with the best value
- * and its metric appended exactly as the record carries them when both are present. */
+ * visible row states it), status, a running row's own heartbeat age, and the record's own
+ * launcher sentence, with the best value's metric appended exactly as the record carries them
+ * when present; the same order the visible row itself reads in. */
 function runRowLabel(run: TrainingRunSummary): string {
   const idPart =
     run.experiment_id && run.experiment_id !== run.run_id
       ? `${run.run_id} · ${run.experiment_id}`
       : run.run_id;
-  const base = `${idPart} ${run.status}, ${launcherSentence(run.launched_by)}`;
+  const age = run.status === "running" ? heartbeatAge(run.heartbeat) : null;
+  const statusPart = age ? `${run.status}, ${age}` : run.status;
+  const base = `${idPart} ${statusPart}, ${launcherSentence(run.launched_by)}`;
   if (run.best_metric === undefined || run.best_metric === null || !run.best_metric_name) {
     return base;
   }
@@ -692,6 +706,7 @@ export function TrainingTab() {
             const reason = unmarkableReason(r);
             const cancelling = pendingCancel.has(r.run_id);
             const cancelError = cancelErrors[r.run_id];
+            const heartbeatText = r.status === "running" ? heartbeatAge(r.heartbeat) : null;
             return (
               <li key={r.run_id}>
                 <div
@@ -718,6 +733,7 @@ export function TrainingTab() {
                     <div className="text-[10px] text-tcip-muted flex justify-between">
                       <span>
                         {r.status}
+                        {heartbeatText && `, ${heartbeatText}`}
                         <span title={launcherDescription(r.launched_by)}>
                           {` · ${launcherSentence(r.launched_by)}`}
                         </span>
@@ -756,6 +772,7 @@ export function TrainingTab() {
                       {TRAINING_CANCELLABLE.has(r.status) && (
                         <button
                           type="button"
+                          title="Reaches a live process only; a stale running row keeps this control until its heartbeat window lapses."
                           aria-label={`Cancel ${r.run_id}`}
                           aria-describedby={cancelError ? `cancel-error-${r.run_id}` : undefined}
                           disabled={cancelling}
