@@ -178,7 +178,15 @@ def test_child_is_gone_within_ten_seconds_of_a_normal_exit(tmp_path):
 def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypatch, tmp_path):
     """A regression guard for the guardian's grace staying under the manager's wait: without
     it, a stand-in that ignores SIGTERM can be orphaned by a race rather than a deterministic
-    failure.
+    failure. The cleanup covers three ways this test itself can fail: while the guardian is
+    still alive, its descendants are enumerated by pid and re-checked by create time (a pid
+    inside the stop's ten-second window can be reused) before any is signalled; once the
+    stand-in's own pid is known, captured the moment ``_standin_pid`` answers, it is
+    force-killed directly, covering a failure after ``stop_tensorboard`` has already reaped the
+    guardian and left the stand-in reparented with nothing watching it; and when the launch
+    itself answers with no ``pid`` (the guardian may already have spawned the stand-in inside
+    the startup grace before dying), the descendants are found through this test process's own
+    tree instead of the unknown guardian pid.
     """
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
@@ -190,32 +198,53 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypa
         ],
     )
 
-    guardian_pid = None
-    descendants: list[psutil.Process] = []
+    guardian_pid: int | None = None
+    standin_identity: tuple[int, float] | None = None
+    descendants: list[tuple[int, float]] = []
     try:
         info = tb.launch_tensorboard(str(tmp_path), key="stubborn-run")
-        guardian_pid = info["pid"]
+        guardian_pid = info.get("pid")
+        if guardian_pid is None:
+            raise RuntimeError(f"launch_tensorboard did not return a pid: {info}")
         standin_num = _standin_pid(guardian_pid, guardian_expected=True)
         standin = psutil.Process(standin_num)
-        standin_pid, standin_create_time = standin.pid, standin.create_time()
+        standin_identity = (standin.pid, standin.create_time())
         result = tb.stop_tensorboard(key="stubborn-run")
         assert result["status"] == "stopped"
-        assert not _child_alive(standin_pid, standin_create_time)
+        assert not _child_alive(*standin_identity)
     finally:
-        # captured before either cleanup below might end the guardian, so a partway failure
-        # above (inside _standin_pid's own wait included) still leaves every descendant found.
+        # captured before the cleanup below might end the guardian; this process's own tree
+        # stands in when the launch never named a guardian pid at all.
         if guardian_pid is not None:
             try:
-                descendants = psutil.Process(guardian_pid).children(recursive=True)
+                descendants = [
+                    (proc.pid, proc.create_time())
+                    for proc in psutil.Process(guardian_pid).children(recursive=True)
+                ]
+            except psutil.NoSuchProcess:
+                descendants = []
+        else:
+            try:
+                descendants = [
+                    (proc.pid, proc.create_time())
+                    for proc in psutil.Process(os.getpid()).children(recursive=True)
+                ]
             except psutil.NoSuchProcess:
                 descendants = []
         tb.stop_tensorboard(key="stubborn-run")
-        for proc in descendants:
+        live: list[psutil.Process] = []
+        for pid, create_time in descendants:
+            proc = _same_process(pid, create_time)
+            if proc is None:
+                continue
             try:
                 proc.kill()
+                live.append(proc)
             except psutil.NoSuchProcess:
                 pass
-        psutil.wait_procs(descendants, timeout=_DEATH_TIMEOUT)
+        psutil.wait_procs(live, timeout=_DEATH_TIMEOUT)
+        if standin_identity is not None:
+            _force_kill_and_wait(*standin_identity)
 
 
 def _run_guardian(*args: str) -> subprocess.CompletedProcess:
