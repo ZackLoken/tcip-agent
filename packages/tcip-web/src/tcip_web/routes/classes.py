@@ -71,6 +71,7 @@ def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
     append raises ``AuditEntryNotWritten``: the mutation has already committed by the time this
     runs, so the caller answers the gap rather than have it pass as silently recorded.
     """
+    # Kept: three call sites resolve dataset_root themselves rather than sharing one refusal.
     if not dataset_root:
         return
     from tcip_web.routes.audit_gap import record_committed

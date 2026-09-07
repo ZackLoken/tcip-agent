@@ -98,13 +98,13 @@ def _audit(scope: str, tool: str, arguments: dict) -> None:
 
     Every mutation these routes make changes a record that travels with the dataset: the verdict
     store, the ground-truth labels and a prediction bucket's provenance stamp all live under the
-    dataset root, so the dataset root the request states is the scope for all of them. The scope
-    is confined before the append, so no audit line lands outside the allowed roots. A failed
-    append raises ``AuditEntryNotWritten``: the mutation has already committed by the time this
-    runs, so the caller answers the gap rather than have it pass as silently recorded.
+    dataset root, so the dataset root the request states is the scope for all of them. Every
+    caller refuses an empty ``dataset_root`` before it reaches this point, so ``scope`` is always
+    a real path here. The scope is confined before the append, so no audit line lands outside the
+    allowed roots. A failed append raises ``AuditEntryNotWritten``: the mutation has already
+    committed by the time this runs, so the caller answers the gap rather than have it pass as
+    silently recorded.
     """
-    if not scope:
-        return
     from tcip_web.routes.audit_gap import record_committed
 
     record_committed(tool, arguments, scope=str(_guarded(scope)))
@@ -712,6 +712,12 @@ def _apply_gt_mutation(
 @router.post("/action")
 def record_action(payload: ActionPayload) -> dict:
     """Record a user's accept/reject/edit decision; auto-complete the image when done."""
+    if not payload.dataset_root:
+        raise HTTPException(
+            400,
+            "record_action requires the dataset root this verdict is scoped to; name one "
+            "rather than leaving it unstated.",
+        )
     from tcip_annotation.json_io import ClassifiedRecordRefused
 
     gt_path = _guard_path(payload.gt_path)
@@ -890,6 +896,12 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     class map cannot resolve writes no entry at all: the Complete and its status write still
     proceed, and the coverage reader fails closed on the missing entry at validation time.
     """
+    if not payload.dataset_root:
+        raise HTTPException(
+            400,
+            "mark_complete requires the dataset root this completion is scoped to; name one "
+            "rather than leaving it unstated.",
+        )
     gt_path = _guard_path(payload.gt_path)
     pred_dir = _guard_path(payload.pred_dir)
     engine = _get_engine(payload.dataset_root)

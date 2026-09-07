@@ -167,10 +167,10 @@ def _audit(project_root: str, tool: str, arguments: dict) -> None:
     A delivery and the plant mapping behind it are project state, not dataset state: the
     dataset can be read by more than one project, but the export is this project's own
     outward action. A failed append raises ``AuditEntryNotWritten``: the mutation has already
-    committed by the time this runs, so the caller answers the gap.
+    committed by the time this runs, so the caller answers the gap. Every caller derives
+    ``project_root`` from ``_open_project_root``, which raises rather than answering empty, so
+    there is no empty-scope case here to guard against.
     """
-    if not project_root:
-        return
     from tcip_web.routes.audit_gap import record_committed
 
     record_committed(tool, arguments, scope=project_root)

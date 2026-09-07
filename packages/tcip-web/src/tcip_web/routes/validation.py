@@ -106,6 +106,12 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     also fail this way: the validation row it appends lands before that line, so a dropped
     append there answers 409 with the buckets stamped so far, not a 500.
     """
+    if not req.dataset_root:
+        raise HTTPException(
+            400,
+            "validate_reference requires the dataset root this reference is scoped to; name "
+            "one rather than leaving it unstated.",
+        )
     if not req.subject:
         raise HTTPException(
             400,
