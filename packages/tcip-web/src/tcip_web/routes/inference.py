@@ -398,27 +398,33 @@ def _worker(job: InferenceJob) -> None:
         from tcip_mcp.dataset_layout import dataset_root_of
         from tcip_web.routes.classes import _audit_dataset_write
 
-        dataset_root = dataset_root_of(job.output_dir)
-        if dataset_root is not None:
-            try:
-                _audit_dataset_write(
-                    str(dataset_root),
-                    "gui_inference_run",
-                    {
-                        "job_id": job.job_id,
-                        "checkpoint_path": job.checkpoint_path,
-                        "images_dir": job.images_dir,
-                        "output_dir": job.output_dir,
-                        "status": terminal_status,
-                        "images_written": job.done,
-                        "total": job.total,
-                        "error": job.error,
-                        "dropped_nonpositive_boxes": job.dropped_boxes,
-                    },
-                )
-            except AuditEntryNotWritten as exc:
-                job.audit_warning = str(exc)
-        job.status = terminal_status
+        try:
+            # output_dir is resolved under the launch's dataset root by the layout resolver, so
+            # unlike save_labels's caller-named path this is unreachable for a launched job.
+            dataset_root = dataset_root_of(job.output_dir)
+            if dataset_root is not None:
+                try:
+                    _audit_dataset_write(
+                        str(dataset_root),
+                        "gui_inference_run",
+                        {
+                            "job_id": job.job_id,
+                            "checkpoint_path": job.checkpoint_path,
+                            "images_dir": job.images_dir,
+                            "output_dir": job.output_dir,
+                            "status": terminal_status,
+                            "images_written": job.done,
+                            "total": job.total,
+                            "error": job.error,
+                            "dropped_nonpositive_boxes": job.dropped_boxes,
+                        },
+                    )
+                except AuditEntryNotWritten as exc:
+                    job.audit_warning = str(exc)
+        finally:
+            # In its own inner finally so the status still lands terminal whatever the audit
+            # attempt above raises, rather than leaving the job "running" forever.
+            job.status = terminal_status
         _persist()
 
 
