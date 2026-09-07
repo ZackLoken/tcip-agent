@@ -31,6 +31,17 @@ describe("annotate.save lost-update handling", () => {
   });
 
   it("returns a conflict (not a thrown error) on a 409", async () => {
+    stubFetch(409, { detail: { error: "label file changed since it was loaded" } });
+    const res = await api.annotate.save({
+      image_path: "x",
+      label_path: "x.json",
+      annotations: [],
+      base_mtime: "1",
+    });
+    expect(res.status).toBe("conflict");
+  });
+
+  it("returns a conflict on a 409 whose body carries no detail at all (unparseable)", async () => {
     stubFetch(409, { error: "label file changed since it was loaded" });
     const res = await api.annotate.save({
       image_path: "x",
@@ -39,6 +50,29 @@ describe("annotate.save lost-update handling", () => {
       base_mtime: "1",
     });
     expect(res.status).toBe("conflict");
+  });
+
+  it("returns unrecorded with the committed token and message on the audit-gap 409", async () => {
+    stubFetch(409, {
+      detail: {
+        error: "audit_entry_not_written",
+        message: "gui_save_labels completed and its audit entry could not be written",
+        committed: { status: "ok", image_path: "x", n_annotations: 0, base_mtime: "2" },
+      },
+    });
+    const res = await api.annotate.save({
+      image_path: "x",
+      label_path: "x.json",
+      annotations: [],
+      base_mtime: "1",
+    });
+    expect(res.status).toBe("unrecorded");
+    if (res.status === "unrecorded") {
+      expect(res.base_mtime).toBe("2");
+      expect(res.message).toBe(
+        "gui_save_labels completed and its audit entry could not be written",
+      );
+    }
   });
 });
 

@@ -393,6 +393,34 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     assert binding.train_disjointness == {"checked": False, "group_check": None}
 
 
+def test_route_answers_409_with_the_committed_response_on_a_lost_audit_line(
+    client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """The stamp already committed; the 409 carries the same response a 200 would, with
+    ``validated`` and ``buckets_stamped`` exactly as they were written."""
+    import tcip_mcp.audit as audit_module
+
+    class _AppendRefused(RuntimeError):
+        pass
+
+    def _refuse_append(*args: object, **kwargs: object) -> None:
+        raise _AppendRefused("the audit log could not be appended to")
+
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path)
+    monkeypatch.setattr(audit_module, "append", _refuse_append)
+    resp = client.post("/api/review/validate_reference", json={
+        "dataset_root": proj, "trait": "bud_opening", "pred_dir": pred_dir, "subject": "bud"})
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["error"] == "audit_entry_not_written"
+    committed = detail["committed"]
+    assert committed["validated"] is True
+    assert committed["reference"] == "reviewer_confirmed_annotations"
+    assert committed["buckets_stamped"] == [pred_dir]
+    sc = _read_sidecar(pred_dir)
+    assert sc["validated"] is True
+
+
 def test_route_promotion_carries_an_old_vintage_member_and_stamps_no_schema_version(
     client, tmp_path: Path,
 ):

@@ -787,7 +787,15 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
             "name": "valley", "images_root": str(images_root), "plant_registry": registry,
         })
         assert resp.status_code == 409, resp.text
-        assert "plant_mapping_built" in resp.json()["detail"]
+        detail = resp.json()["detail"]
+        assert detail["error"] == "audit_entry_not_written"
+        assert "plant_mapping_built" in detail["message"]
+        # The record write itself lands before the receipt append is attempted, so the
+        # read-back confirms it and the 409 carries the same body a 200 would.
+        committed = detail["committed"]
+        assert set(committed) == {"mapping", "summary", "unreadable", "nn_tolerance_m",
+                                  "max_match_distance_m"}
+        assert committed["nn_tolerance_m"]["source"] == "grid_pitch"
     finally:
         release.set()
         holder.join(30)

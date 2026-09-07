@@ -999,8 +999,38 @@ def test_export_csv_answers_409_when_the_delivery_event_audit_line_cannot_be_app
     assert resp.status_code == 409
     detail = resp.json()["detail"]
     saved = tmp_path / "results_export" / "unaudited.csv"
-    assert detail["saved_path"] == str(saved)
+    assert detail["error"] == "audit_entry_not_written"
+    assert detail["committed"] == {"saved_path": str(saved), "delivery_event_recorded": False}
     assert "could not be written" in detail["message"]
+    assert saved.exists()
+
+
+def test_export_csv_route_line_answers_409_after_the_library_line_lands(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The library's own delivery-binding line lands; the route's own `results.export_csv` line
+    is the one refused, so ``committed`` reports the delivery event as actually recorded."""
+    from tcip_mcp import audit as audit_module
+
+    real_append = audit_module.append
+    calls = {"n": 0}
+
+    def _fail_second_append(*args: object, **kwargs: object) -> object:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return real_append(*args, **kwargs)
+        raise RuntimeError("audit log unwritable")
+
+    body = _phenology_fixture(tmp_path, validated=True)
+    monkeypatch.setattr(audit_module, "append", _fail_second_append)
+    resp = client.post("/api/results/export_csv",
+                       json={**body, "payload": "milestones", "filename": "route_line.csv"})
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    saved = tmp_path / "results_export" / "route_line.csv"
+    assert detail["error"] == "audit_entry_not_written"
+    assert detail["committed"]["saved_path"] == str(saved)
+    assert detail["committed"]["delivery_event_recorded"] is True
     assert saved.exists()
 
 
@@ -1125,8 +1155,44 @@ def test_export_count_csv_answers_409_when_the_delivery_event_audit_line_cannot_
     assert resp.status_code == 409
     detail = resp.json()["detail"]
     saved = tmp_path / "results_export" / "unaudited_counts.csv"
-    assert detail["saved_path"] == str(saved)
+    assert detail["error"] == "audit_entry_not_written"
+    assert detail["committed"] == {"saved_path": str(saved), "delivery_event_recorded": False}
     assert "could not be written" in detail["message"]
+    assert saved.exists()
+
+
+def test_export_count_csv_route_line_answers_409_after_the_library_line_lands(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The library's own delivery-binding line lands; the route's own `results.export_count_csv`
+    line is the one refused, so ``committed`` carries the count-export fields alongside it."""
+    from tcip_mcp import audit as audit_module
+
+    real_append = audit_module.append
+    calls = {"n": 0}
+
+    def _fail_second_append(*args: object, **kwargs: object) -> object:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return real_append(*args, **kwargs)
+        raise RuntimeError("audit log unwritable")
+
+    _seed_count_meaning(tmp_path)
+    bucket = _count_bucket(tmp_path, validated=True)
+    store.open_project(tmp_path.resolve())
+    monkeypatch.setattr(audit_module, "append", _fail_second_append)
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
+        "filename": "route_line_counts.csv",
+    })
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    saved = tmp_path / "results_export" / "route_line_counts.csv"
+    assert detail["error"] == "audit_entry_not_written"
+    committed = detail["committed"]
+    assert committed["saved_path"] == str(saved)
+    assert committed["delivery_event_recorded"] is True
     assert saved.exists()
 
 

@@ -32,6 +32,7 @@ function job(overrides: Partial<InferenceJob> & { job_id: string }): InferenceJo
     output_dir: "C:/data/predictions/baseline/2026-01-01",
     error: null,
     warning: null,
+    audit_warning: null,
     ...overrides,
   };
 }
@@ -268,6 +269,26 @@ describe("InferenceTab job table", () => {
       await screen.findByText(/3 images carried no readable capture date/),
     ).toBeInTheDocument();
     expect(screen.getByText(/Status: running · 4 \/ 9/)).toBeInTheDocument();
+  });
+
+  it("carries a final frame's audit_warning into the watched job panel", async () => {
+    vi.mocked(inferenceApi.listJobs).mockResolvedValue({ jobs: [job({ job_id: "inf-live" })] });
+
+    render(<InferenceTab />);
+    fireEvent.click(await screen.findByRole("button", { name: "Watch" }));
+    await waitFor(() => expect(vi.mocked(openInferenceStream)).toHaveBeenCalled());
+
+    const onFrame = vi.mocked(openInferenceStream).mock.calls[0][1];
+    act(() =>
+      onFrame({
+        type: "final",
+        status: "completed",
+        error: null,
+        audit_warning: "gui_inference_run completed and its audit entry could not be written",
+      }),
+    );
+
+    expect(await screen.findByText(/its audit entry could not be written/)).toBeInTheDocument();
   });
 
   it("carries a final frame's error into the watched job panel", async () => {

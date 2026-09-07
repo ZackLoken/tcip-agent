@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { ImageBandsResponse } from "@/api/client";
 import { api } from "@/api/client";
 import { classesApi, type ImageStatus } from "@/api/classes";
+import { StructuredRefusalError } from "@/api/http";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
 import { UNSET_GLYPH } from "@/lib/glyphs";
@@ -408,6 +409,42 @@ describe("AnnotateToolbar subject authoring", () => {
 
     // "husk" was set optimistically as active; the refusal must not leave it active.
     expect(useStore.getState().gui.active_subject).toBe("leaf");
+  });
+
+  it("adopts the committed registry and keeps the active subject when the save's audit line is lost", async () => {
+    seedDataset();
+    act(() => {
+      useStore.getState().setRegistry({ leaf: {} }, "v1");
+      useStore.getState().setActiveSubject("leaf");
+    });
+    const committed = {
+      status: "ok",
+      n_subjects: 2,
+      classes_path: "C:/data/classes.json",
+      version: "v2",
+      schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
+    };
+    const message = "gui_save_classes completed and its audit entry could not be written";
+    vi.spyOn(classesApi, "save").mockRejectedValue(
+      new StructuredRefusalError(
+        { error: "audit_entry_not_written", message, committed },
+        409,
+        message,
+      ),
+    );
+    answerPrompt("husk");
+    renderToolbar();
+
+    // "leaf" is already active, so the pill reads its name rather than the default placeholder.
+    fireEvent.click(screen.getByRole("button", { name: /leaf|select subject/ }));
+    await act(async () => {
+      fireEvent.click(screen.getByText("+ New subject"));
+    });
+
+    // The committed body is adopted as though the save had answered 200, and the optimistic
+    // active subject is kept rather than reverted (unlike an ordinary refusal above).
+    expect(useStore.getState().registry.version).toBe("v2");
+    expect(useStore.getState().gui.active_subject).toBe("husk");
   });
 
   it("toasts the schema_change_sweep's predating_vocabulary count, same as the attribute panel's", async () => {
