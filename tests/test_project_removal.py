@@ -108,6 +108,27 @@ def test_removal_preview_matches_the_doors_own_refusal(client, tmp_path):
     assert preview["dependent_projects"] == []
 
 
+def test_listing_carries_removal_refusal_matching_the_doors_own_answer(client, tmp_path):
+    """GET /api/projects carries removal_refusal per project: null for a removable one, and for
+    the marker's own project the exact string the door answers a removal request for it with."""
+    ws = tmp_path.parent
+    _seed(ws)
+
+    listing = client.get("/api/projects").json()
+    by_name = {p["name"]: p for p in listing["projects"]}
+    assert by_name["sample_plot_target"]["removal_refusal"] is None
+
+    door = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_open", "confirm_name": "sample_plot_open", "user": "t"},
+    )
+    assert door.status_code == 409
+
+    listing2 = client.get("/api/projects").json()
+    by_name2 = {p["name"]: p for p in listing2["projects"]}
+    assert by_name2["sample_plot_open"]["removal_refusal"] == door.json()["detail"]
+
+
 # ── refusals, each with its admitting case ───────────────────────────────────
 
 
@@ -150,6 +171,19 @@ def test_refuses_a_mismatched_confirmation(client, tmp_path):
     )
     assert resp.status_code == 400
     assert workspace.pending_removal_record(ws / "sample_plot_target") is None
+
+
+def test_a_malformed_name_with_a_mismatched_confirmation_answers_the_invalid_name_text(client, tmp_path):
+    """The name-shape checks run ahead of the confirm-name mismatch check: a malformed name
+    answers with its own text, whatever the mismatched confirm_name carries."""
+    ws = tmp_path.parent
+    _seed(ws)
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "../escape", "confirm_name": "something else entirely", "user": "t"},
+    )
+    assert resp.status_code == 400
+    assert "invalid project name" in resp.json()["detail"]
 
 
 def test_refuses_an_unknown_project_then_admits_once_it_exists(client, tmp_path):
@@ -241,6 +275,33 @@ def test_refuses_the_platform_root_by_identity(client, tmp_path):
     assert resp.status_code == 409
 
 
+def test_refuses_a_platform_root_bound_to_a_project_the_marker_does_not_name(client, tmp_path):
+    """The platform-root spelling of "the open project" fires on its own, independent of the
+    marker: this process's own bound root answers with its own text even when the marker names
+    a different project."""
+    from tcip_mcp import project_paths
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    second = _init(ws, "sample_plot_second")
+
+    before = project_paths.root_binding()
+    project_paths.restore_binding(
+        project_paths.RootBinding(
+            root=second, source="adopted", inherited_root=None, marker_problem=None,
+        )
+    )
+    try:
+        resp = client.post(
+            "/api/projects/remove",
+            json={"name": "sample_plot_second", "confirm_name": "sample_plot_second", "user": "t"},
+        )
+        assert resp.status_code == 409
+        assert "restart on a different project first" in resp.json()["detail"]
+    finally:
+        project_paths.restore_binding(before)
+
+
 def test_refuses_the_canvas_open_binding_then_admits_a_different_project(client, tmp_path):
     ws = tmp_path.parent
     _seed(ws)
@@ -279,7 +340,7 @@ def test_external_roots_present_flag_is_false_for_a_moved_root(client, tmp_path)
 
     preview_before = client.get("/api/projects/sample_plot_target/removal-preview").json()
     entry_before = next(r for r in preview_before["external_roots"] if r["path"] == str(external))
-    assert entry_before["present"] is True
+    assert entry_before.get("present") is True
 
     resp = client.post(
         "/api/projects/remove",
@@ -291,7 +352,7 @@ def test_external_roots_present_flag_is_false_for_a_moved_root(client, tmp_path)
 
     preview_after = client.get("/api/projects/sample_plot_target/removal-preview").json()
     entry_after = next(r for r in preview_after["external_roots"] if r["path"] == str(external))
-    assert entry_after["present"] is False
+    assert entry_after.get("present") is False
 
 
 def test_external_roots_unreadable_is_named_and_the_request_still_admitted(client, tmp_path):
@@ -367,6 +428,23 @@ def test_dependent_project_is_listed_and_never_refused(client, tmp_path):
     assert resp.status_code == 200
     names2 = {d["project"] for d in resp.json()["dependent_projects"]}
     assert "sample_plot_dependent" in names2
+
+
+def test_a_refused_preview_skips_the_dependent_and_external_root_scan(client, tmp_path):
+    """A refused request never walks the sibling registries: a dependent registered against the
+    marker's own project (refused before any scan) is never found."""
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    dependent = _init(ws, "sample_plot_dependent")
+    reg = register_dataset(str(open_project), crop="black locust", project_root=str(dependent))
+    assert "error" not in reg, reg
+
+    preview = client.get("/api/projects/sample_plot_open/removal-preview").json()
+    assert preview["refusal"] is not None
+    assert preview["dependent_projects"] == []
+    assert preview["external_roots"] == []
 
 
 def test_an_unreadable_sibling_registry_is_listed_as_such(client, tmp_path):
@@ -755,6 +833,7 @@ def test_a_tree_moved_back_by_hand_is_listed_and_adoptable(client, tmp_path):
 
 
 def test_denied_completion_reports_blocked_by_and_admits_once_released(tmp_path):
+    import errno
     import os
     import sqlite3
 
@@ -780,6 +859,9 @@ def test_denied_completion_reports_blocked_by_and_admits_once_released(tmp_path)
             outcomes = project_removal.complete_pending_removals(ws)
             assert outcomes[0]["name"] == "sample_plot_target"
             assert "blocked_by" in outcomes[0]
+            # Windows denies the rename of a directory holding an open sqlite handle with
+            # a sharing-violation OSError that Python maps to EACCES, not EPERM.
+            assert outcomes[0]["blocked_errno"] == errno.EACCES
             assert target.is_dir()
         finally:
             held.close()
