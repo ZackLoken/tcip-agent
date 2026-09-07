@@ -2935,6 +2935,24 @@ _SEED_AXIS_REMEDY = (
 )
 
 
+def coerce_split_draws(split_draws: object) -> int | None:
+    """``split_draws`` read as ``int(split_draws)``, the way a manifest of unknown provenance
+    must be read: ``None`` stands for 1, the platform's own unset default; anything ``int()``
+    cannot read (a non-numeric string, a list, a value ``OverflowError`` refuses) is not a draw
+    count and reads as ``None``. Shared by :func:`caller_split_seed_refusal`, which treats an
+    unreadable value as no refusal, and by the Tuning route's relaunch surface, which refuses a
+    manifest recording one outright rather than replaying it into a crash.
+    """
+    if split_draws is None:
+        return 1
+    if not isinstance(split_draws, (int, float, str)):
+        return None
+    try:
+        return int(split_draws)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def caller_split_seed_refusal(
     param_space: object, split_draws: object,
 ) -> SeedAxisRefusal | None:
@@ -2945,23 +2963,15 @@ def caller_split_seed_refusal(
     ``run_hyperparameter_search`` before minting a sweep and by the Tuning route before
     reporting a manifest relaunchable, so both surfaces refuse the same axis the same way.
 
-    ``split_draws`` is read as ``int(split_draws)``, ``None`` standing for 1; a value ``int()``
-    cannot read is not a draw count and refuses nothing. ``param_space`` that is not a mapping
-    is not an axis declaration and refuses nothing either: both tolerances let a listing walk a
-    manifest of unknown shape without raising.
+    ``split_draws`` is read through :func:`coerce_split_draws`; a value it cannot read is not a
+    draw count and refuses nothing. ``param_space`` that is not a mapping is not an axis
+    declaration and refuses nothing either: both tolerances let a listing walk a manifest of
+    unknown shape without raising.
     """
     from tcip_mcp.pipelines.training.hpo import SPLIT_DRAW_SEED_KEY
 
-    if split_draws is None:
-        draws = 1
-    elif isinstance(split_draws, (int, float, str)):
-        try:
-            draws = int(split_draws)
-        except (TypeError, ValueError):
-            return None
-    else:
-        return None
-    if draws > 1:
+    draws = coerce_split_draws(split_draws)
+    if draws is None or draws > 1:
         return None
     if not isinstance(param_space, dict):
         return None
