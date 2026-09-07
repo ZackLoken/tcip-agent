@@ -104,7 +104,7 @@ def test_each_optimizer_step_sees_only_its_own_batch_gradient(tmp_path, monkeypa
 
     steps: list = []
     _record_step_gradients(monkeypatch, steps)
-    run = create_run(_config(), str(tmp_path / "out"))
+    run = create_run(_config(), str(tmp_path / "out"), id="auto-run-34")
     run = train(run, loader, task="regression")
 
     assert run.status == "completed", run.error
@@ -120,7 +120,7 @@ def test_no_accumulated_gradient_survives_the_run(tmp_path, monkeypatch):
     models: list = []
     _capture_model(monkeypatch, models)
 
-    run = create_run(_config(), str(tmp_path / "out"))
+    run = create_run(_config(), str(tmp_path / "out"), id="auto-run-35")
     run = train(run, loader, task="regression")
 
     assert run.status == "completed", run.error
@@ -141,7 +141,7 @@ def test_gradient_accumulation_combines_only_its_own_window(tmp_path, monkeypatc
 
     steps: list = []
     _record_step_gradients(monkeypatch, steps)
-    run = create_run(_config(accumulation=2), str(tmp_path / "out"))
+    run = create_run(_config(accumulation=2), str(tmp_path / "out"), id="auto-run-36")
     run = train(run, loader, task="regression")
 
     assert run.status == "completed", run.error

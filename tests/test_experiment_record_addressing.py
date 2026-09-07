@@ -150,7 +150,7 @@ def test_one_epoch_logs_one_row_when_the_run_writes_where_its_record_lives(tmp_p
     # The default output dir is the experiment's own directory, which is where the two writers
     # used to meet.
     record_dir = experiments.experiments_dir() / experiment_id
-    run = create_run(config, str(record_dir))
+    run = create_run(config, str(record_dir), id="auto-run-30")
     dataset = ConstantImageDataset([0.2, 0.8], [1.0, 4.0])
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("regression"))
     ctx = TrainContext(run=run, train_loader=loader, val_loader=None, task="regression",
@@ -202,7 +202,7 @@ def test_a_run_with_no_experiment_record_still_logs_beside_its_own_artifacts(tmp
     from tcip_mcp.tools.training_tools import trial_metrics_key
 
     trial_dir = tmp_path / "sweep" / "trial_7"
-    run = create_run({"model_source": {}}, str(trial_dir))
+    run = create_run({"model_source": {}}, str(trial_dir), id="auto-run-31")
     ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="regression",
                        experiment_id=None)
     ctx._epoch_sink(1, {"val_loss": 0.25})

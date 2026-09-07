@@ -53,7 +53,7 @@ def test_a_run_whose_loss_never_recovers_stops_after_two_diverged_epochs(tmp_pat
     full passes with no finite loss, never a batch-count-derived threshold, so both shapes stop
     at exactly the same epoch with the same wording."""
     train_loader = _train_loader(batch_size)
-    run = create_run(_config(DIVERGED_BUILDER, {}, epochs=30), str(tmp_path / "out"))
+    run = create_run(_config(DIVERGED_BUILDER, {}, epochs=30), str(tmp_path / "out"), id="auto-run-9")
     run = train(run, train_loader, val_loader=None, task="regression")
 
     assert run.status == "failed"
@@ -66,7 +66,7 @@ def test_a_healthy_run_never_trips_the_divergence_check(tmp_path):
     """A run whose loss stays finite throughout completes normally and carries no divergence
     text, proving the counter never fires on a model that never produces a bad batch."""
     train_loader = _train_loader()
-    run = create_run(_config(HEALTHY_BUILDER, {"init_weight": 0.0}, epochs=3), str(tmp_path / "out"))
+    run = create_run(_config(HEALTHY_BUILDER, {"init_weight": 0.0}, epochs=3), str(tmp_path / "out"), id="auto-run-10")
     run = train(run, train_loader, val_loader=None, task="regression")
 
     assert run.status == "completed", run.error
@@ -80,7 +80,7 @@ def test_one_fully_diverged_epoch_followed_by_recovery_completes(tmp_path):
     train_loader = _train_loader()
     run = create_run(
         _config(TRANSIENT_BUILDER, {"bad_batches": 3, "init_weight": 0.0}, epochs=3),
-        str(tmp_path / "out"))
+        str(tmp_path / "out"), id="auto-run-11")
     run = train(run, train_loader, val_loader=None, task="regression")
 
     assert run.status == "completed", run.error
@@ -95,7 +95,7 @@ def test_a_single_finite_loss_among_bad_batches_does_not_count_the_epoch_as_dive
     train_loader = _train_loader()  # three batches/epoch
     run = create_run(
         _config(STEP_COUNTED_BUILDER, {"finite_at": [2]}, epochs=2),  # epoch 1's middle batch only
-        str(tmp_path / "out"))
+        str(tmp_path / "out"), id="auto-run-12")
     run = train(run, train_loader, val_loader=None, task="regression")
 
     assert run.status == "completed", run.error
@@ -108,7 +108,7 @@ def test_stage_boundary_resets_the_diverged_epoch_counter(tmp_path):
     train_loader = _train_loader()  # three batches/epoch, twelve calls total across four epochs
     config = _config(STEP_COUNTED_BUILDER, {"finite_at": [1, 2, 3, 10, 11, 12]}, epochs=2)
     config["stages"] = [{"freeze_to": 0, "epochs": 2}, {"freeze_to": 0, "epochs": 2}]
-    run = create_run(config, str(tmp_path / "out"))
+    run = create_run(config, str(tmp_path / "out"), id="auto-run-13")
     run = train(run, train_loader, val_loader=None, task="regression")
 
     assert run.status == "completed", run.error
@@ -123,7 +123,7 @@ def test_cancel_requested_during_the_second_diverged_epoch_still_ends_failed(tmp
     train_loader = _train_loader()  # three batches/epoch: epoch 2 is calls 4, 5, 6
     out_dir = str(tmp_path / "out")
     on_forward = CancelSentinelAtCall(out_dir, at_call=5)
-    run = create_run(_config(DIVERGED_BUILDER, {"on_forward": on_forward}, epochs=30), out_dir)
+    run = create_run(_config(DIVERGED_BUILDER, {"on_forward": on_forward}, epochs=30), out_dir, id="auto-run-14")
     run = train(run, train_loader, val_loader=None, task="regression")
 
     assert run.status == "failed"
@@ -158,12 +158,12 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(tmp_path, mon
     }
     res = launch_training(cfg, str(tmp_path / "out"))
     assert "error" not in res, res
-    run_id = res["run_id"]
+    experiment_id = res["experiment_id"]
 
     deadline = time.monotonic() + 60
     status: dict = {}
     while time.monotonic() < deadline:
-        status = monitor_training(run_id)
+        status = monitor_training(experiment_id)
         if status.get("status") in ("failed", "completed", "cancelled"):
             break
         time.sleep(0.5)

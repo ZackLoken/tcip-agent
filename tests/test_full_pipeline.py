@@ -103,7 +103,7 @@ class TestFullClassificationPipeline:
             "gradient_accumulation_steps": 1,
             "checkpoint_every_n_epochs": 1,
         }
-        run = create_run(config, output_dir)
+        run = create_run(config, output_dir, id="auto-run-32")
 
         rows: list[dict] = []
         completed_run = train(run, loader, val_loader=val_loader, task="classification",
@@ -292,7 +292,7 @@ class TestDetectionPipelineRealData:
             "gradient_accumulation_steps": 1,
             "checkpoint_every_n_epochs": 1,
         }
-        run = create_run(config, detection_output_dir)
+        run = create_run(config, detection_output_dir, id="auto-run-33")
         completed = train(run, loader, val_loader=None, task="detection")
 
         assert completed.status == "completed"

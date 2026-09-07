@@ -67,7 +67,7 @@ def test_classification_training_writes_train_and_val_scalars_every_epoch(tmp_pa
         "early_stopping": {"enabled": False},
     }
     out_dir = tmp_path / "out"
-    run = create_run(config, str(out_dir))
+    run = create_run(config, str(out_dir), id="auto-run-42")
     run = train(run, train_loader, val_loader=val_loader, task="classification")
     assert run.status == "completed", run.error
 
@@ -126,7 +126,7 @@ def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(tmp_path,
         "checkpoint_every_n_epochs": 0,
         "early_stopping": {"enabled": False},
     }
-    run = create_run(config, str(tmp_path / "out"))
+    run = create_run(config, str(tmp_path / "out"), id="auto-run-43")
     with caplog.at_level(logging.INFO, logger="tcip_mcp.pipelines.training.generic_trainer"):
         run = train(run, train_loader, val_loader=val_loader, task="classification")
     assert run.status == "completed", run.error

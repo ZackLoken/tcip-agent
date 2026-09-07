@@ -39,7 +39,7 @@ class _RecordingWriter:
 
 def test_epoch_signal_reaches_the_trial_hook_without_an_experiment(tmp_path):
     """An HPO trial runs with ``experiment_id=None``; its pruning signal must still fire."""
-    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    run = create_run(dict(CONFIG), str(tmp_path / "out"), id="auto-run-85")
     seen: list[tuple] = []
     ctx = TrainContext(run=run, train_loader=None, experiment_id=None,
                        epoch_hook=lambda epoch, metrics: seen.append((epoch, dict(metrics))))
@@ -51,7 +51,7 @@ def test_epoch_signal_reaches_the_trial_hook_without_an_experiment(tmp_path):
 
 def test_metrics_file_accumulates_one_row_per_epoch(tmp_path):
     """Every logged epoch survives; the file is a history, not a slot holding the last row."""
-    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    run = create_run(dict(CONFIG), str(tmp_path / "out"), id="auto-run-86")
     ctx = TrainContext(run=run, train_loader=None, experiment_id=None)
 
     ctx.log_metrics(3, {"val_loss": 0.75, "map50": 0.10})
@@ -67,7 +67,7 @@ def test_metrics_file_accumulates_one_row_per_epoch(tmp_path):
 def test_a_diverged_metric_is_logged_as_null_beside_the_state_that_names_it(tmp_path):
     """A diverged loss is real information the run has to record, and NaN is not JSON: the
     row keeps the epoch, states the value is absent, and says why."""
-    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    run = create_run(dict(CONFIG), str(tmp_path / "out"), id="auto-run-87")
     ctx = TrainContext(run=run, train_loader=None, experiment_id=None)
 
     ctx.log_metrics(2, {"val_loss": float("nan"), "map50": 0.0})
@@ -79,7 +79,7 @@ def test_a_diverged_metric_is_logged_as_null_beside_the_state_that_names_it(tmp_
 def test_a_diverged_metric_still_reaches_the_pruning_hook_as_the_number_it_was(tmp_path):
     """The stored row cannot carry a non-finite value, but a pruner compares numbers, so the
     hook sees what the training body produced rather than the record's representation."""
-    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    run = create_run(dict(CONFIG), str(tmp_path / "out"), id="auto-run-88")
     seen: list[dict] = []
     ctx = TrainContext(run=run, train_loader=None, experiment_id=None,
                        epoch_hook=lambda epoch, metrics: seen.append(dict(metrics)))
@@ -91,7 +91,7 @@ def test_a_diverged_metric_still_reaches_the_pruning_hook_as_the_number_it_was(t
 
 def test_only_real_scalars_reach_the_summary_writer(tmp_path):
     """A boolean flag or a text label is not a curve; plotting one misreads it as a number."""
-    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    run = create_run(dict(CONFIG), str(tmp_path / "out"), id="auto-run-89")
     writer = _RecordingWriter()
     ctx = TrainContext(run=run, train_loader=None, experiment_id=None, _tb=writer)
 
@@ -103,7 +103,7 @@ def test_only_real_scalars_reach_the_summary_writer(tmp_path):
 
 def test_checkpoint_lands_under_the_tag_it_was_asked_for(tmp_path):
     """Distinct tags are distinct files; a periodic save never overwrites the best one."""
-    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    run = create_run(dict(CONFIG), str(tmp_path / "out"), id="auto-run-90")
     ctx = TrainContext(run=run, train_loader=None, experiment_id="expTagged")
 
     best = ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.2}}, "model_best")
@@ -128,7 +128,7 @@ def test_a_checkpoint_tag_cannot_walk_out_of_the_run_directory(tmp_path):
     """
     from tcip_store import BadKey
 
-    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    run = create_run(dict(CONFIG), str(tmp_path / "out"), id="auto-run-91")
     ctx = TrainContext(run=run, train_loader=None, experiment_id="expEscape")
 
     with pytest.raises(BadKey):
@@ -139,7 +139,7 @@ def test_a_checkpoint_tag_cannot_walk_out_of_the_run_directory(tmp_path):
 
 def test_checkpoint_stamping_leaves_the_callers_state_untouched(tmp_path):
     """The stamp goes onto the saved payload, never back into the loop's own live state dict."""
-    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    run = create_run(dict(CONFIG), str(tmp_path / "out"), id="auto-run-92")
     ctx = TrainContext(run=run, train_loader=None, experiment_id="expTagged")
     state = {"model_state_dict": {}, "metrics": {"val_loss": 0.2}}
 
@@ -156,7 +156,7 @@ def test_record_artifact_of_model_weights_routes_to_set_final_weights(tmp_path, 
     populated and refuse) or raised (costing a trained run over a naming mistake)."""
     from tcip_mcp.experiments import artifacts_key, create_experiment, read_member
 
-    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    run = create_run(dict(CONFIG), str(tmp_path / "out"), id="auto-run-93")
     create_experiment("expWeights", dict(CONFIG))
     ctx = TrainContext(run=run, train_loader=None, experiment_id="expWeights")
 
@@ -172,7 +172,7 @@ def test_record_artifact_of_any_other_name_still_records_normally(tmp_path):
     """A rail must admit valid work: every name besides the reserved one behaves as documented."""
     from tcip_mcp.experiments import artifacts_key, create_experiment, read_member
 
-    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    run = create_run(dict(CONFIG), str(tmp_path / "out"), id="auto-run-94")
     create_experiment("expOther", dict(CONFIG))
     ctx = TrainContext(run=run, train_loader=None, experiment_id="expOther")
 
@@ -187,7 +187,7 @@ def test_cancellation_is_seen_through_the_cross_process_sentinel(tmp_path):
     """A stop requested by another process must reach a loop polling ``ctx.should_cancel()``."""
     out = tmp_path / "out"
     out.mkdir(parents=True)
-    run = create_run(dict(CONFIG), str(out))
+    run = create_run(dict(CONFIG), str(out), id="auto-run-95")
     ctx = TrainContext(run=run, train_loader=None)
 
     assert ctx.should_cancel() is False
@@ -212,7 +212,7 @@ def _spy_on_operating_point(monkeypatch):
 def test_calibration_defaults_to_the_experiment_this_run_belongs_to(tmp_path, monkeypatch):
     """The train-disjointness gate must check against the split this exact run drew."""
     seen = _spy_on_operating_point(monkeypatch)
-    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    run = create_run(dict(CONFIG), str(tmp_path / "out"), id="auto-run-96")
     ctx = TrainContext(run=run, train_loader=None, experiment_id="expOwn")
 
     ctx.calibrate("bud_opening", calibration_records=[], holdout_records=[], tiled=False,
@@ -226,7 +226,7 @@ def test_calibration_defaults_to_the_experiment_this_run_belongs_to(tmp_path, mo
 def test_calibration_keeps_an_experiment_the_caller_named(tmp_path, monkeypatch):
     """Calibrating against a different run's split is a caller decision, not one to overwrite."""
     seen = _spy_on_operating_point(monkeypatch)
-    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    run = create_run(dict(CONFIG), str(tmp_path / "out"), id="auto-run-97")
     ctx = TrainContext(run=run, train_loader=None, experiment_id="expOwn")
 
     ctx.calibrate("bud_opening", experiment_id="expOther", calibration_records=[], holdout_records=[],
@@ -241,7 +241,7 @@ def test_evaluation_section_reads_the_same_precedence_the_stock_trainer_does(tmp
     ``training.evaluation``."""
     config = {**CONFIG, "evaluation": {"selection_metric": "f1"},
               "training": {"evaluation": {"selection_metric": "loss"}}}
-    run = create_run(config, str(tmp_path / "out"))
+    run = create_run(config, str(tmp_path / "out"), id="auto-run-98")
     ctx = TrainContext(run=run, train_loader=None, experiment_id=None)
 
     assert ctx.evaluation_section() == {"selection_metric": "f1"}

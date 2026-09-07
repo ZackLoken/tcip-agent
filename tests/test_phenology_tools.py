@@ -1930,7 +1930,7 @@ def test_calibrate_scalar_operating_point_ordinal_e2e(
     loader = DataLoader(dataset, batch_size=5, collate_fn=task_collate("ordinal"))
     model_source = _model_source("build_bespoke_ordinal", num_ranks=3)
     # Seeded through the trainer's own config key so this run's init and shuffling repeat.
-    run = create_run({**_train_config(model_source), "seed": 0}, str(tmp_path / "out"))
+    run = create_run({**_train_config(model_source), "seed": 0}, str(tmp_path / "out"), id="auto-run-44")
     run = train(run, loader, val_loader=None, task="ordinal")
     assert run.status == "completed", getattr(run, "error", run.status)
 
@@ -1995,7 +1995,7 @@ def test_calibrate_scalar_operating_point_regression_e2e(
     loader = DataLoader(dataset, batch_size=5, collate_fn=task_collate("regression"))
     model_source = _model_source("build_bespoke_regressor")
     # Seeded through the trainer's own config key so this run's init and shuffling repeat.
-    run = create_run({**_train_config(model_source), "seed": 0}, str(tmp_path / "out"))
+    run = create_run({**_train_config(model_source), "seed": 0}, str(tmp_path / "out"), id="auto-run-45")
     run = train(run, loader, val_loader=None, task="regression")
     assert run.status == "completed", getattr(run, "error", run.status)
 

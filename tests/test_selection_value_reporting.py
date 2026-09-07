@@ -64,7 +64,7 @@ def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(tmp_pa
     callbacks: list[dict] = []
     config = _config()
     create_experiment("exp-selection", config)
-    run = create_run(config, str(out_dir))
+    run = create_run(config, str(out_dir), id="auto-run-63")
     # The production wiring: the trainer hands each row to the envelope's sink, which logs it
     # to the experiment's own record and fires the hook a trial prunes on.
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
@@ -99,7 +99,7 @@ def test_epoch_record_follows_a_configured_selection_metric(tmp_path):
     reported ``selection``, so the two still name the same number."""
     train_loader, val_loader = _loaders()
     out_dir = tmp_path / "out"
-    run = create_run(_config({"selection_metric": "mae"}), str(out_dir))
+    run = create_run(_config({"selection_metric": "mae"}), str(out_dir), id="auto-run-64")
     run = train(run, train_loader, val_loader=val_loader, task="regression")
 
     assert run.status == "completed", run.error
@@ -136,7 +136,7 @@ def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
         "early_stopping": {"enabled": False},
         "evaluation": {"selection_metric": "f1"},
     }
-    run = create_run(config, str(tmp_path / "out"))
+    run = create_run(config, str(tmp_path / "out"), id="auto-run-65")
     run = train(run, train_loader, val_loader=val_loader, task="classification")
 
     assert run.status == "completed", run.error
@@ -157,7 +157,7 @@ def test_a_run_selecting_on_a_metric_its_task_does_not_produce_fails_naming_both
     never produces it; the run must fail naming the requested metric and the keys validation did
     produce, not silently fall back to the training loss under a name nobody chose."""
     train_loader, val_loader = _loaders()
-    run = create_run(_config({"selection_metric": "f1"}), str(tmp_path / "out"))
+    run = create_run(_config({"selection_metric": "f1"}), str(tmp_path / "out"), id="auto-run-66")
     run = train(run, train_loader, val_loader=val_loader, task="regression")
 
     assert run.status == "failed"
@@ -172,7 +172,7 @@ def test_a_loss_selected_run_with_no_validation_loader_still_completes_and_selec
     """No validation loader means no metric but the training loss exists; a run selecting on the
     default (loss) metric must still complete and choose the lowest-loss epoch."""
     train_loader, _ = _loaders()
-    run = create_run(_config(), str(tmp_path / "out"))
+    run = create_run(_config(), str(tmp_path / "out"), id="auto-run-67")
     run = train(run, train_loader, val_loader=None, task="regression")
 
     assert run.status == "completed", run.error
