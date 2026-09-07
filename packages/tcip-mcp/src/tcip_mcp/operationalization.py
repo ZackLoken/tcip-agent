@@ -40,7 +40,16 @@ from tcip_mcp import agent_identity
 from tcip_mcp.class_registry import ClassRegistry, positive_class_problem
 from tcip_mcp.identity import user_identity
 from tcip_mcp.statements import canonical, content_hash, now_iso
-from tcip_mcp.traits import TraitSpec, crops_definitions, get_trait_for, trait_specs_dir
+from tcip_mcp.traits import (
+    TraitSpec,
+    TraitSpecUnconfirmed,
+    crops_definitions,
+    get_trait_for,
+    trait_spec_statement_key,
+    trait_spec_statement_stale,
+    trait_spec_statements_scope,
+    trait_specs_dir,
+)
 
 # ── the delivery kinds ───────────────────────────────────────────────────────
 
@@ -499,6 +508,34 @@ def _delivered_definitions(spec: TraitSpec) -> str:
     return "; ".join(quoted)
 
 
+def _trait_spec_no_statement_text(trait: str) -> str:
+    return (
+        f"Delivery refused for trait {trait!r}: it has no trait-spec statement on record, the "
+        "breeder's own account of this trait's measurement and whether they confirmed it. State "
+        "it as it stands with revise_trait_spec(project_root=..., "
+        f"trait_name={trait!r}, fields={{}}, rationale=...); never author_trait_spec, whose "
+        "restatement path over a spec with no statement rewrites every authored field from its "
+        "own arguments. The breeder then confirms it in the Results tab."
+    )
+
+
+def _trait_spec_stale_text(trait: str) -> str:
+    return (
+        f"Delivery refused for trait {trait!r}: its trait-spec statement no longer matches this "
+        "trait's live spec, confirmed or not. Restate it with revise_trait_spec(project_root=..., "
+        f"trait_name={trait!r}, fields=..., rationale=...), naming the fields to restate or "
+        "fields={} to restate the spec as it stands, then have the breeder confirm it in the "
+        "Results tab."
+    )
+
+
+def _trait_spec_unconfirmed_text(trait: str) -> str:
+    return (
+        f"Delivery refused for trait {trait!r}: its trait-spec statement is current but the "
+        "breeder has not confirmed it. Ask them to open the Results tab and confirm it there."
+    )
+
+
 def _statement_call_form(delivery_kind: str) -> str:
     """The statement call with the arguments this kind actually requires."""
     phenotypes = "[...]" if delivery_kind in _PHENOTYPE_NAMING_KINDS else "[]"
@@ -707,6 +744,12 @@ def state_operationalization(
 ) -> dict[str, Any]:
     """Record what a trait's delivered number means for one delivery kind, unconfirmed.
 
+    Refuses with :class:`~tcip_mcp.traits.TraitSpecUnconfirmed` when this trait's own trait-spec
+    statement, the breeder's account of what the trait itself measures, is not both confirmed and
+    current: the breeder confirms what a trait is before the agent states what its delivered
+    number means. Checked before anything else here, so a caller sees the trait-spec door before
+    any delivery-kind-specific validation.
+
     The writer behind the ``state_trait_operationalization`` tool, and the only path that writes a
     statement. It stamps ``stated_by`` and ``stated_at`` itself and refuses any further payload
     key, naming the confirmation fields when one of those is what arrived: a writer that could fill
@@ -734,6 +777,16 @@ def state_operationalization(
     spec, existing, _specs_dir = resolve_trait_and_record(
         trait, delivery_kind, project_root=project_root
     )
+
+    statement_key = trait_spec_statement_key(trait_spec_statements_scope(project_root), trait)
+    spec_statement = ts.read_versioned(statement_key, default=None).value
+    if trait_spec_statement_stale(spec, spec_statement):
+        if not spec_statement:
+            raise TraitSpecUnconfirmed(_trait_spec_no_statement_text(trait))
+        raise TraitSpecUnconfirmed(_trait_spec_stale_text(trait))
+    if not spec_statement.get("confirmed_by"):
+        raise TraitSpecUnconfirmed(_trait_spec_unconfirmed_text(trait))
+
     phenotypes = [str(name) for name in delivered_phenotypes]
     value_keys = [str(key) for key in delivered_value_keys]
 
