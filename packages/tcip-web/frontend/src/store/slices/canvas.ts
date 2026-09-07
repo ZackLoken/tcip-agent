@@ -119,8 +119,9 @@ export interface CanvasSlice {
   ) => void;
   deletePolygon: (idx: number) => void;
   /** Replaces the polygon at `idx` with the two pieces a cut produced: one undo snapshot, the
-   *  first piece selected, the parent's provenance kept on each except the sign-off (dropped),
-   *  and the hover index cleared since every later polygon's index has just shifted by one. */
+   *  first piece selected, the parent's provenance kept on each except the sign-off and the
+   *  rule marker (both dropped), and the hover index cleared since every later polygon's index
+   *  has just shifted by one. */
   splitPolygon: (idx: number, rings: [[number, number][], [number, number][]]) => void;
   selectPolygon: (idx: number | null) => void;
   /** Point helpers. A point is one coordinate, so it has no vertex/ring variants: it is placed,
@@ -321,6 +322,7 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
         created_at: parent.created_at,
         accepted_by: null,
         accepted_at: null,
+        accepted_by_rule: null,
         authorship: pieceAuthorship,
       }));
       const polys = s.canvas.polygons.slice();

@@ -48,6 +48,9 @@ export interface CanvasShape {
   // Which pattern a dashed shape draws (a tool's own unaccepted shape vs. a derived box); absent
   // for a solid shape. render_canvas_state reads only `dashed`, so this extra key is inert to it.
   dash_kind?: "tool" | "derived";
+  // Set on an admitted prediction's own shape (buildReviewShapes): pre-admitted by the bucket's
+  // validated count operating point. render_canvas_state draws no mark for it; inert to it.
+  admitted?: boolean;
   label?: string;
   tag?: string; // gt | tp | fp | fn | pred | in_progress
   created_by?: string | null;
@@ -300,12 +303,15 @@ export function buildAnnotateShapes(args: {
  *  annotation's geometry (a box stays a box, a polygon stays a polygon, no geometry kind is
  *  hidden), FP = its prediction (dashed blue when focused), TP/FN = the ground truth (focused FN
  *  goes active-blue; reviewed shapes washed), the focused TP overlays its prediction dashed, and
- *  the focused detection draws last so neighbours never bury it. */
+ *  the focused detection draws last so neighbours never bury it. `admissionConf` (the bucket's
+ *  own validated count operating point, or null) marks an admitted prediction's own shape
+ *  (`admitted: true`); the mark travels in the state body, never drawn as a mark of its own. */
 export function buildReviewShapes(
   matches: MatchesResponse,
   colors: ReviewColors,
   focusedIdx: number,
   vis: { showGT?: boolean; showPred?: boolean } = {},
+  admissionConf: number | null = null,
 ): CanvasShape[] {
   const showGT = vis.showGT ?? true;
   const showPred = vis.showPred ?? true;
@@ -319,11 +325,15 @@ export function buildReviewShapes(
     const label = active
       ? `${d.class_name}${d.conf != null ? ` ${d.conf.toFixed(2)}` : ""}`
       : undefined;
+    // An admitted prediction: at or above the bucket's own validated count operating point,
+    // never a point (matching.py never builds a detection on one, so this never applies there).
+    const admitted =
+      admissionConf != null && d.det_type !== "fn" && d.conf != null && d.conf >= admissionConf;
 
     const push = (
       geom: ReviewGeom | null,
       color: string,
-      opts: { dashed?: boolean; fill?: boolean; tag: string },
+      opts: { dashed?: boolean; fill?: boolean; tag: string; admitted?: boolean },
     ) => {
       if (!geom) return;
       if (geom.kind === "box") {
@@ -336,6 +346,7 @@ export function buildReviewShapes(
           fill: opts.fill,
           label,
           tag: opts.tag,
+          admitted: opts.admitted,
         });
       } else if (geom.kind === "point") {
         // A point annotation travels as a point: the agent sees the location that is on screen,
@@ -357,6 +368,7 @@ export function buildReviewShapes(
             fill: opts.fill,
             label: i === 0 ? label : undefined,
             tag: opts.tag,
+            admitted: opts.admitted,
           });
         });
       }
@@ -368,6 +380,7 @@ export function buildReviewShapes(
         dashed: active,
         fill: true,
         tag: "fp",
+        admitted,
       });
     } else {
       const activeFn = active && d.det_type === "fn";
@@ -383,6 +396,7 @@ export function buildReviewShapes(
           dashed: true,
           fill: true,
           tag: "pred",
+          admitted,
         });
       }
     }
