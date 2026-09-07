@@ -828,7 +828,8 @@ def _cite_mapping(tmp_path: Path, name: str) -> None:
     disclosure = build.delivery_disclosure(
         {"captures_unverified": [], "plant_csvs_unverified": []}, build.dates)
     record_delivery_binding_event(
-        "test_delivery_door", None, None, {},
+        "test_delivery_door", None, None,
+        document_reconciliations={}, dimension_reconciliations={},
         measurement_documents=[], scale_document=None, acknowledgement=None,
         plant_mapping=disclosure, project_root=tmp_path,
     )
