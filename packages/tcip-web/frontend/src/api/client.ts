@@ -12,7 +12,9 @@ import {
   type ActionPayload,
   type CoveragePayload,
   type CoverageRecord,
+  type DependencyWarning,
   type GridZoomPayload,
+  type ReleaseResponse,
   type RemovalPreview,
   type RemovalResponse,
 } from "@/api/types.generated";
@@ -138,9 +140,8 @@ export interface ProjectSummary {
   dates: string[];
   subjects: string[];
   models: string[];
-  // Per-date availability: subjects with labels / models with predictions on each date.
-  // The subject/model pickers filter to these so a date with no bush labels doesn't
-  // offer "bush" (which would open an empty canvas).
+  // Per-date availability: subjects with labels / models with predictions on each date, so the
+  // pickers never offer a date with nothing there (an empty canvas).
   subjects_by_date: Record<string, string[]>;
   models_by_date: Record<string, string[]>;
   image_count: number;
@@ -151,9 +152,16 @@ export interface ProjectSummary {
   site_problem: string | null;
   // The first date's labels that would not read, naming the file; the project still lists.
   label_problem: string | null;
-  // Why this card's own removal control is disabled, or null: the backend's own
-  // identity_conflict text, the same string the door's refusal answers with.
+  // The backend's own identity_conflict text, or null; disabled only for a refusal
+  // removal_releasable cannot clear.
   removal_refusal: string | null;
+  // Whether a release (api.projects.releaseBinding) would clear removal_refusal.
+  removal_releasable: boolean;
+  // Every dataset this project registered under another workspace project now pending
+  // removal or gone.
+  dependency_warnings: DependencyWarning[];
+  // Set instead of an empty dependency_warnings list when this project's own registry won't read.
+  dependency_problem: string | null;
 }
 
 /** One workspace project the listing carries under `pending_removal`: archived, marked, and
@@ -199,6 +207,11 @@ export const api = {
       call<RemovalResponse>(ROUTES.postProjectsRemove, {
         method: "POST",
         body: JSON.stringify(body),
+      }),
+    releaseBinding: (name: string, user: string) =>
+      call<ReleaseResponse>(ROUTES.postProjectsByNameReleaseBinding(name), {
+        method: "POST",
+        body: JSON.stringify({ user }),
       }),
   },
 
