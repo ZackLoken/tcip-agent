@@ -1175,9 +1175,46 @@ describe("ProjectPicker removal", () => {
     render(<ProjectPicker />);
 
     await screen.findByText(
-      /Depends on sample_plot_target \(2 datasets\), which is pending removal/,
+      /Depends on sample_plot_target \(2 datasets\), which is pending removal; its images move to the workspace's holding directory at the next backend start\. Register the datasets again from where they are then to clear this\./,
     );
     expect(screen.queryAllByText(/Depends on sample_plot_target/)).toHaveLength(1);
+    expect(screen.queryByText(/Register the dataset again/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the singular remedy for a group of one dataset, plural for more than one, in the absent case too", async () => {
+    const withWarnings: ProjectSummary[] = [
+      {
+        ...PROJECTS[0],
+        dependency_warnings: [
+          {
+            dataset_id: "ds1",
+            dataset_path: "/ws/target/a",
+            target: "sample_plot_gone",
+            present: false,
+          },
+          {
+            dataset_id: "ds2",
+            dataset_path: "/ws/target/b",
+            target: "sample_plot_gone",
+            present: false,
+          },
+        ],
+      },
+      PROJECTS[1],
+    ];
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: withWarnings,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+    });
+    render(<ProjectPicker />);
+
+    await screen.findByText(
+      /Depends on sample_plot_gone \(2 datasets\), which is no longer in the workspace\. Register the datasets again from where its images now are to clear this\./,
+    );
   });
 
   it("on success, toasts at the success level, forgets the recent entry, refetches, and lists the project under pending removal", async () => {

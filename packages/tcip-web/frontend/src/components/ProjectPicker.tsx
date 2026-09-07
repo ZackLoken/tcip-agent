@@ -318,16 +318,17 @@ function groupDependencyWarnings(warnings: DependencyWarning[]): DependencyWarni
 
 function dependencyWarningLine(g: DependencyWarningGroup): string {
   const countSuffix = g.count > 1 ? ` (${g.count} datasets)` : "";
+  const remedy = g.count > 1 ? "the datasets" : "the dataset";
   if (g.present) {
     return (
       `Depends on ${g.target}${countSuffix}, which is pending removal; its images move to the ` +
-      "workspace's holding directory at the next backend start. Register the dataset again " +
+      `workspace's holding directory at the next backend start. Register ${remedy} again ` +
       "from where they are then to clear this."
     );
   }
   return (
-    `Depends on ${g.target}${countSuffix}, which is no longer in the workspace. Register the ` +
-    "dataset again from where its images now are to clear this."
+    `Depends on ${g.target}${countSuffix}, which is no longer in the workspace. Register ` +
+    `${remedy} again from where its images now are to clear this.`
   );
 }
 
