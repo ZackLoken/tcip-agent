@@ -833,6 +833,11 @@ def test_a_tree_moved_back_by_hand_is_listed_and_adoptable(client, tmp_path):
 
 
 def test_denied_completion_reports_blocked_by_and_admits_once_released(tmp_path):
+    """A second process holding the target's database while phase two runs. Only Windows denies
+    the rename of a directory with an open handle inside it, so the denied outcome (`blocked_by`
+    and `blocked_errno`) has content there alone, where CI's own job selects this test by node
+    id; on POSIX the same held handle does not stop the rename, and the test asserts that the
+    move lands under the holder instead, as the module docstring states."""
     import errno
     import os
     import sqlite3
@@ -858,17 +863,22 @@ def test_denied_completion_reports_blocked_by_and_admits_once_released(tmp_path)
             held.execute("select 1")
             outcomes = project_removal.complete_pending_removals(ws)
             assert outcomes[0]["name"] == "sample_plot_target"
-            assert "blocked_by" in outcomes[0]
-            # Windows denies the rename of a directory holding an open sqlite handle with
-            # a sharing-violation OSError that Python maps to EACCES, not EPERM.
-            assert outcomes[0]["blocked_errno"] == errno.EACCES
-            assert target.is_dir()
+            if os.name == "nt":
+                assert "blocked_by" in outcomes[0]
+                # Windows denies the rename of a directory holding an open sqlite handle with
+                # a sharing-violation OSError that Python maps to EACCES, not EPERM.
+                assert outcomes[0]["blocked_errno"] == errno.EACCES
+                assert target.is_dir()
+            else:
+                assert outcomes[0].get("moved_to") is not None
+                assert not target.exists()
         finally:
             held.close()
 
-        outcomes2 = project_removal.complete_pending_removals(ws)
-        assert outcomes2[0].get("moved_to") is not None
-        assert not target.exists()
+        if os.name == "nt":
+            outcomes2 = project_removal.complete_pending_removals(ws)
+            assert outcomes2[0].get("moved_to") is not None
+            assert not target.exists()
 
 
 def test_the_per_project_fold_never_stops_the_walk(tmp_path):
