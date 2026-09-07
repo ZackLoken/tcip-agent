@@ -89,7 +89,8 @@ class ProjectSummary(BaseModel):
     # Every dataset this project registered under another workspace project now pending
     # removal or gone.
     dependency_warnings: list[DependencyWarning]
-    # Set instead of an empty dependency_warnings list when this project's own registry won't read.
+    # A complete sentence: this project's own registry decode failure, or an entry with a path
+    # and no id; the other entries still produce their own dependency_warnings beside it.
     dependency_problem: str | None
 
 
@@ -239,8 +240,7 @@ class DependentProject(BaseModel):
     dataset_id: str | None = None
     dataset_path: str | None = None
     pending: bool | None = None
-    # Set instead of the three fields above when the registry will not read, or the matching
-    # entry carries no id (naming it); the removal proceeds, and the dialog renders a warning.
+    # A complete sentence, set instead of the three fields above when the dependent's own registry will not read or the matching entry carries a path and no id; the dialog renders it verbatim.
     unreadable: str | None = None
 
 
