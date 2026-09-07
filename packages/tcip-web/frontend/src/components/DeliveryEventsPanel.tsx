@@ -12,23 +12,28 @@ import {
   isPlantMappingDisclosure,
   isPlantRegistryDisclosure,
   type DeliveryEventRecord,
+  type DocumentBinding,
+  type ReconciledDimension,
+  type ReconciledDocument,
 } from "@/api/inference";
-
-/** One bucket's binding evidence, as `record_delivery_binding_event` (resolution.py) writes it. */
-interface DocumentBinding {
-  ok?: boolean;
-  claimed?: boolean;
-  experiment_id?: string | null;
-  producing_experiment_id?: string | null;
-  checkpoint_sha256?: string | null;
-  record_digest?: string | null;
-  note?: string | null;
-}
 
 function bucketStatusText(binding: DocumentBinding): string {
   if (binding.ok && binding.claimed) return "verified";
   if (binding.claimed) return "claimed, not verified";
   return "no claim";
+}
+
+/** One rendered line for a recorded document or dimension reconciliation: its key, the validity
+ *  it reconciled to (or "not operative" for a dimension that never ran), the delivery-level
+ *  `bound_validated` beside it when the entry carries one, and its unvalidated-bucket count. */
+function reconciliationLine(key: string, entry: ReconciledDocument | ReconciledDimension): string {
+  const operative = "operative" in entry ? entry.operative : true;
+  const validated = operative ? (entry.validated ?? "not operative") : "not operative";
+  const bound =
+    "bound_validated" in entry && entry.bound_validated != null
+      ? ` (bound: ${entry.bound_validated})`
+      : "";
+  return `${key}: ${validated}${bound}, ${entry.unvalidated_buckets.length} unvalidated bucket(s)`;
 }
 
 function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
@@ -71,6 +76,26 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
           ))}
         </div>
       )}
+      {(() => {
+        const documentEntries = Object.entries(record.document_reconciliations ?? {});
+        const dimensionEntries = Object.entries(record.dimension_reconciliations ?? {});
+        if (documentEntries.length === 0 && dimensionEntries.length === 0) return null;
+        return (
+          <div className="mt-2 flex flex-col gap-0.5">
+            <div className="text-[11px] text-tcip-muted">Reconciled validity</div>
+            {documentEntries.map(([key, entry]) => (
+              <div key={`document-${key}`} className="font-mono text-[11px] text-tcip-muted">
+                {reconciliationLine(key, entry)}
+              </div>
+            ))}
+            {dimensionEntries.map(([key, entry]) => (
+              <div key={`dimension-${key}`} className="font-mono text-[11px] text-tcip-muted">
+                {reconciliationLine(key, entry)}
+              </div>
+            ))}
+          </div>
+        );
+      })()}
       {record.plant_mapping && isCanopySegmentDisclosure(record.plant_mapping) && (
         <div className="mt-2 text-[11px] text-tcip-muted" data-testid="canopy-disclosure">
           {(() => {
