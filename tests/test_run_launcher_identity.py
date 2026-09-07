@@ -332,17 +332,16 @@ def test_a_pid_bearing_live_row_takes_launched_by_from_its_disk_overlay(tmp_path
     from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools import training_tools
 
-    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"))
+    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"),
+                     id="exp-overlay-wins")
     run.pid = 424242
-    run.experiment_id = "exp-overlay-wins"
 
     create_experiment("exp-overlay-wins", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("exp-overlay-wins", run.run_id, str(tmp_path / "out"),
+    stamp_run_identity("exp-overlay-wins", str(tmp_path / "out"),
                         launched_by={"launcher": "process"})
     update_status("exp-overlay-wins", "running")
 
     overlay_row = {
-        "run_id": run.run_id,
         "experiment_id": "exp-overlay-wins",
         "status": "running",
         "current_epoch": None,
@@ -357,5 +356,5 @@ def test_a_pid_bearing_live_row_takes_launched_by_from_its_disk_overlay(tmp_path
     monkeypatch.setattr(training_tools, "_launched_training_runs", lambda **kwargs: [overlay_row])
 
     rows = training_tools._all_training_runs(read_progress=False)
-    row = next(r for r in rows if r["run_id"] == run.run_id)
+    row = next(r for r in rows if r["experiment_id"] == run.id)
     assert row["launched_by"] == {"launcher": "gui"}
