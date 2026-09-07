@@ -6,9 +6,12 @@ account of why, in the breeder's terms; the breeder confirms it from the web GUI
 no MCP tool can reach. A single tool doing both authoring and confirmation would put the
 confirmation inside the agent's own tool surface and make honest attribution depend on the agent
 choosing not to fill a field. ``revise_trait_spec`` is the other door: it edits fields on a
-spec already on record, never creates one. Authoring creates, field-editing merges, and the one
-documented restatement path (a spec on record whose statement never landed) is where the two
-doors overlap: both then write onto an already-registered spec.
+spec already on record, never creates one, and states or restates the trait-spec authoring
+statement when its edit calls for it, the door both the delivery precondition and
+``confirm_trait_spec``'s not-found message name for a spec with a stale statement or none at
+all. Authoring creates, field-editing merges, and the one documented restatement path (a spec on
+record whose statement never landed) is where the two doors overlap: both then write onto an
+already-registered spec.
 """
 
 from __future__ import annotations
@@ -126,9 +129,9 @@ def author_trait_spec(
 @mcp.tool()
 @audited
 def revise_trait_spec(
-    project_root: str, trait_name: str, fields: dict
+    project_root: str, trait_name: str, fields: dict, rationale: str, relayed_note: str = "",
 ) -> dict:
-    """Update one or more fields on an already-registered trait's spec.
+    """Update one or more fields on an already-registered trait's spec, and record why.
 
     Hand-editing a trait spec's YAML directly bypasses the audit record and skips re-validation.
     This refuses if the trait has no existing spec file (creating a new
@@ -140,6 +143,16 @@ def revise_trait_spec(
     breeder-answered count objective gets recorded through, never a silent default and never
     copied from another trait's values, both durable, audited facts instead of living only in a
     session's memory.
+
+    Every call carries a rationale, so after its write the trait's own trait-spec statement is
+    stated fresh whenever it was absent or stale, or whenever this call moves a field the
+    statement's authored fields cover (a moved authored field, `fields={}` over a spec with no
+    statement or a stale one, a carried-forward edit over a stale statement all restate), and is
+    left alone whenever it is current and this call moved no authored field. A fresh statement is
+    unconfirmed; the breeder confirms it in the Results tab, and `statement_restated` and
+    `statement_note` say what happened here so the agent learns it now rather than at the next
+    delivery refusal. `rationale` is the breeder's own account of the spec's authored values
+    whenever this call restates, a carried-forward edit included; it is not parsed.
 
     An operationalization the breeder confirmed covers the field values it was confirmed against,
     so a field this call moves can leave one superseded. That is reported in `superseded`, naming
@@ -154,12 +167,31 @@ def revise_trait_spec(
         trait_name: Name of the already-registered trait whose spec file to update.
         fields: `TraitSpec` field names to new values, merged into the existing spec (unknown
             fields, off-vocab `delivers` entries, or an invalid value refuse the whole write).
+        rationale: The agent's account of why it chose these values, from the breeder's own
+            words. Prose, read by a breeder, not parsed. Required, and must say something.
+        relayed_note: What the breeder said away from the GUI, recorded as a relay attributed to
+            the agent. It is surfaced in a delivery refusal and never clears it.
+
+    Returns the updated spec, `superseded`, `statement_restated` (true when this call stated or
+    restated the trait's trait-spec statement) and `statement_note`; when it did, also
+    `record_seen`, the content hash the confirming surface compares against so a click cannot
+    confirm text nobody displayed.
     """
     from tcip_mcp import operationalization
 
-    spec = traits.write_trait_spec_fields(trait_name, fields, project_root=project_root)
-    updated = traits._encode_spec(spec)
+    try:
+        revision = traits.revise_trait_spec_fields(
+            trait_name, fields, project_root=project_root,
+            rationale=rationale, relayed_note=relayed_note,
+        )
+    except ValueError as e:
+        return {"error": str(e)}
+    updated = traits._encode_spec(revision.spec)
     updated["superseded"] = operationalization.superseded_confirmations(
-        project_root, trait_name, spec=spec
+        project_root, trait_name, spec=revision.spec
     )
+    updated["statement_restated"] = revision.statement is not None
+    updated["statement_note"] = revision.statement_note
+    if revision.statement is not None:
+        updated["record_seen"] = traits.trait_spec_statement_seen_hash(revision.statement)
     return updated
