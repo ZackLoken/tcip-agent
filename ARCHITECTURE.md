@@ -1586,7 +1586,7 @@ are listed here with the rest rather than taking numbers of their own.
   (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1555`
   (`def get_experiment(`), and `compare_experiments`, `experiments.py:1735`.
 - `status.json` (`status_key`, `experiments.py:144`): written by `create_experiment` (`experiments.py:420`),
-  `update_status`, `experiments.py:545` (`def update_status(`), `stamp_run_identity`
+  `update_status`, `experiments.py:553` (`def update_status(`), `stamp_run_identity`
   (`experiments.py:693`), `_touch_heartbeat`, `experiments.py:920` (`def _touch_heartbeat(`).
   Read by `get_experiment` (`experiments.py:1555`), `reconstruct_run_status`, `experiments.py:867`
   (`def reconstruct_run_status(`), `resolve_experiment_dir_for_run` (`experiments.py:731`).
