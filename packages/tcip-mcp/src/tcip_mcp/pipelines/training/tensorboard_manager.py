@@ -4,10 +4,20 @@ A launched child is tied to the life of the process that launched it, since noth
 it once the launcher is gone. On Windows every child is assigned to one job object created with
 ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE``, so the kernel kills every assigned child the moment this
 process's last handle to the job closes, on any parent death. On Linux and macOS each child runs
-under a guardian process (``tensorboard_guardian``) that watches this process by pid and ends the
-child within a second of this process's death, however it died. Everywhere, and as a second line
-of defense beside the platform tie, a normal interpreter exit runs an ``atexit`` hook that stops
-every tracked child, which does not run when this process is killed rather than exiting on its own.
+under a guardian process (``tensorboard_guardian``) that watches this process by pid and, on this
+process's death, ends the child within about three seconds (one second to detect the death, plus
+the guardian's own escalation grace for a child that ignores its terminate signal). Everywhere,
+and as a second line of defense beside the platform tie, a normal interpreter exit runs an
+``atexit`` hook that stops every tracked child, which does not run when this process is killed
+rather than exiting on its own.
+
+``stop_tensorboard`` sends the guardian a terminate signal and waits five seconds for it to end
+before force-killing it; the guardian's own escalation grace against a stubborn TensorBoard stays
+well under that five seconds, so the guardian's kill lands, and the guardian itself exits, before
+this process's own wait gives up and reports stopped with TensorBoard still alive underneath it.
+The half-second startup grace below now also covers the guardian's own start (about 0.15 s
+measured), leaving roughly 0.35 s of it as the margin left for TensorBoard's own failure to
+surface in time.
 """
 
 from __future__ import annotations
@@ -233,7 +243,11 @@ def launch_tensorboard(logdir: str, run_id: str | None = None) -> dict:
     ``{'error': ..., 'output': ...}`` when the process died during startup, so a caller never
     advertises a URL nothing is serving. If TensorBoard is already running for this logdir,
     returns existing info. ``lifetime_tie`` is ``"job"``, ``"guardian"``, or ``"none: <reason>"``,
-    so a caller can tell when the platform tie failed rather than reading a URL as a promise.
+    a fact recorded for whichever caller wants it; no route reads it today. Two things can go
+    wrong here: an exception during the launch or the tie assignment is a failed launch, the
+    child killed and waited if one was started, reported back as ``error``; a platform tie call
+    returning falsy for failure (the Windows job API's own convention) is not an exception, the
+    launch still succeeds and ``lifetime_tie`` becomes ``"none: <reason>"`` instead.
     """
     logdir = str(Path(logdir).resolve())
     key = run_id or logdir
@@ -271,6 +285,7 @@ def launch_tensorboard(logdir: str, run_id: str | None = None) -> dict:
         output.close()
         if proc is not None and proc.poll() is None:
             proc.kill()
+            proc.wait(timeout=5)
         logger.warning("Failed to launch TensorBoard: %s", e)
         return {"error": str(e), "logdir": logdir}
 
@@ -305,6 +320,8 @@ def stop_tensorboard(run_id: str | None = None, logdir: str | None = None) -> di
     if entry.proc.poll() is None:
         entry.proc.terminate()
         try:
+            # Five seconds gives the guardian, whose own escalation grace stays well under
+            # this, time to finish killing a stubborn TensorBoard and exit before this gives up.
             entry.proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             entry.proc.kill()
