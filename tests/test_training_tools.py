@@ -1177,7 +1177,8 @@ def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_
     """The tile geometry stamp_effective_data_geometry records off the same tiled dataset a
     training body's auto_train_val returns must be present in resolved_config.json's own
     data.tiling block, the record a caller reads back to know what the trial actually trained
-    on."""
+    on. Coverage, not a guard: before the tracker held the data block the stamp landed on the
+    plain merged dict the snapshot was written from, so this passed by that path too."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
 
