@@ -197,13 +197,14 @@ def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
-    run = create_run({"data": {"tiling": {"enabled": True, "tile_size": 64}}}, str(tmp_path / "out"))
+    run = create_run({"data": {"tiling": {"enabled": True, "tile_size": 64}}}, str(tmp_path / "out"),
+                     id="det-measure-tiled")
     out = Path(run.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     registered_checkpoint(out, project_root=str(tmp_path), filename="model_best.pt")
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection", subject="bud")
+    evaluate_model(run.id, str(images_dir), str(labels_dir), task="detection", subject="bud")
     assert isinstance(captured["ds"], TiledDetectionDataset)
     assert captured["ds"].num_samples > 3  # more tiles than the 3 source images
     assert captured["tiling"] == {"enabled": True, "tile_size": 64}
@@ -641,7 +642,6 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
     res = training_tools.launch_training(cfg, str(tmp_path / "out"))
     assert res["pid"] != os.getpid()  # a different OS process, not this one
     eid = res["experiment_id"]
-    run_id = res["run_id"]
     key = config_key(eid)
 
     deadline = time.monotonic() + 90
@@ -651,7 +651,7 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
             tiling = ts.read(key).get("data", {}).get("tiling", {})
             if "tile_size" in tiling:
                 break
-        status = training_tools.monitor_training(run_id)
+        status = training_tools.monitor_training(eid)
         if status.get("status") in ("failed", "cancelled"):
             pytest.fail(f"training subprocess ended early: {status}")
         time.sleep(0.5)
@@ -670,7 +670,7 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
     final_status = None
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
-        final_status = training_tools.monitor_training(run_id).get("status")
+        final_status = training_tools.monitor_training(eid).get("status")
         if final_status in ("completed", "failed", "cancelled"):
             break
         time.sleep(0.5)

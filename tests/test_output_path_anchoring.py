@@ -82,14 +82,14 @@ def test_launch_training_defaults_into_the_platform_state_roots_experiment_store
     res = training_tools.launch_training(cfg)
     assert "error" not in res, res
     run_dir = Path(res["output_dir"])
-    assert run_dir == tmp_path / ".tcip" / "experiments" / res["run_id"]
+    assert run_dir == tmp_path / ".tcip" / "experiments" / res["experiment_id"]
 
     # Wait for the subprocess to finish rather than leaking a child that keeps writing into
     # this test's tmp root after the test moves on.
     deadline = time.monotonic() + 90
     final_status = None
     while time.monotonic() < deadline:
-        final_status = training_tools.monitor_training(res["run_id"]).get("status")
+        final_status = training_tools.monitor_training(res["experiment_id"]).get("status")
         if final_status in ("completed", "failed", "cancelled"):
             break
         time.sleep(0.5)

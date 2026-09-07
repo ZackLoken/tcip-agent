@@ -555,8 +555,8 @@ def tb_launches(monkeypatch) -> list[tuple[str, str]]:
     """Record what the routes hand ``launch_tensorboard`` instead of starting a real one."""
     calls: list[tuple[str, str]] = []
 
-    def fake_launch(logdir: str, run_id: str | None = None) -> dict:
-        calls.append((logdir, run_id or ""))
+    def fake_launch(logdir: str, key: str | None = None) -> dict:
+        calls.append((logdir, key or ""))
         return {"url": "http://localhost:6006", "port": 6006, "pid": 1, "logdir": logdir}
 
     monkeypatch.setattr(
@@ -646,8 +646,8 @@ def test_stopping_a_trial_tensorboard_uses_that_trial_s_own_key(
     """Trials share a bounded port range, so each one's TensorBoard must be stoppable alone."""
     stopped: list[str] = []
 
-    def fake_stop(run_id: str | None = None, logdir: str | None = None) -> dict:
-        stopped.append(run_id or "")
+    def fake_stop(key: str | None = None, logdir: str | None = None) -> dict:
+        stopped.append(key or "")
         return {"status": "stopped", "pid": 7}
 
     monkeypatch.setattr(
@@ -758,8 +758,8 @@ def test_a_web_launched_sweep_runs_only_the_routes_own_tensorboard(
     assert tb_resp.status_code == 200
 
     assert len(tb_launches) == 1
-    (_, run_id), = tb_launches
-    assert run_id == f"sweep_{sweep_id}"
+    (_, key), = tb_launches
+    assert key == f"sweep_{sweep_id}"
 
 
 def test_launch_route_no_longer_exists(client: TestClient, hpo_root) -> None:

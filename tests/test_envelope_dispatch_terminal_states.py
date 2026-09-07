@@ -43,7 +43,7 @@ def _start(tmp_path, experiment_id, body_name):
     }
     create_experiment(experiment_id, config, data_source="imgs")
     update_status(experiment_id, "running")
-    run = create_run(config, str(tmp_path / "out"))
+    run = create_run(config, str(tmp_path / "out"), id="auto-run-26")
     ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
                        experiment_id=experiment_id)
     run_training_envelope(ctx)
@@ -175,7 +175,7 @@ def test_env_provenance_carries_an_outcome_only_known_after_the_body_ran(tmp_pat
     assert ctx.run.status == "completed"
     env = ts.read(env_key("expRng"))
     assert env["rng_state_restored"] is True
-    assert env["run_id"] == ctx.run.run_id
+    assert "run_id" not in env  # dropped: nothing reads it back
     assert env["seed"] == ctx.run.config["seed"]
 
 
@@ -225,7 +225,7 @@ def test_a_wall_clock_failed_record_with_unaudited_refusal_still_reconciles(tmp_
     }
     create_experiment(experiment_id, config, data_source="imgs")
     update_status(experiment_id, "running")
-    run = create_run(config, str(tmp_path / "out"))
+    run = create_run(config, str(tmp_path / "out"), id="auto-run-27")
     ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
                        experiment_id=experiment_id)
 

@@ -93,7 +93,7 @@ def test_first_derivation_through_the_real_subprocess_records_the_kind_and_its_a
     assert "error" not in res, res
     assert res["pid"] != os.getpid()
 
-    assert _wait_terminal(res["run_id"], 180) == "completed"
+    assert _wait_terminal(res["experiment_id"], 180) == "completed"
 
     assert get_trait("leaf").localization == "center_match"
     key = audit_module.audit_log_key(audit_module.platform_audit_scope())

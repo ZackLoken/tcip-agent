@@ -171,7 +171,7 @@ def test_worker_leaves_a_spatial_runs_identities_out_of_the_durable_config(tmp_p
     monkeypatch.setattr(sc, "auto_train_val", stub_auto_train_val)
     monkeypatch.setattr(worker, "_resolve_run_id_map", stop)
     with pytest.raises(StopAfterSplit):
-        worker.run("run1", "exp1", str(out), "")
+        worker.run("exp1", str(out), "")
 
     assert "spatial_manifest" not in ts.read(config_key("exp1"))["data"].get("split", {})
 
@@ -179,16 +179,16 @@ def test_worker_leaves_a_spatial_runs_identities_out_of_the_durable_config(tmp_p
 # ── attach_run ──────────────────────────────────────────────────────────
 
 
-def test_attach_run_preserves_given_run_id():
+def test_attach_run_preserves_given_id():
     from tcip_mcp.pipelines.training.run_registry import attach_run, create_run, get_run
 
     run = attach_run("run_fixed_id", {"model_source": {"builder": "x:y"}}, "out")
-    assert run.run_id == "run_fixed_id"
+    assert run.id == "run_fixed_id"
     assert get_run("run_fixed_id") is run
 
-    # Distinct from create_run, which always mints its own id regardless of what's in config.
-    minted = create_run({"model_source": {"builder": "x:y"}}, "out2")
-    assert minted.run_id != "run_fixed_id"
+    # Distinct from create_run, which registers under whatever id its caller supplies.
+    other = create_run({"model_source": {"builder": "x:y"}}, "out2", id="run_other_id")
+    assert other.id != "run_fixed_id"
 
 
 def test_launch_training_child_receives_resolved_experiment_id(tmp_path, monkeypatch):
@@ -248,19 +248,17 @@ def test_launch_training_child_receives_resolved_experiment_id(tmp_path, monkeyp
     assert _argv_experiment_id(captured_argv[-1]) == "exp_fresh" == res1["experiment_id"]
 
     # fresh-id conflict branch: pre-populate "exp_reused" with real recorded history so
-    # _ensure_experiment mints "exp_reused_<run_id>" instead of reusing it.
+    # _ensure_experiment mints a fresh "exp_reused_<minted>" id instead of reusing it.
     create_experiment("exp_reused", {"a": 1})
     update_status("exp_reused", "running")
     log_metrics("exp_reused", 1, {"loss": 0.1})
 
     res2 = training_tools.launch_training(_cfg("exp_reused"), str(tmp_path / "out2"))
-    expected_fresh_id = f"exp_reused_{res2['run_id']}"
-    assert res2["experiment_id"] == expected_fresh_id
+    fresh_id = res2["experiment_id"]
+    assert fresh_id.startswith("exp_reused_") and fresh_id != "exp_reused"
     argv2_experiment_id = _argv_experiment_id(captured_argv[-1])
-    assert argv2_experiment_id == expected_fresh_id
-    # Not what launch_config.json alone would carry (the caller's original, pre-resolution id).
-    # Confirms the CLI arg is the parent's resolved value, never read back from that file.
-    assert argv2_experiment_id != "exp_reused"
+    # The CLI arg is the parent's resolved value, never read back from launch_config.json.
+    assert argv2_experiment_id == fresh_id
 
 
 # ── should_cancel() / the sentinel file ────────────────────────────
@@ -319,10 +317,9 @@ def test_cancel_run_falls_back_to_disk_when_not_in_local_registry(tmp_path, monk
     real_output_dir = tmp_path / "real_run_dir"
     real_output_dir.mkdir()
     create_experiment("exp_cross_proc", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("exp_cross_proc", "run_cross_proc", str(real_output_dir),
-                       launched_by={"launcher": "process"})
+    stamp_run_identity("exp_cross_proc", str(real_output_dir), launched_by={"launcher": "process"})
 
-    assert cancel_run("run_cross_proc") is True
+    assert cancel_run("exp_cross_proc") is True
     assert (real_output_dir / ".cancel_requested").is_file()
 
 
@@ -335,45 +332,24 @@ def test_cancel_run_unknown_run_refuses_honestly(tmp_path, monkeypatch):
 
 def test_ensure_experiment_pristine_reuse_stamps_identity(tmp_path, monkeypatch):
     """The pristine pre-created-experiment reuse branch (a real, tested workflow,
-    test_ensure_experiment_attaches_to_precreated) must stamp run_id/output_dir too, not only the
-    fresh-creation branch. Otherwise a run launched against a pre-named experiment is permanently
-    unresolvable by resolve_experiment_dir_for_run from a different process."""
+    test_ensure_experiment_attaches_to_precreated) must stamp output_dir too, not only the
+    fresh-creation branch, so a run launched against a pre-named experiment is discoverable by
+    its own id from a different process."""
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, resolve_experiment_dir_for_run
+    from tcip_mcp.experiments import create_experiment, read_member, status_key
     from tcip_mcp.tools.training_tools import _ensure_experiment
 
-    create_experiment("precreated", {"a": 1})  # agent pre-creates before any run_id exists
-    eid = _ensure_experiment("precreated", {"a": 1}, None, resume_from="", run_id="run_later",
-                             output_dir=str(tmp_path / "out"), launched_by={"launcher": "process"})
+    create_experiment("precreated", {"a": 1})  # agent pre-creates before any run exists
+    eid, out_dir = _ensure_experiment("precreated", {"a": 1}, None, resume_from="",
+                                      output_base=str(tmp_path / "out"),
+                                      launched_by={"launcher": "process"})
     assert eid == "precreated"
 
-    resolved = resolve_experiment_dir_for_run("run_later")
-    assert resolved is not None
-    assert resolved.name == "precreated"
+    status = read_member(status_key("precreated"), {})
+    assert status["output_dir"] == out_dir
 
 
-# ── resolve_experiment_dir_for_run / reconstruct_run_status ─────────────
-
-
-def test_resolve_experiment_dir_for_run_handles_fresh_id_suffix(tmp_path, monkeypatch):
-    """The fresh-id format (f'{experiment_id}_{run_id}') means experiment_id != run_id: the
-    resolver must not assume they're equal."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, resolve_experiment_dir_for_run, stamp_run_identity
-
-    create_experiment("exp1_run_9_0", {"model_source": {"builder": "x:y"}},
-                      parent_experiment="exp1")
-    stamp_run_identity("exp1_run_9_0", "run_9_0", "out", launched_by={"launcher": "process"})
-
-    resolved = resolve_experiment_dir_for_run("run_9_0")
-    assert resolved is not None and resolved.name == "exp1_run_9_0"
-
-
-def test_resolve_experiment_dir_for_run_refuses_unresolvable(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import resolve_experiment_dir_for_run
-
-    assert resolve_experiment_dir_for_run("nope") is None
+# ── reconstruct_run_status ─────────────
 
 
 def test_reconstruct_run_status_from_disk(tmp_path, monkeypatch):
@@ -381,16 +357,13 @@ def test_reconstruct_run_status_from_disk(tmp_path, monkeypatch):
     ``generic_trainer.train()``) carries no best: the best is derived from the trainer's own
     stamped rows, never fabricated from a metric name this log never recorded."""
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import (
-        create_experiment, log_metrics, reconstruct_run_status, stamp_run_identity, update_status,
-    )
+    from tcip_mcp.experiments import create_experiment, log_metrics, reconstruct_run_status, stamp_run_identity
 
     create_experiment("exp_disk", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("exp_disk", "run_disk", "out_dir", launched_by={"launcher": "process"})
-    update_status("exp_disk", "running")
+    stamp_run_identity("exp_disk", "out_dir", launched_by={"launcher": "process"})
     log_metrics("exp_disk", 3, {"loss": 0.1})
 
-    result = reconstruct_run_status("run_disk")
+    result = reconstruct_run_status("exp_disk")
     assert result is not None
     assert result["status"] == "running"
     assert result["current_epoch"] == 3
@@ -404,17 +377,14 @@ def test_reconstruct_run_status_derives_best_from_stamped_rows(tmp_path, monkeyp
     ``selection_metric``) does carry a name and a best, read back rather than re-derived from
     config."""
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import (
-        create_experiment, log_metrics, reconstruct_run_status, stamp_run_identity, update_status,
-    )
+    from tcip_mcp.experiments import create_experiment, log_metrics, reconstruct_run_status, stamp_run_identity
 
     create_experiment("exp_stamped", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("exp_stamped", "run_stamped", "out_dir", launched_by={"launcher": "process"})
-    update_status("exp_stamped", "running")
+    stamp_run_identity("exp_stamped", "out_dir", launched_by={"launcher": "process"})
     log_metrics("exp_stamped", 1, {"selection": 0.5, "selection_metric": "map50"})
     log_metrics("exp_stamped", 2, {"selection": 0.7, "selection_metric": "map50"})
 
-    result = reconstruct_run_status("run_stamped")
+    result = reconstruct_run_status("exp_stamped")
     assert result is not None
     assert result["best_metric_name"] == "map50"
     assert result["best_metric"] == 0.7
@@ -464,10 +434,10 @@ def test_reconstruct_run_status_surfaces_error(tmp_path, monkeypatch):
     from tcip_mcp.experiments import create_experiment, reconstruct_run_status, stamp_run_identity, update_status
 
     create_experiment("exp_err", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("exp_err", "run_err", "out_dir", launched_by={"launcher": "process"})
+    stamp_run_identity("exp_err", "out_dir", launched_by={"launcher": "process"})
     update_status("exp_err", "failed", error="exceeded max_wall_clock_seconds (10)")
 
-    result = reconstruct_run_status("run_err")
+    result = reconstruct_run_status("exp_err")
     assert result["status"] == "failed"
     assert result["error"] == "exceeded max_wall_clock_seconds (10)"
 
@@ -483,16 +453,15 @@ def test_reconstruct_run_status_reports_cancelled_not_running_or_interrupted(tmp
     from tcip_mcp.experiments import create_experiment, reconstruct_run_status, stamp_run_identity, update_status
 
     create_experiment("exp_cancelled", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("exp_cancelled", "run_cancelled", "out_dir", launched_by={"launcher": "process"})
-    update_status("exp_cancelled", "running")
+    stamp_run_identity("exp_cancelled", "out_dir", launched_by={"launcher": "process"})
     update_status("exp_cancelled", "cancelled")  # stamps a fresh heartbeat, same as any update_status call
 
-    result = reconstruct_run_status("run_cancelled")
+    result = reconstruct_run_status("exp_cancelled")
     assert result["status"] == "cancelled"
 
     # And it must not flip to "interrupted" once the heartbeat goes stale: a cancelled run is
     # already a known, final outcome, not a liveness question.
-    result_stale = reconstruct_run_status("run_cancelled", stale_seconds=-1)  # heartbeat always "stale"
+    result_stale = reconstruct_run_status("exp_cancelled", stale_seconds=-1)  # heartbeat always "stale"
     assert result_stale["status"] == "cancelled"
 
 
@@ -514,7 +483,7 @@ def test_update_status_error_is_keyword_only_and_backward_compatible(tmp_path, m
 
 def test_monitor_training_falls_back_to_disk_for_delegated_run(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, log_metrics, stamp_run_identity, update_status
+    from tcip_mcp.experiments import create_experiment, log_metrics, stamp_run_identity
     from tcip_mcp.pipelines.training.run_registry import attach_run
     from tcip_mcp.tools.training_tools import monitor_training
 
@@ -522,40 +491,12 @@ def test_monitor_training_falls_back_to_disk_for_delegated_run(tmp_path, monkeyp
     run.pid = 999  # subprocess-delegated, in-memory fields below are now stale by design
 
     create_experiment("run_delegated", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("run_delegated", "run_delegated", "out_dir", launched_by={"launcher": "process"})
-    update_status("run_delegated", "running")
+    stamp_run_identity("run_delegated", "out_dir", launched_by={"launcher": "process"})
     log_metrics("run_delegated", 7, {"loss": 0.2})
 
     result = monitor_training("run_delegated")
     assert result["epoch"] == 7  # not the stale in-memory 0
     assert result["status"] == "running"
-
-
-def test_launched_runs_view_reconstructs_without_the_full_scan_resolver(tmp_path, monkeypatch):
-    """Each row is reconstructed from the record the enumeration already holds; it must never
-    round-trip a custom-named (id != run_id) experiment through resolve_experiment_for_run's
-    full-scan fallback the way the old per-run reconstruct_run_status call did."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    import tcip_mcp.experiments as exp_mod
-    from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.tools.experiment_tools import list_experiments
-
-    create_experiment("exp-001-chestnut-burr-det", {"model_source": {"builder": "my_models:burr_det"}})
-    update_status("exp-001-chestnut-burr-det", "running")
-
-    calls = {"n": 0}
-    real = exp_mod.resolve_experiment_for_run
-
-    def _counting(*a, **k):
-        calls["n"] += 1
-        return real(*a, **k)
-
-    monkeypatch.setattr(exp_mod, "resolve_experiment_for_run", _counting)
-
-    runs = list_experiments(launched_only=True)["runs"]
-    assert any(r["run_id"] == "exp-001-chestnut-burr-det" for r in runs)
-    assert calls["n"] == 0
 
 
 def test_launched_runs_view_lists_a_launched_experiment_this_process_never_held(tmp_path, monkeypatch):
@@ -569,7 +510,7 @@ def test_launched_runs_view_lists_a_launched_experiment_this_process_never_held(
     create_experiment("exp-no-stamp", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
     update_status("exp-no-stamp", "running")
 
-    by_id = {r["run_id"]: r for r in list_experiments(launched_only=True)["runs"]}
+    by_id = {r["experiment_id"]: r for r in list_experiments(launched_only=True)["runs"]}
     assert "exp-no-stamp" in by_id
     assert by_id["exp-no-stamp"]["external"] is True
 
@@ -583,7 +524,7 @@ def test_launched_runs_view_overlays_a_pid_bearing_entry_from_disk(tmp_path, mon
     record with no persisted process id can offer."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    from tcip_mcp.experiments import create_experiment, log_metrics, stamp_run_identity, update_status
+    from tcip_mcp.experiments import create_experiment, log_metrics, stamp_run_identity
     from tcip_mcp.pipelines.training.run_registry import attach_run
     from tcip_mcp.tools.experiment_tools import list_experiments
 
@@ -591,11 +532,10 @@ def test_launched_runs_view_overlays_a_pid_bearing_entry_from_disk(tmp_path, mon
     run.pid = 4242
 
     create_experiment("run_pid_overlay", {"model_source": {"builder": "my_models:burr_det"}})
-    stamp_run_identity("run_pid_overlay", "run_pid_overlay", "out_dir", launched_by={"launcher": "process"})
-    update_status("run_pid_overlay", "running")
+    stamp_run_identity("run_pid_overlay", "out_dir", launched_by={"launcher": "process"})
     log_metrics("run_pid_overlay", 9, {"loss": 0.1})
 
-    by_id = {r["run_id"]: r for r in list_experiments(launched_only=True)["runs"]}
+    by_id = {r["experiment_id"]: r for r in list_experiments(launched_only=True)["runs"]}
     assert by_id["run_pid_overlay"]["status"] == "running"
     assert by_id["run_pid_overlay"]["current_epoch"] == 9
     assert by_id["run_pid_overlay"]["external"] is False
@@ -610,12 +550,12 @@ def test_launched_runs_view_leaves_in_process_runs_untouched(tmp_path, monkeypat
     from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.experiment_tools import list_experiments
 
-    run = create_run({"model_source": {"builder": "x:y"}}, "out_dir")
+    run = create_run({"model_source": {"builder": "x:y"}}, "out_dir", id="run_in_process_untouched")
     run.status = "running"
     run.current_epoch = 5
 
     runs = list_experiments(launched_only=True)["runs"]
-    entry = next(r for r in runs if r["run_id"] == run.run_id)
+    entry = next(r for r in runs if r["experiment_id"] == run.id)
     assert entry["status"] == "running"
     assert entry["current_epoch"] == 5
 
@@ -843,7 +783,7 @@ def test_inspect_compute_resources_counts_subprocess_delegated_running_runs(tmp_
     case for a subprocess-launched run, not an edge case, and it's the exact number the tool
     exists to give the agent before it decides whether to launch another concurrent run."""
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, stamp_run_identity, update_status
+    from tcip_mcp.experiments import create_experiment, stamp_run_identity
     from tcip_mcp.pipelines.training.run_registry import attach_run
     from tcip_mcp.tools.training_tools import inspect_compute_resources
 
@@ -856,8 +796,7 @@ def test_inspect_compute_resources_counts_subprocess_delegated_running_runs(tmp_
     assert run.status == "created"  # the parent-side placeholder never advances
 
     create_experiment("run_active", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("run_active", "run_active", str(tmp_path), launched_by={"launcher": "process"})
-    update_status("run_active", "running")  # only the child's disk write reflects reality
+    stamp_run_identity("run_active", str(tmp_path), launched_by={"launcher": "process"})
 
     assert inspect_compute_resources()["active_training_runs"] == baseline + 1
 

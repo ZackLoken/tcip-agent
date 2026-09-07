@@ -744,7 +744,7 @@ def launch_sweep_tensorboard(sweep_id: str, payload: EmptyBodyPayload) -> dict:
 
     root = _sweep_launch_root(sweep_id)
     view = _ensure_trial_view(sweep_id, _sweep_root(sweep_id), root=root)
-    return launch_tensorboard(str(view), run_id=f"sweep_{sweep_id}")
+    return launch_tensorboard(str(view), key=f"sweep_{sweep_id}")
 
 
 @router.post("/sweeps/{sweep_id}/trials/{trial_id}/tensorboard")
@@ -758,7 +758,7 @@ def launch_trial_tensorboard(sweep_id: str, trial_id: str, payload: EmptyBodyPay
         logdir = safe_join(root, f"{_TRIAL_DIR_PREFIX}{trial_id}", "tensorboard")
     except ValueError as exc:
         raise HTTPException(400, f"invalid trial_id: {trial_id}") from exc
-    return launch_tensorboard(str(logdir), run_id=_trial_tb_key(sweep_id, trial_id))
+    return launch_tensorboard(str(logdir), key=_trial_tb_key(sweep_id, trial_id))
 
 
 @router.post("/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop")
@@ -770,4 +770,4 @@ def stop_trial_tensorboard(sweep_id: str, trial_id: str, payload: EmptyBodyPaylo
     """
     from tcip_mcp.pipelines.training.tensorboard_manager import stop_tensorboard
 
-    return stop_tensorboard(run_id=_trial_tb_key(sweep_id, trial_id))
+    return stop_tensorboard(key=_trial_tb_key(sweep_id, trial_id))

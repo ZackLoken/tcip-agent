@@ -64,7 +64,7 @@ def main() -> None:
     launched: dict = {}
 
     def _launch() -> None:
-        launched["info"] = tb.launch_tensorboard(logdir, run_id="lifetime-parent")
+        launched["info"] = tb.launch_tensorboard(logdir, key="lifetime-parent")
 
     if "--thread" in flags:
         thread = threading.Thread(target=_launch)

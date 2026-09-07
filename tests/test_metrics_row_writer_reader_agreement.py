@@ -1,9 +1,9 @@
 """The metrics rows a run writes are the rows the Training stream serves.
 
 Both sides here are the real implementations: ``log_metrics`` appends to the run's own log and
-the WebSocket route resolves that same log and replays it, so a change to the row shape, to
-where the log lives, or to which record a run id resolves to shows up as a disagreement instead
-of passing against a hand-built file.
+the WebSocket route reads that same log by the experiment's own id and replays it, so a change
+to the row shape or to where the log lives shows up as a disagreement instead of passing against
+a hand-built file.
 """
 
 from __future__ import annotations
@@ -51,25 +51,21 @@ def test_logged_rows_reach_the_training_stream_reader_with_their_epoch_and_value
     assert frames[-1]["status"]["status"] == "completed"
 
 
-def test_training_stream_serves_a_relaunched_run_from_the_record_that_claims_it(tmp_path):
-    """A relaunch's experiment id is not its run id, so the stream resolves the record.
-
-    ``_ensure_experiment`` mints ``<id>_<run_id>`` when an id already has a run, and the rows
-    then live under that minted id. Serving by run id alone would read an id nothing writes.
-    """
+def test_training_stream_serves_a_forked_experiment_by_its_own_minted_id(tmp_path):
+    """A fork's id (``<parent>_<minted>``, minted when the parent already has history) is the one
+    id the record is addressed by everywhere, the stream included: no separate run id to resolve
+    it through."""
     from tcip_mcp.experiments import (
-        create_experiment, log_metrics, stamp_run_identity, update_status,
+        create_experiment, log_metrics, mint_experiment_id, update_status,
     )
 
-    run_id = "run-20260401-abcdef"
-    experiment_id = f"exp-022-chestnut-burr-det_{run_id}"
-    create_experiment(experiment_id, {"model_source": {"builder": "my_models:burr_det"}})
-    stamp_run_identity(experiment_id, run_id, str(tmp_path / "out"), launched_by={"launcher": "process"})
-    log_metrics(experiment_id, 1, {"loss": 1.2})
-    update_status(experiment_id, "completed")
+    forked_id = f"exp-022-burr-det_{mint_experiment_id()}"
+    create_experiment(forked_id, {"model_source": {"builder": "my_models:burr_det"}})
+    log_metrics(forked_id, 1, {"loss": 1.2})
+    update_status(forked_id, "completed")
 
     with _client().websocket_connect(
-        f"ws://127.0.0.1/api/training/runs/{run_id}/stream?project_root={tmp_path}",
+        f"ws://127.0.0.1/api/training/runs/{forked_id}/stream?project_root={tmp_path}",
     ) as ws:
         frames = _drain(ws)
 
@@ -114,8 +110,9 @@ def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
 
 
 def test_training_stream_serves_no_metric_frames_for_a_run_no_record_claims(tmp_path):
-    """An experiment no run registry claims resolves to no metrics key: the stream replays
-    nothing and sends only the terminal status frame naming the unresolved run."""
+    """An id no experiment record exists for still resolves a metrics key (nothing appended to
+    it), so the stream replays nothing and sends only the terminal status frame naming the
+    unresolved run."""
     with _client().websocket_connect(
         f"ws://127.0.0.1/api/training/runs/never-launched/stream?project_root={tmp_path}",
     ) as ws:

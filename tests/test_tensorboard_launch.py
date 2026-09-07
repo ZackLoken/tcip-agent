@@ -30,7 +30,7 @@ def test_launch_reports_the_failure_when_the_process_exits_immediately(monkeypat
 
     monkeypatch.setattr(tb.subprocess, "Popen", dying_popen)
 
-    info = tb.launch_tensorboard(str(tmp_path), run_id="dead-run")
+    info = tb.launch_tensorboard(str(tmp_path), key="dead-run")
 
     assert "url" not in info
     assert "exited during startup" in info["error"]
@@ -48,12 +48,12 @@ def test_launch_returns_a_url_for_a_process_that_stays_up(monkeypatch, tmp_path)
 
     monkeypatch.setattr(tb.subprocess, "Popen", living_popen)
 
-    info = tb.launch_tensorboard(str(tmp_path), run_id="live-run")
+    info = tb.launch_tensorboard(str(tmp_path), key="live-run")
     try:
         assert info["url"] == f"http://localhost:{info['port']}"
         assert any(entry["key"] == "live-run" for entry in tb.list_tensorboard())
     finally:
-        tb.stop_tensorboard(run_id="live-run")
+        tb.stop_tensorboard(key="live-run")
     assert all(entry["key"] != "live-run" for entry in tb.list_tensorboard())
 
 

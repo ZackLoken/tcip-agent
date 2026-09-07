@@ -45,7 +45,7 @@ class TrainContext:
     val_loader: Any | None = None
     task: str = "detection"
     resume_from: str = ""
-    experiment_id: str | None = None
+    experiment_id: str | None = None  # None means no record; nothing reads run.id as this instead
     epoch_hook: Any = None        # (epoch, metrics) -> None; the stock trainer's per-epoch signal
     trial_report: Any = None      # (value: float) -> None; the raw HPO reporter, None outside HPO
     final_weights: str | None = None  # the shippable checkpoint path, see set_final_weights
@@ -278,7 +278,7 @@ class TrainContext:
             log_metrics(self.experiment_id, epoch, stored)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Metric log failed (%s epoch %s): %s",
-                           self.experiment_id or self.run.run_id, epoch, exc)
+                           self.experiment_id or self.run.id, epoch, exc)
 
     def set_final_weights(self, path: str) -> None:
         """Declare the shippable checkpoint for this run. ``dispatch_train_body`` derives
@@ -414,7 +414,6 @@ def _snapshot_run_provenance(ctx: TrainContext) -> None:
 
         kind = KIND_TCIP_MODULE
         env = {"env": capture_env(), "seed": ctx.seed, "model_kind": kind,
-               "run_id": ctx.run.run_id,
                "resumed_from": ctx.resume_from or None,
                "rng_state_restored": getattr(ctx.run, "rng_state_restored", None)}
         if experiment_exists(ctx.experiment_id):
@@ -479,7 +478,7 @@ def run_training_envelope(ctx: TrainContext) -> None:
 
     run = ctx.run
     exp_id = ctx.experiment_id
-    audit_args = {"run_id": run.run_id, "experiment_id": exp_id, "task": ctx.task}
+    audit_args = {"experiment_id": exp_id, "task": ctx.task}
 
     _snapshot_run_provenance(ctx)
 
@@ -491,7 +490,7 @@ def run_training_envelope(ctx: TrainContext) -> None:
         if run.status not in ("failed", "cancelled"):
             run.status = "failed"
         run.error = run.error or str(exc)
-        logger.exception("Training body failed for %s: %s", run.run_id, exc)
+        logger.exception("Training body failed for %s: %s", run.id, exc)
 
     _snapshot_run_provenance(ctx)  # refresh with the real resume/RNG-restore outcome
     try:
@@ -561,14 +560,14 @@ def _finalize_run(ctx: TrainContext) -> None:
                     # record was already terminal (a wall-clock watchdog race to failed first).
                     _reconcile_on_refusal(run, result)
                     logger.warning("Run %s: completion refused (%s); weights at %s stay on "
-                                   "disk, unregistered.", run.run_id, result["error"],
+                                   "disk, unregistered.", run.id, result["error"],
                                    ctx.final_weights)
                 else:
                     # final_weights could not be read: mark failed, as the phantom-deliverable
                     # case below does, rather than completing with an unrecorded digest.
                     logger.warning(
                         "Run %s: completion refused (%s); marking failed instead of completing "
-                        "with an unrecorded digest.", run.run_id, result["error"])
+                        "with an unrecorded digest.", run.id, result["error"])
                     run.status = "failed"
                     run.error = run.error or result["error"]
                     try:
@@ -584,17 +583,17 @@ def _finalize_run(ctx: TrainContext) -> None:
                     _reconcile_unaudited_refusal(run, exp_id, exc)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Run %s: model registration failed for weights at %s: %s",
-                                   run.run_id, ctx.final_weights, exc)
+                                   run.id, ctx.final_weights, exc)
                     record_event("model_registration_failed", {
-                        "run_id": run.run_id, "experiment_id": exp_id,
+                        "experiment_id": exp_id,
                         "weights_path": str(ctx.final_weights), "reason": str(exc),
                     })
                 else:
                     if "error" in reg_result:
                         logger.warning("Run %s: model registration refused for weights at %s: %s",
-                                       run.run_id, ctx.final_weights, reg_result["error"])
+                                       run.id, ctx.final_weights, reg_result["error"])
                         record_event("model_registration_failed", {
-                            "run_id": run.run_id, "experiment_id": exp_id,
+                            "experiment_id": exp_id,
                             "weights_path": str(ctx.final_weights), "reason": reg_result["error"],
                         })
         elif run.status == "completed":
@@ -603,7 +602,7 @@ def _finalize_run(ctx: TrainContext) -> None:
             logger.warning(
                 "Run %s completed but produced no discoverable weights (no model_best.pt/"
                 "model_final.pt and ctx.set_final_weights() was never called), marking failed "
-                "instead of registering a nonexistent path.", run.run_id)
+                "instead of registering a nonexistent path.", run.id)
             run.status = "failed"
             run.error = run.error or "training completed but produced no final weights file"
             try:

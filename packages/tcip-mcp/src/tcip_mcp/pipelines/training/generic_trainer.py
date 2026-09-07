@@ -958,10 +958,10 @@ def train(
             }, config), checkpoint_key(out_dir, "model_final"))
 
         if diverged:
-            logger.info("Training run %s stopped: %s", run.run_id, run.error)
+            logger.info("Training run %s stopped: %s", run.id, run.error)
         elif run.should_cancel():
             run.status = "cancelled"
-            logger.info("Training run %s cancelled at epoch %d", run.run_id, run.current_epoch)
+            logger.info("Training run %s cancelled at epoch %d", run.id, run.current_epoch)
         else:
             run.status = "completed"
 

@@ -96,7 +96,7 @@ def test_a_relative_output_dir_anchors_to_the_platform_state_root_not_the_proces
     from tcip_mcp.tools.training_tools import launch_config_key
 
     run_dir = Path(res["output_dir"])
-    assert run_dir == project / "runs" / "nightly" / res["run_id"]
+    assert run_dir == project / "runs" / "nightly" / res["experiment_id"]
     assert ts.exists(launch_config_key(run_dir))
     assert not (server_cwd / "runs").exists()
 
@@ -125,8 +125,8 @@ def test_an_absolute_output_dir_stays_the_callers_own_choice(
 
     from tcip_mcp.tools.training_tools import launch_config_key
 
-    assert Path(res["output_dir"]) == scratch / res["run_id"]
-    assert ts.exists(launch_config_key(scratch / res["run_id"]))
+    assert Path(res["output_dir"]) == scratch / res["experiment_id"]
+    assert ts.exists(launch_config_key(scratch / res["experiment_id"]))
     # The experiment record itself still belongs to the project, wherever the weights go.
     from tcip_mcp.experiments import status_key
 
