@@ -180,12 +180,19 @@ register_store(
 
 
 def canvas_open_binding_key(*, create: bool = True) -> Key:
-    """Which root the GUI currently has open: ``{generation, root, project_name, issued_at}``.
+    """Which root the GUI currently has open: ``{generation, root, project_name, issued_at,
+    released}``.
 
-    Workspace-scoped, one record: ``/dataset/select`` is the one writer, reading the current
-    record inside a transaction to decide whether ``root`` changed (bumping ``generation``) before
-    writing, so an unconditional write would drop a concurrent select's bump. ``root`` is the
-    server's own resolved open root, never a client string; ``project_name`` is the workspace
+    Workspace-scoped, one record with two writers: ``/dataset/select`` reads the current record
+    inside a transaction to decide whether ``root`` changed, or the current record was released
+    (either bumps ``generation``), before writing a fresh, unreleased record; an unconditional
+    write would drop a concurrent select's bump. ``tcip_mcp.project_removal.
+    release_project_binding`` is the second writer: inside its own transaction on this key, a
+    record naming the project being released is rewritten with ``generation + 1`` and
+    ``released: True``, never deleted, so a caller still holding the pre-release generation keeps
+    failing its own fence and push the same way it would against any other stale generation.
+    ``released`` is additive and optional, absent from every record a select writes. ``root`` is
+    the server's own resolved open root, never a client string; ``project_name`` is the workspace
     project name when ``root`` is one, else ``None`` (a registered dataset root or a
     ``TCIP_IMAGE_ROOTS`` entry binds by root all the same). A reader that must not bring a
     workspace directory into existence on a bare read (``capture_live_canvas``) passes
@@ -335,16 +342,21 @@ def gui_binding_matches(root: str | Path) -> tuple[bool, dict[str, Any] | None]:
     ``focus_human_attention`` and ``push_panel_event`` all refuse when the GUI has moved to
     another project, and a second, separately-written comparison in each would be the drift
     ``CLAUDE.md`` warns against. Returns ``(False, None)`` when no binding record exists at all
-    (nothing is open for any root to match); otherwise ``(matches, binding)``, so a caller
-    refusing a mismatch can name the binding's own project straight from the second element
-    without a re-read. Raises :class:`GuiBindingUnreadable` when the record cannot be read, or
-    reads as a mapping with no ``root`` field: a record this seam itself never writes without
-    one, so a caller seeing it that way must be told the record is illegible rather than have
-    the comparison raise ``KeyError`` out to it.
+    (nothing is open for any root to match); ``(False, binding)`` before ``root`` is even
+    compared when the binding was released (``tcip_mcp.project_removal.
+    release_project_binding``): a released record names what the GUI last had open, not what it
+    has open now, so it can never match. Otherwise ``(matches, binding)``, so a caller refusing a
+    mismatch can name the binding's own project straight from the second element without a
+    re-read. Raises :class:`GuiBindingUnreadable` when the record cannot be read, or reads as a
+    mapping with no ``root`` field: a record this seam itself never writes without one, so a
+    caller seeing it that way must be told the record is illegible rather than have the
+    comparison raise ``KeyError`` out to it.
     """
     binding = read_canvas_binding()
     if binding is None:
         return False, None
+    if binding.get("released"):
+        return False, binding
     try:
         bound_root = binding["root"]
     except KeyError as exc:
@@ -366,12 +378,15 @@ def binding_divergence(binding: dict[str, Any] | None, own_root: str) -> dict[st
     adopt a named workspace project, so a binding on a non-workspace root (a registered dataset
     or a ``TCIP_IMAGE_ROOTS`` entry) has no name for it to converge on, and no binding at all has
     nothing to converge to besides opening one: the GUI's own (re)selection is the route back to
-    agreement in both cases.
+    agreement in both cases. A released binding (:func:`tcip_mcp.project_removal.
+    release_project_binding`) reports the same as no binding at all: it names what the GUI last
+    had open, not what it has open now.
     """
     from tcip_mcp import workspace
 
-    bound_root = binding.get("root") if binding else None
-    bound_name = binding.get("project_name") if binding else None
+    released = bool(binding and binding.get("released"))
+    bound_root = binding.get("root") if binding and not released else None
+    bound_name = binding.get("project_name") if binding and not released else None
     own_name = workspace.workspace_project_name(Path(own_root))
     if bound_name:
         converge = (

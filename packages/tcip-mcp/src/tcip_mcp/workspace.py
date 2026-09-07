@@ -181,7 +181,12 @@ def active_project_key(*, create: bool = True) -> Key:
 
     ``last_writer_wins``: ``activate_project`` writes the name it was given and reads
     nothing first, so adopting a project is a whole replacement rather than an edit.
-    ``create`` threads through to :func:`workspace_root`.
+    ``tcip_mcp.project_removal.release_project_binding`` is the marker's second mutator, and the
+    only one that ever removes it: it reads the record back with its version and deletes with
+    ``expect=`` that version, only when the value read names the project being released, so a
+    concurrent ``activate_project`` landing between that read and the delete loses the race with
+    a ``VersionConflict`` rather than the release silently clearing a marker that had already
+    moved. ``create`` threads through to :func:`workspace_root`.
     """
     return Key(ACTIVE_PROJECT_STORE, str(workspace_root(create=create)), _MARKER_PARTS)
 

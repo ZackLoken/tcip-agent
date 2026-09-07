@@ -880,6 +880,258 @@ def test_a_canvas_binding_with_no_project_name_is_read_as_no_binding(client, tmp
     assert resp.status_code == 200
 
 
+# ── the release door ──────────────────────────────────────────────────────────
+
+
+def test_release_clears_the_marker_and_the_canvas_binding_both_naming_the_project(
+    client, tmp_path,
+):
+    """coverage: neither release_project_binding nor its route exists at the baseline."""
+    from tcip_mcp.web_client import read_canvas_binding
+
+    ws = tmp_path.parent
+    _seed(ws)
+    target = _init(ws, "sample_plot_release")
+    workspace.activate_project("sample_plot_release")
+    sel = client.post(
+        "/api/dataset/select", json={"project_root": str(target), "dataset_root": str(target)},
+    )
+    assert sel.status_code == 200
+    before = read_canvas_binding()
+
+    resp = client.post(
+        "/api/projects/sample_plot_release/release-binding", json={"user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["marker_cleared"] is True
+    assert body["canvas_binding_released"] is True
+    assert body["releasable"] is False
+
+    assert workspace.read_active_project() is None
+    after = read_canvas_binding()
+    assert after["generation"] == before["generation"] + 1
+    assert after["released"] is True
+
+    lines = _audit_lines(target)
+    line = next(l for l in lines if l["tool"] == "project_binding_released")
+    assert line["arguments"]["marker_cleared"] is True
+    assert line["arguments"]["canvas_binding_released"] is True
+
+
+def test_release_clears_the_marker_alone(client, tmp_path):
+    ws = tmp_path.parent
+    _seed(ws)
+    _init(ws, "sample_plot_marker-only")
+    workspace.activate_project("sample_plot_marker-only")
+
+    resp = client.post(
+        "/api/projects/sample_plot_marker-only/release-binding", json={"user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["marker_cleared"] is True
+    assert body["canvas_binding_released"] is False
+    assert workspace.read_active_project() is None
+
+
+def test_release_when_neither_names_the_project_answers_both_false_with_no_line(
+    client, tmp_path,
+):
+    ws = tmp_path.parent
+    _seed(ws)
+    _init(ws, "sample_plot_unbound")
+
+    resp = client.post(
+        "/api/projects/sample_plot_unbound/release-binding", json={"user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["marker_cleared"] is False
+    assert body["canvas_binding_released"] is False
+    lines = _audit_lines(Path(tmp_path.parent) / "sample_plot_unbound")
+    assert not any(l["tool"] == "project_binding_released" for l in lines)
+
+
+def test_release_leaves_the_marker_in_place_once_it_has_moved_elsewhere(client, tmp_path):
+    """coverage of the read-back branch, not a race proof: the marker is moved to another
+    project before the call, and release_project_binding reads it back rather than trusting an
+    earlier read, so it finds no match and clears nothing."""
+    ws = tmp_path.parent
+    _seed(ws)
+    _init(ws, "sample_plot_moved-away")
+    workspace.activate_project("sample_plot_moved-away")
+    workspace.activate_project("sample_plot_open")
+
+    resp = client.post(
+        "/api/projects/sample_plot_moved-away/release-binding", json={"user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["marker_cleared"] is False
+    assert workspace.read_active_project() == "sample_plot_open"
+
+
+def test_release_canvas_failure_after_the_marker_cleared_names_both_in_the_line_and_the_409(
+    client, tmp_path, monkeypatch,
+):
+    import tcip_store
+    from tcip_mcp import project_removal as pr_module
+
+    ws = tmp_path.parent
+    _seed(ws)
+    target = _init(ws, "sample_plot_canvas-fail")
+    workspace.activate_project("sample_plot_canvas-fail")
+    sel = client.post(
+        "/api/dataset/select", json={"project_root": str(target), "dataset_root": str(target)},
+    )
+    assert sel.status_code == 200
+
+    real_transaction = tcip_store.transaction
+
+    def _flaky_transaction(*keys, **kwargs):
+        raise tcip_store.StoreBusy(keys, keys[0], 5.0)
+
+    monkeypatch.setattr(pr_module.tcip_store, "transaction", _flaky_transaction)
+
+    resp = client.post(
+        "/api/projects/sample_plot_canvas-fail/release-binding", json={"user": "t"},
+    )
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert "sample_plot_canvas-fail" in detail
+    assert "marker_cleared=True" in detail
+
+    monkeypatch.setattr(pr_module.tcip_store, "transaction", real_transaction)
+    lines = _audit_lines(target)
+    line = next(l for l in lines if l["tool"] == "project_binding_released")
+    assert line["arguments"]["marker_cleared"] is True
+    assert line["arguments"]["canvas_binding_released"] is False
+
+
+def test_release_then_a_select_bumps_the_generation_again(client, tmp_path):
+    from tcip_mcp.web_client import read_canvas_binding
+
+    ws = tmp_path.parent
+    _seed(ws)
+    target = _init(ws, "sample_plot_reselect")
+    sel = client.post(
+        "/api/dataset/select", json={"project_root": str(target), "dataset_root": str(target)},
+    )
+    assert sel.status_code == 200
+    before = read_canvas_binding()
+
+    resp = client.post(
+        "/api/projects/sample_plot_reselect/release-binding", json={"user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
+    after_release = read_canvas_binding()
+    assert after_release["generation"] == before["generation"] + 1
+
+    sel2 = client.post(
+        "/api/dataset/select", json={"project_root": str(target), "dataset_root": str(target)},
+    )
+    assert sel2.status_code == 200
+    after_select = read_canvas_binding()
+    assert after_select["generation"] == after_release["generation"] + 1
+    assert not after_select.get("released")
+
+
+def test_canvas_push_carrying_the_pre_release_generation_is_refused(client, tmp_path):
+    ws = tmp_path.parent
+    _seed(ws)
+    target = _init(ws, "sample_plot_push-refused")
+    _add_image(target)
+    sel = client.post(
+        "/api/dataset/select", json={"project_root": str(target), "dataset_root": str(target)},
+    )
+    assert sel.status_code == 200
+    pre_release_generation = sel.json()["generation"]
+
+    resp = client.post(
+        "/api/projects/sample_plot_push-refused/release-binding", json={"user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    push = client.post(
+        "/api/canvas/state",
+        json={
+            "binding_generation": pre_release_generation, "tab": "annotate",
+            "image_path": str(target / "images" / "2026-03-04" / "img.jpg"), "image": "img.jpg",
+        },
+    )
+    assert push.status_code == 409
+
+
+def test_gui_binding_matches_is_false_on_a_released_record(client, tmp_path):
+    from tcip_mcp.web_client import gui_binding_matches
+
+    ws = tmp_path.parent
+    _seed(ws)
+    target = _init(ws, "sample_plot_matches-false")
+    sel = client.post(
+        "/api/dataset/select", json={"project_root": str(target), "dataset_root": str(target)},
+    )
+    assert sel.status_code == 200
+
+    resp = client.post(
+        "/api/projects/sample_plot_matches-false/release-binding", json={"user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    matches, binding = gui_binding_matches(str(target))
+    assert matches is False
+    assert binding is not None
+    assert binding["released"] is True
+
+
+def test_release_route_answers_404_for_an_unknown_project(client, tmp_path):
+    """VACUOUS at the baseline: the route does not exist there either, so FastAPI's own
+    unmatched-route 404 coincidentally answers the same status."""
+    ws = tmp_path.parent
+    _seed(ws)
+    resp = client.post(
+        "/api/projects/sample_plot_absent/release-binding", json={"user": "t"},
+    )
+    assert resp.status_code == 404
+
+
+def test_release_response_refusal_names_the_bound_root_for_the_backends_own_project(
+    client, tmp_path,
+):
+    """After release, the backend's own bound project (the process was started on it) still
+    refuses removal through the bound-root spelling naming a restart; a different project's
+    fresh state answers refusal null."""
+    from tcip_mcp import project_paths
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    second = _init(ws, "sample_plot_second-bound")
+
+    before = project_paths.root_binding()
+    project_paths.restore_binding(
+        project_paths.RootBinding(
+            root=second, source="adopted", inherited_root=None, marker_problem=None,
+        )
+    )
+    try:
+        resp = client.post(
+            "/api/projects/sample_plot_second-bound/release-binding", json={"user": "t"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["refusal"] is not None
+        assert "restart the backend first" in body["refusal"]
+        assert body["releasable"] is False
+
+        resp2 = client.post(
+            "/api/projects/sample_plot_target/release-binding", json={"user": "t"},
+        )
+        assert resp2.status_code == 200, resp2.text
+        assert resp2.json()["refusal"] is None
+    finally:
+        project_paths.restore_binding(before)
+
+
 def test_refuses_a_live_run_then_admits_once_it_is_stale(client, tmp_path):
     from tcip_mcp import experiments
 

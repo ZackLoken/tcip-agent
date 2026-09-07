@@ -11,7 +11,7 @@ Trust boundary: same as every other REST route (``tcip_web.trust_boundary``). Li
 inherently confined to the workspace directory, and the active-project name is validated
 as a single path segment, so neither can be coaxed into reaching outside the workspace.
 
-Three doors write here. ``POST /active`` writes the active-project marker only, its own
+Four doors write here. ``POST /active`` writes the active-project marker only, its own
 line staying wherever the MCP tool's own caller emits one (this route emits none itself).
 ``GET /{name}/removal-preview`` writes nothing (:func:`tcip_mcp.project_removal.
 removal_preview`). ``POST /remove`` (:func:`tcip_mcp.project_removal.request_project_removal`)
@@ -20,7 +20,11 @@ written, in the target's own log; this request's own line joins the archive door
 a bound project's own log when this process is bound to one (``recorded_in_open_project`` true
 in the response), or joins the target's own line in the target's own log otherwise, so a
 workspace with nothing bound still records the whole request. Phase two's own completion line
-lands on the moved tree at the next backend start.
+lands on the moved tree at the next backend start. ``POST /{name}/release-binding``
+(:func:`tcip_mcp.project_removal.release_project_binding`) clears the marker when it names the
+project, marks the canvas-open binding released when it does (never deleting either the binding
+record or repinning this process), and, when either changed, records one line under the
+project's own root.
 
 ``tcip_mcp.project_removal`` imports nothing from ``tcip_web``: this module resolves the
 requesting identity through :mod:`tcip_web.identity` and supplies :func:`_job_conflict`, the
@@ -75,6 +79,8 @@ class ProjectSummary(BaseModel):
     label_problem: str | None
     # project_removal.identity_conflict's own text, or null.
     removal_refusal: str | None
+    # Whether the control stays enabled beside removal_refusal: a release would clear it.
+    removal_releasable: bool
     # Every dataset this project registered under another workspace project now pending
     # removal or gone.
     dependency_warnings: list[DependencyWarning]
@@ -129,6 +135,7 @@ def _summarize(
         site_problem=site["site_problem"],
         label_problem=label_problem,
         removal_refusal=project_removal.identity_conflict(project_dir, open_state),
+        removal_releasable=project_removal.binding_release_available(project_dir, open_state),
         dependency_warnings=[DependencyWarning(**w) for w in warnings],
         dependency_problem=dependency_problem,
     )
@@ -247,6 +254,9 @@ class RemovalPreview(BaseModel):
     # Set instead of an external_roots list when the target's own registry will not read;
     # the request is still admitted, and the dialog renders this as a warning.
     external_roots_unreadable: str | None = None
+    # Whether a release (POST .../release-binding) would clear refusal: project_removal.
+    # binding_release_available's own answer, set whether or not refusal is set.
+    releasable: bool
 
 
 class RemovalRequest(BaseModel):
@@ -268,6 +278,20 @@ class RemovalResponse(BaseModel):
     recorded_in_open_project: bool
     # Names where the request's own two lines and the archive door's own line went.
     audit_note: str
+
+
+class ReleaseBindingRequest(BaseModel):
+    user: str = ""
+
+
+class ReleaseResponse(BaseModel):
+    name: str
+    marker_cleared: bool
+    canvas_binding_released: bool
+    # A fresh identity_conflict/binding_release_available read after the release, so the dialog
+    # can render the next refusal (or none) without a second round trip.
+    refusal: str | None
+    releasable: bool
 
 
 def _job_conflict(target: Path) -> str | None:
@@ -341,3 +365,16 @@ def remove_project(req: RemovalRequest) -> RemovalResponse:
     if "error" in result:
         raise HTTPException(result.get("status", 400), result["error"])
     return RemovalResponse(**result)
+
+
+@router.post("/{name}/release-binding")
+def release_binding_route(name: str, req: ReleaseBindingRequest) -> ReleaseResponse:
+    """Stop ``name`` opening by default and forget it as the GUI's own open project
+    (:func:`tcip_mcp.project_removal.release_project_binding`); the only caller of that door.
+    Never repins this process and never touches removal state; a project the marker and the
+    canvas binding both leave alone answers with both flags false and no line."""
+    requested_by = identity.user_id(identity.resolve_user(req.user))
+    result = project_removal.release_project_binding(name, released_by=requested_by)
+    if "error" in result:
+        raise HTTPException(result.get("status", 400), result["error"])
+    return ReleaseResponse(**result)

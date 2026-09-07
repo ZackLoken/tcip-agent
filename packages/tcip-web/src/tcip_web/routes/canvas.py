@@ -19,10 +19,11 @@ debounce cycle), not durable review/annotation history, and a crash losing the l
 nothing, the next push repaints it.
 
 The write destination is the ``canvas_open_binding`` record, never the payload: a push names
-only the generation it was built against, ``/dataset/select`` is the one writer of the record,
-and this route reads it and writes under its own ``root``. A push whose generation the record
-no longer carries (the GUI opened another project since the push was built) answers 409 rather
-than land under a root the payload never named and the pusher never chose.
+only the generation it was built against, ``/dataset/select`` is the record's ordinary writer
+and this route reads it and writes under its own ``root``. A push whose generation the record no
+longer carries (the GUI opened another project since the push was built, or
+``tcip_mcp.project_removal.release_project_binding`` bumped it releasing that project) answers
+409 rather than land under a root the payload never named and the pusher never chose.
 """
 
 from __future__ import annotations
