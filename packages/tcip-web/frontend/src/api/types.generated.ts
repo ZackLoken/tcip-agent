@@ -147,6 +147,13 @@ export interface TerminalResizeFrame {
   cols: number;
 }
 
+export interface DependencyWarning {
+  dataset_id?: string | null;
+  dataset_path: string;
+  target: string;
+  present: boolean;
+}
+
 export interface DependentProject {
   project: string;
   dataset_id?: string | null;
@@ -161,11 +168,20 @@ export interface ExternalRoot {
   present: boolean;
 }
 
+export interface ReleaseResponse {
+  name: string;
+  marker_cleared: boolean;
+  canvas_binding_released: boolean;
+  refusal: string | null;
+  releasable: boolean;
+}
+
 export interface RemovalPreview {
   external_roots: ExternalRoot[];
   dependent_projects: DependentProject[];
   refusal?: string | null;
   external_roots_unreadable?: string | null;
+  releasable: boolean;
 }
 
 export interface RemovalRequest {
@@ -182,4 +198,6 @@ export interface RemovalResponse {
   dependent_projects: DependentProject[];
   completes: string;
   audit_scope: string;
+  recorded_in_open_project: boolean;
+  audit_note: string;
 }

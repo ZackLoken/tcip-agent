@@ -72,6 +72,8 @@ export const ROUTES = {
     `/api/inference/jobs/${encodeURIComponent(jobId)}/cancel`,
   postInferenceLaunch: "/api/inference/launch",
   postProjectsActive: "/api/projects/active",
+  postProjectsByNameReleaseBinding: (name: string) =>
+    `/api/projects/${encodeURIComponent(name)}/release-binding`,
   postProjectsRemove: "/api/projects/remove",
   postResultsExportCountCsv: "/api/results/export_count_csv",
   postResultsExportCsv: "/api/results/export_csv",

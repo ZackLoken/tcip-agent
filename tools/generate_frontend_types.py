@@ -3,7 +3,9 @@
 ``routes/_coverage_models.py`` and ``routes/coverage.py`` declare the view-coverage record's
 shape once, in Python; ``routes/review.py`` declares the review verdict's action vocabulary;
 ``routes/training.py`` and ``routes/terminal.py`` declare their WebSocket frame vocabularies;
-``routes/projects.py`` declares the removal preview/request/response shapes; and
+``routes/projects.py`` declares the removal preview/request/response and release-binding
+response shapes, plus the dependency-warning shape the removal preview and the workspace
+listing share; and
 ``tcip_web.state.GuiVocabulary`` declares the GUI's tab/mode vocabulary. This script projects
 them into ``frontend/src/api/types.generated.ts`` through each model's own JSON schema, so the
 browser's types are held to the backend's rather than hand-transcribed and left to drift. The
@@ -64,7 +66,8 @@ def declared_models() -> list[type[BaseModel]]:
     )
     from tcip_web.routes.coverage import CompletenessSetPayload, CoveragePayload, GridZoomPayload
     from tcip_web.routes.projects import (
-        DependentProject, ExternalRoot, RemovalPreview, RemovalRequest, RemovalResponse,
+        DependencyWarning, DependentProject, ExternalRoot, ReleaseResponse, RemovalPreview,
+        RemovalRequest, RemovalResponse,
     )
     from tcip_web.routes.review import ActionPayload
     from tcip_web.routes.terminal import TerminalInputFrame, TerminalResizeFrame
@@ -74,8 +77,8 @@ def declared_models() -> list[type[BaseModel]]:
     return [GridGeometry, StatsSource, WorkingScale, CoverageViewing, CoverageRecord,
             CoveragePayload, CompletenessSetPayload, GridZoomPayload, ActionPayload,
             GuiVocabulary, TrainingMetricFrame, TrainingStatusFrame, TerminalInputFrame,
-            TerminalResizeFrame, DependentProject, ExternalRoot, RemovalPreview, RemovalRequest,
-            RemovalResponse]
+            TerminalResizeFrame, DependencyWarning, DependentProject, ExternalRoot,
+            ReleaseResponse, RemovalPreview, RemovalRequest, RemovalResponse]
 
 
 def render_cache_version() -> int:
