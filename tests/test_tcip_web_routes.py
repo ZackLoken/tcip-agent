@@ -987,6 +987,30 @@ def _audit_entries(root: Path) -> list[dict]:
     return list(tcip_store.read_log(audit_log_key(root)).records)
 
 
+def _cwd_store_fingerprint(path: Path) -> tuple[int, int] | None:
+    """``(size, mtime_ns)`` for a raw stat of a store's own file, or ``None`` when the file is
+    absent; a stat rather than a store read, since the platform's own reader (a file-backend
+    lock, a database connect) can create the very file a probe of an unwritten location must
+    not."""
+    try:
+        st = path.stat()
+    except FileNotFoundError:
+        return None
+    return (st.st_size, st.st_mtime_ns)
+
+
+def _cwd_audit_store_path(cwd: Path) -> Path:
+    """Where the audit log an empty ``dataset_root`` would resolve to actually lives on disk,
+    whichever backend this process bound; computed the way the backend itself would (a pure
+    key-to-path or root-to-path mapping), never opened."""
+    from tcip_store.binding import is_database_backend
+    from tcip_store.file_backend import FileBackend, database_file
+
+    if is_database_backend():
+        return database_file(str(cwd))
+    return FileBackend().path_for(audit_log_key(cwd))
+
+
 def test_review_matches_returns_400_for_a_stem_collision(
     client: TestClient, dataset_root: Path, tmp_path: Path,
 ) -> None:
@@ -1533,10 +1557,23 @@ def test_review_action_requires_dataset_root(
     """No read or write happens before the refusal: an empty ``dataset_root`` is named rather
     than resolving to the process cwd. In this test environment the process cwd does not
     resolve under an allowed root, so the pre-refusal baseline answered the path guard's 403,
-    not the 200 a resolvable cwd would reach."""
+    not the 200 a resolvable cwd would reach. The location a lost guard would actually leave a
+    mark at is the process cwd, not this fixture's own ``dataset_root`` tree (an unguarded call
+    resolves the empty string to the cwd, never to a directory this fixture never creates), so
+    the probes below read the cwd-resolved image-status document and audit-log store rather
+    than a location nothing was ever going to touch either way."""
+    from tcip_mcp.dataset_layout import image_status_path
+
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     pred = tmp_path / "pred.json"
     _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+
+    cwd = Path.cwd()
+    status_path = image_status_path(cwd)
+    audit_path = _cwd_audit_store_path(cwd)
+    status_before = _cwd_store_fingerprint(status_path)
+    audit_before = _cwd_store_fingerprint(audit_path)
+
     resp = client.post(
         "/api/review/action",
         json={
@@ -1561,6 +1598,8 @@ def test_review_action_requires_dataset_root(
     ]
     assert written == []
     assert _audit_entries(dataset_root) == []
+    assert _cwd_store_fingerprint(status_path) == status_before
+    assert _cwd_store_fingerprint(audit_path) == audit_before
 
 
 def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> None:
@@ -1616,8 +1655,21 @@ def test_review_mark_complete_requires_dataset_root(
     """No read or write happens before the refusal: an empty ``dataset_root`` is named rather
     than resolving to the process cwd. In this test environment the process cwd does not
     resolve under an allowed root, so the pre-refusal baseline answered the path guard's 403,
-    not the 200 a resolvable cwd would reach."""
+    not the 200 a resolvable cwd would reach. The location a lost guard would actually leave a
+    mark at is the process cwd, not this fixture's own ``dataset_root`` tree (an unguarded call
+    resolves the empty string to the cwd, never to a directory this fixture never creates), so
+    the probes below read the cwd-resolved image-status document and audit-log store rather
+    than a location nothing was ever going to touch either way."""
+    from tcip_mcp.dataset_layout import image_status_path
+
     dataset_root = tmp_path / "data"
+
+    cwd = Path.cwd()
+    status_path = image_status_path(cwd)
+    audit_path = _cwd_audit_store_path(cwd)
+    status_before = _cwd_store_fingerprint(status_path)
+    audit_before = _cwd_store_fingerprint(audit_path)
+
     resp = client.post(
         "/api/review/mark_complete",
         json={"dataset_root": "", "image_name": "IMG_9.JPG"},
@@ -1631,6 +1683,8 @@ def test_review_mark_complete_requires_dataset_root(
     )
     assert "IMG_9.JPG" not in status.json()["statuses"]
     assert _audit_entries(dataset_root) == []
+    assert _cwd_store_fingerprint(status_path) == status_before
+    assert _cwd_store_fingerprint(audit_path) == audit_before
 
 
 def test_review_mark_complete_refuses_an_unreadable_gt(
