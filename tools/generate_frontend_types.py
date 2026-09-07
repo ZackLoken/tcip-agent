@@ -4,8 +4,8 @@
 shape once, in Python; ``routes/review.py`` declares the review verdict's action vocabulary;
 ``routes/training.py`` and ``routes/terminal.py`` declare their WebSocket frame vocabularies;
 ``routes/projects.py`` declares the removal preview/request/response and release-binding
-response shapes, plus the dependency-warning shape the removal preview and the workspace
-listing share; and
+response shapes, plus the dependency-warning shape ``ProjectSummary`` alone carries (hand-typed
+in ``client.ts``, never generated itself); and
 ``tcip_web.state.GuiVocabulary`` declares the GUI's tab/mode vocabulary. This script projects
 them into ``frontend/src/api/types.generated.ts`` through each model's own JSON schema, so the
 browser's types are held to the backend's rather than hand-transcribed and left to drift. The
