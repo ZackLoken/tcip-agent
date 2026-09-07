@@ -931,9 +931,10 @@ def test_dependency_problem_named_for_a_damaged_registry(tmp_path):
 def test_dependency_warnings_names_a_no_id_entry_as_a_problem_not_a_null_id_warning(
     client, tmp_path,
 ):
-    """GUARDS: the baseline carries the no-id entry as a warning with a null dataset_id and no
-    problem; the preview's own scan already lists such an entry as unreadable, and the listing
-    now applies the same rule."""
+    """coverage: dependency_warnings does not exist at the baseline. The entry names a target
+    already pending removal, the one state a no-id entry would otherwise reach the warning
+    branch through, so this actually exercises the malformed-entry rule rather than a state
+    (a live target) neither the old nor the new code ever turns into a warning."""
     from tcip_mcp.project_removal import dependency_warnings
     from tcip_mcp.tools.project_tools import registry_path_for, upsert_dataset
 
@@ -943,6 +944,12 @@ def test_dependency_warnings_names_a_no_id_entry_as_a_problem_not_a_null_id_warn
     upsert_dataset(
         dependent, {"path": registry_path_for(target, dependent), "crop": "black locust"},
     )
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
 
     warnings, problem = dependency_warnings(dependent)
     assert warnings == []
