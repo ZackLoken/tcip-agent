@@ -185,9 +185,10 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypa
     stand-in's own pid is known, captured the moment ``_standin_pid`` answers, it is
     force-killed directly, covering a failure after ``stop_tensorboard`` has already reaped the
     guardian and left the stand-in reparented with nothing watching it. A launch that answers
-    with no ``pid`` is beyond this cleanup: the guardian is dead by then, so a stand-in it
-    spawned inside the startup grace is already reparented away from every tree this test can
-    enumerate.
+    with no ``pid`` is beyond this cleanup: the guardian is dead by then (or never started), so
+    a stand-in it spawned inside the startup grace is already reparented away from every tree
+    this test can enumerate, unless this test process is itself the pid namespace's init or a
+    subreaper, where the orphan would land in its own tree instead.
     """
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
