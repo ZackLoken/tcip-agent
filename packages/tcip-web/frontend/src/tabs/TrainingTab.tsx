@@ -83,7 +83,7 @@ function launcherDescription(launchedBy: TrainingRunSummary["launched_by"]): str
       : "This run was launched by an agent through the MCP door.";
   }
   if (launcher === "process") {
-    return "This run was launched outside this app's own route and outside the agent, by a script or a test.";
+    return "This run was launched outside this app's own route and outside the agent, by something other than both.";
   }
   return `This run's record names its own launcher: ${launcher}.`;
 }

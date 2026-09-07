@@ -377,7 +377,7 @@ describe("TrainingTab run launcher mark", () => {
     const describedBy = button.getAttribute("aria-describedby");
     expect(describedBy).toBeTruthy();
     expect(document.getElementById(describedBy as string)).toHaveTextContent(
-      "This run was launched outside this app's own route and outside the agent, by a script or a test.",
+      "This run was launched outside this app's own route and outside the agent, by something other than both.",
     );
   });
 });
