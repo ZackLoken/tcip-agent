@@ -78,7 +78,10 @@ function latestSelectionMetric(rows: MetricRow[]): string | null {
  * `selection` when the log carries it. When the run's selection metric is itself a plotted loss
  * (its own name ends in "loss"), the two are merged into one series named for the loss key it
  * duplicates, resolved as `val_<metric>` when that key is plotted, else the bare metric name
- * when that key is plotted, else `train_loss`, so the chart never draws the same line twice. The
+ * when that key is plotted, else `train_loss` only when the selection metric is the bare string
+ * `loss`, the stock trainer's own value for a run with no validation loader; a bespoke loop's
+ * own `*_loss`-suffixed selection metric that names no plotted key keeps its own duplicate line
+ * rather than being folded into `train_loss`. So the chart never draws the same line twice. The
  * limit is stated, never widened: a bespoke non-loss key sits in the table, and the all-keys
  * fallback below applies only when the log carries neither a loss-suffixed key nor `selection`.
  * The merge fires only when a row names the selection metric, which the stock trainer always
@@ -98,7 +101,7 @@ export function defaultChartSeries(metricKeys: string[], rows: MetricRow[]): Cha
     const valKey = VAL_METRIC_PREFIX + selectionMetric;
     if (lossKeys.includes(valKey)) duplicateLossKey = valKey;
     else if (lossKeys.includes(selectionMetric)) duplicateLossKey = selectionMetric;
-    else if (lossKeys.includes("train_loss")) duplicateLossKey = "train_loss";
+    else if (selectionMetric === "loss" && lossKeys.includes("train_loss")) duplicateLossKey = "train_loss";
   }
 
   const keys = hasSelection && !duplicateLossKey ? [...lossKeys, "selection"] : lossKeys;
