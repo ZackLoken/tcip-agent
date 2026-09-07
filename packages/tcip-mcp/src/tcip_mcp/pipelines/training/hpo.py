@@ -619,6 +619,9 @@ def tune_search(
             "search names its own directory."
         )
 
+    # One normalized local, read at every branch point below; result["search_alg"] stays the caller's own string.
+    normalized_search_alg = (search_alg or "").lower()
+
     if split_draws > 1 and SPLIT_DRAW_SEED_KEY not in (param_space or {}):
         raise ValueError(
             f"tune_search: split_draws={split_draws} pairs {SPLIT_DRAW_SEED_KEY!r} as a grid "
@@ -630,8 +633,8 @@ def tune_search(
     from ray import tune
 
     grid_keys = frozenset({SPLIT_DRAW_SEED_KEY}) if split_draws > 1 else frozenset()
-    space = _to_tune_space(param_space or get_default_space(), grid=(search_alg == "grid"),
-                           grid_keys=grid_keys)
+    space = _to_tune_space(param_space or get_default_space(),
+                           grid=(normalized_search_alg == "grid"), grid_keys=grid_keys)
     resources = resources_per_trial or _default_trial_resources(max_concurrent)
 
     points = None
@@ -645,7 +648,7 @@ def tune_search(
         searcher = BasicVariantGenerator(
             constant_grid_search=True, random_state=seed, points_to_evaluate=points)
     else:
-        searcher = build_search_alg(search_alg, seed=seed, points_to_evaluate=points)
+        searcher = build_search_alg(normalized_search_alg, seed=seed, points_to_evaluate=points)
     sched = build_scheduler(
         scheduler, grace_period=grace_period, reduction_factor=reduction_factor,
         hyperparam_mutations=space,
