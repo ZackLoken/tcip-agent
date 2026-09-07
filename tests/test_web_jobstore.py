@@ -230,6 +230,30 @@ def test_inference_rehydrate_restores_dropped_nonpositive_boxes(tmp_path, monkey
         inference._registry.jobs.clear()
 
 
+def test_inference_rehydrate_restores_audit_warning(tmp_path, monkeypatch):
+    """``audit_warning`` is written on the persisted row (``_summary``) beside ``warning``, a
+    distinct fact; a restart must serve the recorded gap back, not the field's own null default,
+    and an entry with no such key at all (the pre-existing shape) reads back as null, not a
+    missing-attribute error."""
+    from tcip_web.routes import inference
+
+    job = inference.InferenceJob(
+        job_id="j-audit-warn", checkpoint_path="c", images_dir="i", output_dir="o",
+        tile=False, conf=0.25, iou=0.7, slice_hw=(640, 640), overlap=0.2,
+    )
+    job.status = "completed"
+    job.audit_warning = "gui_inference_run completed and its audit entry could not be written"
+    inference._register(job)
+
+    inference._registry.jobs.clear()
+    try:
+        inference.rehydrate_for_current_root()
+        jobs = {j["job_id"]: j for j in inference.list_jobs()["jobs"]}
+        assert jobs["j-audit-warn"]["audit_warning"] == job.audit_warning
+    finally:
+        inference._registry.jobs.clear()
+
+
 def test_review_priority_queue_persists_lists_and_rehydrates_per_root_across_a_repin(
     tmp_path, monkeypatch
 ):
@@ -403,6 +427,51 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, monkeypatch):
     from tcip_web.jobstore import load
     data = load("inference_jobs")
     assert any(s["job_id"] == "j1" and s["status"] == "cancelled" for s in data)
+
+
+def test_inference_worker_sets_audit_warning_on_a_lost_audit_line(tmp_path, monkeypatch):
+    """The run's own predictions land regardless; a failed append must not vanish as a silent
+    warning, and it must not change the run's own terminal status either."""
+    pytest.importorskip("fastapi")
+    monkeypatch.chdir(tmp_path)
+    from PIL import Image
+
+    from tcip_web.routes.inference import InferenceJob, _register, _worker
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    Image.new("RGB", (16, 16)).save(images_dir / "img.jpg")
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+
+    class FakePredictor:
+        def __init__(self, checkpoint_path=None, **kw):
+            pass
+
+        def predict_batch(self, paths, **kw):
+            return [{"boxes": [], "scores": [], "labels": [], "width": 16, "height": 16}]
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
+
+    import tcip_mcp.audit as audit_module
+
+    def _refuse_append(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("audit log unwritable")
+
+    monkeypatch.setattr(audit_module, "append", _refuse_append)
+
+    output_dir = tmp_path / "ds" / "predictions" / "model" / "2026-01-01"
+    job = InferenceJob(job_id="j-audit", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+                       output_dir=str(output_dir), tile=False, conf=0.25, iou=0.7,
+                       slice_hw=(640, 640), overlap=0.2)
+    _register(job)
+
+    _worker(job)
+    assert job.status == "completed"
+    assert job.audit_warning is not None
+    assert "gui_inference_run" in job.audit_warning
+    assert (output_dir / "img.json").exists()
 
 
 def test_inference_cancel_reaches_a_job_launched_under_a_previous_root(tmp_path, monkeypatch):

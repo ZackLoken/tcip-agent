@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { asJson, decodeRefusal, getJson, postJson, StructuredRefusalError } from "@/api/http";
+import {
+  asJson,
+  committedOf,
+  decodeRefusal,
+  getJson,
+  isAuditEntryNotWritten,
+  postJson,
+  StructuredRefusalError,
+} from "@/api/http";
 
 function res(status: number, body: unknown): Response {
   return {
@@ -65,5 +73,40 @@ describe("http helpers", () => {
     const refusal = thrown as StructuredRefusalError;
     expect(refusal.status).toBe(404);
     expect(refusal.message).toBe("sweep not found: hpo-1");
+  });
+
+  it("isAuditEntryNotWritten reads the marker at any status, never just 409", async () => {
+    const at409 = await asJson(
+      res(409, { detail: { error: "audit_entry_not_written", message: "m", committed: null } }),
+    ).catch((e: unknown) => e);
+    const at500 = await asJson(
+      res(500, { detail: { error: "audit_entry_not_written", message: "m", committed: null } }),
+    ).catch((e: unknown) => e);
+    expect(isAuditEntryNotWritten(at409)).toBe(true);
+    expect(isAuditEntryNotWritten(at500)).toBe(true);
+  });
+
+  it("isAuditEntryNotWritten is false for an ordinary refusal, or a non-error value", () => {
+    expect(isAuditEntryNotWritten(new StructuredRefusalError({ error: "other" }, 409, "m"))).toBe(
+      false,
+    );
+    expect(isAuditEntryNotWritten(new Error("plain"))).toBe(false);
+    expect(isAuditEntryNotWritten(null)).toBe(false);
+  });
+
+  it("committedOf returns the committed body only for the marker, null otherwise", async () => {
+    const committed = { status: "ok", n: 1 };
+    const gap = await asJson(
+      res(409, { detail: { error: "audit_entry_not_written", message: "m", committed } }),
+    ).catch((e: unknown) => e);
+    expect(committedOf<typeof committed>(gap)).toEqual(committed);
+
+    const nullCommitted = await asJson(
+      res(409, { detail: { error: "audit_entry_not_written", message: "m", committed: null } }),
+    ).catch((e: unknown) => e);
+    expect(committedOf(nullCommitted)).toBeNull();
+
+    const ordinary = await asJson(res(400, { detail: "bad request" })).catch((e: unknown) => e);
+    expect(committedOf(ordinary)).toBeNull();
   });
 });

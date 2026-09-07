@@ -303,6 +303,24 @@ def test_each_launch_leaves_one_platform_audit_line_naming_the_session_and_progr
     assert rows[0]["arguments"]["version"] is None
 
 
+def test_create_session_answers_503_and_terminates_the_process_when_the_start_line_fails(
+    client, monkeypatch,
+):
+    """A spawn whose own launch line fails to append must not leave an orphaned, untracked
+    process: the PTY is terminated and, once it is gone, no session is registered as live."""
+    import tcip_mcp.audit as audit_module
+
+    def _refuse_append(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("audit log unwritable")
+
+    monkeypatch.setattr(audit_module, "append", _refuse_append)
+    resp = client.post("/api/terminal/sessions", json={})
+    assert resp.status_code == 503
+    assert "could not be written" in resp.json()["detail"]
+    assert _terminal_start_rows() == []
+    assert all(not s.alive() for s in terminal_routes._SESSIONS.values())
+
+
 def test_the_create_and_restart_responses_answer_the_launched_program(client):
     created = client.post("/api/terminal/sessions", json={}).json()
     sid = created["session_id"]

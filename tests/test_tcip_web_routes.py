@@ -914,6 +914,51 @@ def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
     assert _audit_entries(proj) == []
 
 
+def test_annotate_save_with_no_dataset_root_audits_the_platform_log(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    """A label path outside any dataset tree, still under an allowed root, is recorded to the
+    platform log instead of proceeding unaudited: the widened ``root`` is what makes this so."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    label_path = tmp_path / "notes" / "IMG_0000.json"
+    resp = _save_box(client, img_path, label_path)
+    assert resp.status_code == 200
+
+    entries = _audit_entries(tmp_path)
+    entry = next(e for e in entries if e.get("tool") == "gui_save_labels")
+    assert "scope" not in entry
+
+
+class _AppendRefused(RuntimeError):
+    """Stands in for whatever stops a real append: a busy lock, a refused root, a bad key."""
+
+
+def _refuse_append(*args: object, **kwargs: object) -> None:
+    raise _AppendRefused("the audit log could not be appended to")
+
+
+def test_annotate_save_answers_409_with_the_committed_body_on_a_lost_audit_line(
+    client: TestClient, dataset_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The label write already committed; a lost audit line answers the gap, not the 200 body."""
+    import tcip_mcp.audit as audit_module
+
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
+    monkeypatch.setattr(audit_module, "append", _refuse_append)
+
+    resp = _save_box(client, img_path, label_path)
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["error"] == "audit_entry_not_written"
+    committed = detail["committed"]
+    assert committed["status"] == "ok"
+    assert committed["image_path"] == str(img_path)
+    assert committed["n_annotations"] == 1
+    anns = read_annotations(str(label_path))
+    assert len(anns) == 1
+
+
 # ── /api/review ─────────────────────────────────────────────────────────
 
 
@@ -1392,6 +1437,43 @@ def test_review_action_auto_completes_and_audits(
     assert _audit_entries(project_root) == []
 
 
+def test_review_action_answers_409_with_the_committed_body_on_a_lost_audit_line(
+    client: TestClient, dataset_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The verdict and any GT write already committed; a client that adopts ``committed`` reaches
+    the state a 200 would have, never re-rejecting a detection whose GT this call already wrote."""
+    import tcip_mcp.audit as audit_module
+
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])
+    pred = tmp_path / "pred.json"
+    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+
+    monkeypatch.setattr(audit_module, "append", _refuse_append)
+    resp = client.post(
+        "/api/review/action",
+        json={
+            "dataset_root": str(dataset_root),
+            "image_name": "IMG_0000.JPG",
+            "image_path": str(img_path),
+            "gt_path": str(gt),
+            "pred_path": str(pred),
+            "det_type": "tp", "class_name": "bud", "conf": 0.9, "iou": 0.95,
+            "gt_idx": 0, "pred_idx": 0,
+            "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
+        },
+    )
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["error"] == "audit_entry_not_written"
+    committed = detail["committed"]
+    assert committed["status"] == "ok"
+    assert committed["matches"]["n_tp"] == 1
+    state = _shard_state(dataset_root / ".tcip" / "state", "IMG_0000.JPG")
+    assert state["detections"][0]["action"] == "accepted"
+
+
 def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> None:
     dataset_root = tmp_path / "data"
 
@@ -1408,6 +1490,30 @@ def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> 
     )
     assert status.json()["statuses"]["IMG_9.JPG"] == "completed"
     assert any(e.get("tool") == "gui_review_mark_complete" for e in _audit_entries(dataset_root))
+
+
+def test_review_mark_complete_answers_409_with_the_committed_body_on_a_lost_audit_line(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tcip_mcp.audit as audit_module
+
+    dataset_root = tmp_path / "data"
+    monkeypatch.setattr(audit_module, "append", _refuse_append)
+
+    resp = client.post(
+        "/api/review/mark_complete",
+        json={"dataset_root": str(dataset_root), "image_name": "IMG_9.JPG"},
+    )
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["error"] == "audit_entry_not_written"
+    assert detail["committed"]["image_status"] == "completed"
+
+    status = client.get(
+        "/api/review/image_statuses",
+        params={"dataset_root": str(dataset_root)},
+    )
+    assert status.json()["statuses"]["IMG_9.JPG"] == "completed"
 
 
 def test_review_mark_complete_refuses_an_unreadable_gt(
