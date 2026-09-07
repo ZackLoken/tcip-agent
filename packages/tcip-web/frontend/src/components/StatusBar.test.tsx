@@ -172,7 +172,7 @@ describe("StatusBar canvas facts", () => {
     render(<StatusBar />);
 
     expect(screen.queryByText(/Image: /)).not.toBeInTheDocument();
-    expect(screen.queryByText(/boxes/)).not.toBeInTheDocument();
+    expect(screen.queryByText("1 box")).not.toBeInTheDocument();
   });
 });
 
@@ -309,5 +309,32 @@ describe("StatusBar shape counts (stored records only, never a derived box)", ()
     // whole-string match misses; a substring regex still finds each independently.
     expect(screen.getByText(/1 polygon/)).toBeInTheDocument();
     expect(screen.getByText(/2 boxes/)).toBeInTheDocument();
+  });
+
+  it("labels a single point in the singular", () => {
+    useStore.setState((s) => ({
+      canvas: {
+        ...s.canvas,
+        points: [{ x: 5, y: 6, subject: "tip", attributes: {} }],
+      },
+    }));
+    render(<StatusBar />);
+
+    expect(screen.getByText("1 point")).toBeInTheDocument();
+  });
+
+  it("labels more than one point in the plural, on the point count's own value", () => {
+    useStore.setState((s) => ({
+      canvas: {
+        ...s.canvas,
+        points: [
+          { x: 5, y: 6, subject: "tip", attributes: {} },
+          { x: 8, y: 9, subject: "tip", attributes: {} },
+        ],
+      },
+    }));
+    render(<StatusBar />);
+
+    expect(screen.getByText("2 points")).toBeInTheDocument();
   });
 });

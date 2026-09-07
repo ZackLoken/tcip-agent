@@ -80,7 +80,7 @@ export function StatusBar() {
       {/* Points are counted on their own: they are not detection targets, so they never fold into
           the box count. */}
       {activeTab === "annotate" && canvasMatchesDataset && pointCount > 0 && (
-        <span className="tabular-nums">{pointCount} points</span>
+        <span className="tabular-nums">{countLabel(pointCount, "point", "points")}</span>
       )}
       {activeTab === "annotate" && dirty && <span className="text-tcip-warn">Unsaved changes</span>}
       {activeTab === "review" && matches && (
