@@ -28,6 +28,42 @@ split manifest carries, picked per document since ``resolve_scale`` has no train
 at all."""
 
 
+def document_reconciliation(
+    bindings: dict[str, Any],
+    *,
+    validated: str,
+    per_bucket: dict[str, str],
+    unvalidated_buckets: list[str],
+    missing_sidecars: list[str],
+    on_disk_validated: bool,
+    conf: float | None = None,
+    confs: dict[str, float | None] | None = None,
+) -> dict:
+    """A ``_reconcile_validity``-shaped mapping, forged from real ``StampBinding`` objects rather
+    than a hand-typed dict a real reconciler would never produce.
+
+    ``bindings`` stays exactly the ``StampBinding`` mapping it is given, the same raw shape a real
+    reconciler's own ``bindings`` key carries (rendered to plain JSON only by
+    ``record_delivery_binding_event`` itself, at write time); ``binding_notes`` is derived from it
+    (one note per bucket whose binding does not hold), the only two keys a ``StampBinding`` carries
+    anything about. Every other key a reconciler decides for itself (which document validated,
+    which buckets it floored and why, whether it read every bucket on disk) is a named argument
+    here, so a forged reconciliation states every fact the reconciler would have decided rather
+    than inferring one from the binding it stands beside.
+    """
+    return {
+        "validated": validated,
+        "on_disk_validated": on_disk_validated,
+        "missing_sidecars": list(missing_sidecars),
+        "unvalidated_buckets": list(unvalidated_buckets),
+        "binding_notes": {bucket: b.note for bucket, b in bindings.items() if not b.ok},
+        "bindings": dict(bindings),
+        "conf": conf,
+        "confs": dict(confs) if confs is not None else {},
+        "per_bucket": dict(per_bucket),
+    }
+
+
 def write_prediction(pred_dir: str | Path, stem: str, *, count: int = 1) -> Path:
     """One per-image prediction document in a bucket, enough to give the bucket content to hash."""
     d = Path(pred_dir)
