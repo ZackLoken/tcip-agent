@@ -474,12 +474,20 @@ def test_route_answers_409_with_the_committed_response_on_a_lost_sealed_record_l
 
 def test_route_requires_dataset_root(client, tmp_path: Path) -> None:
     """No read or write happens before the refusal: the field is named rather than left to a
-    stamp-scope or bucket-confinement error further in."""
-    _, pred_dir = _make_dense_reviewed_project(tmp_path)
+    stamp-scope or bucket-confinement error further in. In this test environment the process cwd
+    does not resolve under an allowed root, so the pre-refusal baseline answered the path guard's
+    403, not the 200 a resolvable cwd would reach."""
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path)
     resp = client.post("/api/review/validate_reference", json={
         "dataset_root": "", "trait": "bud_opening", "pred_dir": pred_dir, "subject": "bud"})
     assert resp.status_code == 400
     assert "requires the dataset root" in resp.json()["detail"]
+    assert _read_sidecar(pred_dir)["validated"] is False
+
+    import tcip_store
+    from tcip_mcp.audit import audit_log_key
+
+    assert list(tcip_store.read_log(audit_log_key(proj)).records) == []
 
 
 def test_route_promotion_carries_an_old_vintage_member_and_stamps_no_schema_version(

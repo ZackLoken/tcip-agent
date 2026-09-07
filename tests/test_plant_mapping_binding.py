@@ -768,11 +768,15 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
     registry = register_plant_registry_for([plant_csv])
     store.open_project(tmp_path.resolve())
 
-    # A real 200 body to compare the refused-append pass's own ``committed`` against, taken
+    client = TestClient(app, base_url="http://127.0.0.1")
+
+    # A real 200 body from the route itself, not the MCP tool's differently-shaped one, taken
     # before the audit log is locked below.
-    healthy = build_plant_mapping(
-        name="untouched", images_root=str(images_root), plant_registry=registry)
-    assert "error" not in healthy, healthy
+    healthy_resp = client.post("/api/results/plant_mapping/build", json={
+        "name": "untouched", "images_root": str(images_root), "plant_registry": registry,
+    })
+    assert healthy_resp.status_code == 200, healthy_resp.text
+    healthy = healthy_resp.json()
 
     audit_path = tmp_path / ".tcip" / "audit.jsonl"
     audit_path.parent.mkdir(parents=True, exist_ok=True)
@@ -788,7 +792,6 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
     holder.start()
     try:
         assert holding.wait(30)
-        client = TestClient(app, base_url="http://127.0.0.1")
         resp = client.post("/api/results/plant_mapping/build", json={
             "name": "valley", "images_root": str(images_root), "plant_registry": registry,
         })
@@ -804,10 +807,10 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
         assert set(committed) == {"mapping", "summary", "unreadable", "nn_tolerance_m",
                                   "max_match_distance_m"}
         assert committed["nn_tolerance_m"]["source"] == "grid_pitch"
-        assert {k: v for k, v in committed.items() if k not in ("mapping", "summary")} == {
-            k: v for k, v in healthy.items()
-            if k in committed and k not in ("mapping", "summary")
-        }
+        # rows(), summary(), unreadable and the tolerance (plant_mapping.py:222-276) are all
+        # derived from the scene's own assignments, never from the build's name or built_at.
+        for key in committed:
+            assert committed[key] == healthy[key], key
     finally:
         release.set()
         holder.join(30)
