@@ -52,7 +52,7 @@ from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status
 from tcip_mcp.pipelines.image_utils import (
     AmbiguousImageStem, image_dimensions, resolve_image_source,
 )
-from tcip_mcp.web_client import REVIEW_PRIORITY_JOBS
+from tcip_mcp.web_client import REVIEW_PRIORITY_JOBS, current_root
 from tcip_web import jobstore
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.label_annotations_cache import cached_label_annotations
@@ -1061,7 +1061,6 @@ REVIEW_PRIORITY_REGISTRY = REVIEW_PRIORITY_JOBS
 
 
 def _pq_current_root() -> str:
-    from tcip_mcp.web_client import current_root
     return current_root()
 
 

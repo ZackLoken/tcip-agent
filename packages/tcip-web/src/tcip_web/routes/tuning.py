@@ -21,7 +21,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from tcip_mcp.web_client import HPO_SWEEPS
+from tcip_mcp.web_client import HPO_SWEEPS, current_root
 from tcip_web import jobstore
 from tcip_web.routes._body_common import EmptyBodyPayload
 from tcip_web.routes._metrics_common import metrics_response
@@ -37,7 +37,6 @@ HPO_REGISTRY = HPO_SWEEPS
 
 
 def _current_root() -> str:
-    from tcip_mcp.web_client import current_root
     return current_root()
 
 
@@ -531,8 +530,6 @@ def list_sweeps() -> dict:
     listing (``hpo_root()``) is already scoped to the current root, so only the live half
     needs its own root filter.
     """
-    from tcip_mcp.web_client import current_root
-
     live = [_summary(j) for j in _registry.list(current_root())]
     live_ids = frozenset(s["sweep_id"] for s in live)
     return {"sweeps": live + _disk_sweeps(exclude=live_ids)}

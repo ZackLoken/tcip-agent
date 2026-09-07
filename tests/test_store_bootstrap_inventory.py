@@ -200,6 +200,7 @@ def _names_register_store(func: ast.expr) -> bool:
 _CATALOGUE_IMPORT_ONLY = """\
 import sys
 
+import tcip_mcp
 from tcip_mcp.store_catalogue import bootstrapped_stores
 
 stores = bootstrapped_stores()
@@ -207,17 +208,25 @@ assert "tcip_web" not in sys.modules, sorted(sys.modules)
 assert "learning_capture" in stores, stores
 assert "job_registry" in stores, stores
 assert "annotation_stats" in stores, stores
-print("ok")
+print(tcip_mcp.__file__)
 """
 
 
 def test_the_catalogue_reaches_every_web_owned_store_without_importing_tcip_web():
     """A caller that only needs the catalogue (``export-store``, ``adopt-store``, this test
     suite) must not pull the web package in as a side effect: the three stores the web package
-    owns register through :mod:`tcip_mcp.web_client`, which the catalogue already imports."""
+    owns register through :mod:`tcip_mcp.web_client`, which the catalogue already imports.
+
+    The child prints the ``tcip_mcp`` it imported, and the assertion holds it to this
+    repository's own package, so a run whose environment resolves an installed copy elsewhere
+    fails here rather than proving the fact about another tree. The catalogue's import chain
+    reaches torch, so a cold child takes longer than a warm one.
+    """
     result = subprocess.run(
         [sys.executable, "-c", _CATALOGUE_IMPORT_ONLY],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, timeout=180,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "ok"
+    imported = Path(result.stdout.strip()).resolve()
+    repository_packages = Path(__file__).resolve().parents[1] / "packages"
+    assert repository_packages in imported.parents, imported

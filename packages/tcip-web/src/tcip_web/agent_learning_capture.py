@@ -19,9 +19,6 @@ import json
 import sys
 from datetime import datetime, timezone
 
-from tcip_store import append
-
-from tcip_mcp.web_client import learning_capture_key
 
 
 def main() -> None:
@@ -30,7 +27,10 @@ def main() -> None:
     except Exception:
         payload = {}
     try:
+        from tcip_store import append
         from tcip_store.binding import bind_default
+
+        from tcip_mcp.web_client import learning_capture_key
 
         bind_default()
         try:
