@@ -299,33 +299,74 @@ def test_a_document_arrived_during_the_move_refuses_naming_the_stem(tmp_path, mo
     assert "arrived" in result["error"]
 
 
-def test_a_secondary_stamp_written_fresh_into_the_half_cleared_source_refuses_on_resume(
+def test_a_secondary_stamp_present_at_the_source_alone_moves_or_refuses_by_the_op_stamps_state(
         tmp_path, monkeypatch):
-    """One of the three producers that write a fresh stamp into any directory landed on the
-    half-cleared source between the two calls: the resume refuses naming them, no door removes it.
-    The original bucket carries its own resolve_scale stamp (so the interrupted call moves it to
-    the destination before the crash); a fresh value written into the now-stampless source after
-    is what the resume must catch, present at both and different."""
-    from tcip_mcp.pipelines.resolution import write_sidecar
+    """A source-only secondary stamp reads differently by whether operating_point.json has
+    already left source. Before it has (the crash fell before any stamp write): the secondary
+    stamp is this call's own original, unmoved value, and the resume moves it normally. After it
+    has (a resume over an already half-cleared source): a value present at the source alone can
+    only be a fresh write one of the three producers made into the half-cleared directory since
+    this door already left it stampless, and the resume refuses naming them; a value present at
+    both sides and differing refuses the same way, whether or not it was ever absent."""
+    from tcip_mcp.pipelines.resolution import _read_sidecar, read_operating_point_sidecar, write_sidecar
+    from tcip_mcp.prediction_buckets import bucket_stems
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
 
-    built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expFreshSecondary")
-    write_sidecar(built["bucket"], {"conf": {"value": 0.1}}, document="resolve_scale")
+    built_a = build_published_bucket(
+        tmp_path, monkeypatch, experiment_id="expSecondaryOpNotMoved", dataset_root=tmp_path / "ds_a")
+    write_sidecar(built_a["bucket"], {"conf": {"value": 0.1}}, document="resolve_scale")
     _fix_stamp(monkeypatch)
-    destination = _expected_destination(built)
+    destination_a = _expected_destination(built_a)
 
-    fault = inject_store_fault(monkeypatch, method_name="put_blob")
+    fault_a = inject_store_fault(
+        monkeypatch, method_name="replace", predicate=key_in_store("operating_point_sidecar"))
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built["bucket"]), "should crash before the first document")
-    assert fault.fired
+        clear_prediction_bucket(str(built_a["bucket"]), "should crash before any stamp write")
+    assert fault_a.fired
 
-    write_sidecar(built["bucket"], {"conf": {"value": 0.4}}, document="resolve_scale")
+    result_a = clear_prediction_bucket(
+        str(built_a["bucket"]), "resume after the no-stamp-write crash",
+        cleared_bucket=str(destination_a))
+    assert "error" not in result_a, result_a
+    assert read_operating_point_sidecar(destination_a) is not None
+    assert _read_sidecar(destination_a, "resolve_scale") == {"conf": {"value": 0.1}}
+    assert _read_sidecar(built_a["bucket"], "resolve_scale") is None
+    assert bucket_stems(built_a["bucket"]) == set()
 
-    result = clear_prediction_bucket(
-        str(built["bucket"]), "resume after a fresh secondary stamp landed",
-        cleared_bucket=str(destination))
-    assert "error" in result
-    assert "resolve_scale.json differs" in result["error"]
+    built_b = build_published_bucket(
+        tmp_path, monkeypatch, experiment_id="expSecondaryOpMoved", dataset_root=tmp_path / "ds_b")
+    destination_b = _expected_destination(built_b)
+
+    fault_b = inject_store_fault(monkeypatch, method_name="put_blob")
+    with pytest.raises(RuntimeError):
+        clear_prediction_bucket(str(built_b["bucket"]), "should crash after the stamps moved")
+    assert fault_b.fired
+
+    write_sidecar(built_b["bucket"], {"conf": {"value": 0.4}}, document="resolve_scale")
+
+    result_b = clear_prediction_bucket(
+        str(built_b["bucket"]), "resume after a fresh secondary stamp landed",
+        cleared_bucket=str(destination_b))
+    assert "error" in result_b
+    assert "resolve_scale.json is present at" in result_b["error"]
+
+    built_c = build_published_bucket(
+        tmp_path, monkeypatch, experiment_id="expSecondaryOpMovedDiffers", dataset_root=tmp_path / "ds_c")
+    write_sidecar(built_c["bucket"], {"conf": {"value": 0.1}}, document="resolve_scale")
+    destination_c = _expected_destination(built_c)
+
+    fault_c = inject_store_fault(monkeypatch, method_name="put_blob")
+    with pytest.raises(RuntimeError):
+        clear_prediction_bucket(str(built_c["bucket"]), "should crash after the stamps moved")
+    assert fault_c.fired
+
+    write_sidecar(built_c["bucket"], {"conf": {"value": 0.4}}, document="resolve_scale")
+
+    result_c = clear_prediction_bucket(
+        str(built_c["bucket"]), "resume after a differing secondary stamp landed",
+        cleared_bucket=str(destination_c))
+    assert "error" in result_c
+    assert "resolve_scale.json differs" in result_c["error"]
 
 
 def test_a_same_stem_document_staged_over_a_copied_one_refuses_on_resume(tmp_path, monkeypatch):

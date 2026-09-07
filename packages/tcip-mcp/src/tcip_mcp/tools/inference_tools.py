@@ -1445,17 +1445,24 @@ def _reconcile_op_stamp(source: Path, destination: Path) -> tuple[bool, dict | N
     return False, None  # present at the destination alone: already finished
 
 
-def _reconcile_secondary_stamp(source: Path, destination: Path, document: str) -> tuple[bool, dict | None]:
+def _reconcile_secondary_stamp(
+    source: Path, destination: Path, document: str, *, op_stamp_left_source: bool,
+) -> tuple[bool, dict | None]:
     """Move (or finish moving) one of :data:`_OTHER_STAMP_DOCUMENTS` between ``source`` and
     ``destination``. Returns ``(moved_this_call, refusal)``.
 
-    Absent at the destination with a value at the source: copied, then the source's deleted.
-    Present at both and equal: the source's delete finishes it. Present at both and different: one
-    of the three producers that write a fresh stamp into any directory it is given
-    (``resolve_scale``, ``classifier_operating_point``, ``ordinal_operating_point`` or
-    ``regression_operating_point``) wrote into the half-cleared source after this clear began;
-    refused naming them, since no door removes such an entry. Present at neither, or at the
-    destination alone: nothing to do.
+    Absent at the destination with a value at the source: while ``operating_point.json`` still
+    reads from ``source`` (``op_stamp_left_source`` is ``False``), this is the original, unmoved
+    secondary stamp, and it is copied then deleted. Once ``operating_point.json`` has already left
+    ``source`` (``op_stamp_left_source`` is ``True``, a resume over an already half-cleared
+    source), a value present at the source alone can only be a fresh write: one of the three
+    producers that write a stamp into any directory it is given (``resolve_scale``,
+    ``classifier_operating_point``, ``ordinal_operating_point`` or ``regression_operating_point``)
+    landed on the half-cleared source between the two calls, since this door already left it
+    stampless; refused the same way a value differing at both sides is. Present at both and equal:
+    the source's delete finishes it. Present at both and different: one of the three producers
+    wrote into the half-cleared source after this clear began; refused naming them, since no door
+    removes such an entry. Present at neither, or at the destination alone: nothing to do.
     """
     from tcip_mcp.pipelines.resolution import sidecar_key
 
@@ -1464,7 +1471,17 @@ def _reconcile_secondary_stamp(source: Path, destination: Path, document: str) -
     source_v = store.read_versioned(source_key, default=None)
     dest_present, source_present = dest_v.value is not None, source_v.value is not None
 
+    fresh_write_refusal = {
+        "error": f"{document}.json is present at {source} alone with operating_point.json "
+                f"already at {destination}: resolve_scale, classifier_operating_point, "
+                "ordinal_operating_point or regression_operating_point wrote a fresh stamp into "
+                "the half-cleared source after this clear began; a person must reconcile it, no "
+                "door removes it.",
+    }
+
     if not dest_present and source_present:
+        if op_stamp_left_source:
+            return False, fresh_write_refusal
         store.replace(dest_key, source_v.value, expect=Version.ABSENT)
         store.delete(source_key, expect=source_v.version)
         return True, None
@@ -1826,6 +1843,9 @@ def clear_prediction_bucket(
     stamps_moved_this_call: list[str] = []
     documents_moved_this_call = 0
     source_republished = False
+    # Whether operating_point.json had already left source before this call, the discriminator
+    # _reconcile_secondary_stamp uses between this call's own unmoved stamp and a fresh write.
+    op_stamp_left_source = resuming and source_op.value is None
 
     try:
         if len(bucket_stems(destination)) == 0:
@@ -1835,7 +1855,8 @@ def clear_prediction_bucket(
             if moved:
                 stamps_moved_this_call.append("operating_point")
             for document in _OTHER_STAMP_DOCUMENTS:
-                moved, refusal = _reconcile_secondary_stamp(source, destination, document)
+                moved, refusal = _reconcile_secondary_stamp(
+                    source, destination, document, op_stamp_left_source=op_stamp_left_source)
                 if refusal is not None:
                     return refusal
                 if moved:
@@ -1850,7 +1871,8 @@ def clear_prediction_bucket(
             source_republished = True
         else:
             for document in _OTHER_STAMP_DOCUMENTS:
-                moved, refusal = _reconcile_secondary_stamp(source, destination, document)
+                moved, refusal = _reconcile_secondary_stamp(
+                    source, destination, document, op_stamp_left_source=op_stamp_left_source)
                 if refusal is not None:
                     return refusal
                 if moved:
