@@ -213,14 +213,20 @@ def _write_canvas_binding(root: Path) -> int:
     is read to decide whether ``root`` actually changed (generation bumps only then, so a
     same-project re-select or ordinary navigation never supersedes a sibling tab), and the write
     is staged in the same transaction so a concurrent select cannot land between the read and the
-    write and have its own bump silently dropped.
+    write and have its own bump silently dropped. A released current record
+    (``tcip_mcp.project_removal.release_project_binding``) bumps regardless of whether ``root``
+    changed: its own root is not what the GUI has open, whatever it names, so the fresh select
+    this write makes never reuses a generation that release already retired.
     """
     key = canvas_open_binding_key()
     root_str = str(root)
     project_name = workspace.workspace_project_name(root)
     with ts.transaction(key) as txn:
         current = txn.read(key, default=None)
-        if current is not None and ts.canonical_path(current["root"]) == ts.canonical_path(root_str):
+        same_root = current is not None and not current.get("released") and (
+            ts.canonical_path(current["root"]) == ts.canonical_path(root_str)
+        )
+        if same_root:
             generation = current["generation"]
         else:
             generation = (current["generation"] + 1) if current is not None else 1

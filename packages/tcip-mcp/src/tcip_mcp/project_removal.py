@@ -1,18 +1,20 @@
 """Project removal: archive now, mark for removal, move at the next backend start.
 
-Two doors, GUI-only (the picker's "Remove..." dialog; the agent has no MCP tool for this, per
-the owner's ruling): :func:`request_project_removal` (phase one, run from the removal route)
-and :func:`complete_pending_removals` (phase two, run once at backend startup, after
-``bind_startup_root``'s early return, or through ``tcip complete-removals``). Phase one
-archives the project (``tcip_mcp.tools.project_tools.archive_project``, models included) into
-the workspace's ``.removed/`` holding directory, then writes a ``pending_removal`` marker on
-the project itself; every workspace opener and walker that already exists refuses or skips a
-marked project from that moment (``tcip_mcp.workspace.adoptable_project_root``,
-``tcip_web.paths.allowed_roots``'s excluded roots). Phase one leaves the project's directory
-exactly where it was: nothing is deleted, and the archive round-trips through
-``tcip import-project``. Phase two walks the workspace and renames each marked project's
-directory onto its own holding path, deleting the marker only once the rename and its own
-completion line have landed.
+Three doors, GUI-only (the picker's "Remove..." dialog; the agent has no MCP tool for any of
+this, per the owner's ruling): :func:`request_project_removal` (phase one, run from the removal
+route), :func:`complete_pending_removals` (phase two, run once at backend startup, after
+``bind_startup_root``'s early return, or through ``tcip complete-removals``), and
+:func:`release_project_binding` (clears the marker and/or marks the canvas-open binding
+released for a project that refuses removal only because it opens by default or the GUI has it
+open, with no archiving or marking of its own). Phase one archives the project
+(``tcip_mcp.tools.project_tools.archive_project``, models included) into the workspace's
+``.removed/`` holding directory, then writes a ``pending_removal`` marker on the project itself;
+every workspace opener and walker that already exists refuses or skips a marked project from
+that moment (``tcip_mcp.workspace.adoptable_project_root``, ``tcip_web.paths.allowed_roots``'s
+excluded roots). Phase one leaves the project's directory exactly where it was: nothing is
+deleted, and the archive round-trips through ``tcip import-project``. Phase two walks the
+workspace and renames each marked project's directory onto its own holding path, deleting the
+marker only once the rename and its own completion line have landed.
 
 A successful archive re-exports every database under the target back out as loose files inside
 its own ``.tcip`` before the marker is written, so the moved tree carries them rather than a
@@ -327,6 +329,32 @@ def dependency_warnings(project_root: Path) -> tuple[list[dict], Optional[str]]:
     return warnings, None
 
 
+def binding_release_available(target: Optional[Path], state: OpenProjectState) -> bool:
+    """Whether :func:`release_project_binding` would have something to clear for ``target``:
+    true when the marker or the canvas binding (not itself already released) names it by
+    identity, the same two checks :func:`_open_project_conflict` runs for its own marker and
+    canvas spellings, so a control this answers ``True`` for stays enabled beside a refusal a
+    release would clear. ``target`` may be ``None`` (a name that resolved to nothing safely
+    addressable), which never matches. Shared by :func:`_preview`'s own ``releasable`` field and
+    the workspace listing's own per-project ``removal_releasable``
+    (``tcip_web.routes.projects._summarize``), the same split :func:`identity_conflict` and
+    ``removal_refusal`` already keep."""
+    if target is None:
+        return False
+    if state.marker_name:
+        try:
+            marker_root = workspace.project_path(state.marker_name, create=False)
+        except ValueError:
+            marker_root = None
+        if marker_root is not None and _same_path(target, marker_root):
+            return True
+    if state.canvas and not state.canvas.get("released"):
+        root = state.canvas.get("root")
+        if root and _same_path(target, root):
+            return True
+    return False
+
+
 def _live_run_conflict(target: Path) -> Optional[str]:
     from tcip_mcp import experiments
     from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS
@@ -436,22 +464,32 @@ def _preview(
 
     Reads the target's experiment records (the live-run refusal check), which opens its database
     on this request's thread and keeps it open for the process's life: previewing and cancelling
-    still leaves this backend holding the target until it restarts.
+    still leaves this backend holding the target until it restarts. ``releasable`` is
+    :func:`binding_release_available` against whatever name resolves, computed before the refusal
+    chain runs so a refused preview still tells the dialog whether a release would help.
     """
     from tcip_mcp.registry_paths import nearest_containing_ancestor
     from tcip_mcp.store_catalogue import project_roots
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets_raw
 
+    try:
+        candidate: Optional[Path] = workspace.project_path(name, create=False)
+    except ValueError:
+        candidate = None
+    releasable = binding_release_available(candidate, state)
+
     refusal = _ordered_refusal(name, job_conflict, state)
     if refusal is not None:
-        return {"external_roots": [], "dependent_projects": [], "refusal": refusal.message}, refusal
+        return {"external_roots": [], "dependent_projects": [], "refusal": refusal.message,
+                "releasable": releasable}, refusal
 
     try:
         project = workspace.workspace_project_root(name)
     except ValueError as exc:
         # The chain above just resolved this name; a ValueError here means it vanished in the
         # narrow window since, which the chain has not seen yet.
-        return {"external_roots": [], "dependent_projects": [], "refusal": str(exc)}, _Refusal(404, str(exc))
+        return {"external_roots": [], "dependent_projects": [], "refusal": str(exc),
+                "releasable": releasable}, _Refusal(404, str(exc))
 
     roots_by_path: dict[str, list[str]] = {}
     external_roots_unreadable: Optional[str] = None
@@ -505,6 +543,7 @@ def _preview(
         "external_roots": external_roots,
         "dependent_projects": dependent_projects,
         "refusal": None,
+        "releasable": releasable,
     }
     if external_roots_unreadable is not None:
         result["external_roots_unreadable"] = external_roots_unreadable
@@ -667,7 +706,7 @@ def request_project_removal(
                               "completes at the next backend start.",
                     "status": 409}
 
-        if recorded_in_open_project:
+        if bound_root is not None:
             bound_name = workspace.workspace_project_name(bound_root)
             audit_note = (
                 f"{name!r}'s own line is in its own log; the route's own line and the archive "
@@ -691,6 +730,116 @@ def request_project_removal(
             "recorded_in_open_project": recorded_in_open_project,
             "audit_note": audit_note,
         }
+
+
+def release_project_binding(name: str, *, released_by: str) -> dict:
+    """Stop ``name`` opening by default and forget it as the GUI's own open project, so the
+    breeder can clear a marker or canvas-binding refusal a removal request meets without a
+    restart, and try the request again once the bound-root spelling (if that is what remains) has
+    one.
+
+    ``name`` must name an existing workspace project (404 on a ``ValueError``, the same shape
+    :func:`~tcip_mcp.workspace.workspace_project_root` raises). Each binding is read back with its
+    own version and compared to the project by identity right before it is changed, never on the
+    strength of an earlier read, so a caller cannot delete a marker or bump a binding that moved to
+    another project in between.
+
+    The marker: read through :func:`~tcip_mcp.workspace.active_project_key`, cleared with
+    ``delete(key, expect=version)`` only when it names ``name`` by identity; a ``VersionConflict``
+    (``activate_project`` landing between the read and the delete) is answered 409 naming it, with
+    nothing cleared and no line. The canvas-open binding is never deleted, so a caller still
+    holding its generation keeps failing its own fence and its own push exactly as it would
+    against any other stale generation: inside one transaction on
+    :func:`~tcip_mcp.web_client.canvas_open_binding_key`, the record is read, and when its
+    ``root`` names ``name`` by identity it is rewritten with ``generation + 1``, ``released: True``
+    and a fresh ``issued_at``, ``root`` and ``project_name`` kept. A transaction failure
+    (``StoreBusy``, or any other exception the backend raises attempting it) is caught and
+    answered after the marker's own outcome is settled, never silently.
+
+    When either binding actually changed, ``project_binding_released`` is recorded under the
+    project's own root before any answer, naming ``released_by``, ``marker_cleared`` and
+    ``canvas_binding_released``; a canvas failure after the marker was cleared still gets that
+    line (``marker_cleared`` true, ``canvas_binding_released`` false) before the 409 that names
+    both what was cleared and recorded and what was not, and a failed append itself answers 409
+    naming what was cleared and that the line was not written. Neither binding naming the project
+    writes nothing and answers both flags false with no line. This door never repins this
+    process's own platform-state root and never touches :class:`~tcip_web.state.StateStore`'s
+    in-memory open project: the platform root stays bound until the process restarts (the
+    bound-root refusal says so), and the Results doors keep serving the last root the GUI
+    selected until another select, which the guard's own excluded-roots check closes the moment a
+    marker lands on that root. The response is ``{name, marker_cleared, canvas_binding_released,
+    refusal, releasable}``, ``refusal`` and ``releasable`` read fresh after the release through
+    :func:`identity_conflict` and :func:`binding_release_available`.
+    """
+    from tcip_mcp.web_client import canvas_open_binding_key
+
+    try:
+        project = workspace.workspace_project_root(name)
+    except ValueError as exc:
+        return {"error": str(exc), "status": 404}
+
+    marker_cleared = False
+    marker_key = workspace.active_project_key()
+    versioned = tcip_store.read_versioned(marker_key, default=None)
+    marker_value = (versioned.value or "").strip()
+    if marker_value:
+        try:
+            marker_root: Optional[Path] = workspace.project_path(marker_value, create=False)
+        except ValueError:
+            marker_root = None
+        if marker_root is not None and _same_path(project, marker_root):
+            try:
+                tcip_store.delete(marker_key, expect=versioned.version)
+                marker_cleared = True
+            except tcip_store.VersionConflict as exc:
+                return {"error": f"the active-project marker changed while releasing {name!r}: "
+                                  f"{exc}", "status": 409}
+
+    canvas_binding_released = False
+    canvas_key = canvas_open_binding_key()
+    canvas_failure: Optional[Exception] = None
+    try:
+        with tcip_store.transaction(canvas_key) as txn:
+            current = txn.read(canvas_key, default=None)
+            if current is not None and _same_path(project, current.get("root")):
+                txn.write(canvas_key, {
+                    "generation": current["generation"] + 1,
+                    "root": current["root"],
+                    "project_name": current.get("project_name"),
+                    "released": True,
+                    "issued_at": datetime.now(timezone.utc).isoformat(),
+                })
+                canvas_binding_released = True
+    except (tcip_store.StoreBusy, tcip_store.VersionConflict) as exc:
+        canvas_failure = exc
+
+    if marker_cleared or canvas_binding_released:
+        try:
+            audit.record_event_or_raise(
+                "project_binding_released",
+                {"name": name, "released_by": released_by, "marker_cleared": marker_cleared,
+                 "canvas_binding_released": canvas_binding_released},
+                scope=project,
+            )
+        except audit.AuditEntryNotWritten as exc:
+            return {"error": f"{name!r}'s binding was cleared (marker_cleared={marker_cleared}, "
+                              f"canvas_binding_released={canvas_binding_released}) but the line "
+                              f"was not written: {exc}",
+                    "status": 409}
+
+    if canvas_failure is not None:
+        return {"error": f"releasing {name!r}'s canvas-open binding failed: {canvas_failure}. "
+                          f"marker_cleared={marker_cleared}.",
+                "status": 409}
+
+    state = read_open_project_state()
+    return {
+        "name": name,
+        "marker_cleared": marker_cleared,
+        "canvas_binding_released": canvas_binding_released,
+        "refusal": identity_conflict(project, state),
+        "releasable": binding_release_available(project, state),
+    }
 
 
 def complete_pending_removals(workspace_root: Path) -> list[dict]:
