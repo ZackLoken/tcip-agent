@@ -1319,55 +1319,95 @@ def test_run_hpo_trial_bespoke_custom_key_not_falsely_flagged_unconsumed(monkeyp
     assert resolved["unconsumed_params"] == []
 
 
-def test_run_hpo_trial_swept_top_level_evaluation_is_not_reported_unconsumed(monkeypatch, tmp_path):
-    """A swept top-level ``evaluation`` axis must be seen as read: the fake training body reads
-    it the same way ``generic_trainer.train()`` does, through ``evaluation_section``, which must
-    read ``run.config`` (the access-tracking wrapper) directly rather than through a
-    ``dict(config)`` copy that would bypass the wrapper's own ``get`` override."""
+def test_run_hpo_trial_swept_dotted_evaluation_leaf_reached_via_get_is_not_reported_unconsumed(
+    monkeypatch, tmp_path,
+):
+    """A swept dotted ``evaluation.<leaf>`` axis, on a leaf the trial's own preamble never reads
+    (the preamble reads only ``evaluation``, ``evaluation.trait`` and
+    ``evaluation.selection_metric`` before dispatch, on every trial regardless of the swept
+    params), is marked consumed only by the training body's own read: the fake body's
+    ``evaluation_section(run.config).get(...)`` is the read that consumes it here. A literal
+    top-level ``evaluation`` sweep (a dict value under that key) cannot guard this at all: the
+    preamble's own ``evaluation_section(tracked_config)`` call marks the bare ``evaluation`` key
+    read on every trial no matter what the body does, so that key is never reported unconsumed
+    regardless of body behavior; only a dotted leaf outside the three the preamble itself reads
+    can distinguish a body that reads it from one that does not."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
     from tcip_mcp.pipelines.schemas import evaluation_section
 
     def fake_train(run, train_loader, val_loader, task="detection",
                    epoch_callback=None, resume_from=""):
-        evaluation_section(run.config)  # the same read generic_trainer.train() performs
+        evaluation_section(run.config).get("confidence_floor")  # the read that consumes it
         run.best_metric = 1.0
         run.status = "completed"
         return run
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
     trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"lr": 3e-4, "evaluation": {"selection_metric": "f1"}}, [].append,
+    _run_hpo_trial({"lr": 3e-4, "evaluation.confidence_floor": 0.3}, [].append,
                    _detection_base(), str(trial_dir))
 
     resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert "evaluation" not in resolved["unconsumed_params"]
+    assert "evaluation.confidence_floor" not in resolved["unconsumed_params"]
 
 
-def test_run_hpo_trial_swept_dotted_selection_metric_is_not_reported_unconsumed(monkeypatch, tmp_path):
-    """A dotted swept key (``evaluation.selection_metric``) is applied by ``_apply_hpo_params``
-    into the nested ``evaluation`` field it names, never as a literal top-level key. It counts as
-    consumed once its own leaf is read off that nested block, the same read
-    ``generic_trainer.train()`` actually performs (``evaluation_section(config).get("selection_metric")``),
-    not merely because the block itself was touched."""
+def test_run_hpo_trial_swept_dotted_evaluation_leaf_reached_via_getitem_is_not_reported_unconsumed(
+    monkeypatch, tmp_path,
+):
+    """A dotted swept key (``evaluation.loss_weighting``, a leaf the preamble never reads) is
+    applied by ``_apply_hpo_params`` into the nested ``evaluation`` field it names, never as a
+    literal top-level key. It counts as consumed once its own leaf is read off that nested
+    block, here through ``__getitem__`` rather than ``get`` (the wrapper's other tracked read
+    path), not merely because the ancestor block was touched by the preamble's own
+    ``evaluation_section`` call."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
     from tcip_mcp.pipelines.schemas import evaluation_section
 
     def fake_train(run, train_loader, val_loader, task="detection",
                    epoch_callback=None, resume_from=""):
-        evaluation_section(run.config).get("selection_metric")  # generic_trainer.train()'s own read
+        evaluation_section(run.config)["loss_weighting"]  # __getitem__, not get
         run.best_metric = 1.0
         run.status = "completed"
         return run
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
     trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"lr": 3e-4, "evaluation.selection_metric": "f1"}, [].append,
+    _run_hpo_trial({"lr": 3e-4, "evaluation.loss_weighting": 0.7}, [].append,
                    _detection_base(), str(trial_dir))
 
     resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert "evaluation.selection_metric" not in resolved["unconsumed_params"]
+    assert "evaluation.loss_weighting" not in resolved["unconsumed_params"]
+
+
+def test_run_hpo_trial_swept_dotted_evaluation_leaf_read_through_a_dict_copy_is_reported_unconsumed(
+    monkeypatch, tmp_path,
+):
+    """Coverage of ``_AccessTrackingConfig``'s own documented limitation, not a regression guard:
+    a C-level ``dict()`` copy of the evaluation block bypasses the wrapper's ``get`` override, so
+    a leaf read only through that copy is invisible to the tracker even though
+    ``evaluation_section(run.config)`` itself returned the tracked wrapper. The two tests above
+    read the leaf straight off that wrapper and are not reported unconsumed; this one takes an
+    extra ``dict()`` copy of the returned block before reading the leaf, and is."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+    from tcip_mcp.pipelines.schemas import evaluation_section
+
+    def fake_train(run, train_loader, val_loader, task="detection",
+                   epoch_callback=None, resume_from=""):
+        dict(evaluation_section(run.config)).get("copied_leaf")  # a C-level copy of the block
+        run.best_metric = 1.0
+        run.status = "completed"
+        return run
+
+    _patch_hpo_trial_machinery(monkeypatch, fake_train)
+    trial_dir = tmp_path / "trial_0"
+    _run_hpo_trial({"lr": 3e-4, "evaluation.copied_leaf": 0.9}, [].append,
+                   _detection_base(), str(trial_dir))
+
+    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
+    assert resolved["unconsumed_params"] == ["evaluation.copied_leaf"]
 
 
 def test_run_hpo_trial_swept_dotted_leaf_under_a_read_block_is_still_reported_unconsumed(
@@ -1401,24 +1441,28 @@ def test_run_hpo_trial_swept_dotted_key_whose_segment_is_unread_is_reported_unco
     monkeypatch, tmp_path,
 ):
     """A dotted swept key still counts as unconsumed when nothing reads even its own top-level
-    segment, the plainest case: no ancestor of the leaf was ever touched at all."""
+    segment, the plainest case: no ancestor of the leaf is ever touched at all, by the preamble
+    or by the fake body. ``model_source`` cannot carry this case: the preamble itself reads
+    ``model_source`` and ``model_source.task`` before dispatch, on every trial; a bespoke
+    top-level block name nothing in the trial ever references is what distinguishes this from
+    the test above it, where the ancestor block is read but the leaf on it is not."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
 
     def fake_train(run, train_loader, val_loader, task="detection",
                    epoch_callback=None, resume_from=""):
-        run.config.get("lr")  # a known key, consumed; "model_source" itself is never read
+        run.config.get("lr")  # a known key, consumed; "custom_untouched_block" is never read
         run.best_metric = 1.0
         run.status = "completed"
         return run
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
     trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"lr": 3e-4, "model_source.builder_kwargs.width": 32}, [].append,
+    _run_hpo_trial({"lr": 3e-4, "custom_untouched_block.width": 32}, [].append,
                    _detection_base(), str(trial_dir))
 
     resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert resolved["unconsumed_params"] == ["model_source.builder_kwargs.width"]
+    assert resolved["unconsumed_params"] == ["custom_untouched_block.width"]
 
 
 def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(tmp_path):
