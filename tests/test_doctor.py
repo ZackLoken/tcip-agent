@@ -597,6 +597,10 @@ def _leaf_spec_project(tmp_path: Path) -> Path:
 
 
 def test_doctor_is_silent_on_a_confirmed_current_trait_spec_statement(tmp_path: Path):
+    """New-behaviour test, proved on the landed tree: the seeding call carries the writer's new
+    ``rationale`` keyword, so the fail-before tool refuses this test against the pre-item-45
+    baseline rather than proving anything. Proved instead by disabling the doctor's
+    confirmed-current branch on this tree and watching this assertion fail."""
     root = _leaf_spec_project(tmp_path)
     confirm_spec_statement(root, "leaf")
 
@@ -606,6 +610,10 @@ def test_doctor_is_silent_on_a_confirmed_current_trait_spec_statement(tmp_path: 
 
 
 def test_doctor_reports_a_stale_trait_spec_statement(tmp_path: Path):
+    """New-behaviour test, proved on the landed tree: the seeding call carries the writer's new
+    ``rationale`` keyword, so the fail-before tool refuses this test against the pre-item-45
+    baseline rather than proving anything. Proved instead by disabling the doctor's stale branch
+    on this tree and watching this assertion fail."""
     import tcip_store as ts
 
     root = _leaf_spec_project(tmp_path)
@@ -624,6 +632,10 @@ def test_doctor_reports_a_stale_trait_spec_statement(tmp_path: Path):
 
 
 def test_doctor_reports_a_current_unconfirmed_trait_spec_statement(tmp_path: Path):
+    """New-behaviour test, proved on the landed tree: the seeding call carries the writer's new
+    ``rationale`` keyword, so the fail-before tool refuses this test against the pre-item-45
+    baseline rather than proving anything. Proved instead by disabling the doctor's
+    current-unconfirmed branch on this tree and watching this assertion fail."""
     root = _leaf_spec_project(tmp_path)
     traits.write_trait_spec_fields(
         "leaf", {}, project_root=root, rationale="an initial account of the leaf trait",
@@ -637,6 +649,10 @@ def test_doctor_reports_a_current_unconfirmed_trait_spec_statement(tmp_path: Pat
 
 
 def test_doctor_reports_an_undecodable_trait_spec_statement_without_aborting(tmp_path: Path):
+    """New-behaviour test, proved on the landed tree: the seeding call carries the writer's new
+    ``rationale`` keyword, so the fail-before tool refuses this test against the pre-item-45
+    baseline rather than proving anything. Proved instead by disabling the doctor's
+    ``DecodeError`` branch on this tree and watching this assertion fail."""
     from tests._record_damage_fixtures import damage_record
 
     root = _leaf_spec_project(tmp_path)
@@ -653,6 +669,10 @@ def test_doctor_reports_an_undecodable_trait_spec_statement_without_aborting(tmp
 
 
 def test_doctor_reports_a_version_refused_trait_spec_statement_without_aborting(tmp_path: Path):
+    """New-behaviour test, proved on the landed tree: the seeding call carries the writer's new
+    ``rationale`` keyword, so the fail-before tool refuses this test against the pre-item-45
+    baseline rather than proving anything. Proved instead by disabling the doctor's
+    ``SchemaVersionRefused`` branch on this tree and watching this assertion fail."""
     import json
 
     from tests._record_damage_fixtures import damage_record
@@ -669,7 +689,7 @@ def test_doctor_reports_a_version_refused_trait_spec_statement_without_aborting(
 
     assert res.returncode == 1, res.stdout
     lines = _lines(res.stdout, "trait spec")
-    assert len(lines) == 1
+    assert len(lines) == 1 and "schema_version 99, above the" in lines[0]
 
 
 def test_doctor_warns_on_a_project_with_no_record(tmp_path):
