@@ -836,6 +836,12 @@ def reconstruct_from_status(
     ``launched_by`` carries the record's own stamped declaration (see :func:`stamp_run_identity`)
     whole, or ``None`` for a record that predates the field or whose stamp was dropped; a reader
     treats both the same way, as "launcher not recorded".
+
+    ``heartbeat`` carries the record's own last-touched instant (see :func:`_touch_heartbeat`)
+    whole, the same value :func:`derived_state` already reads to decide ``running`` vs
+    ``interrupted``: no process id is persisted anywhere this reconstruction can check, so a
+    caller showing this row as ``running`` shows this instant beside it rather than implying a
+    liveness check that does not exist.
     """
     current_epoch = None
     best_metric_name = None
@@ -854,6 +860,7 @@ def reconstruct_from_status(
         "output_dir": status.get("output_dir"),
         "error": status.get("error"),
         "launched_by": status.get("launched_by"),
+        "heartbeat": status.get("heartbeat"),
     }
 
 

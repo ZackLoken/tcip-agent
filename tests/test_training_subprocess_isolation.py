@@ -576,10 +576,11 @@ def test_launched_runs_view_lists_a_launched_experiment_this_process_never_held(
 
 def test_launched_runs_view_overlays_a_pid_bearing_entry_from_disk(tmp_path, monkeypatch):
     """A pid-bearing in-memory entry (subprocess-delegated) takes the disk overlay for its
-    status/current_epoch: its own in-memory copy is a stale launch-time placeholder once the
-    child starts mutating its own separate copy on disk. The status/current_epoch overlay is
-    pre-existing coverage; the new assertion this test adds is external=False, unlike a run this
-    process never held at all."""
+    status/current_epoch/heartbeat: its own in-memory copy is a stale launch-time placeholder
+    once the child starts mutating its own separate copy on disk. The status/current_epoch
+    overlay is pre-existing coverage; the new assertions this test adds are external=False,
+    unlike a run this process never held at all, and heartbeat, the one liveness signal a
+    record with no persisted process id can offer."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment, log_metrics, stamp_run_identity, update_status
@@ -598,6 +599,8 @@ def test_launched_runs_view_overlays_a_pid_bearing_entry_from_disk(tmp_path, mon
     assert by_id["run_pid_overlay"]["status"] == "running"
     assert by_id["run_pid_overlay"]["current_epoch"] == 9
     assert by_id["run_pid_overlay"]["external"] is False
+    # log_metrics touches the disk record's own heartbeat; the overlay carries it through.
+    assert by_id["run_pid_overlay"]["heartbeat"] is not None
 
 
 def test_launched_runs_view_leaves_in_process_runs_untouched(tmp_path, monkeypatch):
