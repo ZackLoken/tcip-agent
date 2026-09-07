@@ -947,13 +947,10 @@ describe("ProjectPicker removal", () => {
   it.each([
     [true, false, `Released ${PROJECTS[0].name} as the default.`, "success"],
     [false, true, `Released ${PROJECTS[0].name} as the open project.`, "success"],
+    [true, true, `Released ${PROJECTS[0].name} as the default and as the open project.`, "success"],
     [
-      true, true,
-      `Released ${PROJECTS[0].name} as the default and as the open project.`,
-      "success",
-    ],
-    [
-      false, false,
+      false,
+      false,
       `Nothing to release: ${PROJECTS[0].name} is not the default and the GUI does not have ` +
         "it open.",
       "info",
@@ -993,9 +990,7 @@ describe("ProjectPicker removal", () => {
       });
       fireEvent.click(releaseButton);
 
-      await waitFor(() =>
-        expect(pushToast).toHaveBeenCalledWith(expectedMessage, expectedLevel),
-      );
+      await waitFor(() => expect(pushToast).toHaveBeenCalledWith(expectedMessage, expectedLevel));
     },
   );
 
@@ -1113,8 +1108,7 @@ describe("ProjectPicker removal", () => {
     const withProblem: ProjectSummary[] = [
       {
         ...PROJECTS[0],
-        dependency_problem:
-          "its dataset registry has an entry with a path and no id: /ws/target/x",
+        dependency_problem: "its dataset registry has an entry with a path and no id: /ws/target/x",
       },
       PROJECTS[1],
     ];
@@ -1238,8 +1232,9 @@ describe("ProjectPicker removal", () => {
   });
 
   it("on success, toasts at the success level, forgets the recent entry, refetches, and lists the project under pending removal", async () => {
-    let resolveSecondList: (value: Awaited<ReturnType<typeof api.projects.list>>) => void =
-      () => {};
+    let resolveSecondList: (
+      value: Awaited<ReturnType<typeof api.projects.list>>,
+    ) => void = () => {};
     vi.mocked(api.projects.list)
       .mockResolvedValueOnce({
         workspace: "/ws",
