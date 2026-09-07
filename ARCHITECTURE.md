@@ -743,22 +743,22 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `freeze_split_manifest` | `data_tools.py:223` | yes | Freeze a finished run's own drawn train/val partition into a ``split_manifest`` record, |
-| `draw_splits` | `data_tools.py:640` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
+| `draw_splits` | `data_tools.py:641` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
 
 ### experiment_tools.py (3 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `create_experiment` | `experiment_tools.py:11` | yes | Create a new experiment to track a training run. |
-| `get_experiment` | `experiment_tools.py:41` | yes | Read an experiment record. |
-| `list_experiments` | `experiment_tools.py:83` | yes | Enumerate every experiment the store holds a status record for. |
+| `get_experiment` | `experiment_tools.py:42` | yes | Read an experiment record. |
+| `list_experiments` | `experiment_tools.py:84` | yes | Enumerate every experiment the store holds a status record for. |
 
 ### feedback_tools.py (2 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `materialize_review_dataset` | `feedback_tools.py:167` | yes | Build a curated detection dataset from human review verdicts. |
-| `prioritize_review_queue` | `feedback_tools.py:394` | yes | Rank un-reviewed images by active-learning informativeness for the next review batch. |
+| `prioritize_review_queue` | `feedback_tools.py:395` | yes | Rank un-reviewed images by active-learning informativeness for the next review batch. |
 
 ### gui_tools.py (2 tools)
 
@@ -772,8 +772,8 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `run_inference` | `inference_tools.py:279` | yes | Run a trained model over images or a raster, and persist the predictions as a bucket. |
-| `clear_prediction_bucket` | `inference_tools.py:1645` | yes | Move a terminal experiment's own recorded prediction bucket into a dated archive under `predictions/.cleared/`, so the path re-publishes: the audited remedy `run_inference`'s own docstring and `delivery.md` name for a bucket the pointer lock has otherwise made unreachable a second time (a completed or failed experiment's bucket publishes once through the ordinary doors). |
-| `deliver_per_image_counts` | `inference_tools.py:2555` | yes | Export a CSV summary of detection counts per image, from a live run or a persisted bucket. |
+| `clear_prediction_bucket` | `inference_tools.py:1646` | yes | Move a terminal experiment's own recorded prediction bucket into a dated archive under `predictions/.cleared/`, so the path re-publishes: the audited remedy `run_inference`'s own docstring and `delivery.md` name for a bucket the pointer lock has otherwise made unreachable a second time (a completed or failed experiment's bucket publishes once through the ordinary doors). |
+| `deliver_per_image_counts` | `inference_tools.py:2556` | yes | Export a CSV summary of detection counts per image, from a live run or a persisted bucket. |
 
 ### calibration_tools.py (3 tools)
 
@@ -781,7 +781,7 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `redraw_calibration_holdout` | `calibration_tools.py:25` | yes | Deliberately redraw a locked calibration/holdout split. |
 | `calibrate_scalar_operating_point` | `calibration_tools.py:261` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
-| `calibrate_count_operating_point` | `calibration_tools.py:463` | yes | Calibrate and validate the count operating point against held-out GT, earning a claim |
+| `calibrate_count_operating_point` | `calibration_tools.py:464` | yes | Calibrate and validate the count operating point against held-out GT, earning a claim |
 
 ### ingest_tools.py (1 tool)
 
@@ -810,7 +810,7 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `register_model` | `model_tools.py:24` | yes | Register a trained model in the project model registry. |
-| `rank_registered_models` | `model_tools.py:118` | yes | List the project's registered models, or rank them by an explicit metric. |
+| `rank_registered_models` | `model_tools.py:119` | yes | List the project's registered models, or rank them by an explicit metric. |
 
 ### operationalization_tools.py (1 tool)
 
@@ -845,7 +845,7 @@ Docstring is the function's docstring first line, verbatim.
 | `register_plant_registry` | `phenology_tools.py:31` | yes | Register a plant-locations CSV set under a name, so `build_plant_mapping` and |
 | `build_plant_mapping` | `phenology_tools.py:102` | yes | Assign each geolocated image to a plant, then persist the mapping under this project. |
 | `calibrate_classifier_operating_point` | `phenology_tools.py:560` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
-| `deliver_phenology_milestones` | `phenology_tools.py:705` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `deliver_phenology_milestones` | `phenology_tools.py:706` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (5 tools)
 
@@ -888,11 +888,11 @@ anything.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `launch_training` | `training_tools.py:757` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `monitor_training` | `training_tools.py:1015` | yes | Check the status of a training run, or of a hyperparameter sweep. |
-| `cancel_training` | `training_tools.py:1455` | yes | Request graceful cancellation of a running training run. |
-| `run_hyperparameter_search` | `training_tools.py:2193` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hyperparameter_search` | `training_tools.py:2603` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:3367` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `monitor_training` | `training_tools.py:1016` | yes | Check the status of a training run, or of a hyperparameter sweep. |
+| `cancel_training` | `training_tools.py:1456` | yes | Request graceful cancellation of a running training run. |
+| `run_hyperparameter_search` | `training_tools.py:2195` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `cancel_hyperparameter_search` | `training_tools.py:2605` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:3369` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (1 tool)
 
@@ -1368,9 +1368,9 @@ Writers: `set_image_status`,
 (`trainable_stems`) before the split's manifest or file tree is written, then
 attributed to a split by
 `negative_carry = _compute_negative_carry(label_map, bare_parts, image_map, subject, only_date)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:989`, then applied by
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:990`, then applied by
 `_apply_negative_carry(negative_carry, out_dir, subject)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:1075`).
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:1076`).
 
 Readers: `tcip_mcp.pipelines.data.label_queries.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:570`; `_status_bucket_for`,
@@ -1527,7 +1527,7 @@ Platform-scoped, no `scope` of their own: the training envelope's open/close eve
 (`pipelines/training/envelope.py`), the model registry's replace and write-refusal events
 (`model_registry.py:408,424`), `evaluation.py`'s derived-localization-kind record
 (`pipelines/training/evaluation.py:539` (`record_event_or_raise`)),
-`experiments.py`'s post-terminal refusal (`_audit_refused`, `experiments.py:384`) when its caller names no
+`experiments.py`'s post-terminal refusal (`_audit_refused`, `experiments.py:386`) when its caller names no
 project root (the training watchdog passes the launch's own pinned platform root, so its lines
 carry a `scope` equal to the platform root, the presence-never-means-non-platform case), and
 `routes/terminal.py`'s one line per agent-terminal launch (`agent_terminal_started`, `routes/terminal.py:83`). The `@audited(scope_arg=...)`
@@ -1569,9 +1569,9 @@ path-sanitized, by the same standing choice.
 Readers: two production parsers, both reading through the storage seam's `read_log` rather than
 decoding lines by hand, and both refusing (never scanning past) a page reporting corruption or an
 unknown `schema_version`. `experiments._index_refused_mutations`,
-`packages/tcip-mcp/src/tcip_mcp/experiments.py:1627`, one scan of the platform audit log
+`packages/tcip-mcp/src/tcip_mcp/experiments.py:1629`, one scan of the platform audit log
 (`audit_log_key()`, no scope) indexing every `experiment_mutation_refused` entry by
-`arguments.experiment_id`, shared by `compare_experiments` (`experiments.py:1732`), across every experiment it
+`arguments.experiment_id`, shared by `compare_experiments` (`experiments.py:1734`), across every experiment it
 compares in one call; `page.corrupt`/`page.version_refused` both fail the whole call (`None`, not
 a partial index), so a caller who cannot see behind an unreadable entry never reports "no
 refusals" in its place. `plant_mapping._scan_receipts`
@@ -1591,15 +1591,15 @@ for every consumer beside the two parsers above.
 ## 10-15. `.tcip/experiments/<experiment_id>/`, eight sub-formats
 
 Path root: `.tcip/experiments/<experiment_id>/`, resolved via `experiments_dir()`,
-`packages/tcip-mcp/src/tcip_mcp/experiments.py:57`, against the pinned platform state root. Each
+`packages/tcip-mcp/src/tcip_mcp/experiments.py:59`, against the pinned platform state root. Each
 member is a store of its own with its own key constructor beside it, and every writer and reader
 below addresses the member through that key rather than composing a path. Eight members are
 declared; the numbered range 10-15 carries six of them, and `env.json` and `validations.jsonl`
 are listed here with the rest rather than taking numbers of their own.
 
-- `config.json` (`config_key`, `experiments.py:124`): written by `create_experiment`,
-  `experiments.py:438` (`def create_experiment(`), `overwrite_config_if_pristine`,
-  `experiments.py:515` (rewrites only while the record is still pristine, no metrics logged), and
+- `config.json` (`config_key`, `experiments.py:126`): written by `create_experiment`,
+  `experiments.py:440` (`def create_experiment(`), `overwrite_config_if_pristine`,
+  `experiments.py:517` (rewrites only while the record is still pristine, no metrics logged), and
   three best-effort merges the subprocess worker patches into the durable record after a run's
   own resolution is known, each a thin mutator over the one shared terminal-refusing procedure
   `_patch_experiment_config`, `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:33`:
@@ -1609,35 +1609,35 @@ are listed here with the rest rather than taking numbers of their own.
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:92`
   (`def _patch_experiment_config_id_map(`), and `_patch_experiment_config_split`,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:115`
-  (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1556`
-  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1732`.
-- `status.json` (`status_key`, `experiments.py:151`): written by `create_experiment` (`experiments.py:438`),
-  `update_status`, `experiments.py:571` (`def update_status(`), `stamp_run_identity`
-  (`experiments.py:726`), `_touch_heartbeat`, `experiments.py:925` (`def _touch_heartbeat(`).
-  Read by `get_experiment` (`experiments.py:1556`), `reconstruct_run_status`, `experiments.py:868`
+  (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1558`
+  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1734`.
+- `status.json` (`status_key`, `experiments.py:153`): written by `create_experiment` (`experiments.py:440`),
+  `update_status`, `experiments.py:573` (`def update_status(`), `stamp_run_identity`
+  (`experiments.py:728`), `_touch_heartbeat`, `experiments.py:927` (`def _touch_heartbeat(`).
+  Read by `get_experiment` (`experiments.py:1558`), `reconstruct_run_status`, `experiments.py:870`
   (`def reconstruct_run_status(`).
   `state` is terminal-locked once `"completed"`/`"failed"`.
-- `lineage.json` (`lineage_key`, `experiments.py:184`): written by `create_experiment` (`experiments.py:438`),
+- `lineage.json` (`lineage_key`, `experiments.py:186`): written by `create_experiment` (`experiments.py:440`),
   `complete_run`,
-  `experiments.py:638` (`def complete_run(`, the run's own `model_weights`/`model_weights_sha256`
+  `experiments.py:640` (`def complete_run(`, the run's own `model_weights`/`model_weights_sha256`
   digest, sealed into the transaction that completes the run) and `update_lineage`,
-  `experiments.py:1327` (every other field; refuses `model_weights`/`model_weights_sha256` as
-  `complete_run`'s alone). Read by `get_experiment` (`experiments.py:1556`) and `get_experiment_lineage`,
-  `experiments.py:1865`.
-- `artifacts.json` (`artifacts_key`, `experiments.py:208`): written by `create_experiment` (`experiments.py:438`),
-  `complete_run` (`experiments.py:638`, the `model_weights` entry: `path`, `sha256`, `recorded`) and
-  `record_artifact`, `experiments.py:1278`. Read by `get_experiment` (`experiments.py:1556`).
-- `metrics.jsonl` (`metrics_key`, `experiments.py:278`, append-only): written by
-  `log_metrics`, `experiments.py:1004`. Read by `read_metrics`, `experiments.py:944`, which
-  `get_experiment` (`experiments.py:1556`, paginated) and `reconstruct_run_status` (`experiments.py:868`, last row only) go through.
-- `env.json` (`env_key`, `experiments.py:232`): the library versions, seed and model kind a run is
+  `experiments.py:1329` (every other field; refuses `model_weights`/`model_weights_sha256` as
+  `complete_run`'s alone). Read by `get_experiment` (`experiments.py:1558`) and `get_experiment_lineage`,
+  `experiments.py:1867`.
+- `artifacts.json` (`artifacts_key`, `experiments.py:210`): written by `create_experiment` (`experiments.py:440`),
+  `complete_run` (`experiments.py:640`, the `model_weights` entry: `path`, `sha256`, `recorded`) and
+  `record_artifact`, `experiments.py:1280`. Read by `get_experiment` (`experiments.py:1558`).
+- `metrics.jsonl` (`metrics_key`, `experiments.py:280`, append-only): written by
+  `log_metrics`, `experiments.py:1006`. Read by `read_metrics`, `experiments.py:946`, which
+  `get_experiment` (`experiments.py:1558`, paginated) and `reconstruct_run_status` (`experiments.py:870`, last row only) go through.
+- `env.json` (`env_key`, `experiments.py:234`): the library versions, seed and model kind a run is
   reproducible from, written once by the training envelope,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:355`. No accessor in this module
   reads it back; it is provenance a reviewer reads directly.
-- `split.json` (`split_key`, `experiments.py:255`): written by `split_construction.persist_split_manifest`,
+- `split.json` (`split_key`, `experiments.py:257`): written by `split_construction.persist_split_manifest`,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/data/split_construction.py:63`
   (`def persist_split_manifest(`). Read by `read_split_manifest`,
-  `experiments.py:1908`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
+  `experiments.py:1910`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
   both take the manifest from. Every run, bound to a manifest or not, records `date`, the labels
   directory's own capture date, `manifest_date_key`'s empty string for a flat tree (never `null`:
   a selection-disjointness check comparing dates must tell a flat run's own date apart from a
@@ -1657,10 +1657,10 @@ are listed here with the rest rather than taking numbers of their own.
   of the manifest record the run bound to), so a calibration can name a label that moved between
   the draw and now without the durable experiment config, a checkpoint's embedded config or a
   trial's resolved config ever carrying a per-stem digest.
-- `validations.jsonl` (`validations_key`, `experiments.py:297`, append-only): the claims earned against this
-  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:1114`
+- `validations.jsonl` (`validations_key`, `experiments.py:299`, append-only): the claims earned against this
+  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:1116`
   (no public raw appender; the storage seam's generic append remains reachable and is a stated
-  residual), which refuses a row missing any of `_VALIDATION_FIELDS` (`experiments.py:1062`),
+  residual), which refuses a row missing any of `_VALIDATION_FIELDS` (`experiments.py:1064`),
   `train_disjointness` among them: `{"checked": bool, "group_check": str | None}` for the four
   documents whose gate runs the check, `null` for `resolve_scale`. `selection_disjointness` is the
   parallel field for whether the calibration used to validate a checkpoint's own reference was kept
@@ -1678,9 +1678,9 @@ are listed here with the rest rather than taking numbers of their own.
   read a selection side from. `verify_stamp_binding` (`packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1833`) requires the five label-movement
   keys present, `null` admitted, on an applicable row it would otherwise pass: an applicable,
   checked, no-leak row missing any of them floors, the same as a leak does, so a row earned before
-  the keys existed cannot read as cleared. Read by `read_validations`, `experiments.py:1147`,
-  `find_validation`, `experiments.py:1165` (matching rows by recomputed `validation_digest`,
-  `experiments.py:1104`), and included whole by `get_experiment` (`experiments.py:1556`). The one member appendable
+  the keys existed cannot read as cleared. Read by `read_validations`, `experiments.py:1149`,
+  `find_validation`, `experiments.py:1167` (matching rows by recomputed `validation_digest`,
+  `experiments.py:1106`), and included whole by `get_experiment` (`experiments.py:1558`). The one member appendable
   after a terminal state, because a validation is a statement made about a run after it ended.
 
 Seam S07 ("Experiment record .tcip/experiments/<id>/", covering config/status/lineage/artifacts),
@@ -1811,7 +1811,7 @@ recorded review verdict; `BucketHasVerdicts`, `prediction_buckets.py:228`, is ra
 exhausted. `bucket_document_stem_count`, `prediction_buckets.py:287`, is the document count
 `BucketHoldsDocuments`, `prediction_buckets.py:252`, names; `run_inference` and
 `deliver_per_image_counts` reach both classes through the shared
-`_resolve_writable_bucket_for`, `tools/inference_tools.py:1070`.
+`_resolve_writable_bucket_for`, `tools/inference_tools.py:1071`.
 
 Readers: `bucket_stems`, `prediction_buckets.py:54`, walks each dir through
 `tcip_annotation.json_io.prediction_documents`, which excludes every provenance stamp named in
@@ -2027,7 +2027,7 @@ Path: `<output_path>/split_manifest.json`, addressed by `split_manifest_key`,
 `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:38`, under whatever directory the caller
 asked the partition to be written to; no dataset resolver owns this layout.
 
-Writer: `draw_splits`, `data_tools.py:640`, when `output_path` is given or `materialize=True`.
+Writer: `draw_splits`, `data_tools.py:641`, when `output_path` is given or `materialize=True`.
 A finished run's own drawn train/val partition freezes into the identical shape through
 `freeze_split_manifest` (`data_tools.py:223`), the second writer; both compose their fields
 through the one `compose_split_manifest` (`data_tools.py:124`) that builds the dict and writes
@@ -2098,7 +2098,7 @@ config-only conflict and task checks (computed before any read, so an unreadable
 suppresses them) and the manifest-dependent checks (subject/attribute, date, images-root
 presence and movement, and an empty train/val side once narrowed to the run's own date).
 `preflight_config` calls both halves directly, in the same order, over a manifest it read
-itself; `training_tools.list_split_choices` (`training_tools.py:1280`), the relaunch data
+itself; `training_tools.list_split_choices` (`training_tools.py:1281`), the relaunch data
 picker's own reader wrapped by `GET /api/training/configs/{experiment_id}/splits`, calls the
 composed function per candidate manifest it read through the checked variant above, and builds
 each candidate's launch config through `training_tools.candidate_config_with_manifest`
@@ -2297,14 +2297,14 @@ and the web route alike).
 ## S07. Experiment record .tcip/experiments/<id>/
 
 Must agree: three processes agree on the experiment directory layout and immutability rules for each file.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:67` (`def experiment_dir(` plus the per-member key constructors, the one declaration of the record's path and member set).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:69` (`def experiment_dir(` plus the per-member key constructors, the one declaration of the record's path and member set).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py` (config patch goes through `store.transaction(config_key(...))`; every member writer takes its target from the experiments module's accessors).
 Phase 3 verdict: single.
 
 ## S08. metrics.jsonl row format
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1004` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1006` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
 Side B: `packages/tcip-web/src/tcip_web/routes/training.py:334` (`asyncio.to_thread(read_log, key, after=cursor)`, the training stream's incremental tail read off the event loop, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:706` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
@@ -2404,7 +2404,7 @@ Phase 3 verdict: single.
 
 Must agree: a prediction's integer label decodes to the class name the run trained it as.
 Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:509` (`def assign_class_ids(`, the one assignment, reached by the loader through `pipelines/data/label_queries.py:113` (`return registry, class_registry.assign_class_ids(registry, subject, attribute)`)).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:230` (`def resolve_decode_id_map(`, the one resolution every entry point that decodes predictions or reads GT by id calls: the private pass at `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:825` (`id_map = resolve_decode_id_map(predictor, images_dir)`), the raster regime at `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:2143` (`id_map = resolve_decode_id_map(predictor, None)`), the GUI worker at `packages/tcip-web/src/tcip_web/routes/inference.py:281`, and block calibration at `pipelines/block_calibration.py:274`, which hands over the run's own scope rather than restating the prefer-recorded-else-derive rule).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:230` (`def resolve_decode_id_map(`, the one resolution every entry point that decodes predictions or reads GT by id calls: the private pass at `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:826` (`id_map = resolve_decode_id_map(predictor, images_dir)`), the raster regime at `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:2144` (`id_map = resolve_decode_id_map(predictor, None)`), the GUI worker at `packages/tcip-web/src/tcip_web/routes/inference.py:281`, and block calibration at `pipelines/block_calibration.py:274`, which hands over the run's own scope rather than restating the prefer-recorded-else-derive rule).
 Phase 3 verdict: single.
 
 ## S22. image_status.json confirmed-negative store
@@ -2465,14 +2465,14 @@ path, and the web route's own launch), to a second agreement that no writer publ
 bucket that already holds a prediction document with no verdict yet recorded, whatever
 `overwrite` says.
 Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:332` (`def resolve_writable_bucket(`, the one guard, its `refuse_documents` keyword the document agreement's opt-in; `bucket_stems`, `prediction_buckets.py:54`, excludes every provenance stamp through `tcip_annotation.json_io.prediction_documents` rather than naming one filename).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/proposal_tools.py:459` (`from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes`) and `tools/proposal_tools.py:608` (`from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes`, both leaving `refuse_documents` at its default off), `tools/inference_tools.py:1070` (`_resolve_writable_bucket_for`, passing `refuse_documents=True` on every branch) and `packages/tcip-web/src/tcip_web/routes/inference.py:536` (`refuse_documents=True`, the document agreement now reaching the route's own `resolve_prediction_bucket` call too).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/proposal_tools.py:459` (`from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes`) and `tools/proposal_tools.py:608` (`from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes`, both leaving `refuse_documents` at its default off), `tools/inference_tools.py:1071` (`_resolve_writable_bucket_for`, passing `refuse_documents=True` on every branch) and `packages/tcip-web/src/tcip_web/routes/inference.py:536` (`refuse_documents=True`, the document agreement now reaching the route's own `resolve_prediction_bucket` call too).
 Phase 3 verdict: single.
 
 ## S30. split.json train/val manifest
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on, and,
 when a split manifest is in play, from the checkpoint's own selection (val) side too.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1908` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1910` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (`_train_disjointness` and `_selection_disjointness` both read through it and share `_resolve_group_stem_disjointness`, the one group/stem-overlap implementation).
 Phase 3 verdict: single.
 
