@@ -287,6 +287,33 @@ def test_refuses_a_second_request_over_an_existing_marker(client, tmp_path):
     assert "already has a pending-removal marker" in second.json()["detail"]
 
 
+def test_the_pending_marker_refusal_names_the_plain_project_with_no_doubled_apostrophe(
+    client, tmp_path,
+):
+    """coverage: the message already names the plain project rather than a quoted repr; this
+    pins that a damaged pending-removal marker still reads that way."""
+    from tests._record_damage_fixtures import damage_record
+
+    ws = tmp_path.parent
+    _seed(ws)
+    first = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert first.status_code == 200
+    target = ws / "sample_plot_target"
+    damage_record(workspace.pending_removal_key(target), b"not json")
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert "sample_plot_target's pending-removal marker could not be read" in detail
+    assert "''" not in detail
+
+
 def test_admits_the_request_with_no_project_bound_and_records_both_lines_under_the_target(
     client, tmp_path, tmp_path_factory, monkeypatch,
 ):
@@ -1040,6 +1067,36 @@ def test_release_clears_the_marker_alone(client, tmp_path):
     assert workspace.read_active_project() is None
 
 
+def test_release_line_not_written_answers_409_naming_the_plain_project_with_no_doubled_apostrophe(
+    client, tmp_path, monkeypatch,
+):
+    """coverage: the failed-append message already names the plain project rather than a
+    quoted repr; this pins that the release door's own line keeps that shape too."""
+    from tcip_mcp import audit
+
+    ws = tmp_path.parent
+    _seed(ws)
+    _init(ws, "sample_plot_release-line-fails")
+    workspace.activate_project("sample_plot_release-line-fails")
+
+    real_append = ts.append
+
+    def _flaky_append(key, record):
+        if record.get("tool") == "project_binding_released":
+            raise RuntimeError("simulated append failure")
+        return real_append(key, record)
+
+    monkeypatch.setattr(audit, "append", _flaky_append)
+
+    resp = client.post(
+        "/api/projects/sample_plot_release-line-fails/release-binding", json={"user": "t"},
+    )
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert "sample_plot_release-line-fails's binding was cleared" in detail
+    assert "''" not in detail
+
+
 def test_release_when_neither_names_the_project_answers_both_false_with_no_line(
     client, tmp_path,
 ):
@@ -1138,7 +1195,8 @@ def test_release_canvas_record_decode_error_after_the_marker_cleared_still_recor
     )
     assert resp.status_code == 409
     detail = resp.json()["detail"]
-    assert "sample_plot_canvas-decode" in detail
+    assert "sample_plot_canvas-decode's canvas-open binding failed" in detail
+    assert "''" not in detail
     assert "marker_cleared=True" in detail
 
     lines = _audit_lines(target)
