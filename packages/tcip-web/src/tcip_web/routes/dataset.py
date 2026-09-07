@@ -205,6 +205,10 @@ class SelectionRequest(BaseModel):
 def _write_canvas_binding(root: Path) -> int:
     """Record ``root`` as the GUI's open root; return the generation now in force.
 
+    ``project_name`` is resolved before the transaction opens, since it names a directory and
+    reads no store of its own (:func:`tcip_mcp.workspace.workspace_project_name`): no other
+    root's store is read inside this transaction and no new lock order arises from it.
+
     Read-modify-write inside a transaction, the store's own ``cas`` policy: the current record
     is read to decide whether ``root`` actually changed (generation bumps only then, so a
     same-project re-select or ordinary navigation never supersedes a sibling tab), and the write
@@ -213,6 +217,7 @@ def _write_canvas_binding(root: Path) -> int:
     """
     key = canvas_open_binding_key()
     root_str = str(root)
+    project_name = workspace.workspace_project_name(root)
     with ts.transaction(key) as txn:
         current = txn.read(key, default=None)
         if current is not None and ts.canonical_path(current["root"]) == ts.canonical_path(root_str):
@@ -222,7 +227,7 @@ def _write_canvas_binding(root: Path) -> int:
         txn.write(key, {
             "generation": generation,
             "root": root_str,
-            "project_name": workspace.workspace_project_name(root),
+            "project_name": project_name,
             "issued_at": datetime.now(timezone.utc).isoformat(),
         })
     return generation
@@ -230,7 +235,20 @@ def _write_canvas_binding(root: Path) -> int:
 
 @router.post("/select")
 async def select_dataset(req: SelectionRequest) -> dict:
-    """Set the active dataset for the GUI; broadcasts a state delta."""
+    """Set the active dataset for the GUI; broadcasts a state delta.
+
+    Refuses (409, naming when the request was made) a ``project_root`` pending removal before
+    either guard resolves it or the binding write runs, so a refused select changes no binding
+    and bumps no generation.
+    """
+    pending = workspace.pending_removal_or_none(Path(req.project_root).expanduser().resolve())
+    if pending is not None:
+        raise HTTPException(
+            409,
+            f"{req.project_root!r} is pending removal (requested {pending['requested_at']}); "
+            "it moves to the workspace's holding directory at the next backend start, or "
+            "through tcip complete-removals",
+        )
     project_root = _guarded(req.project_root)
     root = _guarded(req.dataset_root)
     if not root.is_dir():

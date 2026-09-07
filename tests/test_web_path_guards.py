@@ -158,6 +158,57 @@ def test_symlink_inside_the_root_pointing_out_is_refused(tmp_path) -> None:
     assert safe_join(base, "images", "IMG_0007.JPG") == real.resolve()
 
 
+# -- the workspace's own exclusions: .removed, and a project pending removal -------------
+
+
+def test_a_removed_holding_directory_is_excluded_like_imports(tmp_path, monkeypatch) -> None:
+    """``.removed`` sits directly under the workspace, itself an allowed root, so the exclusion
+    has to be by name: nothing else keeps a moved-project archive out of a guarded route."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+    holding = ws / ".removed" / "sample_plot_alpha-20260304T120000Z"
+    holding.mkdir(parents=True)
+    (holding / "images").mkdir()
+    target = holding / "images" / "IMG_0001.JPG"
+    target.write_bytes(b"x")
+
+    with pytest.raises(ValueError, match="outside the allowed roots"):
+        assert_path_allowed(str(target))
+
+
+def test_a_project_pending_removal_is_excluded_by_identity(tmp_path, monkeypatch) -> None:
+    """A pending project's own root, and a path nested under it, are refused from the moment
+    its marker lands; the same paths were admitted before the marker existed."""
+    import tcip_store as ts
+    from tcip_mcp import workspace
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+    proj = ws / "sample_plot_alpha"
+    (proj / ".tcip").mkdir(parents=True)
+    (proj / "images").mkdir()
+    nested = proj / "images" / "IMG_0001.JPG"
+    nested.write_bytes(b"x")
+
+    assert assert_path_allowed(str(proj)) == proj.resolve()
+    assert assert_path_allowed(str(nested)) == nested.resolve()
+
+    ts.replace(
+        workspace.pending_removal_key(proj),
+        {"requested_at": "20260304T120000Z", "requested_by": "user:tester",
+         "archive_path": "archive.zip", "holding_dir": "holding",
+         "external_roots": [], "dependent_projects": []},
+        expect=ts.Version.ABSENT,
+    )
+
+    with pytest.raises(ValueError, match="pending removal"):
+        assert_path_allowed(str(proj))
+    with pytest.raises(ValueError, match="pending removal"):
+        assert_path_allowed(str(nested))
+
+
 @pytest.mark.skipif(os.name != "nt", reason="drive-relative parts are a Windows path shape")
 def test_drive_relative_part_cannot_replace_the_root_anchor(tmp_path) -> None:
     """A part naming another drive relocates the join off the root and must be refused.
