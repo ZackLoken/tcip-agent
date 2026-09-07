@@ -261,6 +261,30 @@ def test_push_answers_409_after_a_release_even_with_the_records_own_generation(c
     assert not (tmp_path / ".tcip" / "state" / "canvas_live.json").exists()
 
 
+def test_push_lands_after_a_release_and_a_fresh_select(client, tmp_path):
+    """coverage: the refusal above is only half the push route's own predicate; a select after
+    the release issues a fresh, unreleased binding a push must still be admitted against."""
+    (tmp_path / ".tcip").mkdir()
+    _select(client, tmp_path)
+
+    resp = client.post("/api/projects/project/release-binding", json={"user": "tester"})
+    assert resp.status_code == 200, resp.text
+
+    reselect = _select(client, tmp_path)
+
+    from tcip_mcp.web_client import read_canvas_binding
+
+    current = read_canvas_binding()
+    assert not current.get("released")
+
+    push = client.post(
+        "/api/canvas/state",
+        json=_payload("C:/img/a.jpg", reselect["generation"], shapes=SHAPES),
+    )
+    assert push.status_code == 200
+    assert _meta(tmp_path)["image_path"] == "C:/img/a.jpg"
+
+
 def test_push_answers_409_on_no_binding_at_all(client, tmp_path):
     """The refusal's other half: a push before any select has ever run names a missing record,
     not a generation mismatch."""
