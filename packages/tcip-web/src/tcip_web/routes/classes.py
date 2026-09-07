@@ -69,11 +69,11 @@ def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
     there is no single project's audit log a write here unambiguously belongs to. Colocating the
     trail with the state it describes, rather than guessing a project, is deliberate. A failed
     append raises ``AuditEntryNotWritten``: the mutation has already committed by the time this
-    runs, so the caller answers the gap rather than have it pass as silently recorded.
+    runs, so the caller answers the gap rather than have it pass as silently recorded. Every
+    caller (``save_classes``, ``set_image_status``, ``set_image_status_bulk``, and
+    ``inference.py``'s worker) refuses a falsy root before calling this, so there is no
+    empty-scope case here to guard against.
     """
-    # Kept: three call sites resolve dataset_root themselves rather than sharing one refusal.
-    if not dataset_root:
-        return
     from tcip_web.routes.audit_gap import record_committed
 
     record_committed(tool, arguments, scope=dataset_root)
