@@ -3,6 +3,7 @@ import type Konva from "konva";
 
 import { api } from "@/api/client";
 import { classesApi, subjectColor } from "@/api/classes";
+import { committedOf } from "@/api/http";
 import { resultsApi, type RegisteredModel } from "@/api/inference";
 import type { ActionPayload } from "@/api/types.generated";
 import { BandPicker } from "@/components/BandPicker";
@@ -755,6 +756,19 @@ export function ReviewTab() {
       }
       return true;
     } catch (e) {
+      const committed = committedOf<Awaited<ReturnType<typeof api.review.action>>>(e);
+      if (committed) {
+        setImageStatus(committed.image_status);
+        if (imgName) setReviewImageStatus(imgName, committed.image_status);
+        markDetReviewed(detectionIdx, action);
+        advanceToNextUnreviewed();
+        if (committed.annotation_status) {
+          setStoreImageStatus(imgName, committed.annotation_status);
+          applyMatches(committed.matches, useStore.getState().gui.review.detection_idx);
+        }
+        useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
+        return true;
+      }
       useStore
         .getState()
         .pushToast(`Could not record review action: ${e instanceof Error ? e.message : String(e)}`);
@@ -828,6 +842,17 @@ export function ReviewTab() {
       }
       return true;
     } catch (e) {
+      const committed = committedOf<Awaited<ReturnType<typeof api.review.action>>>(e);
+      if (committed) {
+        setImageStatus(committed.image_status);
+        if (imgName) setReviewImageStatus(imgName, committed.image_status);
+        if (committed.annotation_status) {
+          setStoreImageStatus(imgName, committed.annotation_status);
+          applyMatches(committed.matches, useStore.getState().gui.review.detection_idx);
+        }
+        useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
+        return true;
+      }
       useStore
         .getState()
         .pushToast(
@@ -878,6 +903,13 @@ export function ReviewTab() {
       useStore.getState().pushToast("Recorded: no missed objects found on this image.", "info");
       return true;
     } catch (e) {
+      const committed = committedOf<Awaited<ReturnType<typeof api.review.action>>>(e);
+      if (committed) {
+        setImageStatus(committed.image_status);
+        if (imgName) setReviewImageStatus(imgName, committed.image_status);
+        useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
+        return true;
+      }
       useStore
         .getState()
         .pushToast(`Could not record the sweep: ${e instanceof Error ? e.message : String(e)}`);
@@ -921,6 +953,30 @@ export function ReviewTab() {
         }
       }
     } catch (e) {
+      const committed = committedOf<Awaited<ReturnType<typeof api.review.markComplete>>>(e);
+      if (committed) {
+        setImageStatus(committed.image_status);
+        if (imgName) setReviewImageStatus(imgName, committed.image_status);
+        if (committed.annotation_status) {
+          setStoreImageStatus(imgName, committed.annotation_status);
+          if (dataset.project_root) {
+            void classesApi
+              .setImageStatus(
+                dataset.project_root,
+                imgName,
+                committed.annotation_status,
+                dataset.subject,
+                dataset.date,
+                dataset.dataset_root,
+                dataset.annotations_dir,
+                useStore.getState().user || undefined,
+              )
+              .catch(() => {});
+          }
+        }
+        useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
+        return;
+      }
       useStore
         .getState()
         .pushToast(`Could not mark image reviewed: ${e instanceof Error ? e.message : String(e)}`);
@@ -959,6 +1015,14 @@ export function ReviewTab() {
       setValidationResult({ validated: res.validated, reason: res.reason });
       useStore.getState().pushToast(res.reason);
     } catch (e) {
+      const committed = committedOf<Awaited<ReturnType<typeof api.review.validateReference>>>(e);
+      if (committed) {
+        setValidationResult({ validated: committed.validated, reason: committed.reason });
+        useStore
+          .getState()
+          .pushToast(`${committed.reason} ${e instanceof Error ? e.message : String(e)}`);
+        return;
+      }
       useStore
         .getState()
         .pushToast(`Could not check the review: ${e instanceof Error ? e.message : String(e)}`);

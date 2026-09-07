@@ -11,7 +11,14 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import type { ImageBandsResponse } from "@/api/client";
-import { classesApi, FINISHED_STATUSES, subjectColor, type ImageStatus } from "@/api/classes";
+import {
+  classesApi,
+  FINISHED_STATUSES,
+  subjectColor,
+  type ImageStatus,
+  type SchemaChangeSweep,
+} from "@/api/classes";
+import { committedOf } from "@/api/http";
 import { BandPicker } from "@/components/BandPicker";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { useDisclosure } from "@/hooks/useDisclosure";
@@ -199,6 +206,20 @@ export function AnnotateToolbar({
         const toast = schemaChangeSweepToast(saved.schema_change_sweep);
         if (toast) useStore.getState().pushToast(toast, "info");
       } catch (e) {
+        const saved = committedOf<{
+          status: string;
+          n_subjects: number;
+          classes_path: string;
+          version: string;
+          schema_change_sweep: SchemaChangeSweep;
+        }>(e);
+        if (saved) {
+          setRegistry(next, saved.version);
+          const toast = schemaChangeSweepToast(saved.schema_change_sweep);
+          if (toast) useStore.getState().pushToast(toast, "info");
+          useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
+          return;
+        }
         // A refusal means this browser's registry is not trustworthy: reload rather than keep it.
         useStore
           .getState()
@@ -248,6 +269,14 @@ export function AnnotateToolbar({
           );
       }
     } catch (e) {
+      const committed = committedOf<{ status: string; digest_stamped: boolean }>(e);
+      if (committed) {
+        if (FINISHED_STATUSES.includes(newStatus) && !committed.digest_stamped) {
+          useStore.getState().markStale(currentImage);
+        }
+        useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
+        return;
+      }
       // The optimistic write above cleared the mark; the confirmation it stood for never
       // reached the server, so the disagreement it named still holds.
       if (wasStale) useStore.getState().markStale(currentImage);
