@@ -312,6 +312,36 @@ def test_grid_mode_enumerates_discrete_axes():
     assert space["bs"] == {"grid_search": [2, 4, 8]}
 
 
+def test_tune_search_normalizes_search_alg_case_before_deciding_grid(tmp_path, monkeypatch):
+    """tune_search reads a normalized local, not the caller's own casing, at the point it
+    decides whether _to_tune_space builds a grid space: search_alg="Grid" (the agent's own
+    casing, not this module's lower-cased spelling) still reaches the grid branch. Stopped
+    right after _to_tune_space records its own grid keyword, before Ray is ever touched."""
+    pytest.importorskip("ray")
+    import tcip_mcp.pipelines.training.hpo as hpo
+
+    class _StoppedAfterSpace(Exception):
+        pass
+
+    captured: dict = {}
+
+    def fake_to_tune_space(param_space, grid=False, grid_keys=frozenset()):
+        captured["grid"] = grid
+        raise _StoppedAfterSpace
+
+    monkeypatch.setattr(hpo, "_to_tune_space", fake_to_tune_space)
+
+    with pytest.raises(_StoppedAfterSpace):
+        hpo.tune_search(
+            objective_fn=lambda config, report: None,
+            param_space={"bs": {"type": "categorical", "choices": [2, 4]}},
+            search_alg="Grid",
+            storage_path=str(tmp_path),
+        )
+
+    assert captured["grid"] is True
+
+
 def test_build_scheduler_aliases():
     pytest.importorskip("ray")
     from ray.tune.schedulers import (
