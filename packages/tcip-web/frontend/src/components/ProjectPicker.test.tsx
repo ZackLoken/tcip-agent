@@ -534,8 +534,8 @@ describe("ProjectPicker removal", () => {
   it.each([
     "sample plot is the project this workspace opens by default; choose a different default " +
       "first, or release it as the default",
-    "sample plot is the project this backend started on; restart the backend first, started " +
-      "without TCIP_STATE_ROOT naming it",
+    "sample plot is the project this backend started on; restart the backend first, and " +
+      "start it without a state root naming this project",
     "sample plot is the project the GUI has open; open a different project first, or release " +
       "it as the open project",
   ])("disables Remove with the backend's own reason (%s)", async (reasonText) => {
@@ -903,7 +903,7 @@ describe("ProjectPicker removal", () => {
       name: `Release ${PROJECTS[0].name}`,
     });
     await within(dialog).findByText(
-      /Stops it opening by default and forgets it as the GUI's open project; nothing else changes\./,
+      /Stops it opening by default, and forgets it as the GUI's open project if the GUI has it open; nothing else changes\./,
     );
 
     fireEvent.click(releaseButton);
@@ -916,13 +916,61 @@ describe("ProjectPicker removal", () => {
     );
     await waitFor(() =>
       expect(pushToast).toHaveBeenCalledWith(
-        expect.stringContaining(`Released ${PROJECTS[0].name}`),
+        `Released ${PROJECTS[0].name} as the default.`,
         "success",
       ),
     );
     await waitFor(() => expect(api.projects.removalPreview).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(api.projects.list).toHaveBeenCalledTimes(2));
   });
+
+  it.each([
+    [true, false, "as the default"],
+    [false, true, "as the open project"],
+    [true, true, "as the default and as the open project"],
+  ])(
+    "composes the release toast from marker_cleared=%s canvas_binding_released=%s as %s",
+    async (markerCleared, canvasBindingReleased, expectedBody) => {
+      vi.mocked(api.projects.list).mockResolvedValue({
+        workspace: "/ws",
+        active: null,
+        active_path: null,
+        projects: PROJECTS,
+        pending_removal: [],
+        removal_startup_outcomes: [],
+      });
+      vi.mocked(api.projects.removalPreview).mockResolvedValue({
+        external_roots: [],
+        dependent_projects: [],
+        refusal: "sample plot is the project this workspace opens by default",
+        releasable: true,
+      });
+      vi.mocked(api.projects.releaseBinding).mockResolvedValue({
+        name: PROJECTS[0].name,
+        marker_cleared: markerCleared,
+        canvas_binding_released: canvasBindingReleased,
+        refusal: null,
+        releasable: false,
+      });
+      const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+
+      render(<ProjectPicker />);
+      await selectFirstCard();
+      fireEvent.click(screen.getByRole("button", { name: "Remove…" }));
+      const dialog = await screen.findByRole("dialog");
+      const releaseButton = await within(dialog).findByRole("button", {
+        name: `Release ${PROJECTS[0].name}`,
+      });
+      fireEvent.click(releaseButton);
+
+      await waitFor(() =>
+        expect(pushToast).toHaveBeenCalledWith(
+          `Released ${PROJECTS[0].name} ${expectedBody}.`,
+          "success",
+        ),
+      );
+    },
+  );
 
   it("renders no release button when the preview says not releasable", async () => {
     vi.mocked(api.projects.list).mockResolvedValue({
@@ -1000,6 +1048,8 @@ describe("ProjectPicker removal", () => {
             dataset_path: "/ws/target/a",
             target: "sample_plot_target",
             present: true,
+            archive_path: "/ws/.removed/sample_plot_target-x.zip",
+            holding_dir: "/ws/.removed/sample_plot_target-x",
           },
           {
             dataset_id: "ds2",
@@ -1022,12 +1072,51 @@ describe("ProjectPicker removal", () => {
     render(<ProjectPicker />);
 
     await screen.findByText(
-      /Depends on sample_plot_target \(dataset ds1\), which is pending removal/,
+      /Depends on sample_plot_target, which is pending removal; its images move to the workspace's holding directory at the next backend start\. Register the dataset again from where they are then to clear this\./,
     );
     await screen.findByText(
-      /Depends on sample_plot_gone \(dataset ds2\), which is no longer in the workspace/,
+      /Depends on sample_plot_gone, which is no longer in the workspace\. Register the dataset again from where its images now are to clear this\./,
     );
+    expect(screen.queryByText(/dataset ds1/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/dataset ds2/)).not.toBeInTheDocument();
     await screen.findByText(/its dataset registry could not be read \(not json\)/);
+  });
+
+  it("groups a dependent's own multiple datasets under one target into one card sentence", async () => {
+    const withWarnings: ProjectSummary[] = [
+      {
+        ...PROJECTS[0],
+        dependency_warnings: [
+          {
+            dataset_id: "ds1",
+            dataset_path: "/ws/target/a",
+            target: "sample_plot_target",
+            present: true,
+          },
+          {
+            dataset_id: "ds2",
+            dataset_path: "/ws/target/b",
+            target: "sample_plot_target",
+            present: true,
+          },
+        ],
+      },
+      PROJECTS[1],
+    ];
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: withWarnings,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+    });
+    render(<ProjectPicker />);
+
+    await screen.findByText(
+      /Depends on sample_plot_target \(2 datasets\), which is pending removal/,
+    );
+    expect(screen.queryAllByText(/Depends on sample_plot_target/)).toHaveLength(1);
   });
 
   it("on success, toasts at the success level, forgets the recent entry, refetches, and lists the project under pending removal", async () => {
@@ -1094,6 +1183,100 @@ describe("ProjectPicker removal", () => {
     expect(pushToast).toHaveBeenCalledWith(expect.stringContaining("x.zip"), "success");
     expect(JSON.parse(localStorage.getItem("tcip.recent_projects") ?? "[]")).toEqual([]);
     await screen.findByText(new RegExp(`Pending removal: ${PROJECTS[0].name}`));
+    // The card and its own "Remove..." button (the dialog's recorded opener) are both gone from
+    // this refetched listing: focus must land on the annotator field, not the body.
+    await waitFor(() => expect(screen.getByLabelText("Annotator")).toHaveFocus());
+  });
+
+  it("names the dependent count in the success toast when the response lists dependents", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
+    vi.mocked(api.projects.remove).mockResolvedValue({
+      name: PROJECTS[0].name,
+      archive_path: "/ws/.removed/x.zip",
+      holding_dir: "/ws/.removed/x",
+      external_roots: [],
+      dependent_projects: [
+        { project: "dependent_one", dataset_id: "ds1" },
+        { project: "dependent_two", dataset_id: "ds2" },
+      ],
+      completes: "at the next backend start, or tcip complete-removals",
+      audit_scope: "/ws/other",
+      recorded_in_open_project: true,
+      audit_note: "its own line is in its own log.",
+    });
+    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Remove…" }));
+    const dialog = await screen.findByRole("dialog");
+    const nameField = await within(dialog).findByLabelText(/type the project name to confirm/i);
+    fireEvent.change(nameField, { target: { value: PROJECTS[0].name } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Remove$/ }));
+
+    await waitFor(() =>
+      expect(pushToast).toHaveBeenCalledWith(
+        expect.stringContaining("2 project(s) depend on it; see their cards."),
+        "success",
+      ),
+    );
+  });
+
+  it("returns focus to the Remove... control after a release followed by Cancel", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.removalPreview)
+      .mockResolvedValueOnce({
+        external_roots: [],
+        dependent_projects: [],
+        refusal: "sample plot is the project this workspace opens by default",
+        releasable: true,
+      })
+      .mockResolvedValueOnce({
+        external_roots: [],
+        dependent_projects: [],
+        refusal: null,
+        releasable: false,
+      });
+    vi.mocked(api.projects.releaseBinding).mockResolvedValue({
+      name: PROJECTS[0].name,
+      marker_cleared: true,
+      canvas_binding_released: false,
+      refusal: null,
+      releasable: false,
+    });
+
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    const removeButton = screen.getByRole("button", { name: "Remove…" });
+    removeButton.focus();
+    fireEvent.click(removeButton);
+    const dialog = await screen.findByRole("dialog");
+    const releaseButton = await within(dialog).findByRole("button", {
+      name: `Release ${PROJECTS[0].name}`,
+    });
+    fireEvent.click(releaseButton);
+    await waitFor(() => expect(api.projects.releaseBinding).toHaveBeenCalled());
+    await waitFor(() => expect(api.projects.removalPreview).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(removeButton).toHaveFocus();
   });
 
   it("lists the last start's removal outcomes", async () => {
