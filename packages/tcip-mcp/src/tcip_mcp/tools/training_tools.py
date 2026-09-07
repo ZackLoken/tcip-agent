@@ -12,7 +12,7 @@ import sys
 import threading
 from contextlib import contextmanager
 from pathlib import Path, PureWindowsPath
-from typing import Any, Iterator, Sized
+from typing import Any, Iterator, NamedTuple, Sized
 
 from tcip_store import (
     LOG_JSON,
@@ -2206,7 +2206,10 @@ def run_hyperparameter_search(
     Ray's Tuner taking only one fixed metric/mode for the whole sweep: this catches a dotted or
     nested-dict axis naming ``selection_metric`` directly, and an axis (``model_source.task``,
     in particular) that changes the metric's own task-derived default with no
-    ``selection_metric`` key in sight. ``cancel_hyperparameter_search`` requested against this study before or
+    ``selection_metric`` key in sight. Also refuses, whatever the sampler, a ``param_space``
+    axis naming ``data.split.seed`` while ``split_draws`` draws at most one partition (see
+    :func:`caller_split_seed_refusal`): the paired grid above one draw is the way to sweep the
+    split seed itself. ``cancel_hyperparameter_search`` requested against this study before or
     during the run instead ends the sweep ``{"status": "cancelled", ...}``, the manifest
     recording the same, rather than a completed result.
 
@@ -2215,7 +2218,9 @@ def run_hyperparameter_search(
         param_space: Param-space dict (see ``hpo.get_default_space``); default when omitted.
             Every axis is checked against ``base_config``'s own resolved selection metric and
             direction (see above); an axis that would disagree at any sampled point is refused
-            rather than minted.
+            rather than minted. A ``data.split.seed`` axis is refused outright at
+            ``split_draws`` of 1 or unset (see :func:`caller_split_seed_refusal`); above 1 it
+            belongs to ``split_draws``/``split_draw_seeds`` instead, never to this dict.
         n_trials: Number of trials.
         output_dir: Base output directory for trial results (defaults under ``.tcip/hpo``).
         search_alg: Search algorithm, see the list above; call ``hpo.available_search_algs()``
@@ -2309,6 +2314,11 @@ def run_hyperparameter_search(
             split_draws, split_draw_seeds, warm_start, baseline_params)
         if draws_refusal is not None:
             return {"error": draws_refusal, "issues": []}
+
+        seed_axis_refusal = caller_split_seed_refusal(param_space, split_draws)
+        if seed_axis_refusal is not None:
+            return {"error": f"{seed_axis_refusal.reason} {seed_axis_refusal.remedy}",
+                    "issues": []}
 
         from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
         from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
@@ -2771,7 +2781,9 @@ def _split_draws_refusal(
 ) -> str | None:
     """Every reason ``run_hyperparameter_search`` refuses ``split_draws`` above 1, checked before minting the
     sweep. ``None`` when nothing here objects; every call at ``split_draws=1`` is one of them,
-    since split_draws itself governs nothing at its default.
+    since split_draws itself governs nothing at its default. A caller-supplied
+    ``data.split.seed`` axis at one draw is its sibling's own refusal, not this one's: see
+    :func:`caller_split_seed_refusal`.
 
     ``base_config`` bound to a split manifest is admitted rather than refused: ``run_hyperparameter_search`` has
     already set ``data.split.redraw_within_manifest`` on its own copy
@@ -2864,6 +2876,77 @@ def _bound_redraw_starvation_issue(data_cfg: dict, split_cfg: dict) -> str | Non
         stems, group_key_fn, foreground_counts=foreground_counts, manifest_dir=manifest_dir,
         date=date, seed=split_cfg.get("seed"), group_by=manifest.get("group_by"),
     )
+
+
+class SeedAxisRefusal(NamedTuple):
+    """Why a caller-supplied ``data.split.seed`` axis in ``param_space`` refuses at one draw:
+    ``reason`` names the fact and the breeder's own next step, in the register of the Tuning
+    tab's row caption; ``remedy`` names the Ray mechanics and what the tool's caller passes
+    instead. ``run_hyperparameter_search`` and the Tuning relaunch route each join the two with
+    one space for their own error surface; the caption shows ``reason`` alone.
+    """
+
+    reason: str
+    remedy: str
+
+
+_SEED_AXIS_REASON = (
+    "this sweep varied the split seed itself, so it cannot be replayed as recorded; "
+    "ask the agent to run it again"
+)
+_SEED_AXIS_REMEDY = (
+    "at one draw a caller-supplied data.split.seed axis is sampled or gridded with the point, "
+    "the best is Ray's own pick over seeds and points together (so best_params would name a "
+    "seed), a pruning scheduler can end one seed's trial early, and the sweep computes no "
+    "spread; drop data.split.seed from param_space and pass split_draws=<n> (with "
+    "split_draw_seeds for chosen, distinct seeds), which pairs every seed with every point and "
+    "picks the best by mean over draws. The paired path's own conditions apply, bound and "
+    "unbound alike: a config bound to a split manifest redraws train and val inside the "
+    "manifest's own members (the manifest must be readable, name a usable group_by, and "
+    "resolve at least two foreground groups for the config's date); an unbound config names no "
+    "data.val_images_dir and keeps auto_val on; the task is one with drawn splits; search_alg "
+    "is one the native generator builds (random, grid, variant_generator, or unset); scheduler "
+    "prunes nothing (none, fifo, or unset); split_draw_seeds is one per draw and distinct; no "
+    "baseline_params names the seed under a warm start; and no other data.* axis is in "
+    "param_space. A single fixed seed belongs in base_config's own data.split.seed, which the "
+    "drawn path reads and a config with data.val_images_dir, or bound to a manifest without "
+    "redraw_within_manifest, never does."
+)
+
+
+def caller_split_seed_refusal(
+    param_space: object, split_draws: object,
+) -> SeedAxisRefusal | None:
+    """Whether ``param_space`` names ``data.split.seed`` as its own axis while ``split_draws``
+    draws at most one partition: refused whatever the sampler, since a caller-supplied seed
+    axis at one draw is sampled or gridded with the point rather than paired across draws (see
+    ``_split_draws_refusal`` for the paired path's own conditions above one draw). Read by
+    ``run_hyperparameter_search`` before minting a sweep and by the Tuning route before
+    reporting a manifest relaunchable, so both surfaces refuse the same axis the same way.
+
+    ``split_draws`` is read as ``int(split_draws)``, ``None`` standing for 1; a value ``int()``
+    cannot read is not a draw count and refuses nothing. ``param_space`` that is not a mapping
+    is not an axis declaration and refuses nothing either: both tolerances let a listing walk a
+    manifest of unknown shape without raising.
+    """
+    from tcip_mcp.pipelines.training.hpo import SPLIT_DRAW_SEED_KEY
+
+    if split_draws is None:
+        draws = 1
+    elif isinstance(split_draws, (int, float, str)):
+        try:
+            draws = int(split_draws)
+        except (TypeError, ValueError):
+            return None
+    else:
+        return None
+    if draws > 1:
+        return None
+    if not isinstance(param_space, dict):
+        return None
+    if SPLIT_DRAW_SEED_KEY not in param_space:
+        return None
+    return SeedAxisRefusal(reason=_SEED_AXIS_REASON, remedy=_SEED_AXIS_REMEDY)
 
 
 def group_split_draws(all_trials: list[dict], planned_seeds: list[int]) -> list[dict]:
