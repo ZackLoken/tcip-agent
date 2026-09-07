@@ -45,7 +45,8 @@ export const ROUTES = {
     `/api/training/configs/${encodeURIComponent(experimentId)}/splits`,
   getTrainingMetricDirections: "/api/training/metric-directions",
   getTrainingRuns: "/api/training/runs",
-  getTrainingRunsByRunId: (runId: string) => `/api/training/runs/${encodeURIComponent(runId)}`,
+  getTrainingRunsByExperimentId: (experimentId: string) =>
+    `/api/training/runs/${encodeURIComponent(experimentId)}`,
   getTuningRayDashboard: "/api/tuning/ray-dashboard",
   getTuningSweeps: "/api/tuning/sweeps",
   getTuningSweepsBySweepId: (sweepId: string) =>
@@ -95,10 +96,10 @@ export const ROUTES = {
   postTrainingCompare: "/api/training/compare",
   postTrainingCompareBest: "/api/training/compare/best",
   postTrainingRuns: "/api/training/runs",
-  postTrainingRunsByRunIdCancel: (runId: string) =>
-    `/api/training/runs/${encodeURIComponent(runId)}/cancel`,
-  postTrainingRunsByRunIdTensorboard: (runId: string) =>
-    `/api/training/runs/${encodeURIComponent(runId)}/tensorboard`,
+  postTrainingRunsByExperimentIdCancel: (experimentId: string) =>
+    `/api/training/runs/${encodeURIComponent(experimentId)}/cancel`,
+  postTrainingRunsByExperimentIdTensorboard: (experimentId: string) =>
+    `/api/training/runs/${encodeURIComponent(experimentId)}/tensorboard`,
   postTuningSweeps: "/api/tuning/sweeps",
   postTuningSweepsBySweepIdCancel: (sweepId: string) =>
     `/api/tuning/sweeps/${encodeURIComponent(sweepId)}/cancel`,
@@ -112,8 +113,8 @@ export const ROUTES = {
     `/api/inference/jobs/${encodeURIComponent(jobId)}/stream`,
   socketTerminalWsBySessionId: (sessionId: string) =>
     `/api/terminal/ws/${encodeURIComponent(sessionId)}`,
-  socketTrainingRunsByRunIdStream: (runId: string) =>
-    `/api/training/runs/${encodeURIComponent(runId)}/stream`,
+  socketTrainingRunsByExperimentIdStream: (experimentId: string) =>
+    `/api/training/runs/${encodeURIComponent(experimentId)}/stream`,
   socketWsPanelByPanel: (panel: string) => `/ws/panel/${encodeURIComponent(panel)}`,
   socketWsState: "/ws/state",
 } as const;

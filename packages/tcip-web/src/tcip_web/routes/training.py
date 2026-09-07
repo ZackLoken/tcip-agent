@@ -22,25 +22,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/training", tags=["training"])
 
 
-def _metrics_key(project_root: str, run_id: str) -> "Key | None":
-    """The metrics log of the experiment that claims ``run_id``, under ``project_root``.
+def _metrics_key(project_root: str, experiment_id: str) -> "Key":
+    """The metrics log of the experiment named ``experiment_id``, under ``project_root``.
 
-    ``None`` when no record claims the run: the experiment may not exist yet on a run just
-    launched, and the caller then has nothing to serve rather than an empty log to assert.
-    A relaunch mints an experiment id that is not the run id, so the id is resolved from the
-    records themselves rather than assumed; ``run_id`` never becomes a path component here.
-    An id no record could ever carry (a path separator, an empty or dot name) raises
-    ``BadKey`` instead of resolving to "no record": absence is an answer, malformedness is a
-    refusal.
+    An id no record could ever carry (a path separator, an empty or dot name) raises ``BadKey``;
+    an id that merely names no record yet (a record still stamped before the run starts, D2/D4)
+    still resolves a key, since nothing here needs the record to already exist.
     """
-    from tcip_mcp.experiments import metrics_key, resolve_experiment_for_run, status_key
+    from tcip_mcp.experiments import metrics_key
 
-    # Shape check through the key constructor, the one place the id rule lives; the key is
-    # discarded because resolution below decides which record actually claims the run.
-    status_key(run_id, root=project_root)
-    experiment_id = resolve_experiment_for_run(run_id, root=project_root)
-    if experiment_id is None:
-        return None
     return metrics_key(experiment_id, root=project_root)
 
 
@@ -92,7 +82,7 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
     actually posted here (a browser, a script, another agent), since nothing here tells them
     apart; that distinction is a later authentication concern, not this route's.
     """
-    from tcip_mcp.experiments import config_key, read_member, status_key
+    from tcip_mcp.experiments import config_key, read_member
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
     from tcip_mcp.tools.training_tools import (
         candidate_config_with_manifest, declare_launcher, launch_training, list_split_choices,
@@ -102,11 +92,6 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
     config = read_member(config_key(payload.experiment_id), None)
     if not isinstance(config, dict) or not config.get(MODEL_SOURCE_KEY):
         raise HTTPException(404, f"no launchable config named {payload.experiment_id}")
-
-    status = read_member(status_key(payload.experiment_id), {})
-    if status.get("state") == "created" and status.get("run_id"):
-        raise HTTPException(409, f"experiment {payload.experiment_id} already has a run "
-                                 "attached to it")
 
     config = {**config, "experiment_id": payload.experiment_id}
     if payload.split_manifest_dir:
@@ -143,20 +128,22 @@ def list_runs_route() -> dict:
     return {"runs": _all_training_runs(read_progress=True)}
 
 
-@router.get("/runs/{run_id}")
-def get_run(run_id: str) -> dict:
+@router.get("/runs/{experiment_id}")
+def get_run(experiment_id: str) -> dict:
     from tcip_mcp.tools.training_tools import monitor_training
 
-    return monitor_training(run_id)
+    return monitor_training(experiment_id)
 
 
-@router.post("/runs/{run_id}/tensorboard")
-def launch_run_tensorboard(run_id: str, payload: EmptyBodyPayload) -> dict:
+@router.post("/runs/{experiment_id}/tensorboard")
+def launch_run_tensorboard(experiment_id: str, payload: EmptyBodyPayload) -> dict:
     """Start (or reuse) a TensorBoard serving this run's log directory.
 
     ``tensorboard_manager`` tracks its children in module-level process state, so a TensorBoard
     started by the agent's own process is not one this process can hand the browser a URL for.
     This route is how a TensorBoard exists from the GUI's side, whichever process trained the run.
+    Passes no key of its own, so it resolves to the same tracking entry the run's own launch (or
+    an earlier call here) keyed by the identical log directory, never a second TensorBoard on it.
 
     A run with no recorded output directory (it failed before writing one) or whose output
     directory's ``tensorboard`` subdirectory holds no event file (it crashed before
@@ -173,9 +160,9 @@ def launch_run_tensorboard(run_id: str, payload: EmptyBodyPayload) -> dict:
     from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
     from tcip_mcp.tools.training_tools import monitor_training
 
-    status = monitor_training(run_id)
+    status = monitor_training(experiment_id)
     if "status" not in status:
-        raise HTTPException(404, status.get("error") or f"Run not found: {run_id}")
+        raise HTTPException(404, status.get("error") or f"Run not found: {experiment_id}")
     output_dir = status.get("output_dir")
     tb_dir = Path(f"{output_dir}/tensorboard") if output_dir else None
     has_events = bool(tb_dir is not None and tb_dir.is_dir()
@@ -186,13 +173,13 @@ def launch_run_tensorboard(run_id: str, payload: EmptyBodyPayload) -> dict:
     if not has_events:
         raise HTTPException(
             404,
-            {"error": error or f"run produced no logs: {run_id}", "no_logs": True},
+            {"error": error or f"run produced no logs: {experiment_id}", "no_logs": True},
         )
-    return launch_tensorboard(f"{output_dir}/tensorboard", run_id=run_id)
+    return launch_tensorboard(f"{output_dir}/tensorboard")
 
 
-@router.post("/runs/{run_id}/cancel")
-def cancel_run_route(run_id: str, payload: EmptyBodyPayload) -> dict:
+@router.post("/runs/{experiment_id}/cancel")
+def cancel_run_route(experiment_id: str, payload: EmptyBodyPayload) -> dict:
     """Request graceful cancellation of a running run (stops at the next batch boundary).
 
     Wraps the ``cancel_training`` MCP tool: the trainer still writes ``model_final.pt``
@@ -201,7 +188,7 @@ def cancel_run_route(run_id: str, payload: EmptyBodyPayload) -> dict:
     """
     from tcip_mcp.tools.training_tools import cancel_training
 
-    result = cancel_training(run_id)
+    result = cancel_training(experiment_id)
     if result.get("error"):
         raise HTTPException(404, result["error"])
     return result
@@ -295,7 +282,7 @@ class TrainingMetricFrame(BaseModel):
     """One metrics-log row, pushed as it is appended."""
 
     type: Literal["metric"]
-    run_id: str
+    experiment_id: str
     row: dict
 
 
@@ -304,38 +291,34 @@ class TrainingStatusFrame(BaseModel):
     run this process can still identify, ``error`` is set instead when it cannot."""
 
     type: Literal["status"]
-    run_id: str
+    experiment_id: str
     status: dict | None
     error: str | None
 
 
 async def _stream_metrics(
-    ws: WebSocket, project_root: str, run_id: str, poll_seconds: float = 1.0
+    ws: WebSocket, project_root: str, experiment_id: str, poll_seconds: float = 1.0
 ) -> None:
-    """Push every row of a run's metrics log to the browser as it is appended.
+    """Push every row of an experiment's metrics log to the browser as it is appended.
 
     The cursor is the log's own resume token, so each tick reads only what was appended
-    since the last one and an entry still being written is replayed once it is complete.
-    The run's record is re-resolved until it exists, since a stream can be opened before the
-    launch has created it. Both reads run off the event loop: a file-backend read can wait
-    on a training subprocess's own append, and that wait must stall this socket's own
+    since the last one and an entry still being written is replayed once it is complete. The
+    record already exists and is stamped before the run starts (D2/D4), so the key is resolved
+    once, not re-resolved per tick. Both reads run off the event loop: a file-backend read can
+    wait on a training subprocess's own append, and that wait must stall this socket's own
     coroutine rather than every request and socket the backend serves.
     """
     from tcip_store import read_log
 
-    key = None
+    key = _metrics_key(project_root, experiment_id)
     cursor: str | None = None
 
     while True:
-        if key is None:
-            key = _metrics_key(project_root, run_id)
-        rows: list[dict] = []
-        if key is not None:
-            page = await asyncio.to_thread(read_log, key, after=cursor)
-            cursor = page.cursor
-            rows = [dict(row) for row in page.records]
+        page = await asyncio.to_thread(read_log, key, after=cursor)
+        cursor = page.cursor
+        rows = [dict(row) for row in page.records]
         for row in rows:
-            frame = TrainingMetricFrame(type="metric", run_id=run_id, row=row)
+            frame = TrainingMetricFrame(type="metric", experiment_id=experiment_id, row=row)
             await ws.send_json(frame.model_dump())
 
         # Has the run finished (or gone away)? ``error`` with no ``status`` key => unknown run;
@@ -344,23 +327,23 @@ async def _stream_metrics(
             from tcip_mcp.tools.training_tools import monitor_training
             from tcip_web import jobstore
 
-            status = monitor_training(run_id)
+            status = monitor_training(experiment_id)
             if status.get("error") or status.get("status") in jobstore.TERMINAL_STATUSES:
                 # A row can land between the read above and this terminal observation; drain
                 # it now so the status frame never precedes the row it terminates on.
-                if key is not None:
-                    final_page = await asyncio.to_thread(read_log, key, after=cursor)
-                    cursor = final_page.cursor
-                    for row in (dict(r) for r in final_page.records):
-                        frame = TrainingMetricFrame(type="metric", run_id=run_id, row=row)
-                        await ws.send_json(frame.model_dump())
+                final_page = await asyncio.to_thread(read_log, key, after=cursor)
+                cursor = final_page.cursor
+                for row in (dict(r) for r in final_page.records):
+                    frame = TrainingMetricFrame(type="metric", experiment_id=experiment_id, row=row)
+                    await ws.send_json(frame.model_dump())
                 if "status" in status:
                     status_frame = TrainingStatusFrame(
-                        type="status", run_id=run_id, status=status, error=None
+                        type="status", experiment_id=experiment_id, status=status, error=None
                     )
                 else:
                     status_frame = TrainingStatusFrame(
-                        type="status", run_id=run_id, status=None, error=status.get("error")
+                        type="status", experiment_id=experiment_id, status=None,
+                        error=status.get("error"),
                     )
                 await ws.send_json(status_frame.model_dump())
                 break
@@ -370,9 +353,9 @@ async def _stream_metrics(
         await asyncio.sleep(poll_seconds)
 
 
-@router.websocket("/runs/{run_id}/stream")
-async def training_stream_ws(websocket: WebSocket, run_id: str, project_root: str) -> None:
-    """Tail ``run_id``'s metrics log and push new rows to the browser."""
+@router.websocket("/runs/{experiment_id}/stream")
+async def training_stream_ws(websocket: WebSocket, experiment_id: str, project_root: str) -> None:
+    """Tail ``experiment_id``'s metrics log and push new rows to the browser."""
     try:
         assert_project_root_allowed(project_root)
     except ValueError as exc:
@@ -380,7 +363,7 @@ async def training_stream_ws(websocket: WebSocket, run_id: str, project_root: st
         return
     await websocket.accept()
     try:
-        await _stream_metrics(websocket, project_root, run_id)
+        await _stream_metrics(websocket, project_root, experiment_id)
     except BadKey as exc:
         await websocket.close(code=1008, reason=str(exc))
     except WebSocketDisconnect:

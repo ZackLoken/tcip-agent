@@ -125,13 +125,13 @@ export interface GuiVocabulary {
 
 export interface TrainingMetricFrame {
   type: "metric";
-  run_id: string;
+  experiment_id: string;
   row: Record<string, unknown>;
 }
 
 export interface TrainingStatusFrame {
   type: "status";
-  run_id: string;
+  experiment_id: string;
   status: Record<string, unknown> | null;
   error: string | null;
 }

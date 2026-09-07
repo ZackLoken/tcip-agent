@@ -16,13 +16,13 @@ def client() -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 
-def _wait_terminal(run_id: str, deadline_s: float = 60) -> dict:
+def _wait_terminal(experiment_id: str, deadline_s: float = 60) -> dict:
     from tcip_mcp.tools.training_tools import monitor_training
 
     deadline = time.monotonic() + deadline_s
     status: dict = {}
     while time.monotonic() < deadline:
-        status = monitor_training(run_id)
+        status = monitor_training(experiment_id)
         if status.get("status") in ("failed", "completed", "cancelled"):
             return status
         time.sleep(0.2)
@@ -79,23 +79,6 @@ def test_relaunch_route_404s_for_a_config_without_model_source(tmp_path, monkeyp
 
     resp = client.post("/api/training/runs", json={"experiment_id": "exp-not-training"})
     assert resp.status_code == 404
-
-
-def test_relaunch_route_409s_for_a_pristine_config_with_an_attached_run(
-    tmp_path, monkeypatch, client: TestClient
-) -> None:
-    """A 'created' experiment whose status already carries a run identity is a launch already
-    attached to it; relaunching would silently clobber that stamp rather than forking."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    from tcip_mcp.experiments import create_experiment, stamp_run_identity
-
-    create_experiment("exp-attached", {"model_source": {"builder": "m:f"}, "data": {}})
-    stamp_run_identity("exp-attached", "run_123", str(tmp_path / "out"),
-                       launched_by={"launcher": "process"})
-
-    resp = client.post("/api/training/runs", json={"experiment_id": "exp-attached"})
-    assert resp.status_code == 409
 
 
 def test_relaunch_route_422s_with_preflight_issues_for_a_refused_config(
@@ -293,11 +276,11 @@ def test_tensorboard_route_launches_under_the_run_output_dir(client: TestClient,
     tb_dir.mkdir()
     (tb_dir / "events.out.tfevents.1.host").write_bytes(b"")
 
-    def fake_status(run_id: str) -> dict:
-        return {"run_id": run_id, "status": "running", "output_dir": str(tmp_path)}
+    def fake_status(experiment_id: str) -> dict:
+        return {"experiment_id": experiment_id, "status": "running", "output_dir": str(tmp_path)}
 
-    def fake_launch(logdir: str, run_id: str | None = None) -> dict:
-        calls.append((logdir, run_id or ""))
+    def fake_launch(logdir: str, key: str | None = None) -> dict:
+        calls.append((logdir, key or ""))
         return {"url": "http://localhost:6006", "port": 6006, "pid": 1, "logdir": logdir}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.monitor_training", fake_status)
@@ -308,7 +291,9 @@ def test_tensorboard_route_launches_under_the_run_output_dir(client: TestClient,
     resp = client.post("/api/training/runs/run-42/tensorboard", json={})
     assert resp.status_code == 200
     assert resp.json()["url"] == "http://localhost:6006"
-    assert calls == [(f"{tmp_path}/tensorboard", "run-42")]
+    # No key of its own: keyed by log directory, so a repeat call here reuses the run's own
+    # TensorBoard entry rather than starting a second one.
+    assert calls == [(f"{tmp_path}/tensorboard", "")]
 
 
 def test_tensorboard_route_404s_with_no_logs_for_a_run_with_no_output_dir(
@@ -317,8 +302,8 @@ def test_tensorboard_route_404s_with_no_logs_for_a_run_with_no_output_dir(
     """A run that failed before writing an output directory has nothing a TensorBoard could
     ever serve; the refusal names that so the GUI never offers a retry against it."""
 
-    def fake_status(run_id: str) -> dict:
-        return {"run_id": run_id, "status": "failed", "output_dir": "", "error": None}
+    def fake_status(experiment_id: str) -> dict:
+        return {"experiment_id": experiment_id, "status": "failed", "output_dir": "", "error": None}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.monitor_training", fake_status)
 
@@ -334,8 +319,9 @@ def test_tensorboard_route_404s_with_no_logs_for_a_stamped_dir_with_no_event_fil
     reached ``SummaryWriter``) has a real output directory but no event file for TensorBoard
     to serve; that reads as ``no_logs`` too, not as a launchable board over an empty directory."""
 
-    def fake_status(run_id: str) -> dict:
-        return {"run_id": run_id, "status": "failed", "output_dir": str(tmp_path), "error": None}
+    def fake_status(experiment_id: str) -> dict:
+        return {"experiment_id": experiment_id, "status": "failed", "output_dir": str(tmp_path),
+                "error": None}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.monitor_training", fake_status)
 
@@ -359,7 +345,7 @@ def test_tensorboard_route_404s_with_no_logs_carrying_the_recorded_error(
     output_dir = tmp_path / "out"
     output_dir.mkdir()
     create_experiment(run_id, {"model_source": {"builder": "m:f"}})
-    stamp_run_identity(run_id, run_id, str(output_dir), launched_by={"launcher": "process"})
+    stamp_run_identity(run_id, str(output_dir), launched_by={"launcher": "process"})
     update_status(run_id, "failed", error="could not open the dataset's images_dir")
 
     resp = client.post(f"/api/training/runs/{run_id}/tensorboard", json={})
@@ -391,7 +377,7 @@ def test_list_runs_reconstructs_from_experiments(tmp_path, monkeypatch) -> None:
     update_status("fb_1", "completed")
 
     body = training.list_runs_route()
-    by_id = {r["run_id"]: r for r in body["runs"]}
+    by_id = {r["experiment_id"]: r for r in body["runs"]}
     assert by_id["run_1"]["status"] == "interrupted"  # dead process -> interrupted
     assert by_id["run_1"]["external"] is True
     assert "fb_1" not in by_id  # review-feedback experiment is not a training run
@@ -414,16 +400,16 @@ def test_list_runs_route_is_a_pure_pass_through_to_the_tool(tmp_path, monkeypatc
 
 
 def test_never_launched_experiment_is_absent_from_the_route(tmp_path, monkeypatch) -> None:
-    """A pre-created experiment (state 'created', no run_id stamp, no metrics logged) never
+    """A pre-created experiment (state 'created', no output_dir stamp, no metrics logged) never
     launched and must not list as a run at all, interrupted or otherwise."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment
     from tcip_web.routes.training import list_runs_route
 
-    create_experiment("exp-never-launched", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    create_experiment("exp-never-launched", {"model_source": {"builder": "my_models:fcos_det"}})
 
-    by_id = {r["run_id"]: r for r in list_runs_route()["runs"]}
+    by_id = {r["experiment_id"]: r for r in list_runs_route()["runs"]}
     assert "exp-never-launched" not in by_id
 
 
@@ -454,8 +440,7 @@ def test_relaunch_route_launches_a_pristine_config_as_its_own_first_run(
 
     resp = client.post("/api/training/runs", json={"experiment_id": "exp-pristine-relaunch"})
     assert resp.status_code == 200, resp.json()
-    run_id = resp.json()["run_id"]
-    _wait_terminal(run_id)
+    _wait_terminal(resp.json()["experiment_id"])
 
     from tcip_mcp.experiments import config_key, lineage_key, read_member
 
@@ -547,13 +532,13 @@ def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
     first = launch_training(dict(cfg), str(tmp_path / "out1"))
     assert "error" not in first, first
     parent_id = first["experiment_id"]
-    _wait_terminal(first["run_id"])
+    _wait_terminal(parent_id)
 
     resp = client.post("/api/training/runs", json={"experiment_id": parent_id})
     assert resp.status_code == 200, resp.json()
     forked_id = resp.json()["experiment_id"]
     assert forked_id != parent_id
-    _wait_terminal(resp.json()["run_id"])
+    _wait_terminal(forked_id)
 
     from tcip_mcp.experiments import config_key, lineage_key, read_member
 
@@ -593,12 +578,12 @@ def test_list_runs_route_names_the_run_s_selection_metric(
     }
     result = launch_training(cfg, str(tmp_path / "out"))
     assert "error" not in result, result
-    _wait_terminal(result["run_id"])
+    _wait_terminal(result["experiment_id"])
 
     from tcip_web.routes.training import list_runs_route
 
-    by_id = {r["run_id"]: r for r in list_runs_route()["runs"]}
-    row = by_id[result["run_id"]]
+    by_id = {r["experiment_id"]: r for r in list_runs_route()["runs"]}
+    row = by_id[result["experiment_id"]]
     # Regression selects on the training loss by default; there is no evaluation.selection_metric
     # override in this config.
     assert row["best_metric_name"] == "loss"
@@ -610,10 +595,10 @@ def test_list_runs_excludes_hpo_trials(monkeypatch) -> None:
     from tcip_mcp.pipelines.training import run_registry as rr
 
     monkeypatch.setattr(rr, "_RUNS", {})
-    rr.create_run({"model_source": {"builder": "x:y"}}, "out_a", origin="training")
-    rr.create_run({"model_source": {"builder": "x:y"}}, "out_b", origin="hpo_trial")
+    rr.create_run({"model_source": {"builder": "x:y"}}, "out_a", id="run-a", origin="training")
+    rr.create_run({"model_source": {"builder": "x:y"}}, "out_b", id="run-b", origin="hpo_trial")
 
-    default = {r["run_id"] for r in rr.list_runs()}
+    default = {r["id"] for r in rr.list_runs()}
     assert len(default) == 1  # only the standalone training run
     assert all(rr._RUNS[rid].origin == "training" for rid in default)
     assert len(rr.list_runs(include_hpo_trials=True)) == 2  # full set on request
