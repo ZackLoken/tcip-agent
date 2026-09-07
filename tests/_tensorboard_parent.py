@@ -30,13 +30,13 @@ def _standin_pid(returned_pid: int, guardian_expected: bool) -> int:
     and its one child is the stand-in; this waits up to five seconds for that child to appear,
     since the guardian may not have spawned it yet, and exits naming the condition if it never
     settles on exactly one. A guardian that has already died is not a separate case: it stays a
-    zombie, still resolvable and reporting zero children, until reaped by its own caller (which
-    has not yet called ``wait`` at this point), so that outcome also reaches the five-second
-    diagnosis below rather than a ``NoSuchProcess`` raised on its own. Otherwise (Windows, or the
-    tie disabled under ``--no-tie``) nothing sits in front of the stand-in, so the returned pid is
-    used directly and children are never consulted. This is called both from the standalone
-    script's own ``main`` and directly by a pytest test; the ``SystemExit`` it raises on failure
-    is accepted in the latter case too, since it fails the calling test the same as any exception.
+    zombie, still resolvable and reporting zero children, until reaped by its own caller, which
+    has neither polled nor waited on it since the launch's own startup check, so that outcome
+    also reaches the five-second diagnosis below. Otherwise (Windows, or the tie disabled under
+    ``--no-tie``) nothing sits in front of the stand-in, so the returned pid is used directly and
+    children are never consulted. This is called both from the standalone script's own ``main``
+    and directly by a pytest test; the ``SystemExit`` it raises on failure is accepted in the
+    latter case too, since it fails the calling test the same as any exception.
     """
     if not guardian_expected:
         return returned_pid
@@ -49,9 +49,14 @@ def _standin_pid(returned_pid: int, guardian_expected: bool) -> int:
         if len(children) == 1:
             return children[0].pid
         time.sleep(0.1)
+    try:
+        status = psutil.Process(returned_pid).status()
+    except psutil.NoSuchProcess:
+        status = "gone"
     sys.exit(
         f"expected exactly one guardian child of pid {returned_pid} within 5 seconds, found "
-        f"{len(children)}"
+        f"{len(children)} (guardian status: {status}); either it has not spawned its child yet "
+        f"or it has died"
     )
 
 
