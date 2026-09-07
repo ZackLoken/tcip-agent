@@ -332,6 +332,24 @@ def test_repairing_an_unparseable_record_back_to_confirmed_values_with_no_ration
     assert on_file == confirmed
 
 
+def test_repairing_an_unparseable_records_name_with_no_rationale_refuses(tmp_path: Path) -> None:
+    """The stored record's name is what the parser refuses on, not one of
+    ``_AUTHORED_SPEC_FIELDS``; the repair still reads as moving the authored values, since a
+    record the parser refuses has none it can prove unchanged."""
+    confirmed = _confirmed_leaf(tmp_path)
+    directory = traits.trait_specs_dir(str(tmp_path))
+    key = traits.trait_spec_key(directory, "leaf")
+    stored = ts.read_versioned(key)
+    ts.replace(key, {**stored.value, "name": 7}, expect=stored.version)
+
+    with pytest.raises(ValueError, match="rationale"):
+        traits.write_trait_spec_fields("leaf", {"name": "leaf"}, project_root=tmp_path)
+
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    on_file = ts.read_versioned(traits.trait_spec_statement_key(scope, "leaf")).value
+    assert on_file == confirmed
+
+
 def test_revising_an_authored_field_with_a_rationale_restates_and_clears_confirmation(
     tmp_path: Path,
 ) -> None:
