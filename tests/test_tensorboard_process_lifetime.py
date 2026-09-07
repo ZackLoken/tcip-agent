@@ -3,10 +3,13 @@
 Each test here spawns a real parent process (``_tensorboard_parent.py``) that launches a real
 child through the manager, with the child's own command swapped for a sleep loop so no
 TensorBoard install is required, then watches what becomes of the child once the parent is gone.
-The normal-exit test disables the platform tie (``--no-tie``) so it proves the ``atexit`` hook
-alone, since the job object and the guardian each end the child on a normal exit too; the
-hard-kill tests keep the tie and prove it directly, one launching from the main thread and one
-from a background thread that has already exited by the time the parent is killed.
+The parent prints the pid ``launch_tensorboard`` returned and the TensorBoard stand-in's own pid
+on one line; on POSIX these differ (a guardian process sits in front of the stand-in) and both
+deaths are asserted, on Windows they are the same pid. The normal-exit test disables the platform
+tie (``--no-tie``) so it proves the ``atexit`` hook alone, since the job object and the guardian
+each end the child on a normal exit too; the hard-kill tests keep the tie and prove it directly,
+one launching from the main thread and one from a background thread that has already exited by
+the time the parent is killed.
 """
 
 from __future__ import annotations
@@ -50,13 +53,24 @@ def _wait_until_dead(pid: int, create_time: float, timeout: float = _DEATH_TIMEO
     return not _child_alive(pid, create_time)
 
 
-def _force_kill(pid: int, create_time: float) -> None:
+def _force_kill_and_wait(pid: int, create_time: float, timeout: float = _DEATH_TIMEOUT) -> None:
     proc = _same_process(pid, create_time)
-    if proc is not None:
-        try:
-            proc.kill()
-        except psutil.NoSuchProcess:
-            pass
+    if proc is None:
+        return
+    try:
+        proc.kill()
+        proc.wait(timeout=timeout)
+    except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+        pass
+
+
+def _kill_and_wait_parent(parent: subprocess.Popen, timeout: float = _DEATH_TIMEOUT) -> None:
+    if parent.poll() is None:
+        parent.kill()
+    try:
+        parent.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def _spawn_parent(tmp_path: Path, mode: str, *flags: str) -> subprocess.Popen:
@@ -70,55 +84,75 @@ def _spawn_parent(tmp_path: Path, mode: str, *flags: str) -> subprocess.Popen:
     )
 
 
-def _read_child_pid(parent: subprocess.Popen) -> tuple[int, float]:
-    """The child pid the parent printed, and its creation time for later identity checks."""
-    pid_line = parent.stdout.readline()
-    child_pid = int(pid_line.strip())
-    return child_pid, psutil.Process(child_pid).create_time()
+def _read_pids(parent: subprocess.Popen) -> tuple[tuple[int, float], tuple[int, float]]:
+    """The pid ``launch_tensorboard`` returned and the TensorBoard stand-in's own pid, each read
+    and paired with its creation time immediately as it arrives, since a pid's identity is bound
+    to the process alive at the moment its creation time was captured, not to the number itself.
+    """
+    line = parent.stdout.readline()
+    returned_pid, standin_pid = (int(p) for p in line.split())
+    returned = (returned_pid, psutil.Process(returned_pid).create_time())
+    standin = (standin_pid, psutil.Process(standin_pid).create_time())
+    return returned, standin
 
 
 def test_child_is_gone_within_ten_seconds_of_a_hard_kill(tmp_path):
     parent = _spawn_parent(tmp_path, "sleep")
-    child_pid = create_time = None
+    returned = standin = None
     try:
-        child_pid, create_time = _read_child_pid(parent)
+        returned, standin = _read_pids(parent)
         parent.kill()
         parent.wait(timeout=_DEATH_TIMEOUT)
-        assert _wait_until_dead(child_pid, create_time)
+        assert _wait_until_dead(*standin)
+        if sys.platform != "win32":
+            assert _wait_until_dead(*returned)
     finally:
-        if child_pid is not None:
-            _force_kill(child_pid, create_time)
+        if standin is not None:
+            _force_kill_and_wait(*standin)
+        if returned is not None:
+            _force_kill_and_wait(*returned)
+        _kill_and_wait_parent(parent)
         parent.stdout.close()
         parent.stderr.close()
 
 
 def test_child_survives_its_launching_thread_and_dies_within_ten_seconds_of_a_hard_kill(tmp_path):
     parent = _spawn_parent(tmp_path, "sleep", "--thread")
-    child_pid = create_time = None
+    returned = standin = None
     try:
-        child_pid, create_time = _read_child_pid(parent)
+        returned, standin = _read_pids(parent)
         # the launching thread has already joined by the time the pid line was printed.
-        assert _child_alive(child_pid, create_time)
+        assert _child_alive(*standin)
         assert parent.poll() is None
         parent.kill()
         parent.wait(timeout=_DEATH_TIMEOUT)
-        assert _wait_until_dead(child_pid, create_time)
+        assert _wait_until_dead(*standin)
+        if sys.platform != "win32":
+            assert _wait_until_dead(*returned)
     finally:
-        if child_pid is not None:
-            _force_kill(child_pid, create_time)
+        if standin is not None:
+            _force_kill_and_wait(*standin)
+        if returned is not None:
+            _force_kill_and_wait(*returned)
+        _kill_and_wait_parent(parent)
         parent.stdout.close()
         parent.stderr.close()
 
 
 def test_child_is_gone_within_ten_seconds_of_a_normal_exit(tmp_path):
     parent = _spawn_parent(tmp_path, "exit", "--no-tie")
-    child_pid = create_time = None
+    returned = standin = None
     try:
-        child_pid, create_time = _read_child_pid(parent)
+        returned, standin = _read_pids(parent)
         parent.wait(timeout=_DEATH_TIMEOUT)
-        assert _wait_until_dead(child_pid, create_time)
+        assert _wait_until_dead(*standin)
+        if sys.platform != "win32":
+            assert _wait_until_dead(*returned)
     finally:
-        if child_pid is not None:
-            _force_kill(child_pid, create_time)
+        if standin is not None:
+            _force_kill_and_wait(*standin)
+        if returned is not None:
+            _force_kill_and_wait(*returned)
+        _kill_and_wait_parent(parent)
         parent.stdout.close()
         parent.stderr.close()
