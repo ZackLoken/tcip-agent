@@ -503,3 +503,100 @@ def test_a_relayed_note_lands_fresh_never_carried_from_the_old_statement(tmp_pat
     scope = traits.trait_spec_statements_scope(tmp_path)
     stated = ts.read_versioned(traits.trait_spec_statement_key(scope, "leaf")).value
     assert stated["relayed_note"] == ""
+
+
+def test_author_confirm_revise_confirm_and_state_end_to_end_through_the_tools(
+    tmp_path: Path,
+) -> None:
+    """The whole trait-spec statement lifecycle through the platform's own tool surface: author,
+    confirm, revise with a rationale, confirm again, then state an operationalization against the
+    revised spec, on whichever backend this run is bound to."""
+    from tcip_mcp import operationalization as op
+    from tcip_mcp.tools.operationalization_tools import state_trait_operationalization
+    from tcip_mcp.tools.trait_spec_authoring_tools import author_trait_spec, revise_trait_spec
+
+    trait = "leaf_e2e"
+    statement = author_trait_spec(
+        str(tmp_path), trait, delivers=["stem_count"],
+        rationale="the breeder described leaf-borne stem counting directly",
+    )
+    seen = traits.trait_spec_statement_seen_hash(statement)
+    confirmed = traits.confirm_trait_spec(
+        str(tmp_path), trait, user="breeder", record_seen=seen, identity_from_request=True,
+    )
+    assert confirmed["confirmed_by"] == "user:breeder"
+
+    revised = revise_trait_spec(
+        str(tmp_path), trait, {"holdout_match_quality_floor": 0.6},
+        rationale="the breeder set the minimum acceptable held-out match quality",
+    )
+    assert revised["statement_restated"] is True
+    assert revised["holdout_match_quality_floor"] == 0.6
+
+    reconfirmed = traits.confirm_trait_spec(
+        str(tmp_path), trait, user="breeder", record_seen=revised["record_seen"],
+        identity_from_request=True,
+    )
+    assert reconfirmed["confirmed_by"] == "user:breeder"
+
+    result = state_trait_operationalization(
+        str(tmp_path), trait, op.PER_IMAGE_COUNT,
+        statement="how many stems the model finds in one frame",
+        mechanism="the calibrated detector's per-image count",
+        measured_subject="stem", delivered_phenotypes=[],
+    )
+
+    assert "error" not in result, result
+    assert result["trait"] == trait
+
+
+def test_a_localization_revision_with_no_rationale_leaves_the_statement_as_it_was(
+    tmp_path: Path,
+) -> None:
+    """Coverage: ``localization`` is carried forward, never authored, so a plain revision over it
+    never meets the rationale refusal and never touches the statement, whether that statement is
+    confirmed or already stale."""
+    confirmed = _confirmed_leaf(tmp_path)
+    directory = traits.trait_specs_dir(str(tmp_path))
+    spec_key = traits.trait_spec_key(directory, "leaf")
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    statement_key = traits.trait_spec_statement_key(scope, "leaf")
+
+    traits.write_trait_spec_fields(
+        "leaf", {"localization": traits.CENTER_MATCH}, project_root=tmp_path,
+    )
+    assert ts.read_versioned(statement_key).value == confirmed
+
+    stored = ts.read_versioned(spec_key)
+    ts.replace(
+        spec_key, {**stored.value, "holdout_match_quality_floor": 0.9}, expect=stored.version,
+    )
+    stale_before = ts.read_versioned(statement_key).value
+    assert traits.trait_spec_statement_stale(
+        traits.get_trait_for("leaf", str(tmp_path)), stale_before
+    )
+
+    traits.write_trait_spec_fields(
+        "leaf", {"localization": traits.IOU_MATCH}, project_root=tmp_path,
+    )
+
+    assert ts.read_versioned(statement_key).value == stale_before
+
+
+def test_a_stamped_specs_schema_version_survives_a_non_restating_edit(tmp_path: Path) -> None:
+    """Coverage: the restating path above already proves the stamp survives a rewrite; this is
+    the rationale-less carried-forward edit the landing's own stamp test stopped covering once it
+    became a restating one."""
+    _confirmed_leaf(tmp_path)
+    directory = traits.trait_specs_dir(str(tmp_path))
+    key = traits.trait_spec_key(directory, "leaf")
+    stored = ts.read_versioned(key)
+    ts.replace(key, {**stored.value, "schema_version": 1}, expect=stored.version)
+
+    traits.write_trait_spec_fields(
+        "leaf", {"localization": traits.CENTER_MATCH}, project_root=tmp_path,
+    )
+
+    rewritten = ts.read_versioned(key).value
+    assert rewritten["schema_version"] == 1
+    assert rewritten["localization"] == traits.CENTER_MATCH

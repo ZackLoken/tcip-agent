@@ -746,6 +746,32 @@ def test_spec_edited_during_delivery_refuses_before_the_write(
     assert not (tmp_path / "results_export").exists()
 
 
+def test_a_confirmed_delivery_still_ships_after_a_non_constituting_field_stales_its_statement(
+    tmp_path: Path,
+):
+    """Admits valid work: the trait-spec statement precondition guards
+    state_trait_operationalization, never a delivery door itself. check_operationalization reads
+    the operationalization's own constituting fields against the live spec, never the trait-spec
+    statement, so a non-constituting authored field (notes) moved by a raw write leaves a
+    confirmed operationalization deliverable while its trait-spec statement waits on its own
+    re-confirmation."""
+    import tcip_store as ts
+
+    body = _delivery(tmp_path, validated=True)
+    out_csv = tmp_path / "delivered.csv"
+    _hand_edit_spec(tmp_path, "bud_opening", notes="a note added after confirmation")
+
+    spec = traits.get_trait_for("bud_opening", str(tmp_path))
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    statement = ts.read_versioned(traits.trait_spec_statement_key(scope, "bud_opening")).value
+    assert traits.trait_spec_statement_stale(spec, statement)
+
+    res = _compute(body, out_csv, **_validated_call(body))
+
+    assert "error" not in res, res
+    assert out_csv.exists()
+
+
 def test_write_phenology_csv_refuses_without_a_basis(tmp_path: Path):
     """The canonical writer is a ninth entry point, and it demands proof its caller ran the check.
 

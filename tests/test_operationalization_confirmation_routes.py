@@ -727,6 +727,36 @@ def test_confirm_statement_route_returns_409_when_the_record_moved(
     ).status_code == 200
 
 
+def test_confirm_statement_route_returns_409_when_the_real_writer_moved_the_record(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """The same 409, this time through the platform's own revision writer rather than a
+    simulated rewrite: both cases stay, since the one above isolates the route's own comparison
+    from any particular writer and this one proves the door a real revision actually goes
+    through raises it too."""
+    from tcip_mcp import traits
+
+    statement = _author_statement(tmp_path)
+    seen = traits.trait_spec_statement_seen_hash(statement)
+    assert _confirm_statement(client, tmp_path, STATEMENT_TRAIT, seen, user="rosalind").status_code == 200
+    confirmed_seen = _read_statement(client, tmp_path, STATEMENT_TRAIT).json()["record_seen"]
+
+    revision = traits.revise_trait_spec_fields(
+        STATEMENT_TRAIT, {"notes": "a real breeder-authored note"}, project_root=tmp_path,
+        rationale="the breeder added a note on how astringency is scored",
+    )
+    assert revision.statement is not None
+
+    resp = _confirm_statement(client, tmp_path, STATEMENT_TRAIT, confirmed_seen, user="rosalind")
+
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["kind"] == "trait_spec_authoring"
+    assert detail["record"]["rationale"] == (
+        "the breeder added a note on how astringency is scored"
+    )
+
+
 def test_confirm_statement_route_confirms_and_withdraws(
     client: TestClient, tmp_path: Path,
 ) -> None:
