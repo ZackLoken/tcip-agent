@@ -431,6 +431,9 @@ def test_an_empty_rationale_refuses_by_name(tmp_path: Path) -> None:
 
 
 def test_a_stamped_specs_schema_version_survives_a_restating_revision(tmp_path: Path) -> None:
+    """Coverage: the reattachment itself is the baseline's own behavior
+    (``test_a_stamped_trait_specs_schema_version_survives_a_field_edit``); this only pins that
+    the new restating path still goes through it."""
     _confirmed_leaf(tmp_path)
     directory = traits.trait_specs_dir(str(tmp_path))
     key = traits.trait_spec_key(directory, "leaf")
