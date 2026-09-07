@@ -37,7 +37,7 @@ function reconciliationLine(key: string, entry: ReconciledDocument | ReconciledD
 }
 
 function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
-  const buckets = Object.entries(record.documents ?? {}) as [string, DocumentBinding][];
+  const buckets = Object.entries(record.documents ?? {});
   return (
     <li
       className="rounded border border-tcip-border p-3"

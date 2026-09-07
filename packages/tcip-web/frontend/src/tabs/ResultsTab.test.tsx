@@ -1231,7 +1231,7 @@ describe("ResultsTab delivery events (read-only)", () => {
         producing_experiment_id: "exp-1",
         checkpoint_sha256: "abc",
         record_digest: "digest-1",
-        note: null,
+        note: "",
       },
       "C:/data/predictions/baseline/2026-01-08": {
         ok: false,
