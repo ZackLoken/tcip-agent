@@ -59,12 +59,11 @@ def _manifest_fields(manifest: dict) -> dict:
     (a live sweep's row, read from the manifest under its own launch root), so a sweep reads
     the same fields whichever way it is listed.
 
-    ``base_config`` plus a readable ``split_draws`` (:func:`_invalid_split_draws_field`) plus no
-    caller-supplied ``data.split.seed`` axis at one draw (:func:`training_tools.caller_split_seed_refusal`)
-    is the relaunchable marker, the same three conditions :func:`relaunch_sweep` checks before
-    starting the worker, in the same order, so a relaunch is denied whatever a fresh launch
-    would already refuse. Any failure among the three is reported with a reason rather than a
-    reconstructed config. ``cancel_requested`` is the manifest's own field, set by
+    ``relaunchable`` and ``reason`` are :func:`_relaunch_refusal`'s own absence and presence: the
+    same function :func:`relaunch_sweep` calls for its own 409, so the marker and the route can
+    never name different conditions, or the same conditions in a different order, for the same
+    manifest. Any failure among them is reported with a reason rather than a reconstructed
+    config. ``cancel_requested`` is the manifest's own field, set by
     ``cancel_hyperparameter_search`` and never derived from a side file this route cannot see across roots.
     ``relaunched_from`` projects as ``None`` for a manifest predating the field, the same as
     for one that genuinely was not a relaunch: a relaunch of an older sweep must still work
@@ -93,22 +92,13 @@ def _manifest_fields(manifest: dict) -> dict:
             "relaunchable": False, "reason": None, "cancel_requested": False,
             "relaunched_from": None, "split_draws": None, "redraws_within_manifest": False,
         }
-    from tcip_mcp.tools.training_tools import caller_split_seed_refusal, coerce_split_draws
+    from tcip_mcp.tools.training_tools import coerce_split_draws
 
     param_space = manifest.get("param_space")
     if not isinstance(param_space, dict):
         param_space = {}
-    relaunchable = "base_config" in manifest
-    reason = None if relaunchable else "this sweep's record holds no base config"
-    if relaunchable:
-        if _invalid_split_draws_field(manifest):
-            relaunchable = False
-            reason = _INVALID_SPLIT_DRAWS_REASON
-        else:
-            seed_axis_refusal = caller_split_seed_refusal(param_space, manifest.get("split_draws"))
-            if seed_axis_refusal is not None:
-                relaunchable = False
-                reason = seed_axis_refusal.reason
+    reason = _relaunch_refusal(manifest)
+    relaunchable = reason is None
     base_config = manifest.get("base_config") or {}
     base_split = (base_config.get("data") or {}).get("split") or {}
     return {
@@ -409,9 +399,9 @@ def _missing_relaunch_fields(manifest: dict) -> list[str]:
 
 
 _INVALID_SPLIT_DRAWS_REASON = "this sweep's record's split_draws is not a draw count"
-"""The one text naming :func:`_invalid_split_draws_field`'s refusal, composed by both the
-relaunchable marker (:func:`_manifest_fields`) and the relaunch route's 409
-(:func:`relaunch_sweep`), so the two surfaces refuse a manifest with this field the same words."""
+"""The one text naming :func:`_invalid_split_draws_field`'s refusal, composed with the
+missing-fields text's own ": cannot relaunch" suffix by :func:`_relaunch_refusal`, so the two
+siblings read alike wherever the relaunchable marker and the relaunch route's 409 surface either."""
 
 
 def _invalid_split_draws_field(manifest: dict) -> bool:
@@ -426,6 +416,32 @@ def _invalid_split_draws_field(manifest: dict) -> bool:
     if "split_draws" not in manifest:
         return False
     return coerce_split_draws(manifest["split_draws"]) is None
+
+
+def _relaunch_refusal(manifest: dict) -> str | None:
+    """The 409 text for the first of a relaunch's own conditions ``manifest`` fails, checked in
+    this order: a missing ``base_config``, a relaunch field :func:`_missing_relaunch_fields`
+    names absent, an unreadable ``split_draws`` (:func:`_invalid_split_draws_field`), and a
+    caller-supplied ``data.split.seed`` axis at one draw
+    (:func:`training_tools.caller_split_seed_refusal`); ``None`` when every condition passes.
+    Shared by :func:`relaunch_sweep`, whose 409 detail is exactly this text, and
+    :func:`_manifest_fields`, whose ``relaunchable``/``reason`` pair is this function's own
+    absence and presence, so the marker and the route refuse a manifest the same way for the
+    same reason.
+    """
+    from tcip_mcp.tools.training_tools import caller_split_seed_refusal
+
+    if "base_config" not in manifest:
+        return "this sweep's record holds no base config"
+    missing = _missing_relaunch_fields(manifest)
+    if missing:
+        return f"this sweep's record is missing {missing}: cannot relaunch"
+    if _invalid_split_draws_field(manifest):
+        return f"{_INVALID_SPLIT_DRAWS_REASON}: cannot relaunch"
+    seed_axis_refusal = caller_split_seed_refusal(manifest.get("param_space"), manifest.get("split_draws"))
+    if seed_axis_refusal is not None:
+        return f"{seed_axis_refusal.reason} {seed_axis_refusal.remedy}"
+    return None
 
 
 def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
@@ -539,21 +555,14 @@ def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
     (case, say) never disagree on this sweep's manifest.
     Marks the new sweep id as launching, on this request thread, before the worker starts, so
     a cancel that arrives before ``run_hyperparameter_search`` writes its own first manifest still reaches it."""
-    from tcip_mcp.tools.training_tools import caller_split_seed_refusal, hpo_root, mark_sweep_launching
+    from tcip_mcp.tools.training_tools import hpo_root, mark_sweep_launching
 
     manifest = _read_manifest(payload.study_name, root=_sweep_launch_root(payload.study_name))
     if manifest is None:
         raise HTTPException(404, f"sweep not found: {payload.study_name}")
-    if "base_config" not in manifest:
-        raise HTTPException(409, "this sweep's record holds no base config")
-    missing = _missing_relaunch_fields(manifest)
-    if missing:
-        raise HTTPException(409, f"this sweep's record is missing {missing}: cannot relaunch")
-    if _invalid_split_draws_field(manifest):
-        raise HTTPException(409, _INVALID_SPLIT_DRAWS_REASON)
-    seed_axis_refusal = caller_split_seed_refusal(manifest.get("param_space"), manifest.get("split_draws"))
-    if seed_axis_refusal is not None:
-        raise HTTPException(409, f"{seed_axis_refusal.reason} {seed_axis_refusal.remedy}")
+    refusal = _relaunch_refusal(manifest)
+    if refusal is not None:
+        raise HTTPException(409, refusal)
 
     output_dir = str(hpo_root())
     spec = _relaunch_spec(manifest)
