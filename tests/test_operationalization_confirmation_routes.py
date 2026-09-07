@@ -820,7 +820,8 @@ def test_delivery_events_route_lists_a_recorded_event(client: TestClient, tmp_pa
     from tcip_mcp.pipelines.resolution import record_delivery_binding_event
 
     record_delivery_binding_event(
-        "test_door", None, [], {}, measurement_documents=["operating_point"],
+        "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
+        measurement_documents=["operating_point"],
         scale_document=None, acknowledgement=None, trait=STATEMENT_TRAIT,
         delivery_kind=PER_IMAGE_COUNT, project_root=tmp_path,
     )
@@ -923,7 +924,8 @@ def test_delivery_events_route_serves_a_real_plant_mapping_disclosure_with_all_t
         {"captures_unverified": [], "plant_csvs_unverified": []}, dates)
 
     record_delivery_binding_event(
-        "test_door", None, [], {}, measurement_documents=["operating_point"],
+        "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
+        measurement_documents=["operating_point"],
         scale_document=None, acknowledgement=None, trait=STATEMENT_TRAIT,
         delivery_kind="state_crossing_dates", project_root=tmp_path, plant_mapping=disclosure,
     )
