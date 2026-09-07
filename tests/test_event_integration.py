@@ -473,7 +473,7 @@ class TestSharedWebStateDeclarations:
 
 
 class TestTrainingToolOutputSchema:
-    def test_launch_training_returns_the_run_id_its_artifacts_are_nested_under(
+    def test_launch_training_returns_the_experiment_id_its_artifacts_are_nested_under(
         self, tmp_path: Path, monkeypatch,
     ) -> None:
         """The identifier a launch hands back is the run the platform registered, and the
@@ -533,9 +533,9 @@ class TestTrainingToolOutputSchema:
 
         assert "error" not in res, res
         assert res["status"] == "launched"
-        registered = get_run(res["run_id"])
-        assert registered is not None, f"no run registered under {res['run_id']!r}"
-        assert Path(res["output_dir"]) == tmp_path / "runs" / res["run_id"]
+        registered = get_run(res["experiment_id"])
+        assert registered is not None, f"no run registered under {res['experiment_id']!r}"
+        assert Path(res["output_dir"]) == tmp_path / "runs" / res["experiment_id"]
         assert res["pid"] == _NoChild.pid
 
     def test_monitor_training_answers_for_the_run_it_was_asked_about(
@@ -548,14 +548,14 @@ class TestTrainingToolOutputSchema:
         from tcip_mcp.pipelines.training.run_registry import create_run
         from tcip_mcp.tools import training_tools
 
-        early = create_run({"seed": 11}, str(tmp_path / "early"))
+        early = create_run({"seed": 11}, str(tmp_path / "early"), id="event-run-early")
         early.status, early.current_epoch, early.best_metric = "running", 1, 0.81
-        late = create_run({"seed": 12}, str(tmp_path / "late"))
+        late = create_run({"seed": 12}, str(tmp_path / "late"), id="event-run-late")
         late.status, late.current_epoch, late.best_metric = "completed", 9, 0.07
 
-        status = training_tools.monitor_training(late.run_id)
-        assert status["run_id"] == late.run_id
-        assert status["run_id"] != early.run_id
+        status = training_tools.monitor_training(late.id)
+        assert status["experiment_id"] == late.id
+        assert status["experiment_id"] != early.id
         assert status["status"] == "completed"
         assert status["epoch"] == 9
         assert status["best_metric"] == 0.07

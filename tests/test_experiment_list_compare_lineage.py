@@ -9,9 +9,9 @@ def test_a_created_experiment_is_listed_whichever_backend_holds_its_record(
 ):
     """What names an experiment is a status record, not a directory some backend happens to make.
 
-    The listing and the run resolver have to answer over the same set: an experiment the resolver
-    finds and the listing omits is a run the breeder cannot see in the GUI's experiment list while
-    the tools resolve it fine.
+    The listing and a direct lookup by id have to answer over the same set: an experiment
+    findable by its own id but omitted from the listing is a run the breeder cannot see in the
+    GUI's experiment list while the tools reach it fine.
     """
     import tcip_store as ts
     from tcip_store.binding import BACKEND_ENV, bind_default
@@ -20,15 +20,11 @@ def test_a_created_experiment_is_listed_whichever_backend_holds_its_record(
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     backend = bind_default()
     try:
-        from tcip_mcp.experiments import (
-            create_experiment,
-            list_experiments,
-            resolve_experiment_for_run,
-        )
+        from tcip_mcp.experiments import create_experiment, experiment_exists, list_experiments
 
         create_experiment("e1", {"model_source": {"builder": "my_models:fcos_det"}})
 
-        assert resolve_experiment_for_run("e1") == "e1"
+        assert experiment_exists("e1")
         listed = list_experiments()
         assert [e["experiment_id"] for e in listed] == ["e1"]
         assert listed[0]["state"] == "created"
@@ -110,25 +106,24 @@ def test_get_experiment_tool_lineage_view_admits_defaults_refuses_pagination(tmp
 # ── list_experiments MCP tool ──────────────────────────────────────────────
 
 
-def test_list_experiments_tool_carries_run_id_and_has_model_source(tmp_path, monkeypatch):
+def test_list_experiments_tool_carries_has_model_source(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import create_experiment, stamp_run_identity
     from tcip_mcp.tools.experiment_tools import list_experiments
 
-    create_experiment("exp-run", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
-    stamp_run_identity("exp-run", "run-abc", "out_dir", launched_by={"launcher": "process"})
+    create_experiment("exp-run", {"model_source": {"builder": "my_models:fcos_det"}})
+    stamp_run_identity("exp-run", "out_dir", launched_by={"launcher": "process"})
     create_experiment("exp-precreated", {"a": 1})
 
     listed = {e["experiment_id"]: e for e in list_experiments()["experiments"]}
-    assert listed["exp-run"]["run_id"] == "run-abc"
     assert listed["exp-run"]["has_model_source"] is True
-    assert listed["exp-precreated"]["run_id"] is None
     assert listed["exp-precreated"]["has_model_source"] is False
+    assert "run_id" not in listed["exp-run"]
 
 
 def test_list_experiments_launched_only_serves_the_absorbed_runs_view(tmp_path, monkeypatch):
     """launched_only=True switches list_experiments to the view the door it absorbed used to
-    serve: launched runs only, keyed by run_id, in the shape _all_training_runs builds."""
+    serve: launched runs only, keyed by experiment_id, in the shape _all_training_runs builds."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment, update_status
@@ -144,7 +139,7 @@ def test_list_experiments_launched_only_serves_the_absorbed_runs_view(tmp_path, 
 
     launched_view = list_experiments(launched_only=True)
     assert launched_view == {"runs": _all_training_runs(read_progress=True)}
-    by_id = {r["run_id"]: r for r in launched_view["runs"]}
+    by_id = {r["experiment_id"]: r for r in launched_view["runs"]}
     assert "exp-launched-view" in by_id
     assert "exp-not-a-run" not in by_id
 
@@ -335,11 +330,12 @@ def test_compare_experiments_finds_a_refusal_under_the_pinned_root(tmp_path, mon
     root.mkdir()
     monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
 
+    from tcip_store import store
     from tcip_mcp.experiments import (
-        compare_experiments, create_experiment, stamp_run_identity, update_status,
+        compare_experiments, create_experiment, status_key, update_status,
     )
 
-    create_experiment("exp-terminal", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    create_experiment("exp-terminal", {"model_source": {"builder": "my_models:fcos_det"}})
     completed = update_status("exp-terminal", "completed")
     assert completed["state"] == "completed"
     refused = update_status("exp-terminal", "failed")
@@ -348,10 +344,13 @@ def test_compare_experiments_finds_a_refusal_under_the_pinned_root(tmp_path, mon
     other_root = tmp_path / "other_root"
     (other_root / ".tcip").mkdir(parents=True)
     (other_root / ".tcip" / "store.db").write_bytes(b"not a real sqlite database")
-    stamp_run_identity(
-        "exp-terminal", "run-1", str(other_root / ".tcip" / "experiments" / "exp-terminal"),
-        launched_by={"launcher": "process"},
-    )
+    # A completed record refuses stamp_run_identity's own precondition; write output_dir
+    # directly, the field this test needs to point compare_experiments at a second root.
+    key = status_key("exp-terminal")
+    with store.transaction(key) as txn:
+        status = txn.read(key, default={})
+        status["output_dir"] = str(other_root / ".tcip" / "experiments" / "exp-terminal")
+        txn.write(key, status)
 
     result = compare_experiments(["exp-terminal"])
     refusals = result["experiments"][0]["refused_mutations"]

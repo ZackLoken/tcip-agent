@@ -59,7 +59,7 @@ def test_a_pre_envelope_crash_marks_the_run_failed_and_opens_a_training_run_even
     sc.auto_train_val = _boom
     try:
         with pytest.raises(RuntimeError, match="dataset build exploded"):
-            worker.run("run-worker-crash", eid, str(out), "")
+            worker.run(eid, str(out), "")
     finally:
         sc.auto_train_val = original_ref
 
@@ -71,7 +71,6 @@ def test_a_pre_envelope_crash_marks_the_run_failed_and_opens_a_training_run_even
     assert len(events) == 1
     assert events[0]["status"] == "failed"
     assert events[0]["arguments"]["experiment_id"] == eid
-    assert events[0]["arguments"]["run_id"] == "run-worker-crash"
 
 
 def test_a_terminal_lock_refusal_reaching_run_is_left_to_its_own_audit_line(tmp_path):
@@ -97,7 +96,7 @@ def test_a_terminal_lock_refusal_reaching_run_is_left_to_its_own_audit_line(tmp_
     sc.auto_train_val = _already_audited_refusal
     try:
         with pytest.raises(exp.ExperimentTerminal):
-            worker.run("run-worker-terminal", eid, str(out), "")
+            worker.run(eid, str(out), "")
     finally:
         sc.auto_train_val = original_ref
 
@@ -137,7 +136,7 @@ def test_a_terminal_records_refusal_append_failure_still_gets_a_training_run_eve
     sc.auto_train_val = _boom
     try:
         with pytest.raises(RuntimeError, match="dataset build exploded again"):
-            worker.run("run-worker-refusal-append-fails", eid, str(out), "")
+            worker.run(eid, str(out), "")
     finally:
         sc.auto_train_val = original_ref
 
@@ -149,4 +148,3 @@ def test_a_terminal_records_refusal_append_failure_still_gets_a_training_run_eve
     assert len(events) == 1
     assert events[0]["status"] == "failed"
     assert events[0]["arguments"]["experiment_id"] == eid
-    assert events[0]["arguments"]["run_id"] == "run-worker-refusal-append-fails"

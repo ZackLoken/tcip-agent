@@ -27,9 +27,10 @@ def dataset_identity(data_cfg: dict) -> tuple[str | None, str | None]:
 
     A version-refused identity (``tcip_store.SchemaVersionRefused``) is a real, wrong identity a
     delivered number could rest on, never the same fact as not-registered, so it propagates rather
-    than being caught here: this function's own caller already wraps the call in a best-effort
-    ``except Exception`` that logs and continues the run, instead of silently recording
-    ``(None, fp)`` as though the dataset were simply unregistered.
+    than being caught here: ``launch_training`` calls this outside any wrapper and turns the
+    exception into a launch refusal, naming the document and its ceiling, rather than silently
+    recording ``(None, fp)`` as though the dataset were simply unregistered, or training an
+    untracked run against a dataset it cannot verify.
     """
     images_dir = data_cfg.get("images_dir")
     if not images_dir:

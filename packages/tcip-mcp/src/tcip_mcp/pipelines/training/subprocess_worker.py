@@ -4,8 +4,8 @@ an isolated OS process, so a leak/OOM/hang in one run can't take down the launch
 other concurrent run's process. Everything here mirrors what running the same body synchronously
 in-process would do; only the process boundary differs.
 
-Invoked as ``python -m tcip_mcp.pipelines.training.subprocess_worker --run-id ... --experiment-id
-... --output-dir ... --resume-from ...``, never imported for its functions elsewhere, only run as
+Invoked as ``python -m tcip_mcp.pipelines.training.subprocess_worker --experiment-id ...
+--output-dir ... --resume-from ...``, never imported for its functions elsewhere, only run as
 ``__main__``. The bootstrap config is read from the run's own output directory, which is the
 record the launching process wrote it to, so the two processes cannot disagree on where it is.
 """
@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
-    p.add_argument("--run-id", required=True)
     p.add_argument("--experiment-id", required=True)
     p.add_argument("--output-dir", required=True)
     p.add_argument("--resume-from", default="")
@@ -171,7 +170,7 @@ def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dic
     return (subject, attribute, id_map) if id_map else None
 
 
-def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> None:
+def run(experiment_id: str, output_dir: str, resume_from: str) -> None:
     """The training body, identical in substance to running synchronously in-process, just
     executing in this dedicated process instead."""
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
@@ -188,14 +187,14 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
     from tcip_mcp.experiments import ExperimentTerminal
 
     try:
-        ctx = _prepare_run_context(run_id, experiment_id, output_dir, resume_from, store)
+        ctx = _prepare_run_context(experiment_id, output_dir, resume_from, store)
     except ExperimentTerminal:
         # Already audited, and the record already terminal, by the raiser itself.
         raise
     except Exception as exc:
         # No run_training_envelope has opened its own "training_run" audit event yet, so
         # without this the record stays running and the crash goes unaudited.
-        logger.exception("Pre-training setup failed for run %s: %s", run_id, exc)
+        logger.exception("Pre-training setup failed for run %s: %s", experiment_id, exc)
         try:
             from tcip_mcp.audit import record_event
             from tcip_mcp.experiments import update_status
@@ -206,12 +205,11 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
                 update_status(experiment_id, "failed", error=str(exc))
             except Exception:
                 logger.warning("could not mark run %s failed after its own setup crash",
-                               run_id, exc_info=True)
-            record_event("training_run", {"run_id": run_id, "experiment_id": experiment_id},
-                        status="failed")
+                               experiment_id, exc_info=True)
+            record_event("training_run", {"experiment_id": experiment_id}, status="failed")
         except Exception:
             logger.warning("could not reconcile run %s to failed after its own setup crash",
-                           run_id, exc_info=True)
+                           experiment_id, exc_info=True)
         raise
 
     from tcip_mcp.pipelines.training.envelope import run_training_envelope
@@ -219,7 +217,7 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
     run_training_envelope(ctx)
 
 
-def _prepare_run_context(run_id: str, experiment_id: str, output_dir: str, resume_from: str,
+def _prepare_run_context(experiment_id: str, output_dir: str, resume_from: str,
                          store: Any) -> "TrainContext":
     """Build this run's ``TrainContext``: read the launch config, build the datasets and loaders,
     patch the durable experiment record's own provenance, and persist the split manifest.
@@ -240,7 +238,7 @@ def _prepare_run_context(run_id: str, experiment_id: str, output_dir: str, resum
     from tcip_mcp.tools.training_tools import launch_config_key
 
     config = store.read(launch_config_key(output_dir))
-    run_obj = attach_run(run_id, config, output_dir)
+    run_obj = attach_run(experiment_id, config, output_dir)
 
     model_source = config.get(MODEL_SOURCE_KEY, {})
     # setdefault, not get: the geometry stamp below mutates this dict and must land in config.
@@ -315,7 +313,7 @@ def _prepare_run_context(run_id: str, experiment_id: str, output_dir: str, resum
             "No validation loader for %s run %s: best-model selection and early "
             "stopping will fall back to training loss (no val mAP/composite). "
             "Provide a val split (data.val_images_dir) or enable auto_val.",
-            task, run_id,
+            task, experiment_id,
         )
 
     # The dataset identity this run trains on, recomputed here (recompute-on-read is this fact's
@@ -336,7 +334,7 @@ def _prepare_run_context(run_id: str, experiment_id: str, output_dir: str, resum
 
 def main() -> None:
     args = _parse_args()
-    run(args.run_id, args.experiment_id, args.output_dir, args.resume_from)
+    run(args.experiment_id, args.output_dir, args.resume_from)
 
 
 if __name__ == "__main__":

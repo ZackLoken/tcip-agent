@@ -1,103 +1,88 @@
-"""Resolving a run id to the experiment directory that actually produced it.
+"""A custom-named record, launched by one process, monitored/cancelled/streamed by its own id
+from a second process that never held it in its own in-memory registry.
 
-The directory-name shortcuts (an exact match, then the fresh-id relaunch suffix) are guesses;
-the stamped ``status.json["run_id"]`` is the fact. When more than one directory name fits the
-suffix pattern, resolution has to come from the stamp, otherwise a run's epochs, heartbeat and
-reconstructed status are attributed to a different experiment. A run id nothing stamped resolves
-to nothing at all rather than to whichever directory happens to be nearby.
+There is one id: a training run's id is always its experiment id (no record, no run), so a
+second process reaches a record it never launched by that id alone, straight off the status
+record, with no resolver to fall back to and no second, minted id to reconcile against it.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 
-
-def _experiment(experiment_id: str, run_id: str, output_dir: str) -> None:
+def _launch_custom_named_record(experiment_id: str, output_dir: str) -> None:
+    """The exact create_experiment/stamp_run_identity sequence _ensure_experiment drives for a
+    pre-created record, leaving nothing in this process's own in-memory registry: a second
+    process's monitor_training/cancel_training/stream calls below see only the disk record,
+    never a TrainRun for this id."""
     from tcip_mcp.experiments import create_experiment, stamp_run_identity
 
     create_experiment(experiment_id, {"model_source": {"builder": "my_models:bud_det"}})
-    stamp_run_identity(experiment_id, run_id, output_dir, launched_by={"launcher": "process"})
+    stamp_run_identity(experiment_id, output_dir, launched_by={"launcher": "process"})
 
 
-def test_ambiguous_relaunch_suffix_resolves_through_the_stamped_run_id(tmp_path):
-    from tcip_mcp import experiments as exp
-    from tcip_mcp.experiments import resolve_experiment_dir_for_run
+def test_a_custom_named_record_is_monitored_by_its_own_id_with_no_registry_entry(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import log_metrics
+    from tcip_mcp.pipelines.training.run_registry import get_run
+    from tcip_mcp.tools.training_tools import monitor_training
 
-    run_id = "run_20260114_7f3c"
-    decoy = f"alpha_{run_id}"
-    stamped = f"zeta_{run_id}"
-    _experiment(decoy, "run_20251203_11ab", str(tmp_path / "runs" / "alpha"))
-    _experiment(stamped, run_id, str(tmp_path / "runs" / "zeta"))
-
-    # The candidates the ambiguous suffix match actually walks, from the store the resolver
-    # itself reads, not a directory listing the store's own backend need not keep.
-    candidates = exp.experiment_ids_with_status(None)
-    assert sorted(name for name in candidates if name.endswith(f"_{run_id}")) == [decoy, stamped]
-
-    resolved = resolve_experiment_dir_for_run(run_id)
-    assert resolved is not None
-    assert resolved.name == stamped
-
-
-def test_reconstructed_run_attributes_its_epochs_to_the_stamped_experiment(tmp_path):
-    from tcip_mcp.experiments import log_metrics, reconstruct_run_status, update_status
-
-    run_id = "run_20260114_7f3c"
-    decoy = f"alpha_{run_id}"
-    stamped = f"zeta_{run_id}"
-    _experiment(decoy, "run_20251203_11ab", str(tmp_path / "runs" / "alpha"))
-    _experiment(stamped, run_id, str(tmp_path / "runs" / "zeta"))
-
-    update_status(decoy, "running")
-    log_metrics(decoy, 1, {"val_map50": 0.10})
-    log_metrics(decoy, 2, {"val_map50": 0.12})
-
-    update_status(stamped, "running")
-    for epoch, score in ((5, 0.55), (6, 0.61), (7, 0.63)):
-        log_metrics(stamped, epoch, {"val_map50": score})
-
-    result = reconstruct_run_status(run_id)
-    assert result is not None
-    assert result["experiment_id"] == stamped
-    assert result["run_id"] == run_id
-    assert result["current_epoch"] == 7
-    assert result["output_dir"] == str(tmp_path / "runs" / "zeta")
-
-
-def test_reconstructed_run_reports_the_stamped_output_dir_not_the_experiment_dir(tmp_path):
-    """A run's artifact directory is computed separately from its experiment directory and only
-    coincides with it by convention, so a custom-named experiment (pre-created before any run id
-    existed) has to report the directory its launch actually stamped."""
-    from tcip_mcp.experiments import (
-        experiments_dir,
-        log_metrics,
-        reconstruct_run_status,
-        update_status,
-    )
-
-    eid = "exp-001-currant-bud-det"
-    run_id = "run_20260114_9d21"
-    output_dir = tmp_path / "training_runs" / run_id
+    eid = "exp-001-bud-det"
+    output_dir = tmp_path / "runs" / eid
     output_dir.mkdir(parents=True)
-    _experiment(eid, run_id, str(output_dir))
-    update_status(eid, "running")
-    log_metrics(eid, 6, {"val_map50": 0.48})
-    update_status(eid, "completed")
+    _launch_custom_named_record(eid, str(output_dir))
+    log_metrics(eid, 3, {"val_map50": 0.4})
 
-    result = reconstruct_run_status(run_id)
-    assert result is not None
-    assert result["experiment_id"] == eid
-    assert result["status"] == "completed"
-    assert result["current_epoch"] == 6
-    assert Path(result["output_dir"]) != experiments_dir() / eid
+    assert get_run(eid) is None  # the registry this process holds never saw this id
+
+    result = monitor_training(eid)
+    assert result["status"] == "running"
+    assert result["epoch"] == 3
     assert result["output_dir"] == str(output_dir)
 
 
-def test_run_id_no_directory_stamped_resolves_to_nothing(tmp_path):
-    from tcip_mcp.experiments import reconstruct_run_status, resolve_experiment_dir_for_run
+def test_a_custom_named_record_is_cancelled_by_its_own_id_with_no_registry_entry(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.tools.training_tools import cancel_training
 
-    _experiment("exp-002-currant-cluster-det", "run_20260101_aa01", str(tmp_path / "runs" / "a"))
-    _experiment("exp-003-currant-cluster-det", "run_20260102_bb02", str(tmp_path / "runs" / "b"))
+    eid = "exp-002-bud-det"
+    output_dir = tmp_path / "runs" / eid
+    output_dir.mkdir(parents=True)
+    _launch_custom_named_record(eid, str(output_dir))
 
-    assert resolve_experiment_dir_for_run("run_20260113_never") is None
-    assert reconstruct_run_status("run_20260113_never") is None
+    result = cancel_training(eid)
+    assert result["cancel_requested"] is True
+    assert result["experiment_id"] == eid
+    assert (output_dir / ".cancel_requested").is_file()
+
+
+def test_a_custom_named_record_streams_by_its_own_id_with_no_registry_entry(tmp_path, monkeypatch):
+    """The web route's own metrics key resolves straight from the id, exactly like
+    monitor_training/cancel_training above: no resolver, no in-memory entry needed."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_store import read_log
+
+    from tcip_mcp.experiments import log_metrics
+    from tcip_web.routes.training import _metrics_key
+
+    eid = "exp-003-bud-det"
+    output_dir = tmp_path / "runs" / eid
+    output_dir.mkdir(parents=True)
+    _launch_custom_named_record(eid, str(output_dir))
+    log_metrics(eid, 1, {"val_map50": 0.2})
+
+    key = _metrics_key(str(tmp_path), eid)
+    rows = [dict(r) for r in read_log(key).records]
+    assert rows and rows[0]["val_map50"] == 0.2
+
+
+def test_an_id_no_record_ever_stamped_resolves_to_nothing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import reconstruct_run_status
+
+    _launch_custom_named_record("exp-004-bud-det", str(tmp_path / "runs" / "a"))
+
+    assert reconstruct_run_status("exp-never-launched") is None

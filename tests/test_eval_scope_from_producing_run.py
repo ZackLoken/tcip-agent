@@ -51,7 +51,7 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _two_subject_dataset(tmp_path / "ds")
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                               "subject": "leaf"}}, str(tmp_path / "runs"))
+                               "subject": "leaf"}}, str(tmp_path / "runs"), id="auto-run-28")
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
     registered_checkpoint(Path(run.output_dir), project_root=tmp_path,
                           filename="model_best.pt")
@@ -64,7 +64,7 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
 
-    res = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection")
+    res = evaluate_model(run.id, str(images_dir), str(labels_dir), task="detection")
     assert "error" not in res, res
 
     dataset = captured["ds"]
@@ -85,7 +85,7 @@ def test_a_caller_supplied_subject_still_wins_over_the_runs_own(
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _two_subject_dataset(tmp_path / "ds")
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                               "subject": "leaf"}}, str(tmp_path / "runs"))
+                               "subject": "leaf"}}, str(tmp_path / "runs"), id="auto-run-29")
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
     registered_checkpoint(Path(run.output_dir), project_root=tmp_path,
                           filename="model_best.pt")
@@ -98,7 +98,7 @@ def test_a_caller_supplied_subject_still_wins_over_the_runs_own(
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
 
-    res = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
+    res = evaluate_model(run.id, str(images_dir), str(labels_dir), task="detection",
                          subject="bud")
     assert "error" not in res, res
     assert captured["ds"].subject == "bud"

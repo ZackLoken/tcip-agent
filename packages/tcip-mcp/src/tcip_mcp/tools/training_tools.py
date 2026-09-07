@@ -785,10 +785,13 @@ def launch_training(
     reads as no launcher recorded, same as a record with none.
 
     Args:
-        config: Full training configuration dict with model_source, data, training sections.
-        output_dir: Directory for checkpoints and logs. Empty defaults to the experiment store
-            (``<project>/.tcip/experiments``, the same base the experiment records use); a
-            relative path resolves against the platform state root, never the server process's cwd.
+        config: Full training configuration dict with model_source, data, training sections. An
+            ``experiment_id`` names the record to launch under (created if absent, reused while
+            pristine, forked if it already has history); absent, a fresh id is minted.
+        output_dir: Base directory for checkpoints and logs. Empty defaults to the experiment
+            store (``<project>/.tcip/experiments``, the same base the experiment records use); a
+            relative path resolves against the platform state root, never the server process's
+            cwd. The run's own artifacts land under ``output_dir/<experiment_id>``.
         resume_from: Optional path to a ``checkpoint_epoch_*.pt`` to resume from
             (restores model + optimizer + scheduler + scaler and continues).
         max_wall_clock_seconds: Optional hard timeout. If the training process hasn't exited on its
@@ -802,6 +805,15 @@ def launch_training(
             model can fail twenty steps on noise, so only the contract itself decides ``valid``.
             Default False, since the cost is one the agent elects per launch rather than pays on
             every one.
+
+    No record, no run: everything through the experiment stamp below is one boundary. Before it:
+    preflight, normalization, the model contract, and the dataset identity read (a
+    ``SchemaVersionRefused`` reader-ceiling mismatch refuses the launch by name; an absent,
+    malformed or otherwise-unreadable identity trains untracked, as an unregistered dataset
+    always has). After it: the registry entry, the launch config, the subprocess and TensorBoard.
+    A spawn failure after the stamp leaves a ``running`` record with no process, which reads
+    ``interrupted`` once its heartbeat stales and forks on relaunch, the same as any other
+    process death.
     """
     # The caller's config is stored twice, as the launch config and as the experiment's
     # snapshot, so what it holds is checked before either write.
@@ -837,59 +849,57 @@ def launch_training(
     check_json_value(model_contract_record, path="model_contract")
     config["model_contract"] = model_contract_record
 
-    from tcip_mcp.experiments import experiments_dir
-    from tcip_mcp.pipelines.training.run_registry import create_run
+    from tcip_mcp.experiments import experiments_dir, mint_experiment_id
+    from tcip_mcp.pipelines.training.run_registry import create_run, draw_seed_if_unset
     from tcip_mcp.project_paths import resolve_output_path
 
     # Training artifacts (weights, tensorboard, metrics) live with the project the run belongs
     # to, same as its experiment record; only an absolute output_dir points anywhere else.
-    output_dir = str(resolve_output_path(output_dir) if output_dir else experiments_dir())
+    output_base = str(resolve_output_path(output_dir) if output_dir else experiments_dir())
 
     data_cfg = config.get("data", {})
 
-    # Resolved once, before create_run and _ensure_experiment, so every status write this launch
-    # makes (fresh creation, pristine reuse or a fresh-id conflict) stamps the same declaration.
+    # Resolved once, before the record is written, so every status write this launch makes
+    # (fresh creation, pristine reuse or a fresh-id conflict) stamps the same declaration.
     launched_by = _resolve_launched_by()
 
-    run = create_run(config, output_dir)
-    # Nest each run's artifacts under its run_id. The GUI (and typical callers) pass a
-    # shared base such as ``<project>/.tcip/experiments``; without nesting, sequential
-    # runs write ``model_best.pt`` / TensorBoard events to the *same* flat directory and
-    # clobber each other, violating experiment immutability. Nesting also gives the subprocess
-    # a single directory to write into and the cancel sentinel to live in.
-    run.output_dir = str(Path(output_dir) / run.run_id)
+    from tcip_store import SchemaVersionRefused
 
-    # Auto-create experiment if not already tracked. Experiments are immutable:
-    # reusing an id that already has a run would interleave metrics histories and
-    # overwrite lineage/registry entries, so such relaunches get a fresh id.
-    experiment_id = config.get("experiment_id") or run.run_id
+    from tcip_mcp.pipelines.data.split_construction import dataset_identity
+
+    # Read before any record exists: a version-refused identity refuses the launch by name.
     try:
-        from tcip_mcp.experiments import update_status
-        from tcip_mcp.pipelines.data.split_construction import dataset_identity
-
-        # The dataset identity this run trains on, passed to the immutable lineage record; the
-        # child recomputes it independently for split.json ("recompute-on-read" is its authority).
         ds_id, ds_fp = dataset_identity(data_cfg)
-        experiment_id = _ensure_experiment(
-            experiment_id, config, data_cfg.get("images_dir"), resume_from, run.run_id,
-            output_dir=run.output_dir, launched_by=launched_by, dataset_id=ds_id,
+    except SchemaVersionRefused as exc:
+        return {"error": f"launch_training: dataset identity is unreadable at this reader's "
+                         f"ceiling, refusing to train against it untracked: {exc}"}
+
+    draw_seed_if_unset(config)
+
+    requested = config.get("experiment_id") or mint_experiment_id()
+
+    # The id becomes the run's own artifact directory name: checked by the same rule _trial_name
+    # applies to an HTTP path segment; the store seam's own key rule stays as it is.
+    if PureWindowsPath(requested).name != requested or requested in ("", ".", ".."):
+        return {"error": f"launch_training: experiment_id {requested!r} is not a legal directory "
+                         "name (a path separator, a drive, an empty name or '.'/'..'), and the id "
+                         "becomes the run's own artifact directory."}
+
+    try:
+        experiment_id, run_output_dir = _ensure_experiment(
+            requested, config, data_cfg.get("images_dir"), resume_from,
+            output_base=output_base, launched_by=launched_by, dataset_id=ds_id,
             dataset_fingerprint=ds_fp,
         )
-        # Thread the resolved id into the live config so the child's checkpoints carry it (the
-        # envelope's ctx.save_checkpoint stamps it explicitly).
-        config["experiment_id"] = experiment_id
-        run.experiment_id = experiment_id
-        update_status(experiment_id, "running")
-    except Exception as exc:  # Experiment tracking is best-effort, but failures must be visible.
-        logger.warning("Experiment tracking failed for %s: %s", experiment_id, exc)
-        run.experiment_error = str(exc)
+    except Exception as exc:
+        return {"error": f"launch_training: could not record this run's experiment: {exc}"}
 
-    # The child reads its own bootstrap config from here, independent of whether experiment
-    # tracking above succeeded, a filesystem hiccup in .tcip/experiments degrades tracking (as it
-    # always has) without also preventing the run from training at all. experiment_id is never
-    # read from here (see subprocess_worker.py), only passed as the explicit CLI arg below,
-    # because this file is written before config["experiment_id"] is guaranteed resolved in the
-    # fresh-id-relaunch branch.
+    # Thread the resolved id into the live config so the child's checkpoints carry it.
+    config["experiment_id"] = experiment_id
+
+    run = create_run(config, run_output_dir, id=experiment_id)
+
+    # The child reads its own bootstrap config from here.
     store.replace(launch_config_key(run.output_dir), config)
 
     # Captured once, beside the child's environment snapshot: the watchdog below writes about
@@ -902,7 +912,6 @@ def launch_training(
     proc = subprocess.Popen(
         [
             sys.executable, "-m", "tcip_mcp.pipelines.training.subprocess_worker",
-            "--run-id", run.run_id,
             "--experiment-id", experiment_id,
             "--output-dir", run.output_dir,
             "--resume-from", resume_from,
@@ -914,17 +923,16 @@ def launch_training(
     if max_wall_clock_seconds is not None:
         _watch_wall_clock(proc, run, experiment_id, max_wall_clock_seconds, root=launch_root)
 
-    # Launch TensorBoard for live monitoring
+    # Keyed by its own log directory (the manager's default), never by the record id.
     tb_info = {}
     try:
         from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
         tb_dir = str(Path(run.output_dir) / "tensorboard")
-        tb_info = launch_tensorboard(tb_dir, run_id=run.run_id)
+        tb_info = launch_tensorboard(tb_dir)
     except Exception:
         pass  # TensorBoard launch is best-effort
 
     return {
-        "run_id": run.run_id,
         "experiment_id": experiment_id,
         "status": "launched",
         "output_dir": run.output_dir,
@@ -1004,18 +1012,22 @@ def _watch_wall_clock(proc: subprocess.Popen, run: Any, experiment_id: str,
 
 @mcp.tool()
 @audited
-def monitor_training(run_id: str | None = None, sweep_id: str | None = None) -> dict:
+def monitor_training(experiment_id: str | None = None, sweep_id: str | None = None) -> dict:
     """Check the status of a training run, or of a hyperparameter sweep.
 
-    Exactly one of ``run_id`` and ``sweep_id`` names what to check; both or neither refuses by
-    name. The two return different shapes.
+    Exactly one of ``experiment_id`` and ``sweep_id`` names what to check; both or neither
+    refuses by name. The two return different shapes.
 
-    ``run_id``: reads the run's own status/metrics from disk whenever its training body runs in
-    a subprocess, the in-memory record for a subprocess-delegated run is a launch-time
+    ``experiment_id``: reads the run's own status/metrics from disk whenever its training body
+    runs in a subprocess, the in-memory record for a subprocess-delegated run is a launch-time
     placeholder only, since the subprocess mutates its own separate copy in its own process
     memory, or when this process never held the run in memory at all (a different process
-    launched it). Returns ``{"run_id", "status", "epoch", "best_metric", "output_dir", "error",
-    "tensorboard_url"}``.
+    launched it, or it was pre-created and launched by its own custom id from elsewhere). Returns
+    ``{"experiment_id", "status", "epoch", "best_metric", "output_dir", "error",
+    "tensorboard_url"}``, or ``{"error": "Run not found: ..."}`` for an id no record claims,
+    malformed ids folded to the same answer. An HPO trial is monitored through its sweep
+    (``sweep_id=``) and cancelled with it (``cancel_hyperparameter_search``); it was never listed
+    by id, so no documented route is lost here.
 
     ``sweep_id``: reads the sweep's own manifest and trial directories from disk under this
     process's own pinned platform root, through :func:`read_sweep_from_disk`, the same reader
@@ -1029,13 +1041,14 @@ def monitor_training(run_id: str | None = None, sweep_id: str | None = None) -> 
     manifest exists or ``sweep_id`` would address a record outside the HPO store.
 
     Args:
-        run_id: Training run identifier. Exactly one of ``run_id``/``sweep_id`` is required.
-        sweep_id: Hyperparameter sweep identifier. Exactly one of ``run_id``/``sweep_id``.
+        experiment_id: Experiment id (from launch_training). Exactly one of
+            ``experiment_id``/``sweep_id`` is required.
+        sweep_id: Hyperparameter sweep identifier. Exactly one of ``experiment_id``/``sweep_id``.
     """
     if sweep_id is not None:
-        if run_id is not None:
-            return {"error": "exactly one of run_id or sweep_id is required, got "
-                              f"run_id={run_id!r} sweep_id={sweep_id!r}"}
+        if experiment_id is not None:
+            return {"error": "exactly one of experiment_id or sweep_id is required, got "
+                              f"experiment_id={experiment_id!r} sweep_id={sweep_id!r}"}
         try:
             disk_sweep = read_sweep_from_disk(sweep_id)
         except BadKey:
@@ -1043,20 +1056,20 @@ def monitor_training(run_id: str | None = None, sweep_id: str | None = None) -> 
         if disk_sweep is None:
             return {"error": f"sweep not found: {sweep_id}"}
         return enrich_with_study_result(disk_sweep, sweep_id)
-    if run_id is None:
-        return {"error": "exactly one of run_id or sweep_id is required, got "
-                          "run_id=None sweep_id=None"}
+    if experiment_id is None:
+        return {"error": "exactly one of experiment_id or sweep_id is required, got "
+                          "experiment_id=None sweep_id=None"}
 
     from tcip_mcp.pipelines.training.run_registry import get_run
-    run = get_run(run_id)
+    run = get_run(experiment_id)
 
     result: dict[str, Any] | None = None
     if run is None or run.pid is not None:
         from tcip_mcp.experiments import reconstruct_run_status
-        disk = reconstruct_run_status(run_id, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS)
+        disk = reconstruct_run_status(experiment_id, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS)
         if disk is not None:
             result = {
-                "run_id": disk["run_id"],
+                "experiment_id": experiment_id,
                 "status": disk["status"],
                 "epoch": disk["current_epoch"],
                 "best_metric": disk["best_metric"],
@@ -1066,9 +1079,9 @@ def monitor_training(run_id: str | None = None, sweep_id: str | None = None) -> 
 
     if result is None:
         if run is None:
-            return {"error": f"Run not found: {run_id}"}
+            return {"error": f"Run not found: {experiment_id}"}
         result = {
-            "run_id": run.run_id,
+            "experiment_id": run.id,
             "status": run.status,
             "epoch": run.current_epoch,
             "best_metric": run.best_metric,
@@ -1076,11 +1089,13 @@ def monitor_training(run_id: str | None = None, sweep_id: str | None = None) -> 
             "error": run.error or None,
         }
 
-    # Check for running TensorBoard
+    # A run's own TensorBoard is keyed by its log directory, never by experiment_id.
     tb_url = None
     try:
         from tcip_mcp.pipelines.training.tensorboard_manager import _TB_PROCESSES
-        entry = _TB_PROCESSES.get(run_id)
+        output_dir = result.get("output_dir")
+        tb_key = str((Path(output_dir) / "tensorboard").resolve()) if output_dir else None
+        entry = _TB_PROCESSES.get(tb_key) if tb_key is not None else None
         if entry is not None and entry.proc.poll() is None:
             tb_url = f"http://localhost:{entry.port}"
     except Exception:
@@ -1093,9 +1108,10 @@ def _launched_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
     """Every launched training run this store holds a record for, reconstructed from disk.
 
     A record is a launched run when its config carries ``model_source`` and
-    :func:`~tcip_mcp.experiments.is_launched` says so: a stamped ``run_id``, a state other than
-    ``"created"``, or the ``metrics_logged`` marker, so a launch whose best-effort stamp or status
-    write was lost still lists, and a pre-created experiment that never launched does not; the
+    :func:`~tcip_mcp.experiments.is_launched` says so: a stamped ``output_dir``, a state other
+    than ``"created"``, or the ``metrics_logged`` marker, so a record from before the stamp moved
+    to one transaction, whose separate ``state`` write never landed, still lists, and a
+    pre-created experiment that never launched does not; the
     same predicate :func:`~tcip_mcp.experiments.compare_experiments` consults before deriving a
     heartbeat state at all. Rows come back sorted by
     experiment id (``experiment_ids_with_status``'s own order), each carrying ``external: True``:
@@ -1140,17 +1156,16 @@ def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
     ``launched_only=True``) and :func:`inspect_compute_resources` both build on, so a
     subprocess-delegated run's real status is visible to both and neither reimplements the merge.
 
-    A live in-memory entry (HPO trials excluded) wins by ``run_id`` over its own disk row: a
+    A live in-memory entry (HPO trials excluded) wins by its own id over its own disk row: a
     ``pid``-bearing one takes the disk overlay for ``status``/``heartbeat``/``current_epoch``/
     ``error`` and ``best_metric``/``best_metric_name`` (a subprocess-delegated run mutates its
     own separate copy on disk, so the parent-side in-memory record, ``best_metric`` included, is
     a stale launch-time placeholder past that point); a ``pid``-less one (every synchronous run)
     is reported from its own in-memory record, untouched, with no ``heartbeat`` at all: this
     process running the loop is itself the liveness fact, nothing else to legibilize. Both carry
-    ``external: False`` (a process-locality fact, never who launched the run) and an
-    ``experiment_id``: the row's own resolved field
-    (``TrainRun.experiment_id``, set by ``launch_training`` once ``_ensure_experiment`` resolves
-    it) when it has one, the disk overlay's own id only as a fallback for a row that has none.
+    ``external: False`` (a process-locality fact, never who launched the run) and
+    ``experiment_id``, the row's own id: a training run's own id is always its experiment id (no
+    record, no run), so there is nothing here to resolve or fall back to.
     ``launched_by`` is never carried on ``TrainRun``: a ``pid``-bearing row with a disk overlay
     takes the overlay's own ``launched_by``, already reconstructed through
     ``reconstruct_from_status`` when that overlay's status record was read, rather than reading
@@ -1166,13 +1181,15 @@ def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
 
     live = list_runs()
     disk = _launched_training_runs(read_progress=read_progress)
-    disk_by_run_id = {r["run_id"]: r for r in disk}
+    disk_by_id = {r["experiment_id"]: r for r in disk}
 
     merged: list[dict[str, Any]] = []
     for r in live:
         row = dict(r)
+        experiment_id = row.pop("id")
+        row["experiment_id"] = experiment_id
         row["external"] = False
-        overlay = disk_by_run_id.get(row["run_id"]) if row.get("pid") is not None else None
+        overlay = disk_by_id.get(experiment_id) if row.get("pid") is not None else None
         if overlay is not None:
             row["status"] = overlay["status"]
             row["heartbeat"] = overlay.get("heartbeat")
@@ -1183,16 +1200,13 @@ def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
             if overlay.get("best_metric_name") is not None:
                 row["best_metric"] = overlay["best_metric"]
                 row["best_metric_name"] = overlay["best_metric_name"]
-            if not row.get("experiment_id"):
-                row["experiment_id"] = overlay["experiment_id"]
             row["launched_by"] = overlay["launched_by"]
         else:
-            exp_id = row.get("experiment_id")
-            row["launched_by"] = read_member(status_key(exp_id), {}).get("launched_by") if exp_id else None
+            row["launched_by"] = read_member(status_key(experiment_id), {}).get("launched_by")
         merged.append(row)
 
-    live_run_ids = {r["run_id"] for r in live}
-    disk_only = [r for r in disk if r["run_id"] not in live_run_ids]
+    live_ids = {r["id"] for r in live}
+    disk_only = [r for r in disk if r["experiment_id"] not in live_ids]
     return merged + disk_only
 
 
@@ -1429,7 +1443,7 @@ def list_split_choices(experiment_id: str) -> dict:
 
 @mcp.tool()
 @audited
-def cancel_training(run_id: str) -> dict:
+def cancel_training(experiment_id: str) -> dict:
     """Request graceful cancellation of a running training run.
 
     The trainer stops at the next batch/epoch boundary, still saves ``model_final.pt``
@@ -1440,22 +1454,21 @@ def cancel_training(run_id: str) -> dict:
     at the same boundary) ends 'failed' instead, with no ``model_final.pt``.
 
     Args:
-        run_id: Training run identifier (from launch_training).
+        experiment_id: Experiment id (from launch_training).
     """
     from tcip_mcp.pipelines.training.run_registry import cancel_run, get_run
-    if not cancel_run(run_id):
-        return {"error": f"Run not found: {run_id}"}
-    run = get_run(run_id)
+    if not cancel_run(experiment_id):
+        return {"error": f"Run not found: {experiment_id}"}
+    run = get_run(experiment_id)
     if run is not None:
         status = run.status
     else:
-        # Cancelled via the disk fallback, this process never held the run locally, so
-        # there's no in-memory status to read; reflect the same disk record cancel_run itself
-        # resolved to write the sentinel, if it's still discoverable.
+        # Cancelled via the disk fallback: no in-memory status, so reflect the disk record
+        # cancel_run itself resolved to write the sentinel, if it's still discoverable.
         from tcip_mcp.experiments import reconstruct_run_status
-        disk = reconstruct_run_status(run_id, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS)
+        disk = reconstruct_run_status(experiment_id, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS)
         status = disk["status"] if disk is not None else "running"
-    return {"run_id": run_id, "status": status, "cancel_requested": True}
+    return {"experiment_id": experiment_id, "status": status, "cancel_requested": True}
 
 
 @audited
@@ -2018,7 +2031,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         stamp_effective_data_geometry,
     )
     from tcip_mcp.pipelines.training.collation import task_collate
-    from tcip_mcp.pipelines.training.run_registry import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run, draw_seed_if_unset
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
@@ -2054,7 +2067,10 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
     # Track which top-level keys the trial reads, so an unconsumed swept param is caught by
     # observation, not a whitelist that would forbid a bespoke training_source's own axes.
     tracked_config = _AccessTrackingConfig(merged)
-    run = create_run(tracked_config, trial_dir, origin="hpo_trial")  # kept off the Training tab
+    draw_seed_if_unset(tracked_config)  # marks a swept "seed" consumed, same as any other read
+    # An id no tool takes, unique across concurrent sweeps where a directory basename is not.
+    trial_id = str(Path(trial_dir).resolve())
+    run = create_run(tracked_config, trial_dir, id=trial_id, origin="hpo_trial")  # off the Training tab
 
     # The best value this trial has actually reported, in the resolved direction; call_report is
     # what every reporting path below goes through, so this is the one place that tracks it.
@@ -2084,8 +2100,8 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         # worker regime and batching consumes both.
         sampler = build_sampler(merged.get("sampler", "random"), train_ds,
                                 num_workers=num_workers, batch_size=batch_size)
-        # run.config's seed is create_run-resolved (auto-drawn if base_config left it unset),
-        # read it off run.config, not merged, so the loader is seeded with the value actually used.
+        # run.config's seed is draw_seed_if_unset-resolved; read off run.config, not merged, so
+        # the loader is seeded with the value actually used.
         loader_kwargs = seeded_loader_kwargs(run.config.get("seed"), num_workers=num_workers)
         train_loader = DataLoader(
             train_ds, batch_size=batch_size, shuffle=(sampler is None),
@@ -2129,8 +2145,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
             # trial_params is the sampled point itself, the only record of which axes this
             # sweep actually varied (the merged config cannot say that).
             trial_path = Path(trial_dir)
-            # merged never gets create_run's drawn/pinned seed (tracked_config is a separate
-            # dict); read it back the same way create_run/train() resolve it.
+            # merged never gets draw_seed_if_unset's drawn seed (tracked_config is separate).
             seed = run.config.get("seed", run.config.get("training", {}).get("seed"))
             store.replace(trial_config_key(trial_path.parent, trial_path.name),
                           {**merged, "trial_params": dict(config),
@@ -2492,7 +2507,7 @@ def run_hyperparameter_search(
     if tb_logdir and auto_tensorboard:
         try:
             from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
-            tb_info = launch_tensorboard(tb_logdir, run_id=f"hpo_{study_name}")
+            tb_info = launch_tensorboard(tb_logdir, key=f"hpo_{study_name}")
         except Exception:
             pass
 
@@ -3081,42 +3096,39 @@ def _preflight_points(param_space: dict) -> list[tuple[str, dict]]:
 
 
 def _ensure_experiment(
-    experiment_id: str, config: dict, data_source, resume_from: str, run_id: str,
-    *, output_dir: str, launched_by: dict[str, Any], dataset_id: str | None = None,
+    experiment_id: str, config: dict, data_source, resume_from: str,
+    *, output_base: str, launched_by: dict[str, Any], dataset_id: str | None = None,
     dataset_fingerprint: str | None = None,
-) -> str:
+) -> tuple[str, str]:
     """Create or attach the experiment for a run, enforcing experiment immutability.
 
-    Returns the experiment id actually used. An existing id may be reused only when the experiment
-    is pristine (agent pre-created it: state 'created', no metrics), in which case its
-    ``config.json`` (written before tiling/seed resolution) is refreshed with the config this run
-    is actually launching. Anything else, including a ``resume_from`` that targets
-    an id which already has recorded history, mints a fresh ``<id>_<run_id>`` (with the old id as
-    parent lineage) so the prior run's status, metrics, lineage, and registry entry stay intact
-    (resuming into a non-pristine id without this would silently reuse it, discarding the
-    resumed run's own metrics/lineage writes behind the terminal-state lock and letting the model
-    registry replace the original's entry by name with no record of what was superseded).
+    Returns ``(experiment_id, output_dir)``: the id actually used, and its directory
+    (``output_base / experiment_id``, computed here from the id each branch resolves, so a fork's
+    own directory is stamped and the shared base never is). An existing id may be reused only
+    when the experiment is pristine (agent pre-created it: state 'created', no metrics), in which
+    case its ``config.json`` (written before tiling/seed resolution) is refreshed with the config
+    this run is actually launching. Anything else, including a ``resume_from`` that targets an id
+    which already has recorded history, mints a fresh ``<id>_<minted>`` (with the old id as parent
+    lineage) so the prior run's status, metrics, lineage, and registry entry stay intact.
 
-    Every branch below stamps ``run_id``/``output_dir``/``launched_by`` into the resolved
-    experiment's ``status.json`` before returning, unconditionally, once, regardless of which
-    branch resolved the id, so a different process can later discover this run's real artifact
-    directory from ``experiment_id`` alone (``resolve_experiment_dir_for_run``/
-    ``reconstruct_run_status``/the disk-based ``cancel_run`` fallback all depend on this).
-    Deliberately not a ``create_experiment`` param: that would only cover the fresh-creation
-    branch and silently miss the pristine-reuse branch, which never otherwise touches
-    ``status.json`` at all. ``launched_by`` is resolved once by ``launch_training``, before this
-    call, so every branch below stamps the identical declaration.
+    Every branch stamps this experiment through :func:`~tcip_mcp.experiments.stamp_run_identity`,
+    one compare-and-set transaction that moves the record to ``running`` in the same write; a
+    stamp whose precondition fails on the pristine-reuse branch (another launch won the record
+    between the pristine check and this one) falls to the fork branch below, rather than two
+    processes ever training under one id. ``launched_by`` is resolved once by ``launch_training``,
+    before this call, so every branch stamps the identical declaration.
     """
     from tcip_mcp.experiments import (
-        create_experiment, is_pristine, metrics_logged_of, overwrite_config_if_pristine,
-        read_member, stamp_run_identity, status_key,
+        StampPreconditionFailed, create_experiment, is_pristine, metrics_logged_of,
+        overwrite_config_if_pristine, read_member, stamp_run_identity, status_key,
     )
 
+    output_dir = str(Path(output_base) / experiment_id)
     created = create_experiment(experiment_id, config, data_source=data_source,
                                 dataset_id=dataset_id, dataset_fingerprint=dataset_fingerprint)
     if "error" not in created:
-        stamp_run_identity(experiment_id, run_id, output_dir, launched_by=launched_by)
-        return experiment_id
+        stamp_run_identity(experiment_id, output_dir, launched_by=launched_by)
+        return experiment_id, output_dir
 
     # is_pristine is the one implementation of the predicate: only attempt the overwrite when it
     # says pristine, so a non-pristine id mints its fresh id below with no refusal audited.
@@ -3126,10 +3138,15 @@ def _ensure_experiment(
     if is_pristine(state, metrics_logged):
         overwritten = overwrite_config_if_pristine(experiment_id, config)
         if "error" not in overwritten:
-            stamp_run_identity(experiment_id, run_id, output_dir, launched_by=launched_by)
-            return experiment_id
+            try:
+                stamp_run_identity(experiment_id, output_dir, launched_by=launched_by)
+                return experiment_id, output_dir
+            except StampPreconditionFailed:
+                pass  # lost the race for this record between the pristine check and the stamp
 
-    fresh_id = f"{experiment_id}_{run_id}"
+    from tcip_mcp.experiments import mint_experiment_id
+
+    fresh_id = f"{experiment_id}_{mint_experiment_id()}"
     logger.warning(
         "experiment_id %s already has a run; experiments are immutable, tracking "
         "this run as %s instead.", experiment_id, fresh_id,
@@ -3139,8 +3156,9 @@ def _ensure_experiment(
     forked_config = {**config, "experiment_id": fresh_id}
     create_experiment(fresh_id, forked_config, parent_experiment=experiment_id, data_source=data_source,
                       dataset_id=dataset_id, dataset_fingerprint=dataset_fingerprint)
-    stamp_run_identity(fresh_id, run_id, output_dir, launched_by=launched_by)
-    return fresh_id
+    fresh_output_dir = str(Path(output_base) / fresh_id)
+    stamp_run_identity(fresh_id, fresh_output_dir, launched_by=launched_by)
+    return fresh_id, fresh_output_dir
 
 
 def _dataset_source_kwargs(task: str, data_cfg: dict) -> dict:
@@ -3285,7 +3303,7 @@ def _reserve_calibration_feasibility_issues(
 @mcp.tool()
 @audited
 def evaluate_model(
-    run_id_or_ckpt: str,
+    experiment_id_or_ckpt: str,
     images_dir: str,
     labels_dir: str = "",
     task: str = "detection",
@@ -3327,10 +3345,11 @@ def evaluate_model(
         ``run_full_frame_evaluation``'s docstring for the full precedence.
 
     Args:
-        run_id_or_ckpt: A training run id (uses its ``model_best.pt``) or a checkpoint path.
-            Either way the resolved checkpoint must be registered under this process's platform
-            state root (``register_model``, explicit mode for a foreign or bespoke checkpoint) or
-            this door refuses before loading it.
+        experiment_id_or_ckpt: An experiment id this process launched (uses its
+            ``model_best.pt``, resolved through the in-process registry alone) or a checkpoint
+            path. Either way the resolved checkpoint must be registered under this process's
+            platform state root (``register_model``, explicit mode for a foreign or bespoke
+            checkpoint) or this door refuses before loading it.
         images_dir: Images directory for the evaluation split.
         labels_dir: Labels dir (detection/instance_seg), masks dir (semantic_seg), or the GT CSV
             path (classification/ordinal/regression, one row per image stem).
@@ -3398,12 +3417,12 @@ def evaluate_model(
     applied_conf, _applied_nms_iou, _applied_max_dets = applied_operating_point(
         conf_threshold, global_nms_iou, None)
 
-    ckpt = run_id_or_ckpt
+    ckpt = experiment_id_or_ckpt
     run = None
     if not Path(ckpt).is_file():
-        run = get_run(run_id_or_ckpt)
+        run = get_run(experiment_id_or_ckpt)
         if run is None:
-            return {"error": f"Not a checkpoint path or known run id: {run_id_or_ckpt}"}
+            return {"error": f"Not a checkpoint path or known experiment id: {experiment_id_or_ckpt}"}
         ckpt = str(store.blob_path(checkpoint_key(run.output_dir, "model_best")))
     if not Path(ckpt).is_file():
         return {"error": f"Checkpoint not found: {ckpt}"}

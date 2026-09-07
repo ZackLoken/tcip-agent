@@ -22,18 +22,17 @@ def test_relaunch_into_a_cancelled_id_mints_a_fresh_parented_id(tmp_path) -> Non
     update_status("stopped", "cancelled")
     status_before = ts.read(exp.status_key("stopped"))
 
-    eid = _ensure_experiment("stopped", {"optimizer": {"head_lr": 0.05}}, "imgs_v2",
-                             resume_from="", run_id="run_c1", output_dir="out/c1",
-                             launched_by={"launcher": "process"})
+    eid, out_dir = _ensure_experiment("stopped", {"optimizer": {"head_lr": 0.05}}, "imgs_v2",
+                                      resume_from="", output_base="out",
+                                      launched_by={"launcher": "process"})
 
-    assert eid == "stopped_run_c1"
+    assert eid.startswith("stopped_run_") and eid != "stopped"
     assert ts.read(exp.config_key("stopped")) == {"optimizer": {"head_lr": 0.001}}
     assert ts.read(exp.status_key("stopped")) == status_before
 
-    assert ts.read(exp.lineage_key("stopped_run_c1"))["parent_experiment"] == "stopped"
-    fresh_status = ts.read(exp.status_key("stopped_run_c1"))
-    assert fresh_status["run_id"] == "run_c1"
-    assert fresh_status["output_dir"] == "out/c1"
+    assert ts.read(exp.lineage_key(eid))["parent_experiment"] == "stopped"
+    fresh_status = ts.read(exp.status_key(eid))
+    assert fresh_status["output_dir"] == out_dir
 
 
 def test_resuming_from_a_cancelled_runs_checkpoint_does_not_reopen_its_record(tmp_path) -> None:
@@ -50,11 +49,12 @@ def test_resuming_from_a_cancelled_runs_checkpoint_does_not_reopen_its_record(tm
     update_status("stopped_mid", "cancelled")
     metrics_before = list(ts.read_log(exp.metrics_key("stopped_mid")).records)
 
-    eid = _ensure_experiment("stopped_mid", {"seed": 7}, None,
-                             resume_from="out/checkpoint_epoch_2.pt", run_id="run_c2",
-                             output_dir="out/c2", launched_by={"launcher": "process"})
+    eid, _out_dir = _ensure_experiment("stopped_mid", {"seed": 7}, None,
+                                       resume_from="out/checkpoint_epoch_2.pt",
+                                       output_base="out",
+                                       launched_by={"launcher": "process"})
 
-    assert eid == "stopped_mid_run_c2"
+    assert eid.startswith("stopped_mid_run_") and eid != "stopped_mid"
     assert list(ts.read_log(exp.metrics_key("stopped_mid")).records) == metrics_before
-    assert ts.read_log(exp.metrics_key("stopped_mid_run_c2")).records == []
-    assert ts.read(exp.lineage_key("stopped_mid_run_c2"))["parent_experiment"] == "stopped_mid"
+    assert ts.read_log(exp.metrics_key(eid)).records == []
+    assert ts.read(exp.lineage_key(eid))["parent_experiment"] == "stopped_mid"

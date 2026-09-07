@@ -605,11 +605,11 @@ def test_a_config_naming_an_unregistered_trait_still_lists(tmp_path, monkeypatch
     run = create_run(
         {"model_source": {"builder": "x:y", "task": "detection"}, "data": {},
          "training": {"evaluation": {"trait": "no_such_trait_here"}}},
-        str(tmp_path / "out"),
+        str(tmp_path / "out"), id="auto-run-unregistered-trait",
     )
 
     # The registry is process-wide, so the listing may hold runs other tests created.
-    rows = [row for row in list_runs() if row["run_id"] == run.run_id]
+    rows = [row for row in list_runs() if row["id"] == run.id]
     assert len(rows) == 1
     assert rows[0]["best_metric_name"] is None  # train() never ran, so nothing was stamped yet
 
@@ -1360,15 +1360,17 @@ def test_ensure_experiment_mints_fresh_id_instead_of_mutating(tmp_path, monkeypa
     metrics_before = read_metrics("exp1")
 
     # Relaunching with the same experiment_id must not reuse it.
-    eid = _ensure_experiment("exp1", {"a": 2}, "imgs_v2", resume_from="", run_id="run_9_0",
-                             output_dir="out", launched_by={"launcher": "process"})
-    assert eid == "exp1_run_9_0"
+    eid, out_dir = _ensure_experiment("exp1", {"a": 2}, "imgs_v2", resume_from="",
+                                      output_base=str(tmp_path / "out"),
+                                      launched_by={"launcher": "process"})
+    assert eid.startswith("exp1_run_") and eid != "exp1"
+    assert out_dir == str(tmp_path / "out" / eid)
     assert ts.read(status_key("exp1")) == status_before      # untouched
     assert read_metrics("exp1") == metrics_before             # untouched
     assert ts.read(config_key("exp1")) == {"a": 1}
 
     # The fresh experiment exists and points back at the original.
-    lineage = ts.read(lineage_key("exp1_run_9_0"))
+    lineage = ts.read(lineage_key(eid))
     assert lineage["parent_experiment"] == "exp1"
     assert lineage["data_source"] == "imgs_v2"
 
@@ -1385,12 +1387,18 @@ def test_ensure_experiment_attaches_to_precreated(tmp_path, monkeypatch):
 
     # Agent pre-created the experiment (state 'created', no metrics): attach.
     create_experiment("pre", {"a": 1})
-    assert _ensure_experiment("pre", {"a": 1}, None, resume_from="", run_id="r1",
-                              output_dir="out", launched_by={"launcher": "process"}) == "pre"
+    eid, out_dir = _ensure_experiment("pre", {"a": 1}, None, resume_from="",
+                                      output_base=str(tmp_path / "out"),
+                                      launched_by={"launcher": "process"})
+    assert eid == "pre"
+    assert out_dir == str(tmp_path / "out" / "pre")
 
     # A brand-new id is simply created.
-    assert _ensure_experiment("new", {"a": 1}, None, resume_from="", run_id="r3",
-                              output_dir="out", launched_by={"launcher": "process"}) == "new"
+    eid2, out_dir2 = _ensure_experiment("new", {"a": 1}, None, resume_from="",
+                                        output_base=str(tmp_path / "out"),
+                                        launched_by={"launcher": "process"})
+    assert eid2 == "new"
+    assert out_dir2 == str(tmp_path / "out" / "new")
 
 
 def test_ensure_experiment_attaches_to_precreated_and_rewrites_config(tmp_path, monkeypatch):
@@ -1403,8 +1411,10 @@ def test_ensure_experiment_attaches_to_precreated_and_rewrites_config(tmp_path, 
 
     create_experiment("pre", {"a": 1})
     effective_config = {"a": 1, "data": {"tiling": {"tile_size": 512}}, "seed": 99}
-    assert _ensure_experiment("pre", effective_config, None, resume_from="", run_id="r1",
-                              output_dir="out", launched_by={"launcher": "process"}) == "pre"
+    eid, _out_dir = _ensure_experiment("pre", effective_config, None, resume_from="",
+                                       output_base=str(tmp_path / "out"),
+                                       launched_by={"launcher": "process"})
+    assert eid == "pre"
 
     config = ts.read(config_key("pre"))
     assert config == effective_config
@@ -1423,11 +1433,13 @@ def test_ensure_experiment_resume_into_populated_id_mints_fresh_parented_id(tmp_
     create_experiment("res", {"a": 1})
     update_status("res", "running")
     log_metrics("res", 1, {"loss": 0.5})
-    eid = _ensure_experiment("res", {"a": 1}, None, resume_from="ckpt/checkpoint_epoch_5.pt",
-                             run_id="r2", output_dir="out", launched_by={"launcher": "process"})
-    assert eid == "res_r2"
+    eid, _out_dir = _ensure_experiment("res", {"a": 1}, None,
+                                       resume_from="ckpt/checkpoint_epoch_5.pt",
+                                       output_base=str(tmp_path / "out"),
+                                       launched_by={"launcher": "process"})
+    assert eid.startswith("res_run_") and eid != "res"
 
-    lineage = ts.read(lineage_key("res_r2"))
+    lineage = ts.read(lineage_key(eid))
     assert lineage["parent_experiment"] == "res"
 
 
@@ -1439,9 +1451,10 @@ def test_ensure_experiment_resume_into_pristine_id_still_attaches(tmp_path, monk
     from tcip_mcp.tools.training_tools import _ensure_experiment
 
     create_experiment("pre2", {"a": 1})
-    eid = _ensure_experiment("pre2", {"a": 1}, None,
-                             resume_from="ckpt/checkpoint_epoch_5.pt", run_id="r9",
-                             output_dir="out", launched_by={"launcher": "process"})
+    eid, _out_dir = _ensure_experiment("pre2", {"a": 1}, None,
+                                       resume_from="ckpt/checkpoint_epoch_5.pt",
+                                       output_base=str(tmp_path / "out"),
+                                       launched_by={"launcher": "process"})
     assert eid == "pre2"
 
 

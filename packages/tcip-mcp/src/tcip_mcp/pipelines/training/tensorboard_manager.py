@@ -196,7 +196,7 @@ def _stop_all_tracked() -> None:
     stop's outcome instead of leaving the rest of the sweep unrun.
     """
     for key in list(_TB_PROCESSES):
-        stop_tensorboard(run_id=key)
+        stop_tensorboard(key=key)
 
 
 def _register_atexit_once() -> None:
@@ -258,8 +258,13 @@ def _release_output(entry: _Launched) -> None:
         pass
 
 
-def launch_tensorboard(logdir: str, run_id: str | None = None) -> dict:
+def launch_tensorboard(logdir: str, key: str | None = None) -> dict:
     """Launch a TensorBoard process for the given log directory.
+
+    ``key`` is the tracking key this process's children are indexed by, generic since a sweep
+    and a trial each pass their own unnamespaced key while a run passes none and is keyed by its
+    own log directory (the default below), so a caller-chosen record id can never collide with a
+    sweep's or a trial's key.
 
     Returns dict with 'url', 'port', 'pid', 'logdir', 'lifetime_tie', or
     ``{'error': ..., 'output': ...}`` when the process died during startup, so a caller never
@@ -272,7 +277,7 @@ def launch_tensorboard(logdir: str, run_id: str | None = None) -> dict:
     launch still succeeds and ``lifetime_tie`` becomes ``"none: <reason>"`` instead.
     """
     logdir = str(Path(logdir).resolve())
-    key = run_id or logdir
+    key = key or logdir
 
     # Check if already running
     if key in _TB_PROCESSES:
@@ -332,7 +337,7 @@ def launch_tensorboard(logdir: str, run_id: str | None = None) -> dict:
     }
 
 
-def stop_tensorboard(run_id: str | None = None, logdir: str | None = None) -> dict:
+def stop_tensorboard(key: str | None = None, logdir: str | None = None) -> dict:
     """Stop a running TensorBoard process.
 
     Waits up to ``_STOP_WAIT_SECONDS`` for the process to end on its own, then force-kills it
@@ -343,7 +348,7 @@ def stop_tensorboard(run_id: str | None = None, logdir: str | None = None) -> di
     this cannot see at all: a guardian the kernel ended outright leaves its own child alive with
     nothing watching it, and this still reports the guardian's pid stopped.
     """
-    key = run_id or (str(Path(logdir).resolve()) if logdir else None)
+    key = key or (str(Path(logdir).resolve()) if logdir else None)
     if not key or key not in _TB_PROCESSES:
         return {"status": "not_running"}
 

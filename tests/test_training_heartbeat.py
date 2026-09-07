@@ -50,7 +50,7 @@ def test_reconstructed_run_running_vs_interrupted(tmp_path, monkeypatch):
         s["heartbeat"] = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
         txn.write(key, s)
 
-    by_id = {r["run_id"]: r for r in list_experiments(launched_only=True)["runs"]}
+    by_id = {r["experiment_id"]: r for r in list_experiments(launched_only=True)["runs"]}
     assert by_id["live"]["status"] == "running"
     assert by_id["live"]["external"] is True
     assert by_id["dead"]["status"] == "interrupted"
@@ -74,7 +74,7 @@ def test_reconstructed_row_carries_the_heartbeat_instant(tmp_path, monkeypatch):
         s["heartbeat"] = stamped
         txn.write(key, s)
 
-    by_id = {r["run_id"]: r for r in list_experiments(launched_only=True)["runs"]}
+    by_id = {r["experiment_id"]: r for r in list_experiments(launched_only=True)["runs"]}
     assert by_id["beating"]["status"] == "running"
     assert by_id["beating"]["heartbeat"] == stamped
 
@@ -104,7 +104,7 @@ def test_configured_stale_window_agrees_across_run_list_compare_and_status(tmp_p
         s["heartbeat"] = (datetime.now(timezone.utc) - timedelta(seconds=300)).isoformat()
         txn.write(key, s)
 
-    by_id = {r["run_id"]: r for r in list_experiments(launched_only=True)["runs"]}
+    by_id = {r["experiment_id"]: r for r in list_experiments(launched_only=True)["runs"]}
     assert by_id["exp-window"]["status"] == "interrupted"
 
     cmp = compare_tool(["exp-window"])

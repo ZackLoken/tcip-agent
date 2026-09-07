@@ -29,9 +29,58 @@ def test_stamp_run_identity_requires_launched_by(tmp_path, monkeypatch):
     create_experiment("exp-launcher-required", {"model_source": {"builder": "x:y"}})
 
     with pytest.raises(TypeError):
-        stamp_run_identity("exp-launcher-required", "run-1", "out")  # type: ignore[call-arg]
+        stamp_run_identity("exp-launcher-required", "out")  # type: ignore[call-arg]
 
-    stamp_run_identity("exp-launcher-required", "run-1", "out", launched_by={"launcher": "process"})
+    stamp_run_identity("exp-launcher-required", "out", launched_by={"launcher": "process"})
+
+
+def test_stamp_run_identity_moves_the_record_to_running_in_one_write(tmp_path, monkeypatch):
+    """The stamp is the launch's own transition: output_dir, launched_by, state, heartbeat and
+    started all land in the one compare-and-set write, never a separate update_status call."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import create_experiment, read_member, stamp_run_identity, status_key
+
+    create_experiment("exp-one-write", {"model_source": {"builder": "x:y"}})
+    stamp_run_identity("exp-one-write", "out", launched_by={"launcher": "process"})
+
+    status = read_member(status_key("exp-one-write"), {})
+    assert status["state"] == "running"
+    assert status["output_dir"] == "out"
+    assert status["launched_by"] == {"launcher": "process"}
+    assert status["heartbeat"]
+    assert status["started"]
+
+
+def test_stamp_run_identity_refuses_a_record_already_stamped(tmp_path, monkeypatch):
+    """The precondition: state must be "created" and no output_dir already stamped. A second
+    stamp attempt against the same record (the race two concurrent launches could lose) raises
+    the typed exception the launch branches on, rather than silently overwriting the winner's
+    identity."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import (
+        StampPreconditionFailed, create_experiment, stamp_run_identity,
+    )
+
+    create_experiment("exp-already-stamped", {"model_source": {"builder": "x:y"}})
+    stamp_run_identity("exp-already-stamped", "out-1", launched_by={"launcher": "process"})
+
+    with pytest.raises(StampPreconditionFailed):
+        stamp_run_identity("exp-already-stamped", "out-2", launched_by={"launcher": "process"})
+
+
+def test_stamp_run_identity_refuses_a_record_not_in_the_created_state(tmp_path, monkeypatch):
+    """A record already moved past "created" by some other path (here, update_status) fails the
+    same precondition, whether or not it carries an output_dir."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import (
+        StampPreconditionFailed, create_experiment, stamp_run_identity, update_status,
+    )
+
+    create_experiment("exp-not-created", {"model_source": {"builder": "x:y"}})
+    update_status("exp-not-created", "cancelled")
+
+    with pytest.raises(StampPreconditionFailed):
+        stamp_run_identity("exp-not-created", "out", launched_by={"launcher": "process"})
 
 
 def test_a_record_with_no_stamp_reconstructs_with_launched_by_none(tmp_path, monkeypatch):
@@ -48,10 +97,57 @@ def test_a_record_with_no_stamp_reconstructs_with_launched_by_none(tmp_path, mon
     update_status("exp-pre-field", "running")
 
     status = read_member(status_key("exp-pre-field"), {})
-    assert is_launched(status)  # a launched run by state alone, with no run_id ever stamped
+    assert is_launched(status)  # a launched run by state alone, with no output_dir ever stamped
 
     row = reconstruct_from_status("exp-pre-field", status, stale_seconds=600.0, read_progress=False)
     assert row["launched_by"] is None
+
+
+def test_is_launched_true_for_a_record_stamped_with_output_dir_alone(tmp_path, monkeypatch):
+    """A record from before the stamp moved to one transaction: output_dir landed but the
+    separate state write that used to follow it never reached "running". Still launched."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import create_experiment, is_launched, status_key
+    from tcip_store import store
+
+    create_experiment("exp-output-dir-alone", {"model_source": {"builder": "x:y"}})
+    key = status_key("exp-output-dir-alone")
+    with store.transaction(key) as txn:
+        status = txn.read(key, default={})
+        status["output_dir"] = "out"
+        txn.write(key, status)
+
+    status = store.read(key, default={})
+    assert status["state"] == "created"
+    assert is_launched(status)
+
+
+def test_is_launched_true_for_an_old_record_carrying_both_output_dir_and_run_id(tmp_path, monkeypatch):
+    """A record from before this change: the old stamp wrote run_id alongside output_dir. Still
+    reads as launched, through output_dir alone; the stale run_id is never consulted."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import create_experiment, is_launched, status_key
+    from tcip_store import store
+
+    create_experiment("exp-old-both-fields", {"model_source": {"builder": "x:y"}})
+    key = status_key("exp-old-both-fields")
+    with store.transaction(key) as txn:
+        status = txn.read(key, default={})
+        status["run_id"] = "run_123_abcdef"
+        status["output_dir"] = "out"
+        txn.write(key, status)
+
+    status = store.read(key, default={})
+    assert is_launched(status)
+
+
+def test_reconstruct_run_status_on_a_malformed_id_answers_none(tmp_path, monkeypatch):
+    """An id no record could ever carry (a path separator here) folds to None, the same answer
+    an absent record gets, never a raised BadKey reaching the caller."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import reconstruct_run_status
+
+    assert reconstruct_run_status("not/a/single/name") is None
 
 
 def _fake_popen(monkeypatch: pytest.MonkeyPatch, captured: list[list[str]]) -> None:
@@ -215,16 +311,15 @@ def test_all_training_runs_reads_launched_by_from_the_record_not_the_live_row(tm
     from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.training_tools import _all_training_runs
 
-    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"))
-    run.experiment_id = "exp-stamp-write-failed"
-
     # create_experiment/update_status alone, never stamp_run_identity: the shape a failed or
     # dropped stamp leaves behind.
     create_experiment("exp-stamp-write-failed", {"model_source": {"builder": "x:y"}})
     update_status("exp-stamp-write-failed", "running")
+    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"),
+                     id="exp-stamp-write-failed")
 
     rows = _all_training_runs(read_progress=False)
-    row = next(r for r in rows if r["run_id"] == run.run_id)
+    row = next(r for r in rows if r["experiment_id"] == run.id)
     assert row["launched_by"] is None
 
 

@@ -86,7 +86,7 @@ def _stop_leaked_tensorboards():
     if tb is None:
         return
     for entry in tb.list_tensorboard():
-        tb.stop_tensorboard(run_id=entry["key"])
+        tb.stop_tensorboard(key=entry["key"])
 
 
 @pytest.fixture(autouse=True)

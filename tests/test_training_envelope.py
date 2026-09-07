@@ -49,7 +49,7 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
     }
     create_experiment("expE", config, data_source="imgs")
     update_status("expE", "running")
-    run = create_run(config, str(out))
+    run = create_run(config, str(out), id="auto-run-78")
 
     ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
                        experiment_id="expE")
@@ -69,7 +69,7 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
     # Body is bracketed on the append-only audit log (open running + close completed).
     events = _audit_events(tmp_path)
     assert [e["status"] for e in events] == ["running", "completed"]
-    assert events[-1]["arguments"]["run_id"] == run.run_id
+    assert events[-1]["arguments"]["experiment_id"] == "expE"
 
     # Env/source provenance snapshotted into the immutable experiment dir.
     env = ts.read(env_key("expE"))
@@ -122,7 +122,7 @@ def test_envelope_default_tag_with_no_override_fails_run_and_registers_nothing(t
     }
     create_experiment("expF", config, data_source="imgs")
     update_status("expF", "running")
-    run = create_run(config, str(out))
+    run = create_run(config, str(out), id="auto-run-79")
 
     ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
                        experiment_id="expF")
@@ -157,7 +157,7 @@ def test_envelope_declared_deliverable_never_written_fails_run_and_registers_not
     }
     create_experiment("expUnwritten", config, data_source="imgs")
     update_status("expUnwritten", "running")
-    run = create_run(config, str(out))
+    run = create_run(config, str(out), id="auto-run-80")
 
     ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
                        experiment_id="expUnwritten")
@@ -188,7 +188,7 @@ def test_envelope_explicit_set_final_weights_overrides_convention(tmp_path):
     }
     create_experiment("expG", config, data_source="imgs")
     update_status("expG", "running")
-    run = create_run(config, str(out))
+    run = create_run(config, str(out), id="auto-run-81")
 
     ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
                        experiment_id="expG")
@@ -240,14 +240,15 @@ def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
         "early_stopping": {"enabled": False}, "checkpoint_every_n_epochs": 1,
     }
     # Generate the resumable checkpoint directly (not through the envelope).
-    train(gt_create_run(dict(cfg), str(tmp_path / "out")), build_loader(), task="classification")
+    train(gt_create_run(dict(cfg), str(tmp_path / "out"), id="auto-run-resume-provenance-1"),
+         build_loader(), task="classification")
     ckpt = tmp_path / "out" / "checkpoint_epoch_1.pt"
     assert ckpt.is_file()
 
     # Resume through the full audited envelope: env.json must reflect the real outcome.
     create_experiment("expH", cfg)
     update_status("expH", "running")
-    run = gt_create_run(dict(cfg), str(tmp_path / "out2"))
+    run = gt_create_run(dict(cfg), str(tmp_path / "out2"), id="auto-run-resume-provenance-2")
     ctx = TrainContext(run=run, train_loader=build_loader(), val_loader=None, task="classification",
                        experiment_id="expH", resume_from=str(ckpt))
     run_training_envelope(ctx)
@@ -264,7 +265,7 @@ def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------
 
 def test_report_objective_calls_trial_report_when_attached(tmp_path):
-    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"))
+    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"), id="auto-run-82")
     reported: list = []
     ctx = TrainContext(run=run, train_loader=None, trial_report=reported.append)
     ctx.report_objective(3.14)
@@ -272,7 +273,7 @@ def test_report_objective_calls_trial_report_when_attached(tmp_path):
 
 
 def test_report_objective_is_noop_outside_hpo(tmp_path):
-    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"))
+    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"), id="auto-run-83")
     ctx = TrainContext(run=run, train_loader=None)  # no trial_report, not an HPO trial
     ctx.report_objective(3.14)  # must not raise
 
@@ -298,7 +299,7 @@ def test_envelope_default_path_runs_default_train_and_audits(tmp_path, monkeypat
     config = {"model_source": {"builder": "x:y", "task": "classification"}, "device": "cpu"}
     create_experiment("expD", config)
     update_status("expD", "running")
-    run = create_run(config, str(out))
+    run = create_run(config, str(out), id="auto-run-84")
 
     ctx = TrainContext(run=run, train_loader=None, experiment_id="expD", task="classification")
     run_training_envelope(ctx)
