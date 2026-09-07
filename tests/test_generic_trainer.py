@@ -19,7 +19,7 @@ def test_mint_experiment_id_unique_within_one_second():
     from tcip_mcp.experiments import mint_experiment_id
 
     ids = {mint_experiment_id() for _ in range(50)}
-    assert len(ids) == 50  # len(_RUNS)-suffixed ids would collide here
+    assert len(ids) == 50  # the uuid suffix, not a counter, keeps same-second calls from colliding
 
 
 def test_mint_experiment_id_unique_across_threads():
