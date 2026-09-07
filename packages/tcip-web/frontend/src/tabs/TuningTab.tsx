@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { StructuredRefusalError } from "@/api/http";
-import { tuningApi, type Sweep, type SweepDetail, type SweepTrial } from "@/api/tuning";
+import {
+  sweepDrawsOf,
+  tuningApi,
+  type Sweep,
+  type SweepDetail,
+  type SweepTrial,
+} from "@/api/tuning";
 import type { TensorboardLaunch } from "@/api/training";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { EmbeddedTool } from "@/components/EmbeddedTool";
@@ -249,6 +255,7 @@ export function TuningTab() {
   }, [trialMetrics]);
 
   const selectedTrial = trials.find((t) => t.trial_id === selectedTrialId) ?? null;
+  const sweepDraws = useMemo(() => sweepDrawsOf(detail?.result), [detail?.result]);
 
   function toggleSweep(sweepId: string) {
     setSelectedTrialId(null);
@@ -468,6 +475,65 @@ export function TuningTab() {
                   {detail.error ? (
                     <div className="text-[11px] text-tcip-fp">{detail.error}</div>
                   ) : null}
+                  {sweepDraws && (
+                    <div className="text-[11px]">
+                      <div className="tcip-heading mb-1">The spread across draws</div>
+                      {sweepDraws.best ? (
+                        <div className="text-tcip-fg mb-1">
+                          Best: mean {cellText(sweepDraws.best.mean)}, std{" "}
+                          {cellText(sweepDraws.best.std)}, min {cellText(sweepDraws.best.min)}, max{" "}
+                          {cellText(sweepDraws.best.max)}, seeds{" "}
+                          {sweepDraws.best.seeds_complete.map(cellText).join(", ")}
+                        </div>
+                      ) : (
+                        <div className="text-tcip-muted mb-1">
+                          {sweepDraws.bestState ?? "no best recorded"}
+                        </div>
+                      )}
+                      {sweepDraws.groups.length > 0 && (
+                        <div className="overflow-auto">
+                          <table className="w-full text-left">
+                            <thead>
+                              <tr className="text-tcip-muted">
+                                <th className="pr-2">point</th>
+                                <th className="pr-2">draws</th>
+                                <th className="pr-2">rows</th>
+                                <th className="pr-2">mean</th>
+                                <th className="pr-2">std</th>
+                                <th className="pr-2">min</th>
+                                <th className="pr-2">max</th>
+                                <th>eligible</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sweepDraws.groups.map((g, i) => (
+                                <tr key={i}>
+                                  <td className="pr-2 font-mono">
+                                    {g.point
+                                      ? Object.entries(g.point)
+                                          .map(([k, v]) => `${k}=${cellText(v)}`)
+                                          .join(", ")
+                                      : "never answered"}
+                                  </td>
+                                  <td className="pr-2">
+                                    {g.block.seeds_complete.length} of {sweepDraws.splitDraws}
+                                  </td>
+                                  <td className="pr-2">
+                                    {cellText(g.block.n_complete)} of {cellText(g.block.n)}
+                                  </td>
+                                  <td className="pr-2">{cellText(g.block.mean)}</td>
+                                  <td className="pr-2">{cellText(g.block.std)}</td>
+                                  <td className="pr-2">{cellText(g.block.min)}</td>
+                                  <td className="pr-2">{cellText(g.block.max)}</td>
+                                  <td>{g.eligible ? "yes" : "no"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <pre className="max-h-[24vh] text-[11px] font-mono p-3 tcip-panel overflow-auto">
                     {JSON.stringify(detail.result, null, 2)}
                   </pre>
