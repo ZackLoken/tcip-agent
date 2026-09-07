@@ -871,12 +871,59 @@ def test_preflight_points_covers_every_categorical_choice_and_both_numeric_bound
 # The trial runs directly (no Ray) so the training machinery can be stubbed.
 # --------------------------------------------------------------------------
 
+# _AccessTrackingConfig's own wrapper is installed back onto the key it was read from, so the
+# tracker holds a live view of the tree, not a copy of it.
+
+def test_access_tracking_config_write_through_a_nested_read_is_visible_on_the_root():
+    """A write through a value __getitem__/get returned for a nested key lands on the same
+    tree the root holds, not a throwaway copy."""
+    from tcip_mcp.tools.training_tools import _AccessTrackingConfig
+
+    config = _AccessTrackingConfig({"model_source": {"builder_kwargs": {"width": 4}}})
+    config["model_source"]["builder_kwargs"]["width"] = 8
+
+    assert config["model_source"]["builder_kwargs"]["width"] == 8
+
+
+def test_access_tracking_config_setdefault_on_a_nested_block_records_the_dotted_key():
+    """setdefault on a nested block records its own dotted key and answers the installed
+    wrapper, so a later leaf read off it is recorded under the leaf's own dotted path."""
+    from tcip_mcp.tools.training_tools import _AccessTrackingConfig
+
+    config = _AccessTrackingConfig({})
+    data_cfg = config.setdefault("data", {})
+    split_cfg = data_cfg.setdefault("split", {})
+    split_cfg.get("seed", 42)
+
+    assert "data" in config.accessed
+    assert "data.split" in config.accessed
+    assert "data.split.seed" in config.accessed
+
+
+def test_access_tracking_config_a_second_read_of_the_same_key_answers_the_same_object():
+    """The wrapper _wrap builds for a nested key is installed back onto the root, so a second
+    read of that key answers the identical object, never a freshly rebuilt copy."""
+    from tcip_mcp.tools.training_tools import _AccessTrackingConfig
+
+    config = _AccessTrackingConfig({"model_source": {"task": "detection"}})
+    first = config["model_source"]
+    second = config["model_source"]
+
+    assert first is second
+
+
 class _FakeDataset:
     def __len__(self):
         return 4
 
     def __getitem__(self, i):
         return i
+
+
+class _TiledFakeDataset(_FakeDataset):
+    """A stand-in dataset carrying tile geometry, for stamp_effective_data_geometry to record."""
+    tile_size = 224
+    overlap = 0.2
 
 
 def _detection_base() -> dict:
@@ -1087,6 +1134,111 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_trai
     _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=captured)
     _run_hpo_trial({"data.split.seed": 7}, [].append, _detection_base(), str(tmp_path / "trial_0"))
     assert captured["data_cfg"]["split"]["seed"] == 7
+
+
+def _fake_auto_train_val_reading_seed_like_split_construction(task, data_cfg, transforms):
+    """The exact reads split_construction.py's own auto_train_val performs at :682/:692 and
+    :253/:702: setdefault the split block, then get its seed off that block."""
+    split_cfg = data_cfg.setdefault("split", {})
+    split_cfg.get("seed", 42)
+    ds = _TiledFakeDataset()
+    return ds, ds, None
+
+
+def test_run_hpo_trial_dotted_seed_axis_is_marked_consumed_by_a_realistic_split_read(
+    monkeypatch, tmp_path,
+):
+    """data.split.seed (item 8's swept axis) must be marked consumed once a training body reads
+    it the exact way split_construction.py's own auto_train_val does, off the tracked view, not
+    off a plain dict merged never routes any reader through."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+
+    def fake_train(run, train_loader, val_loader, task="detection",
+                   epoch_callback=None, resume_from=""):
+        run.best_metric = 1.0
+        run.status = "completed"
+        return run
+
+    _patch_hpo_trial_machinery(monkeypatch, fake_train)
+    from tcip_mcp.pipelines.data import split_construction as sc
+    monkeypatch.setattr(sc, "auto_train_val", _fake_auto_train_val_reading_seed_like_split_construction)
+
+    trial_dir = tmp_path / "trial_0"
+    _run_hpo_trial({"data.split.seed": 7}, [].append, _detection_base(), str(trial_dir))
+
+    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
+    assert resolved["unconsumed_params"] == []
+
+
+def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_snapshot(
+    monkeypatch, tmp_path,
+):
+    """The tile geometry stamp_effective_data_geometry records off the same tiled dataset a
+    training body's auto_train_val returns must be present in resolved_config.json's own
+    data.tiling block, the record a caller reads back to know what the trial actually trained
+    on."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+
+    def fake_train(run, train_loader, val_loader, task="detection",
+                   epoch_callback=None, resume_from=""):
+        run.best_metric = 1.0
+        run.status = "completed"
+        return run
+
+    _patch_hpo_trial_machinery(monkeypatch, fake_train)
+    from tcip_mcp.pipelines.data import split_construction as sc
+    monkeypatch.setattr(sc, "auto_train_val", _fake_auto_train_val_reading_seed_like_split_construction)
+
+    trial_dir = tmp_path / "trial_0"
+    _run_hpo_trial({"data.split.seed": 7}, [].append, _detection_base(), str(trial_dir))
+
+    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
+    assert resolved["data"]["tiling"]["tile_size"] == 224
+
+
+def test_run_hpo_trial_producer_fed_data_split_seed_reaches_the_real_auto_train_val(
+    monkeypatch, tmp_path,
+):
+    """The producer path: a real one-source tiled dataset through the real, unstubbed
+    auto_train_val, so data.split.seed reaches the exact read split_construction.py performs,
+    and the resolved-config snapshot carries the real spatial_manifest and tiling it wrote."""
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+    from tests.test_training_autoval import _big_single_source
+
+    images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    base = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+                 "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+                 "split": {"val_ratio": 0.25, "test_ratio": 0.1}},
+        "training": {"batch_size": 2},
+    }
+
+    def fake_train(run, train_loader, val_loader, task="detection",
+                   epoch_callback=None, resume_from=""):
+        run.best_metric = 1.0
+        run.status = "completed"
+        return run
+
+    import torch.utils.data as tud
+    from tcip_mcp.pipelines.data import samplers
+    from tcip_mcp.pipelines.training import generic_trainer as gt
+    monkeypatch.setattr(gt, "train", fake_train)
+    monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)
+    monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
+
+    trial_dir = tmp_path / "trial_0"
+    _run_hpo_trial({"data.split.seed": 3}, [].append, base, str(trial_dir))
+
+    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
+    assert "data.split.seed" not in resolved["unconsumed_params"]
+    assert resolved["data"]["split"]["spatial_manifest"]
+    assert resolved["data"]["tiling"]["tile_size"] == 128
 
 
 def test_run_hpo_trial_writes_resolved_config_with_unconsumed_params(monkeypatch, tmp_path):

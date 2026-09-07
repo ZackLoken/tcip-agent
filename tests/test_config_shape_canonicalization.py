@@ -93,18 +93,17 @@ def test_evaluation_section_of_a_plain_dict_returns_the_original_nested_object()
     assert config["evaluation"]["selection_metric"] == "f1"
 
 
-def test_evaluation_section_of_an_access_tracking_config_returns_a_wrapped_copy():
-    """An access-tracking config's own ``get`` wraps a nested read in a freshly constructed
-    ``_AccessTrackingConfig``, a copy of that nested dict's items, never a live view over the
-    original (``_AccessTrackingConfig``'s own stated limitation): a write through the returned
-    block is lost, unlike the plain-dict case above."""
+def test_evaluation_section_of_an_access_tracking_config_returns_a_live_view():
+    """An access-tracking config's own ``get`` wraps a nested read and installs the wrapper back
+    onto the key it read, so the returned block is a live view over the original, the same as
+    the plain-dict case above: a write through it is visible on ``config`` afterward."""
     from tcip_mcp.pipelines.schemas import evaluation_section
     from tcip_mcp.tools.training_tools import _AccessTrackingConfig
 
     config = _AccessTrackingConfig({"evaluation": {"selection_metric": "loss"}})
     evaluation_section(config)["selection_metric"] = "f1"
 
-    assert config["evaluation"]["selection_metric"] == "loss"  # unchanged: the write hit a copy
+    assert config["evaluation"]["selection_metric"] == "f1"
 
 
 def test_evaluation_section_is_idempotent_on_an_already_normalized_config():
