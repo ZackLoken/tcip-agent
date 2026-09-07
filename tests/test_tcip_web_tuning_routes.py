@@ -1364,7 +1364,8 @@ def test_manifest_fields_agree_between_a_live_and_a_disk_row(
 ) -> None:
     """A sweep this process is running (its row built by ``_summary``) and one only found on
     disk (built by ``_manifest_summary``) report the identical projection for the identical
-    manifest shape."""
+    manifest shape: both manifests carry every relaunch field (via ``_RELAUNCH_FIELD_DEFAULTS``),
+    so the comparison is of the two read paths, not of one manifest being more complete."""
     from tcip_web.routes import tuning
 
     def fake_run_hyperparameter_search(*, study_name, **kwargs):
@@ -1372,6 +1373,7 @@ def test_manifest_fields_agree_between_a_live_and_a_disk_row(
         from tcip_mcp.tools.training_tools import sweep_manifest_key
 
         manifest = {"study_name": study_name, "status": "completed", "n_trials": 3,
+                    **_RELAUNCH_FIELD_DEFAULTS,
                     "search_alg": "random", "scheduler": "asha",
                     "param_space": {"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
                     "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}}
@@ -1399,8 +1401,7 @@ def test_manifest_fields_agree_between_a_live_and_a_disk_row(
 def test_manifest_fields_of_an_absent_manifest_is_not_relaunchable_with_no_reason() -> None:
     """A caller with no manifest at all (the pre-manifest window, or a refused relaunch that
     never minted one) reads as not relaunchable but with no reason: the reason is reserved for
-    a manifest that actually exists, and actually lacks base config plus no caller-supplied
-    seed axis at one draw."""
+    a manifest that actually exists and fails one of ``_relaunch_refusal``'s own conditions."""
     from tcip_web.routes.tuning import _manifest_fields
 
     fields = _manifest_fields({})
@@ -1412,16 +1413,19 @@ def test_manifest_fields_of_an_absent_manifest_is_not_relaunchable_with_no_reaso
 def test_manifest_fields_reports_not_relaunchable_for_an_unreadable_split_draws_value() -> None:
     """A split_draws value int() cannot read is not a draw count, and the relaunch route would
     409 on it (_invalid_split_draws_field); the listing marker agrees rather than reporting
-    relaunchable for a manifest the route refuses, with the route's own reason."""
+    relaunchable for a manifest the route refuses, with the route's own reason. Every other
+    relaunch field is filled in so the marker reaches this check rather than the missing-fields
+    one that runs ahead of it."""
     from tcip_web.routes.tuning import _manifest_fields
 
     manifest = {
+        "n_trials": 1, **_RELAUNCH_FIELD_DEFAULTS,
         "base_config": {}, "split_draws": "not-a-number",
         "param_space": {"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
     }
     fields = _manifest_fields(manifest)
     assert fields["relaunchable"] is False
-    assert fields["reason"] == "this sweep's record's split_draws is not a draw count"
+    assert fields["reason"] == "this sweep's record's split_draws is not a draw count: cannot relaunch"
     assert fields["split_draws"] is None
 
 
@@ -1430,26 +1434,33 @@ def test_manifest_fields_reports_not_relaunchable_for_an_infinite_split_draws_va
     even though its own encode refuses to write one, so a manifest of unknown provenance under
     hpo_root() can carry it; int() cannot read it as a draw count either, and the marker reports
     not relaunchable with the same reason the route's 409 would give, rather than raising or
-    reporting relaunchable for a manifest that would fail the worker."""
+    reporting relaunchable for a manifest that would fail the worker. Every other relaunch field
+    is filled in so the marker reaches this check rather than the missing-fields one that runs
+    ahead of it."""
     from tcip_web.routes.tuning import _manifest_fields
 
     manifest = {
+        "n_trials": 1, **_RELAUNCH_FIELD_DEFAULTS,
         "base_config": {}, "split_draws": float("inf"),
         "param_space": {"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
     }
     fields = _manifest_fields(manifest)
     assert fields["relaunchable"] is False
-    assert fields["reason"] == "this sweep's record's split_draws is not a draw count"
+    assert fields["reason"] == "this sweep's record's split_draws is not a draw count: cannot relaunch"
     assert fields["split_draws"] is None
 
 
 def test_invalid_split_draws_reason_matches_what_the_marker_tests_assert_literally() -> None:
-    """The two tests above assert the marker's reason as a literal string, not the imported
-    constant, since a test proving baseline behavior cannot import a name the baseline predates;
-    this pins that literal to the module's own constant, so a reword of one is caught here."""
+    """Coverage: the two tests above assert the marker's reason as a literal string, not the
+    imported constant, since a test proving baseline behavior cannot import a name the baseline
+    predates; this pins that literal to the module's own constant composed with the
+    missing-fields text's own ": cannot relaunch" suffix, so a reword of either half is caught
+    here."""
     from tcip_web.routes.tuning import _INVALID_SPLIT_DRAWS_REASON
 
-    assert _INVALID_SPLIT_DRAWS_REASON == "this sweep's record's split_draws is not a draw count"
+    assert f"{_INVALID_SPLIT_DRAWS_REASON}: cannot relaunch" == (
+        "this sweep's record's split_draws is not a draw count: cannot relaunch"
+    )
 
 
 def test_list_sweeps_serves_a_manifest_with_an_infinite_split_draws_value_beside_a_healthy_one(
@@ -1493,23 +1504,67 @@ def test_list_sweeps_serves_a_manifest_with_an_infinite_split_draws_value_beside
     by_id = {s["sweep_id"]: s for s in resp.json()["sweeps"]}
     assert "hpo_healthy_beside_inf" in by_id
     assert "hpo_infinite_draws" in by_id
+    healthy_row = by_id["hpo_healthy_beside_inf"]
+    assert healthy_row["relaunchable"] is True
+    assert healthy_row["split_draws"] is None
     infinite_row = by_id["hpo_infinite_draws"]
     assert infinite_row["relaunchable"] is False
     assert infinite_row["split_draws"] is None
+    assert infinite_row["reason"] == "this sweep's record's split_draws is not a draw count: cannot relaunch"
+
+
+def test_list_sweeps_on_the_sqlite_backend_never_sees_a_loose_manifest_beside_the_database(
+    client: TestClient, hpo_root,
+) -> None:
+    """Coverage: records the sqlite backend's own standing behavior with a loose manifest file
+    rather than guarding a change this fixup makes. Bound to the sqlite backend on purpose: a
+    manifest.json hand-written straight to the file-backend path, the way the test above
+    produces one, is a loose record beside store.db rather than a row inside it, and store.read
+    (what _read_manifest calls) never sees it, so the sweep it names never reaches the listing
+    while a sweep written through _write_sweep (which goes through tcip_store, landing in the
+    database) still does. Skipped under the file backend: there the hand-written file is exactly
+    the record the listing reads, so there is nothing here to prove."""
+    if os.environ.get("TCIP_STORE_BACKEND", "sqlite") != "sqlite":
+        pytest.skip("proves the sqlite backend's own blindness to a loose file; the file "
+                     "backend reads that same file as its record")
+
+    from tcip_store.file_backend import FileBackend
+    from tcip_mcp.tools.training_tools import sweep_manifest_key
+
+    _write_sweep(hpo_root, "hpo_healthy_sqlite",
+                base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+
+    key = sweep_manifest_key("hpo_loose_manifest")
+    path = FileBackend().path_for(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "study_name": "hpo_loose_manifest", "status": "completed", "n_trials": 1,
+        **_RELAUNCH_FIELD_DEFAULTS,
+        "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+    }
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    resp = client.get("/api/tuning/sweeps")
+    assert resp.status_code == 200
+    ids = {s["sweep_id"] for s in resp.json()["sweeps"]}
+    assert "hpo_healthy_sqlite" in ids
+    assert "hpo_loose_manifest" not in ids
 
 
 def test_manifest_fields_narrows_a_truthy_non_mapping_param_space_rather_than_crashing() -> None:
     """A truthy non-mapping param_space (a hand-edited or otherwise malformed manifest) crashed
     the listing before this change (.keys() on a string); _manifest_fields now narrows it to an
-    empty mapping before both the key projection and the seed-axis helper call, so the listing
-    still renders with an empty axis list and no seed refusal raised."""
-    from tcip_web.routes.tuning import _manifest_fields
+    empty mapping before the key projection, so param_space_keys renders empty rather than
+    raising. This manifest also carries none of the other relaunch fields, so the marker agrees
+    with what a relaunch of it would 409 on: the missing-fields reason, not a false relaunchable."""
+    from tcip_web.routes.tuning import _manifest_fields, _missing_relaunch_fields
 
     manifest = {"base_config": {}, "param_space": "not-a-mapping"}
     fields = _manifest_fields(manifest)
     assert fields["param_space_keys"] == []
-    assert fields["relaunchable"] is True
-    assert fields["reason"] is None
+    assert fields["relaunchable"] is False
+    missing = _missing_relaunch_fields(manifest)
+    assert fields["reason"] == f"this sweep's record is missing {missing}: cannot relaunch"
 
 
 def test_persisted_summary_carries_no_manifest_field(
