@@ -284,13 +284,19 @@ def test_run_hyperparameter_search_refuses_a_caller_split_seed_axis_at_one_draw(
     pytest.param(2.0, 2, id="a-whole-float"),
     pytest.param(1e30, int(1e30), id="a-whole-float-past-ordinary-int-range"),
     pytest.param(float("inf"), None, id="positive-infinity"),
-    pytest.param(-3, -3, id="a-negative-int"),
+    pytest.param(-3, None, id="a-negative-int"),
+    pytest.param(0, None, id="zero"),
+    pytest.param(-3.0, None, id="a-negative-float"),
 ])
 def test_coerce_split_draws_verdicts(value, expected):
-    """coerce_split_draws answers an int only for an int that is not a bool, or a str or finite
-    float whose int() equals the value it was given; a bool (int(True) would otherwise silently
-    read as 1), a fractional float (int(2.5) would otherwise silently truncate to 2), a
-    non-numeric string and a non-finite float are none of those and answer None."""
+    """coerce_split_draws answers an int only for an int that is not a bool and is at least one,
+    or a str or finite float whose int() equals the value it was given and is at least one; a
+    bool (int(True) would otherwise silently read as 1), a fractional float (int(2.5) would
+    otherwise silently truncate to 2), a non-numeric string, a non-finite float, zero and any
+    negative value are none of those and answer None. The 1e30 row admits that magnitude only
+    because run_hyperparameter_search's own split_draws argument carries no upper bound either
+    (_split_draws_refusal refuses nothing above one on size); this row states no ceiling of its
+    own, only that a whole number reads through whatever its size."""
     import tcip_mcp.tools.training_tools as tt
 
     assert tt.coerce_split_draws(value) == expected
