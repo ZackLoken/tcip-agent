@@ -35,6 +35,7 @@ def _experiment_state(root, experiment_id):
 
 def _start(tmp_path, experiment_id, body_name):
     from tcip_mcp.experiments import create_experiment, update_status
+    from tcip_mcp.pipelines.training.run_registry import draw_seed_if_unset
 
     config = {
         "model_source": {"builder": "x:y", "task": "detection", "in_chans": 3},
@@ -43,6 +44,7 @@ def _start(tmp_path, experiment_id, body_name):
     }
     create_experiment(experiment_id, config, data_source="imgs")
     update_status(experiment_id, "running")
+    draw_seed_if_unset(config)
     run = create_run(config, str(tmp_path / "out"), id="auto-run-26")
     ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
                        experiment_id=experiment_id)
