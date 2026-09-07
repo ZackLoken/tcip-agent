@@ -482,8 +482,9 @@ def _register_entry(
     Raises ``FileNotFoundError`` for a missing ``checkpoint_path`` (explicit mode only; experiment
     mode's caller has already confirmed the file), ``ValueError``/``TypeError`` for a
     ``config``/``metrics`` JSON cannot hold or a ``metrics_source`` pairing that disagrees with
-    whether ``metrics`` is empty, and :class:`EntryOwnedByRun` for a replace the eviction rail
-    refuses.
+    whether ``metrics`` is empty, :class:`EntryOwnedByRun` for a replace the eviction rail
+    refuses, and ``AuditEntryNotWritten`` when ``_audit_entry_replace`` cannot append the
+    replacement's own line after the transaction has already closed.
     """
     check_json_value(config, path="config")
     check_json_value(metrics or {}, path="metrics")
@@ -846,6 +847,8 @@ class ModelRegistry:
                 ``metrics`` is empty.
             EntryOwnedByRun: ``name`` already names an entry a run's completion bound to a
                 different (or, for a pre-field entry, an unrecorded) run.
+            AuditEntryNotWritten: the replacement committed but its own audit line could not
+                be appended.
         """
         entry = _register_entry(
             self._project_path, name=name, checkpoint_path=checkpoint_path, config=config,
