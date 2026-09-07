@@ -370,17 +370,6 @@ export function ProjectPicker() {
   const [removalTarget, setRemovalTarget] = useState<string | null>(null);
   const openedRef = useRef(false);
   const annotatorFieldRef = useRef<HTMLInputElement | null>(null);
-  const prevRemovalTargetRef = useRef<string | null>(null);
-
-  // A removed card's own "Remove..." button (the dialog's recorded opener) can unmount with it,
-  // dropping focus to body; restore it to the field every refetch leaves in place instead.
-  useEffect(() => {
-    const wasOpen = prevRemovalTargetRef.current !== null;
-    prevRemovalTargetRef.current = removalTarget;
-    if (wasOpen && removalTarget === null && document.activeElement === document.body) {
-      annotatorFieldRef.current?.focus();
-    }
-  }, [removalTarget]);
 
   function selectCard(p: ProjectSummary) {
     setSelected(p.name);
@@ -744,7 +733,9 @@ export function ProjectPicker() {
           onClose={() => setRemovalTarget(null)}
           onRemoved={() => {
             setRemovalTarget(null);
-            void refetch();
+            // The dialog's own unmount hands focus back to the removed card's still-mounted
+            // button; move it to the field the listing update leaves in place once that card is gone.
+            void refetch().then(() => annotatorFieldRef.current?.focus());
           }}
           onRefetchListing={() => void refetch()}
         />
