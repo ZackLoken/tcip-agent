@@ -12,12 +12,14 @@ function provenance(a: {
   created_at?: string | null;
   accepted_by?: string | null;
   accepted_at?: string | null;
+  accepted_by_rule?: string | null;
 }) {
   return {
     created_by: a.created_by ?? null,
     created_at: a.created_at ?? null,
     accepted_by: a.accepted_by ?? null,
     accepted_at: a.accepted_at ?? null,
+    accepted_by_rule: a.accepted_by_rule ?? null,
   };
 }
 

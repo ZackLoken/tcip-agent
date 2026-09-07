@@ -555,13 +555,14 @@ export const api = {
         body: JSON.stringify(body),
       }),
 
-    // The prediction bucket's own generation confidence: read-only, no gate run, no stamp. Lets
-    // the Review tab warn as soon as the "Conf >=" filter is raised above it, rather than
-    // only after clicking "Use review as validation reference".
+    // The bucket's own generation confidence and admission rule: read-only, no gate/stamp run.
+    // Lets the Review tab warn on the "Conf >=" filter and offer the confirm-admitted button.
     generationConf: (pred_dir: string) =>
-      call<{ generation_conf: number | null }>(
-        `${ROUTES.getReviewGenerationConf}?${new URLSearchParams({ pred_dir }).toString()}`,
-      ),
+      call<{
+        generation_conf: number | null;
+        admission_rule: { conf: number; experiment_id: string; record_digest: string } | null;
+        admission_reason: string;
+      }>(`${ROUTES.getReviewGenerationConf}?${new URLSearchParams({ pred_dir }).toString()}`),
 
     // Batch review status + detection presence for a whole (subject, date): drives the image-level
     // Reviewed/Unreviewed nav filter and lets the tab skip images with nothing to review.

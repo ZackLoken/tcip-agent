@@ -116,6 +116,7 @@ export interface ActionPayload {
   filter_class?: string;
   subject?: string | null;
   attribute?: string | null;
+  rule_admitted?: boolean;
 }
 
 export interface GuiVocabulary {

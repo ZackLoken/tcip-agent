@@ -77,6 +77,9 @@ export interface Annotation {
   created_at?: string | null;
   accepted_by?: string | null;
   accepted_at?: string | null;
+  // The validation record a rule-based admission was verified against ("<experiment_id>:
+  // <record_digest>"), set only by the Review accept that verified the claim.
+  accepted_by_rule?: string | null;
   // One of "person" | "tool" | "tool_accepted" | "unattributed", from the load route's
   // authorship_of. A load-response fact, never sent back on save (AnnotationPayload carries none).
   authorship?: string | null;
@@ -97,6 +100,7 @@ export interface AnnotationPayload {
   created_at?: string | null;
   accepted_by?: string | null;
   accepted_at?: string | null;
+  accepted_by_rule?: string | null;
 }
 
 /* ── Canvas-local shapes (the drawing model; not synced to server) ────────── */
@@ -114,6 +118,7 @@ export interface Box {
   created_at?: string | null;
   accepted_by?: string | null;
   accepted_at?: string | null;
+  accepted_by_rule?: string | null;
   // The load route's authorship classification; drives the canvas symbology, never sent on save.
   authorship?: string | null;
 }
@@ -129,6 +134,7 @@ export interface PolygonShape {
   created_at?: string | null;
   accepted_by?: string | null;
   accepted_at?: string | null;
+  accepted_by_rule?: string | null;
   authorship?: string | null;
 }
 
@@ -143,6 +149,7 @@ export interface PointShape {
   created_at?: string | null;
   accepted_by?: string | null;
   accepted_at?: string | null;
+  accepted_by_rule?: string | null;
   authorship?: string | null;
 }
 
