@@ -74,12 +74,13 @@ def _record_start(session_id: str, launched: dict) -> None:
 
     The MCP server the agent starts reads this id from its environment and stamps it on its own
     lines as a declared correlation (any launcher can set that variable, so those lines say what
-    the process claimed); this line says what the backend itself launched under the id. Never
-    fails the request.
+    the process claimed); this line says what the backend itself launched under the id. A failed
+    append raises ``AuditEntryNotWritten``: the process is already spawned by the time this runs,
+    so the caller (``TerminalSession.start``) answers the gap.
     """
-    from tcip_mcp.audit import record_event
+    from tcip_web.routes.audit_gap import record_committed
 
-    record_event("agent_terminal_started", {"session_id": session_id, **launched})
+    record_committed("agent_terminal_started", {"session_id": session_id, **launched}, scope=None)
 
 
 class TerminalSession:
@@ -129,7 +130,19 @@ class TerminalSession:
             lambda: self._on_exit(gen),
             name=f"term-{self.id}-g{gen}",
         )
-        _record_start(self.id, launched)
+        from tcip_mcp.audit import AuditEntryNotWritten
+
+        try:
+            _record_start(self.id, launched)
+        except AuditEntryNotWritten as exc:
+            stopped = self.terminate()
+            reason = str(exc)
+            if not stopped:
+                reason += (
+                    " The spawned process could not be stopped and stays attached to this "
+                    "session."
+                )
+            return reason
         return None
 
     def restart(self, rows: int, cols: int) -> Optional[str]:
@@ -139,14 +152,27 @@ class TerminalSession:
             self._scrollback_len = 0
         return self.start(rows, cols)
 
-    def terminate(self) -> None:
+    def terminate(self) -> bool:
+        """Kill the PTY. Returns True when no process remains afterward, False when it survives:
+        ``self._pty`` is then restored so ``alive()``/I/O still see it, since an untracked
+        survivor would otherwise let a retry spawn a second process beside it."""
         with self._lock:
             pty, self._pty = self._pty, None
-        if pty is not None:
-            try:
-                pty.terminate()
-            except Exception:  # pragma: no cover - best-effort cleanup
-                logger.debug("terminal terminate failed", exc_info=True)
+        if pty is None:
+            return True
+        try:
+            pty.terminate()
+        except Exception:  # pragma: no cover - best-effort cleanup
+            logger.debug("terminal terminate failed", exc_info=True)
+        try:
+            survived = pty.isalive()
+        except Exception:  # pragma: no cover - best-effort cleanup
+            survived = False
+        if survived:
+            with self._lock:
+                self._pty = pty
+            return False
+        return True
 
     def alive(self) -> bool:
         pty = self._pty
@@ -288,6 +314,10 @@ def create_session(req: CreateSessionRequest) -> dict:
         session = TerminalSession(session_id)
         err = session.start(_clamp(req.rows), _clamp(req.cols))
         if err:
+            # A survivor of the failed start's own termination attempt stays reachable, so a
+            # retry attaches to it instead of spawning a second process beside it.
+            if session.alive():
+                _SESSIONS[session_id] = session
             raise HTTPException(503, err)
         _SESSIONS[session_id] = session
         return {"session_id": session_id, "existing": False, "launched": session.launched}
