@@ -1,10 +1,11 @@
 """launch_tensorboard reports a URL only once the child has proved it survived startup.
 
 The command itself is substituted (a dying one, then a living one) so the process
-lifecycle is exercised for real without depending on a TensorBoard install. Two tests use a
+lifecycle is exercised for real without depending on a TensorBoard install. Three tests use a
 ``Popen`` stand-in whose own ``wait`` never confirms a kill: one drives ``launch_tensorboard``'s
 own failure path, proving the post-kill wait there is caught the same way ``stop_tensorboard``'s
-is; the other drives ``stop_tensorboard`` itself, proving a kill it cannot confirm is logged. The
+is; one drives ``stop_tensorboard`` itself, proving a kill it cannot confirm is logged there; one
+drives ``_stop_all_tracked`` (the exit sweep), proving its own separate log line fires too. The
 last test proves the module-level grace-under-wait check by importing a copy of the module with
 the constant pushed past its margin.
 """
@@ -121,6 +122,32 @@ def test_stop_logs_a_kill_that_never_confirms(monkeypatch, tmp_path, caplog):
         assert result["status"] == "kill_unconfirmed"
         assert any(
             "unconfirmed-run" in r.getMessage() and str(info["pid"]) in r.getMessage()
+            for r in caplog.records
+        )
+    finally:
+        for proc in spawned:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=30)
+
+
+def test_exit_sweep_logs_a_kill_that_never_confirms(monkeypatch, tmp_path, caplog):
+    """``_stop_all_tracked``'s own log line fires on the run its sweep leaves running, not
+    only ``stop_tensorboard``'s own line for a caller that reads its return value."""
+    from tcip_mcp.pipelines.training import tensorboard_manager as tb
+
+    spawned: list[subprocess.Popen] = []
+    monkeypatch.setattr(tb.subprocess, "Popen", _never_confirms_kill_popen_class(spawned))
+    monkeypatch.setattr(tb, "_DISABLE_LIFETIME_TIE", True)
+
+    try:
+        info = tb.launch_tensorboard(str(tmp_path), key="sweep-unconfirmed-run")
+        with caplog.at_level(logging.WARNING, logger=tb.logger.name):
+            tb._stop_all_tracked()
+        assert any(
+            "Exit sweep" in r.getMessage()
+            and "sweep-unconfirmed-run" in r.getMessage()
+            and str(info["pid"]) in r.getMessage()
             for r in caplog.records
         )
     finally:
