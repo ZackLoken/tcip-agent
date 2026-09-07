@@ -39,6 +39,7 @@ COMMANDS: dict[str, str] = {
     "inspect-compute-resources": "tcip_mcp.cli.inspect_compute_resources",
     "plant-aware-group-splits": "tcip_mcp.cli.plant_aware_group_splits",
     "shp-to-plant-csv": "tcip_mcp.cli.shp_to_plant_csv",
+    "drop-spatial-split-seed": "tcip_mcp.cli.drop_spatial_split_seed",
 }
 """Command name (as typed after ``tcip``) to the module exposing its ``main(argv)``, named after
 the script it replaces with underscores respelled as hyphens; the two renamed commands
