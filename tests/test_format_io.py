@@ -156,6 +156,27 @@ def test_write_coco_roundtrip(tmp_path):
     assert parsed[0].geometry.x2 == 50
 
 
+def test_write_coco_then_parse_coco_annotations_carries_accepted_by_rule(tmp_path):
+    anns = [Annotation(subject="tree", geometry=BBox(10, 20, 50, 80),
+                       accepted_by="user:breeder", accepted_by_rule="exp-1:0123456789abcdef")]
+    path = str(tmp_path / "annotations.json")
+    write_coco(path, {"IMG_0001.jpg": (anns, 640, 480)})
+
+    with open(path) as f:
+        coco = json.load(f)
+    (parsed,) = parse_coco_annotations(coco, file_name="IMG_0001.jpg")
+    assert parsed.accepted_by_rule == "exp-1:0123456789abcdef"
+
+
+def test_parse_coco_annotations_keeps_an_empty_string_accepted_by():
+    """An empty-string provenance value is kept, not dropped: the per-image reader already keeps
+    it (is not None, never a truthiness test), and the COCO reader now shares that presence test."""
+    coco = _sample_coco_detect()
+    coco["annotations"][0]["accepted_by"] = ""
+    parsed = parse_coco_annotations(coco, image_id=1)  # GUARDS: dropped at the baseline
+    assert parsed[0].accepted_by == ""
+
+
 # ── COCO polygon parse/write round-trip ──────────────────────────────────────
 
 
