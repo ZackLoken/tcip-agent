@@ -16,9 +16,8 @@ export interface ReconnectingSocketOptions {
   onMessage: (data: string) => void;
   /** True once a frame marks the stream over; the helper then stops reconnecting. */
   isTerminal?: (data: string) => boolean;
-  /** True when a frame counts as the stream working, resetting the backoff to its floor;
-   *  absent means every frame counts. A frame that answers "not yet" (an unknown run, say)
-   *  returns false, so a server that always answers before closing still lets the delay grow. */
+  /** True when a frame counts as the stream working, resetting the backoff to its floor. A
+   *  socket with no such hook resets it on open alone, the default every other socket uses. */
   resetsBackoff?: (data: string) => boolean;
   onConnecting?: () => void;
   onOpen?: () => void;
@@ -126,12 +125,13 @@ export function createReconnectingSocket(opts: ReconnectingSocketOptions): Recon
       if (socket !== ws) return;
       connecting = false;
       opened = true;
+      if (!opts.resetsBackoff) backoff = 500;
       opts.onOpen?.();
     };
     socket.onmessage = (ev: MessageEvent) => {
       if (socket !== ws) return;
       if (typeof ev.data !== "string") return;
-      if (opts.resetsBackoff?.(ev.data) ?? true) backoff = 500;
+      if (opts.resetsBackoff?.(ev.data)) backoff = 500;
       if (opts.isTerminal?.(ev.data)) terminated = true;
       opts.onMessage(ev.data);
     };

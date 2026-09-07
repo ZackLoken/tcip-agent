@@ -154,6 +154,38 @@ describe("createReconnectingSocket", () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
+  it("resets the backoff on open when no resetsBackoff hook is given, never on open with one", () => {
+    const plain = createReconnectingSocket({ url: "ws://x/seven", onMessage: vi.fn() });
+    plain.start();
+    lastSocket().drop();
+    vi.advanceTimersByTime(500);
+    lastSocket().open();
+    lastSocket().drop();
+    vi.advanceTimersByTime(500); // open alone reset it back to 500ms
+    expect(FakeWebSocket.instances).toHaveLength(3);
+
+    const gated = createReconnectingSocket({
+      url: "ws://x/eight",
+      onMessage: vi.fn(),
+      resetsBackoff: (data) => data === "reset",
+    });
+    gated.start();
+    lastSocket().drop();
+    vi.advanceTimersByTime(500);
+    lastSocket().open(); // open alone must not reset a socket with the hook
+    lastSocket().drop();
+    vi.advanceTimersByTime(999);
+    expect(FakeWebSocket.instances).toHaveLength(5);
+    vi.advanceTimersByTime(1);
+    expect(FakeWebSocket.instances).toHaveLength(6);
+
+    lastSocket().open();
+    lastSocket().message("reset");
+    lastSocket().drop();
+    vi.advanceTimersByTime(500);
+    expect(FakeWebSocket.instances).toHaveLength(7);
+  });
+
   it("an async URL provider that throws reports through onError with no reconnect scheduled", async () => {
     const onError = vi.fn();
     const socket = createReconnectingSocket({

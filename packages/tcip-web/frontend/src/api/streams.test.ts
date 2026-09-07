@@ -226,30 +226,30 @@ describe("openTrainingStream", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
-  it("grows the reconnect delay across open-then-close cycles with no frame, and a metric frame resets it", () => {
+  it("grows the reconnect delay across open-then-error-then-close cycles, and a metric frame resets it", () => {
     openTrainingStream("/data/proj", "r1", vi.fn());
-    lastSocket().open();
-    lastSocket().drop();
-    vi.advanceTimersByTime(500);
-    expect(FakeWebSocket.instances).toHaveLength(2);
 
-    lastSocket().open();
-    lastSocket().drop();
-    vi.advanceTimersByTime(1000);
-    expect(FakeWebSocket.instances).toHaveLength(3);
-
-    lastSocket().open();
-    lastSocket().drop();
-    vi.advanceTimersByTime(2000);
-    expect(FakeWebSocket.instances).toHaveLength(4);
+    for (const delay of [499, 999, 1999]) {
+      lastSocket().open();
+      lastSocket().message(
+        JSON.stringify({ type: "status", run_id: "r1", status: null, error: "unknown run" }),
+      );
+      lastSocket().drop();
+      const before = FakeWebSocket.instances.length;
+      vi.advanceTimersByTime(delay);
+      expect(FakeWebSocket.instances).toHaveLength(before);
+      vi.advanceTimersByTime(1);
+      expect(FakeWebSocket.instances).toHaveLength(before + 1);
+    }
 
     lastSocket().open();
     lastSocket().message(JSON.stringify({ type: "metric", run_id: "r1", row: { epoch: 1 } }));
     lastSocket().drop();
+    const before = FakeWebSocket.instances.length;
     vi.advanceTimersByTime(499);
-    expect(FakeWebSocket.instances).toHaveLength(4);
+    expect(FakeWebSocket.instances).toHaveLength(before);
     vi.advanceTimersByTime(1);
-    expect(FakeWebSocket.instances).toHaveLength(5);
+    expect(FakeWebSocket.instances).toHaveLength(before + 1);
   });
 
   it("closing the stream suppresses any further reconnect", () => {
