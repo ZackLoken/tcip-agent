@@ -985,6 +985,56 @@ describe("AnnotateTab ioError banner", () => {
   });
 });
 
+describe("AnnotateTab labels-written conflict sentence", () => {
+  it("names the declared harness that wrote the current image's labels", async () => {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(addBox);
+    act(() => {
+      useStore
+        .getState()
+        .pushAgentActivity(
+          "annotate",
+          "labels_written",
+          { written: ["C:/data/annotations/2026-01-01/img1.json"] },
+          "claude-code 2.1.238",
+        );
+    });
+
+    expect(
+      screen.getByText(
+        "claude-code 2.1.238 just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("names a process when the write declared no actor", async () => {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(addBox);
+    act(() => {
+      useStore
+        .getState()
+        .pushAgentActivity(
+          "annotate",
+          "labels_written",
+          { written: ["C:/data/annotations/2026-01-01/img1.json"] },
+          null,
+        );
+    });
+
+    expect(
+      screen.getByText(
+        "A process just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.",
+      ),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("AnnotateTab legend", () => {
   it("explains the dashed derived box only in box mode", async () => {
     useStore.getState().setRegistry({ subject_a: {} });

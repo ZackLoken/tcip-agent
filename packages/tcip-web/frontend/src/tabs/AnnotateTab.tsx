@@ -584,9 +584,8 @@ export function AnnotateTab() {
     void save({ interactive: false });
   }
 
-  // React to the agent writing labels (panel event). If it touched the file we're
-  // viewing: reload on a clean canvas, or offer a Reload conflict prompt if dirty.
-  // (Different file → the StatusBar indicator already shows the activity.)
+  // React to a panel event writing labels: reload this image on a clean canvas, or offer a
+  // Reload conflict prompt when dirty; a different file leaves the StatusBar indicator alone.
   useEffect(() => {
     if (
       !agentActivity ||
@@ -604,8 +603,9 @@ export function AnnotateTab() {
     if (!current || !written.some((w) => norm(w) === current)) return;
     if (useStore.getState().canvas.dirty) {
       setConflict(true);
+      const actor = agentActivity.actor ?? "A process";
       setIoError(
-        "The agent just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.",
+        `${actor} just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.`,
       );
     } else {
       void reloadCurrent();
