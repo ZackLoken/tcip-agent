@@ -99,6 +99,7 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
     """The tree route and the project-picker summary both derive dates from the layout's one
     grammar, so a hidden directory under ``images/`` is invisible to both alike."""
     from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+    from tcip_mcp.project_removal import read_open_project_state
     from tcip_web.routes.projects import _summarize
 
     root = tmp_path / "Valley_Farm"
@@ -107,7 +108,7 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
     write_registry(root / "classes.json", ClassRegistry((Subject("leaf"),)))
 
     tree = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
-    picker = _summarize(root, active_name=None)
+    picker = _summarize(root, active_name=None, open_state=read_open_project_state())
 
     assert tree["dates_with_images"] == ["2026-03-02"]
     assert picker.dates == ["2026-03-02"]
@@ -116,6 +117,7 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
 def test_the_tree_and_the_project_summary_agree_on_models_over_a_hidden_directory(
     client: TestClient, tmp_path: Path
 ) -> None:
+    from tcip_mcp.project_removal import read_open_project_state
     from tcip_web.routes.projects import _summarize
 
     root = tmp_path / "Valley_Farm"
@@ -124,7 +126,7 @@ def test_the_tree_and_the_project_summary_agree_on_models_over_a_hidden_director
     (root / "predictions" / ".trash").mkdir(parents=True)
 
     tree = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
-    picker = _summarize(root, active_name=None)
+    picker = _summarize(root, active_name=None, open_state=read_open_project_state())
 
     assert tree["model_names"] == ["baseline"]
     assert picker.models == ["baseline"]
