@@ -213,3 +213,31 @@ def test_hpo_trial_resolved_config_records_effective_tile_geometry(monkeypatch, 
 
     tiling = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))["data"]["tiling"]
     assert tiling == {"enabled": True, "tile_size": 224, "overlap": pytest.approx(0.2)}
+
+
+def test_hpo_trial_registers_under_its_resolved_trial_directory_never_by_id(monkeypatch, tmp_path):
+    """create_run's id for a trial is not an experiment id: it is the trial directory's own
+    resolved absolute path, unique across concurrent sweeps where a directory basename is not,
+    and list_runs hides it from the Training tab's default listing."""
+    from pathlib import Path
+
+    from tcip_mcp.pipelines.training.run_registry import list_runs
+    from tcip_mcp.tools.training_tools import _run_hpo_trial
+
+    class _UntiledTrialDataset:
+        def __len__(self):
+            return 4
+
+        def __getitem__(self, i):
+            return i
+
+    _patch_trial_machinery(monkeypatch, _UntiledTrialDataset())
+    trial_dir = tmp_path / "trial_0"
+    _run_hpo_trial({"lr": 3e-4}, [].append,
+                   _base_config({"enabled": True, "tile_size": 999}), str(trial_dir))
+    expected_id = str(Path(trial_dir).resolve())
+
+    assert all(row["id"] != expected_id for row in list_runs())
+    hidden = list_runs(include_hpo_trials=True)
+    row = next(r for r in hidden if r["id"] == expected_id)
+    assert row["origin"] == "hpo_trial"
