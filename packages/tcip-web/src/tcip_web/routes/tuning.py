@@ -59,18 +59,24 @@ def _manifest_fields(manifest: dict) -> dict:
     (a live sweep's row, read from the manifest under its own launch root), so a sweep reads
     the same fields whichever way it is listed.
 
-    ``base_config`` plus no caller-supplied ``data.split.seed`` axis at one draw is the
-    relaunchable marker (:func:`training_tools.run_hyperparameter_search` writes ``base_config``
-    whenever it creates a manifest; :func:`training_tools.caller_split_seed_refusal` reads the
-    same manifest fields the tool itself refused on, so a relaunch is denied the same axis a
-    fresh launch never minted); either absence is reported with a reason rather than a
+    ``base_config`` plus a readable ``split_draws`` (:func:`_invalid_split_draws_field`) plus no
+    caller-supplied ``data.split.seed`` axis at one draw (:func:`training_tools.caller_split_seed_refusal`)
+    is the relaunchable marker, the same three conditions :func:`relaunch_sweep` checks before
+    starting the worker, in the same order, so a relaunch is denied whatever a fresh launch
+    would already refuse. Any failure among the three is reported with a reason rather than a
     reconstructed config. ``cancel_requested`` is the manifest's own field, set by
     ``cancel_hyperparameter_search`` and never derived from a side file this route cannot see across roots.
     ``relaunched_from`` projects as ``None`` for a manifest predating the field, the same as
     for one that genuinely was not a relaunch: a relaunch of an older sweep must still work
     (see :func:`_missing_relaunch_fields`, which does not require this key). ``split_draws``
-    projects the same way, ``None`` for a manifest predating it (read as 1, no draws, by
-    ``run_hyperparameter_search``'s own default): the header line only renders it above 1. ``redraws_within_manifest``
+    projects through :func:`training_tools.coerce_split_draws`, the int it names or ``None`` for
+    a manifest predating it (read as 1, no draws, by ``run_hyperparameter_search``'s own default)
+    or one whose value is not a draw count at all: the header line only renders it above 1. The
+    raw value is never handed to the response: a non-finite one (a hand-written ``Infinity``)
+    happens to render as JSON ``null`` through this route's own ``-> dict`` response handling
+    rather than raising, but nothing here should depend on that route-specific accident, and the
+    unread raw value left ``relaunchable`` true for a manifest the coercion, computed straight
+    off it, could name invalid. ``redraws_within_manifest``
     reads the recorded ``base_config``'s own ``data.split.redraw_within_manifest``, ``False``
     for a manifest carrying none (predating the flag, or a config that never set it): the
     header's draws line names the bound manifest as what each draw redraws inside only then.
@@ -87,7 +93,7 @@ def _manifest_fields(manifest: dict) -> dict:
             "relaunchable": False, "reason": None, "cancel_requested": False,
             "relaunched_from": None, "split_draws": None, "redraws_within_manifest": False,
         }
-    from tcip_mcp.tools.training_tools import caller_split_seed_refusal
+    from tcip_mcp.tools.training_tools import caller_split_seed_refusal, coerce_split_draws
 
     param_space = manifest.get("param_space")
     if not isinstance(param_space, dict):
@@ -95,10 +101,14 @@ def _manifest_fields(manifest: dict) -> dict:
     relaunchable = "base_config" in manifest
     reason = None if relaunchable else "this sweep's record holds no base config"
     if relaunchable:
-        seed_axis_refusal = caller_split_seed_refusal(param_space, manifest.get("split_draws"))
-        if seed_axis_refusal is not None:
+        if _invalid_split_draws_field(manifest):
             relaunchable = False
-            reason = seed_axis_refusal.reason
+            reason = _INVALID_SPLIT_DRAWS_REASON
+        else:
+            seed_axis_refusal = caller_split_seed_refusal(param_space, manifest.get("split_draws"))
+            if seed_axis_refusal is not None:
+                relaunchable = False
+                reason = seed_axis_refusal.reason
     base_config = manifest.get("base_config") or {}
     base_split = (base_config.get("data") or {}).get("split") or {}
     return {
@@ -110,7 +120,7 @@ def _manifest_fields(manifest: dict) -> dict:
         "reason": reason,
         "cancel_requested": bool(manifest.get("cancel_requested")),
         "relaunched_from": manifest.get("relaunched_from"),
-        "split_draws": manifest.get("split_draws"),
+        "split_draws": coerce_split_draws(manifest["split_draws"]) if "split_draws" in manifest else None,
         "redraws_within_manifest": bool(base_split.get("redraw_within_manifest")),
     }
 
