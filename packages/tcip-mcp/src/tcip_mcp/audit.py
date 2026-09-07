@@ -127,9 +127,11 @@ def audit_log_key(scope: str | Path | None = None) -> Key:
 
     ``scope`` is the root the event's subject hangs off: a dataset root when the event changed a
     record that travels with the data, a project root when the event is the project's own outward
-    action, the platform root (the default) for everything else. One store under three kinds of
-    root; writers address it through :func:`_stamp_scope`, readers through this function
-    directly, and both are one resolution because the stamper calls this.
+    action or another project's door files a line about it there (a dependent project's own
+    ``dependency_pending_removal`` line, filed by the door removing what it depends on rather
+    than by the dependent itself), the platform root (the default) for everything else. One store
+    under three kinds of root; writers address it through :func:`_stamp_scope`, readers through
+    this function directly, and both are one resolution because the stamper calls this.
     """
     root = Path(scope) if scope is not None else platform_audit_scope()
     return Key(AUDIT_LOG_STORE, str(root.resolve()), _AUDIT_PARTS)

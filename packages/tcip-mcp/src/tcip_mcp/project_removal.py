@@ -22,20 +22,25 @@ need not be this process's own, while a *bound* project is this process's own pl
 root (:func:`tcip_mcp.project_paths.root_binding`); the marker, the bound root and the GUI's
 canvas-open binding are the three spellings :func:`identity_conflict` refuses a request naming.
 A completed request leaves the removed project's own last line, naming the marker just written,
-in the target's own log; the route's own line about the request lands in the bound project's
-own log when one is bound, and in the target's own log otherwise, so a workspace with nothing
-bound still records the whole request. The archive door's own line is not part of that choice:
-it is a bare ``@audited`` door, so it lands wherever ``$TCIP_STATE_ROOT`` names at write time,
-unmoved by which project (if any) is bound. A refused or failed archive leaves the target's own
-state, and its own log, untouched, since the marker is written before any log line. A crash
-between the marker being written and the target's own request line landing leaves a marker with
-no request line on the target, and the next start then moves a tree whose log ends with the
-completion and no request. Phase two's own completion line lands on the moved tree at the next
-backend start, so a moved tree's own audit trail ends by saying what happened to it; a crash
-between the rename and the marker's own delete leaves a moved tree still carrying its marker,
-one row-delete wide, so a tree moved back by hand inside that window is pending again. Undoing a
-completed move by hand (outside ``tcip import-project``) means renaming ``<name>-<stamp>/`` back
-under the workspace as ``<name>``, since the stamped holding name is not itself a project name.
+in the target's own log; one ``dependency_pending_removal`` line per dependent project, in that
+dependent's own log; and the route's own line about the request, in the bound project's own log
+when one is bound, and in the target's own log otherwise, so a workspace with nothing bound
+still records the whole request. The archive door's own line is not part of that choice: it is
+a bare ``@audited`` door, so it lands wherever ``$TCIP_STATE_ROOT`` names at write time, unmoved
+by which project (if any) is bound. A refused or failed archive leaves the target's own state,
+and its own log, untouched, since the marker is written before any log line. Four crash windows
+follow the marker: between it and the target's own request line landing (a marker with no
+request line on the target, the next start then moving a tree whose log ends with the completion
+and no request); between it and a dependent's line (that dependent's log without it, the marker
+record's own ``dependent_projects`` still naming the dependent); between the last dependent's
+line and the route's own (the target's log ending with ``project_removal_requested`` and no
+route line); and, unrelated to the request, between the rename and the marker's own delete in
+phase two (a moved tree still carrying its marker, one row-delete wide, so a tree moved back by
+hand inside that window is pending again). Phase two's own completion line lands on the moved
+tree at the next backend start, so a moved tree's own audit trail ends by saying what happened to
+it. Undoing a completed move by hand (outside ``tcip import-project``) means renaming
+``<name>-<stamp>/`` back under the workspace as ``<name>``, since the stamped holding name is not
+itself a project name.
 
 A denied rename in phase two means some process still holds the target's database open: this
 backend's own request thread (refusal checks read the target's experiment records and keep that
@@ -329,7 +334,8 @@ def _preview(
     different things to the dialog. ``dependent_projects`` is every other workspace project's
     dataset registry entry that resolves under this project's tree, pending ones included and
     marked ``pending``; a project whose own registry will not read is listed as
-    ``{project, unreadable}`` rather than dropped.
+    ``{project, unreadable}`` rather than dropped, the same treatment a matching entry that
+    carries a path but no id gets, naming the path rather than a null id.
 
     Reads the target's experiment records (the live-run refusal check), which opens its database
     on this request's thread and keeps it open for the process's life: previewing and cancelling
@@ -383,11 +389,19 @@ def _preview(
                 entry_path = dataset_entry_path(child, entry)
             except ValueError:
                 continue
-            if nearest_containing_ancestor(entry_path, project, tolerant=True) is not None:
+            if nearest_containing_ancestor(entry_path, project, tolerant=True) is None:
+                continue
+            dataset_id = entry.get("id")
+            if not dataset_id:
                 dependent_projects.append({
-                    "project": child.name, "dataset_id": entry.get("id"),
-                    "dataset_path": str(entry_path), "pending": pending is not None,
+                    "project": child.name,
+                    "unreadable": f"registry entry {entry_path} carries no id",
                 })
+                continue
+            dependent_projects.append({
+                "project": child.name, "dataset_id": dataset_id,
+                "dataset_path": str(entry_path), "pending": pending is not None,
+            })
 
     result: dict = {
         "external_roots": external_roots,
@@ -437,16 +451,24 @@ def request_project_removal(
     dependent_projects, completes, audit_scope, recorded_in_open_project, audit_note}``.
 
     The removed project's own last line, naming the marker just written, lands in the target's
-    own log first. The route's own line about the request lands in the bound project's own log
-    when this process is bound to one (``recorded_in_open_project`` true); with none bound, it
-    lands in the target's own log instead, right after the target's own line, so a workspace
-    with nothing bound still records the whole request against the project it names.
-    ``audit_scope`` is that root either way; ``audit_note`` names, in one sentence, where the
-    request's two lines and the archive door's own line went (the archive door's own line is a
-    bare ``@audited`` door, unmoved by this decision: it always lands wherever
-    ``$TCIP_STATE_ROOT`` names). Nothing is deleted. ``requested_by`` is the caller's own
-    resolved identity string (``tcip_web.identity.user_id(tcip_web.identity.resolve_user(...))``,
-    the caller's own edge into that package, not this module's).
+    own log first. Next, one ``dependency_pending_removal`` line per dependent project (the
+    preview's own ``dependent_projects`` entries carrying a ``dataset_id``, grouped by
+    ``project``), naming every dataset id and path a dependent registers under the target, in
+    that dependent's own log; an unreadable dependent gets none. Last, the route's own line about
+    the request, in the bound project's own log when this process is bound to one
+    (``recorded_in_open_project`` true), or in the target's own log otherwise, so a workspace with
+    nothing bound still records the whole request against the project it names. ``audit_scope``
+    is that root either way; ``audit_note`` names, in one sentence, where the request's two lines
+    and the archive door's own line went (the archive door's own line is a bare ``@audited`` door,
+    unmoved by this decision: it always lands wherever ``$TCIP_STATE_ROOT`` names). A dependent's
+    line failing to append never costs another dependent its own line, or the route its own
+    attempt: every failure is collected and the loop continues, and one 409 at the end names each
+    line that did not land beside the ones that did, stating that the marker and the target's own
+    line stand and that the removal still completes at the next start; the target's own line keeps
+    its immediate 409, unlike every line after it. See the module docstring for the four crash
+    windows a request can leave. Nothing is deleted. ``requested_by`` is the caller's own resolved
+    identity string (``tcip_web.identity.user_id(tcip_web.identity.resolve_user(...))``, the
+    caller's own edge into that package, not this module's).
     """
     with _request_lock:
         shape_refusal = _name_shape_refusal(name)
@@ -507,6 +529,27 @@ def request_project_removal(
                               f"{exc}. The removal still completes at the next backend start.",
                     "status": 409}
 
+        unwritten: list[str] = []
+        ws_root = workspace.workspace_root(create=False)
+        by_dependent: dict[str, dict] = {}
+        for dep in dependent_projects:
+            if "unreadable" in dep:
+                continue
+            bucket = by_dependent.setdefault(dep["project"], {"dataset_ids": [], "dataset_paths": []})
+            bucket["dataset_ids"].append(dep["dataset_id"])
+            bucket["dataset_paths"].append(dep["dataset_path"])
+        for dep_name, bucket in by_dependent.items():
+            try:
+                audit.record_event_or_raise(
+                    "dependency_pending_removal",
+                    {"dataset_ids": bucket["dataset_ids"], "dataset_paths": bucket["dataset_paths"],
+                     "target": name, "target_root": str(project), "archive_path": str(archive_path),
+                     "holding_dir": str(holding_dir), "requested_by": requested_by},
+                    scope=ws_root / dep_name,
+                )
+            except audit.AuditEntryNotWritten as exc:
+                unwritten.append(f"{dep_name}'s own line: {exc}")
+
         bound_root = _bound_project_root(state)
         recorded_in_open_project = bound_root is not None
         open_root = bound_root if bound_root is not None else project
@@ -518,9 +561,12 @@ def request_project_removal(
                 scope=open_root,
             )
         except audit.AuditEntryNotWritten as exc:
-            return {"error": f"the marker for {name!r} and its own log line are written, but "
-                              f"this backend's line is not: {exc}. The removal still completes "
-                              "at the next backend start.",
+            unwritten.append(f"the route's own line: {exc}")
+
+        if unwritten:
+            return {"error": f"the marker and {name!r}'s own line stand; every other line was "
+                              f"written except: {'; '.join(unwritten)}. The removal still "
+                              "completes at the next backend start.",
                     "status": 409}
 
         if recorded_in_open_project:
