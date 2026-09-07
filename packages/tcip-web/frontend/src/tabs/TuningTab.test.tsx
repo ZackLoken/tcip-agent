@@ -1021,8 +1021,8 @@ describe("TuningTab split draws spread", () => {
     render(<TuningTab />);
     fireEvent.click(await screen.findByText("hpo-draws-no-best-no-reason"));
 
-    expect(await screen.findByText("The spread across draws")).toBeInTheDocument();
-    expect(screen.queryByText("no best recorded")).not.toBeInTheDocument();
+    const heading = await screen.findByText("The spread across draws");
+    expect(heading.parentElement?.children).toHaveLength(1);
   });
 
   it("labels the best line's seed list as completed seeds", async () => {
