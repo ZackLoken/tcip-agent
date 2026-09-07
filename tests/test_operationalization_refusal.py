@@ -722,7 +722,7 @@ def test_write_phenology_csv_with_a_basis_writes_the_delivered_schema(tmp_path: 
     pred_dirs = list(body["predictions_by_date"].values())
     recon = reconcile_operating_point_validity(pred_dirs, trait="bud_opening")
     classifier_recon = reconcile_classifier_validity(pred_dirs)
-    classifier_state, _note = bind_classifier_validity(
+    classifier_state, note = bind_classifier_validity(
         classifier_recon["validated"], pred_dirs, pred_dirs, trait="bud_opening")
     tile_recon = reconcile_tile_size_validity(pred_dirs)
     flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
@@ -735,7 +735,7 @@ def test_write_phenology_csv_with_a_basis_writes_the_delivered_schema(tmp_path: 
             "operating_point": recon,
             "classifier_operating_point": {
                 **classifier_recon, "bound_validated": classifier_state,
-                "delivery_note": _note,
+                "delivery_note": note,
             },
         },
         producer={}, dimension_reconciliations={"tile_size": tile_recon},
