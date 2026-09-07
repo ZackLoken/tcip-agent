@@ -7,12 +7,21 @@
  * data paths rather than hand-structuring a folder here.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
-import { api, type ProjectSummary } from "@/api/client";
+import {
+  api,
+  type OpenProjectNames,
+  type PendingRemovalEntry,
+  type ProjectSummary,
+  type RemovalOutcome,
+} from "@/api/client";
+import type { RemovalPreview } from "@/api/types.generated";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SeasonRail } from "@/components/SeasonRail";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { adoptWorkspaceProject, defaultDate, openProjectByName } from "@/lib/openProject";
+import { forgetRecentProject } from "@/lib/recentProjects";
 import { useStore } from "@/store";
 
 // Session-scoped: auto-open the active project only on the app's first load, so a later
@@ -24,6 +33,137 @@ let autoOpenAttempted = false;
 // labels won't offer "bush" (which would open a blank canvas).
 const subjectsForDate = (p: ProjectSummary, d: string): string[] => p.subjects_by_date[d] ?? [];
 const modelsForDate = (p: ProjectSummary, d: string): string[] => p.models_by_date[d] ?? [];
+
+/** Why `name`'s Remove control is disabled, or null when the request may proceed: one of the
+ *  three spellings the removal door refuses by identity, or no project open in the backend at
+ *  all (every card disabled then, since the request has nowhere to record its own line). */
+function removeDisabledReason(name: string, openNames: OpenProjectNames | null): string | null {
+  if (!openNames) return "Loading which project is open…";
+  const { marker, platform_root, canvas_binding } = openNames;
+  if (!marker && !platform_root && !canvas_binding) {
+    return "No project is open in this backend; open one first so the request is recorded in its log.";
+  }
+  if (name === marker) return `${name} is the workspace's active project (the marker).`;
+  if (name === platform_root) return `${name} is this backend's own platform root.`;
+  if (name === canvas_binding) return `${name} is the project the GUI has open.`;
+  return null;
+}
+
+function RemovalDialog({
+  name,
+  onClose,
+  onRemoved,
+}: {
+  name: string;
+  onClose: () => void;
+  onRemoved: () => void;
+}) {
+  const user = useStore((s) => s.user);
+  const nameFieldId = useId();
+  const [preview, setPreview] = useState<RemovalPreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [confirmText, setConfirmText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.projects
+      .removalPreview(name)
+      .then((p) => {
+        if (!cancelled) setPreview(p);
+      })
+      .catch((e) => {
+        if (!cancelled) setPreviewError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [name]);
+
+  const refusal = submitError ?? preview?.refusal ?? previewError ?? null;
+  const canConfirm = !refusal && confirmText === name && !submitting;
+
+  async function confirmRemoval() {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const res = await api.projects.remove({ name, confirm_name: confirmText, user });
+      forgetRecentProject(name);
+      useStore
+        .getState()
+        .pushToast(
+          `Archived ${name} to ${res.archive_path}; it moves to ${res.holding_dir} at the ` +
+            "next backend start. Nothing is deleted.",
+        );
+      onRemoved();
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <ConfirmDialog heading={`Remove ${name}`} onClose={onClose}>
+      <div className="flex flex-col gap-3 text-[12px]">
+        {refusal && <p className="text-tcip-fp">{refusal}</p>}
+        {preview && preview.dependent_projects.length > 0 && (
+          <div className="text-tcip-fp">
+            <p className="font-medium">
+              Other projects depend on this one; their training fails on a missing image once the
+              move completes:
+            </p>
+            <ul className="list-disc pl-4">
+              {preview.dependent_projects.map((d, i) => (
+                <li key={i}>{JSON.stringify(d)}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {preview && preview.external_roots.length > 0 && (
+          <div className="text-tcip-muted">
+            <p className="font-medium">External roots (stay in place):</p>
+            <ul className="list-disc pl-4">
+              {preview.external_roots.map((r, i) => (
+                <li key={i}>{JSON.stringify(r)}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <p className="text-tcip-muted">
+          {name} is archived now to the workspace&apos;s holding directory and moved there at the
+          next backend start. Nothing is deleted; the archive imports back through{" "}
+          <span className="font-mono">tcip import-project</span>.
+        </p>
+        <label className="flex flex-col gap-1" htmlFor={nameFieldId}>
+          <span className="tcip-label">Type the project name to confirm</span>
+          <input
+            id={nameFieldId}
+            className="tcip-input"
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            disabled={!!refusal}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+        <div className="flex gap-2">
+          <button
+            className="tcip-btn-primary flex-1"
+            disabled={!canConfirm}
+            onClick={confirmRemoval}
+          >
+            {submitting ? "Removing…" : "Remove"}
+          </button>
+          <button className="tcip-btn flex-1" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </ConfirmDialog>
+  );
+}
 
 function relativeTime(epochSeconds: number): string {
   const deltaMs = Date.now() - epochSeconds * 1000;
@@ -47,6 +187,10 @@ export function ProjectPicker() {
   const [model, setModel] = useState("");
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [pendingRemoval, setPendingRemoval] = useState<PendingRemovalEntry[]>([]);
+  const [openProjectNames, setOpenProjectNames] = useState<OpenProjectNames | null>(null);
+  const [removalOutcomes, setRemovalOutcomes] = useState<RemovalOutcome[]>([]);
+  const [removalTarget, setRemovalTarget] = useState<string | null>(null);
   const openedRef = useRef(false);
 
   function selectCard(p: ProjectSummary) {
@@ -97,6 +241,20 @@ export function ProjectPicker() {
     }
   }
 
+  function refetch(): Promise<void> {
+    return api.projects
+      .list()
+      .then((res) => {
+        setProjects(res.projects);
+        setPendingRemoval(res.pending_removal);
+        setOpenProjectNames(res.open_project_names);
+        setRemovalOutcomes(res.removal_startup_outcomes);
+      })
+      .catch((e) => {
+        setLoadError(e instanceof Error ? e.message : String(e));
+      });
+  }
+
   useEffect(() => {
     let cancelled = false;
     // Claim the attempt now, before the fetch: a picker that unmounts mid-fetch (every load
@@ -108,6 +266,9 @@ export function ProjectPicker() {
       .then((res) => {
         if (cancelled) return;
         setProjects(res.projects);
+        setPendingRemoval(res.pending_removal);
+        setOpenProjectNames(res.open_project_names);
+        setRemovalOutcomes(res.removal_startup_outcomes);
         // Auto-open the active project on first app load.
         if (!alreadyAttempted) {
           const active = res.projects.find((p) => p.name === res.active);
@@ -310,7 +471,7 @@ export function ProjectPicker() {
                         </label>
                       </div>
                       {openError && <span className="text-[11px] text-tcip-fp">{openError}</span>}
-                      <div className="flex gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <button
                           className="tcip-btn-primary flex-1"
                           disabled={opening || !date}
@@ -322,6 +483,28 @@ export function ProjectPicker() {
                               ? "This project has no dated images"
                               : "Open project"}
                         </button>
+                        {(() => {
+                          const reason = removeDisabledReason(p.name, openProjectNames);
+                          const reasonId = `remove-reason-${p.name}`;
+                          return (
+                            <>
+                              <button
+                                type="button"
+                                className="tcip-btn"
+                                disabled={!!reason}
+                                aria-describedby={reason ? reasonId : undefined}
+                                onClick={() => setRemovalTarget(p.name)}
+                              >
+                                Remove…
+                              </button>
+                              {reason && (
+                                <span id={reasonId} className="text-[11px] text-tcip-muted">
+                                  {reason}
+                                </span>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
                   )}
@@ -334,7 +517,44 @@ export function ProjectPicker() {
         {!projects && !loadError && (
           <div className="text-[12px] text-tcip-muted">Loading projects…</div>
         )}
+
+        {pendingRemoval.length > 0 && (
+          <div className="text-[11px] text-tcip-muted flex flex-col gap-0.5">
+            {pendingRemoval.map((p) => (
+              <span key={p.name}>
+                Pending removal: {p.name}, requested {p.requested_at}; moves at the next backend
+                start.
+              </span>
+            ))}
+          </div>
+        )}
+
+        {removalOutcomes.length > 0 && (
+          <div className="text-[11px] text-tcip-muted flex flex-col gap-0.5">
+            {removalOutcomes.map((o, i) => (
+              <span key={`${o.name}-${i}`}>
+                {o.name}:{" "}
+                {o.moved_to
+                  ? `moved to ${o.moved_to}`
+                  : o.blocked_by
+                    ? `blocked (${o.blocked_by})`
+                    : `skipped (${o.skipped})`}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
+
+      {removalTarget && (
+        <RemovalDialog
+          name={removalTarget}
+          onClose={() => setRemovalTarget(null)}
+          onRemoved={() => {
+            setRemovalTarget(null);
+            void refetch();
+          }}
+        />
+      )}
     </div>
   );
 }

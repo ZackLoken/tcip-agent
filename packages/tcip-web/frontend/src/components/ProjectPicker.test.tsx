@@ -10,6 +10,8 @@ vi.mock("@/api/client", () => {
       projects: {
         list: vi.fn(),
         setActive: vi.fn().mockResolvedValue({ name: "x", path: "/x" }),
+        removalPreview: vi.fn(),
+        remove: vi.fn(),
       },
       dataset: {
         select: vi.fn(),
@@ -68,7 +70,12 @@ beforeEach(() => {
   vi.mocked(api.dataset.select).mockReset();
   vi.mocked(api.projects.setActive).mockReset();
   vi.mocked(api.projects.setActive).mockResolvedValue({ name: "x", path: "/x" });
+  vi.mocked(api.projects.removalPreview).mockReset();
+  vi.mocked(api.projects.remove).mockReset();
 });
+
+const NO_OPEN_PROJECT = { marker: null, platform_root: null, canvas_binding: null };
+const NO_REFUSAL_PREVIEW = { external_roots: [], dependent_projects: [], refusal: null };
 
 describe("ProjectPicker", () => {
   it("lists workspace projects with stats", async () => {
@@ -77,6 +84,9 @@ describe("ProjectPicker", () => {
       active: null,
       active_path: null,
       projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -91,6 +101,9 @@ describe("ProjectPicker", () => {
       active: null,
       active_path: null,
       projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -109,6 +122,9 @@ describe("ProjectPicker", () => {
       active: null,
       active_path: null,
       projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -121,6 +137,9 @@ describe("ProjectPicker", () => {
       active: null,
       active_path: null,
       projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -146,6 +165,9 @@ describe("ProjectPicker", () => {
       active: null,
       active_path: null,
       projects: withLabelProblem,
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -162,6 +184,9 @@ describe("ProjectPicker", () => {
       active: null,
       active_path: null,
       projects: [],
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
     expect(await screen.findByText("No projects yet")).toBeInTheDocument();
@@ -173,6 +198,9 @@ describe("ProjectPicker", () => {
       active: null,
       active_path: null,
       projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
@@ -214,6 +242,9 @@ describe("ProjectPicker", () => {
       active: null,
       active_path: null,
       projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
@@ -249,6 +280,9 @@ describe("ProjectPicker", () => {
       active: null,
       active_path: null,
       projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
     fireEvent.click(await screen.findByText("crop_a_subject_a_valley-farm"));
@@ -272,6 +306,9 @@ describe("ProjectPicker", () => {
       active: null,
       active_path: null,
       projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -310,6 +347,9 @@ describe("ProjectPicker", () => {
       active: PROJECTS[0].name,
       active_path: PROJECTS[0].path,
       projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     vi.mocked(freshApi.dataset.select).mockResolvedValue({
       status: "ok",
@@ -349,6 +389,9 @@ describe("ProjectPicker", () => {
       active: PROJECTS[0].name,
       active_path: PROJECTS[0].path,
       projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     vi.mocked(freshApi.dataset.select).mockResolvedValue({
       status: "ok",
@@ -379,6 +422,9 @@ describe("ProjectPicker", () => {
       active: null,
       active_path: null,
       projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -442,6 +488,9 @@ describe("ProjectPicker", () => {
       active: null,
       active_path: null,
       projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
     fireEvent.click(await screen.findByText("crop_a_subject_a_valley-farm"));
@@ -462,9 +511,252 @@ describe("ProjectPicker", () => {
       active: null,
       active_path: null,
       projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
     await screen.findByText(PROJECTS[0].name);
     expect(screen.queryByText(/open a folder outside the workspace/i)).not.toBeInTheDocument();
+  });
+});
+
+async function selectFirstCard() {
+  fireEvent.click(await screen.findByText(PROJECTS[0].name));
+}
+
+describe("ProjectPicker removal", () => {
+  it.each([
+    ["marker", { marker: PROJECTS[0].name, platform_root: null, canvas_binding: null }],
+    ["platform_root", { marker: null, platform_root: PROJECTS[0].name, canvas_binding: null }],
+    ["canvas_binding", { marker: null, platform_root: null, canvas_binding: PROJECTS[0].name }],
+  ])("disables Remove with a reason when the card is the %s", async (_label, openNames) => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: openNames,
+      removal_startup_outcomes: [],
+    });
+    render(<ProjectPicker />);
+    await selectFirstCard();
+
+    const remove = screen.getByRole("button", { name: "Remove…" });
+    expect(remove).toBeDisabled();
+    expect(remove).toHaveAttribute("aria-describedby");
+    const reason = document.getElementById(remove.getAttribute("aria-describedby")!);
+    expect(reason).toHaveTextContent(PROJECTS[0].name);
+  });
+
+  it("disables every card's Remove control when no project is open in the backend", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: NO_OPEN_PROJECT,
+      removal_startup_outcomes: [],
+    });
+    render(<ProjectPicker />);
+    await selectFirstCard();
+
+    expect(screen.getByRole("button", { name: "Remove…" })).toBeDisabled();
+  });
+
+  it("enables Remove for a card that is none of the three spellings", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: PROJECTS[1].name, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
+    });
+    render(<ProjectPicker />);
+    await selectFirstCard();
+
+    expect(screen.getByRole("button", { name: "Remove…" })).not.toBeDisabled();
+  });
+
+  it("renders the refusal, dependents and external roots before the name field", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: PROJECTS[1].name, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.removalPreview).mockResolvedValue({
+      external_roots: [{ path: "/data/external", layouts: ["root"] }],
+      dependent_projects: [{ project: "other_project", dataset_id: "ds1" }],
+      refusal: "a live run is in progress",
+    });
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Remove…" }));
+
+    const dialog = await screen.findByRole("dialog");
+    const refusal = await within(dialog).findByText(/a live run is in progress/);
+    const dependents = within(dialog).getByText(/other_project/);
+    const external = within(dialog).getByText(/external/);
+    const nameField = within(dialog).getByLabelText(/type the project name to confirm/i);
+    // All three precede the name field in document order (dialog body reads top to bottom).
+    expect(
+      refusal.compareDocumentPosition(nameField) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      dependents.compareDocumentPosition(nameField) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      external.compareDocumentPosition(nameField) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(nameField).toBeDisabled();
+  });
+
+  it("keeps the confirm control disabled until the typed name matches exactly", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: PROJECTS[1].name, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Remove…" }));
+
+    const dialog = await screen.findByRole("dialog");
+    const nameField = await within(dialog).findByLabelText(/type the project name to confirm/i);
+    const confirm = within(dialog).getByRole("button", { name: /^Remove$/ });
+    expect(confirm).toBeDisabled();
+
+    fireEvent.change(nameField, { target: { value: PROJECTS[0].name.slice(0, -1) } });
+    expect(confirm).toBeDisabled();
+
+    fireEvent.change(nameField, { target: { value: PROJECTS[0].name } });
+    expect(confirm).not.toBeDisabled();
+  });
+
+  it("closes on Escape without sending a request", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: PROJECTS[1].name, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    const removeButton = screen.getByRole("button", { name: "Remove…" });
+    // fireEvent.click does not move focus the way a real browser click does; a real click on
+    // this button focuses it first, which is what the dialog's own opener-tracking relies on.
+    removeButton.focus();
+    fireEvent.click(removeButton);
+    await screen.findByRole("dialog");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(removeButton).toHaveFocus();
+    expect(api.projects.remove).not.toHaveBeenCalled();
+  });
+
+  it("on success, toasts, refetches, and lists the project under pending removal", async () => {
+    vi.mocked(api.projects.list)
+      .mockResolvedValueOnce({
+        workspace: "/ws",
+        active: null,
+        active_path: null,
+        projects: PROJECTS,
+        pending_removal: [],
+        open_project_names: {
+          marker: PROJECTS[1].name,
+          platform_root: null,
+          canvas_binding: null,
+        },
+        removal_startup_outcomes: [],
+      })
+      .mockResolvedValueOnce({
+        workspace: "/ws",
+        active: null,
+        active_path: null,
+        projects: [PROJECTS[1]],
+        pending_removal: [
+          {
+            name: PROJECTS[0].name,
+            requested_at: "20260304T120000Z",
+            archive_path: "/ws/.removed/x.zip",
+            holding_dir: "/ws/.removed/x",
+          },
+        ],
+        open_project_names: {
+          marker: PROJECTS[1].name,
+          platform_root: null,
+          canvas_binding: null,
+        },
+        removal_startup_outcomes: [],
+      });
+    vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
+    vi.mocked(api.projects.remove).mockResolvedValue({
+      name: PROJECTS[0].name,
+      archive_path: "/ws/.removed/x.zip",
+      holding_dir: "/ws/.removed/x",
+      external_roots: [],
+      dependent_projects: [],
+      completes: "at the next backend start, or tcip complete-removals",
+      audit_scope: "/ws/other",
+    });
+    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Remove…" }));
+    const dialog = await screen.findByRole("dialog");
+    const nameField = await within(dialog).findByLabelText(/type the project name to confirm/i);
+    fireEvent.change(nameField, { target: { value: PROJECTS[0].name } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Remove$/ }));
+
+    await waitFor(() =>
+      expect(api.projects.remove).toHaveBeenCalledWith({
+        name: PROJECTS[0].name,
+        confirm_name: PROJECTS[0].name,
+        user: expect.any(String),
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(pushToast).toHaveBeenCalledWith(expect.stringContaining("/ws/.removed/x.zip"));
+    await screen.findByText(new RegExp(`Pending removal: ${PROJECTS[0].name}`));
+  });
+
+  it("lists the last start's removal outcomes", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: NO_OPEN_PROJECT,
+      removal_startup_outcomes: [
+        { name: "moved_one", moved_to: "/ws/.removed/moved_one-x", archive_path: "/ws/a.zip" },
+        { name: "blocked_one", blocked_by: "a held database", archive_path: "/ws/b.zip" },
+      ],
+    });
+    render(<ProjectPicker />);
+    await screen.findByText(PROJECTS[0].name);
+
+    expect(screen.getByText(/moved_one.*moved to/)).toBeInTheDocument();
+    expect(screen.getByText(/blocked_one.*blocked/)).toBeInTheDocument();
   });
 });
