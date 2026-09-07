@@ -108,6 +108,14 @@ describe("defaultChartSeries (the live metrics chart's default series rule)", ()
     expect(series.labels.train_loss).toBe("train_loss (selection)");
   });
 
+  it("keeps a bespoke loss-suffixed selection metric as its own line, never folded into train_loss", () => {
+    const rows = [{ epoch: 0, train_loss: 0.9, selection: 0.3, selection_metric: "my_loss" }];
+    const series = defaultChartSeries(["train_loss", "selection"], rows);
+    expect(series.keys).toEqual(["train_loss", "selection"]);
+    expect(series.labels.selection).toBe("selection (my_loss)");
+    expect(series.labels.train_loss).toBeUndefined();
+  });
+
   it("plots selection alone, unmerged, when no row names a selection_metric", () => {
     const rows = [{ epoch: 0, train_loss: 0.5, selection: 0.5 }];
     const series = defaultChartSeries(["train_loss", "selection"], rows);
