@@ -25,21 +25,21 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 9b555bf9.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 31275265.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 9b555bf9 has 436 modules across the six scanned roots (143192 total lines):
+HEAD 31275265 has 436 modules across the six scanned roots (143993 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 138 | 63762 |
-| tcip-annotation | 12 | 4299 |
-| tcip-web | 40 | 13959 |
+| tcip-mcp | 138 | 63850 |
+| tcip-annotation | 12 | 4341 |
+| tcip-web | 40 | 14067 |
 | tcip-store | 13 | 5282 |
-| tcip-web-frontend | 216 | 50934 |
+| tcip-web-frontend | 216 | 51497 |
 | tools | 17 | 4956 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
@@ -433,7 +433,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/lib/joinRunSeries.ts | Overlay-chart helper for the Training tab's run comparison (kept out of the .tsx so it's unit-testable). | 2 | 2 |
 | packages/tcip-web/frontend/src/lib/labelProblemToast.ts | Toast a dataset selection's label_problem, shared by every path that installs a new selection through /dataset/select. | 1 | 3 |
 | packages/tcip-web/frontend/src/lib/labelSerde.test.ts | (none found) | 2 | 0 |
-| packages/tcip-web/frontend/src/lib/labelSerde.ts | The single mapping between the unified name-based label file (one Annotation list per image) and the Annotate canvas' drawing model (boxes + polygons + points + geometry-less ratings). | 1 | 3 |
+| packages/tcip-web/frontend/src/lib/labelSerde.ts | The single mapping between the unified name-based label file (one Annotation list per image) and the Annotate canvas' drawing model (boxes + polygons + points + geometry-less ratings). | 1 | 4 |
 | packages/tcip-web/frontend/src/lib/openProject.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/lib/openProject.ts | Opening a workspace project = pointing the GUI at it (project root = dataset root) via /dataset/select. | 5 | 4 |
 | packages/tcip-web/frontend/src/lib/paths.test.ts | (none found) | 1 | 0 |
@@ -477,7 +477,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/store/slices/terminalOpen.ts | Holds whether the agent terminal rail is open; always closed on a fresh session since the server-side terminal session survives closing it. | 1 | 2 |
 | packages/tcip-web/frontend/src/store/slices/toasts.ts | Holds the transient toast stack (API failures and the like), capped so a failing poll cannot flood the screen. | 1 | 2 |
 | packages/tcip-web/frontend/src/store/slices/user.ts | Holds the current annotator/reviewer identity, persisted to localStorage and stamped as created_by/accepted_by on what this person authors. | 1 | 2 |
-| packages/tcip-web/frontend/src/store/store.test.ts | (none found) | 2 | 0 |
+| packages/tcip-web/frontend/src/store/store.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/store/tabRestore.test.ts | (none found) | 4 | 0 |
 | packages/tcip-web/frontend/src/store/terminalOpenPolicy.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/store/types.ts | Types mirroring the Python backend's GuiState and the name-based label schema. | 1 | 44 |
