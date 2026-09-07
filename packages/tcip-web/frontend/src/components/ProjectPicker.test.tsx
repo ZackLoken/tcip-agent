@@ -454,6 +454,26 @@ describe("ProjectPicker", () => {
     expect(card).toHaveAccessibleDescription(/42 image\(s\)/);
   });
 
+  it("puts the active badge in the card's description, not its name", async () => {
+    const active: ProjectSummary = { ...PROJECTS[0], is_active: true };
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: [active, PROJECTS[1]],
+      pending_removal: [],
+      removal_startup_outcomes: [],
+    });
+    render(<ProjectPicker />);
+
+    const card = await screen.findByRole("button", { name: "crop_a_subject_a_valley-farm" });
+    expect(card).toHaveAccessibleName("crop_a_subject_a_valley-farm");
+    expect(card).toHaveAccessibleDescription(/active/);
+    expect(card.getAttribute("aria-describedby")).not.toBeNull();
+    const description = document.getElementById(card.getAttribute("aria-describedby")!);
+    expect(description).not.toHaveTextContent("crop_a_subject_a_valley-farm");
+  });
+
   it("names and describes a card correctly when the project name carries a space", async () => {
     const spaced: ProjectSummary = {
       ...PROJECTS[0],
