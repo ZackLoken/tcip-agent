@@ -2295,7 +2295,10 @@ def run_hyperparameter_search(
             ``split_draw_seeds`` (default: the base config's own ``data.split.seed``, else 42,
             plus the draw index), paired with every sampled point through Ray's own
             ``BasicVariantGenerator(constant_grid_search=True)`` so each point trains once per
-            seed, a blocked comparison of the split's own sensitivity. ``base_config`` bound to
+            seed, a blocked comparison of the split's own sensitivity. On the single-source
+            spatial strip path the strip layout no longer varies with ``data.split.seed`` at
+            all, so every draw there trains on the same partition and the report's split
+            sensitivity reflects training-seed noise, not a split's. ``base_config`` bound to
             a split manifest is admitted, not refused: its own copy gains
             ``data.split.redraw_within_manifest: true``, defaulting ``data.split.seed`` to 42
             when the bound config carries none, the same default an unset-seed drawn config

@@ -69,6 +69,11 @@ def _band_rects(
     Recurses :func:`spatial_strip_split` over the region's own local extent (its lattice starts at
     local ``(0, 0)``), then translates every returned rect back by the region's own origin
     (``+ x0, + y0``), the clean, lattice-phase-safe translation confirmed by design review.
+
+    ``seed`` is recorded on the returned split and governs no band placement:
+    :func:`spatial_strip_split` places every band by its fixed center-out order alone, band
+    names being interchangeable and only the set of band rects consumed by this function's
+    callers.
     """
     from tcip_mcp.pipelines.data.splits import spatial_strip_split
 
@@ -364,7 +369,7 @@ def resolve_block_calibration_records(
 
     try:
         cal_bands = _band_rects(cal_rect, k_cal, tile_size, overlap, buffer_px, seed, "cal")
-        test_bands = _band_rects(test_rect, k_test, tile_size, overlap, buffer_px, seed + 1, "test")
+        test_bands = _band_rects(test_rect, k_test, tile_size, overlap, buffer_px, seed, "test")
     except ValueError as exc:
         raise BlockCalibrationRefused(
             f"block calibration refused: the resolved band layout (k_cal={k_cal}, k_test={k_test}, "

@@ -839,12 +839,16 @@ class SpatialStripSplit:
     one differently-assigned neighbor rather than being sandwiched between two; each boundary
     is shrunk from one side only (enough on its own to guarantee ``>= buffer`` separation), so
     the image-edge-facing side of the outermost two regions is never shrunk at all. Raising
-    ``stripes_per_split`` splits each side into that many separate, scattered pieces instead,
-    trading some of that minimal discard for spreading each side across the image (guarding
-    against a side correlating with a spatial gradient along the axis); ``discard_ceiling``
-    caps how many pieces actually get used regardless of how many were asked for, since
-    boundary cost scales with piece count, not with how finely the tile lattice itself could
-    be subdivided.
+    ``stripes_per_split`` asks for that many separate pieces per side, but the fixed
+    center-out order does not scatter every side equally: the largest share's pieces sort
+    adjacent under that order and merge back into one contiguous region, so it is the smaller
+    sides that actually end up split into pieces flanking it. Three equal-count names at
+    ``stripes_per_split=3`` land in the order ``C, B, B, A, A, A, B, C, C`` (``A`` the largest
+    share, ``C`` the smallest), five merged regions once adjacent same-name pieces combine:
+    ``A`` stays whole, ``B`` and ``C`` each split into two pieces on either side of it.
+    ``discard_ceiling`` caps how many pieces actually get used regardless of how many were
+    asked for, since boundary cost scales with piece count, not with how finely the tile
+    lattice itself could be subdivided.
 
     ``regions`` maps each split name to its list of half-open pixel rects (already merged
     where two same-split strips landed adjacent, and buffer-shrunk on any side bordering a
@@ -943,8 +947,11 @@ def _strip_regions(
     fewest possible boundaries (``len(split_names) - 1``), and only the *outermost* two
     regions' image-edge-facing sides go unshrunk, so discard concentrates at the internal
     boundaries between sides rather than scattering through the interior; more pieces trade
-    some of that back for scattering each side across the image (guarding against a side
-    correlating with a spatial gradient along the axis), a choice left to the caller.
+    some of that back, but not evenly across sides: the fixed center-out order
+    (:func:`_center_out_order`) sorts the largest share's own pieces adjacent, so they merge
+    back into one contiguous region regardless of ``stripes_per_split``, while the smaller
+    sides are the ones that actually end up scattered into pieces flanking it (see
+    :class:`SpatialStripSplit`'s docstring for the worked example), a choice left to the caller.
     """
     n = len(positions)
     axis_span = positions[-1] + tile_size - positions[0]
@@ -1006,9 +1013,12 @@ def spatial_strip_split(
     positions, for the finest achievable ratio precision; at the default
     ``stripes_per_split=1`` each requested split is one contiguous region, minimizing discard
     and concentrating it at the internal cuts between sides. A higher ``stripes_per_split``
-    (capped by ``discard_ceiling``, see :class:`SpatialStripSplit`) instead scatters each side
-    across several pieces placed by the same fixed center-out order, trading discard for a
-    guard against any one side correlating with a spatial gradient in the field.
+    (capped by ``discard_ceiling``, see :class:`SpatialStripSplit`) places more pieces per
+    side by the same fixed center-out order, but that order sorts the largest share's own
+    pieces adjacent, so they merge back into one region regardless of the count asked for; it
+    is the smaller sides that actually end up scattered into pieces flanking it, trading their
+    own discard for a guard against those sides correlating with a spatial gradient in the
+    field.
 
     ``seed`` is recorded on the returned split for the manifest and governs no layout
     decision: :func:`_center_out_order` places every side by descending share and declared
