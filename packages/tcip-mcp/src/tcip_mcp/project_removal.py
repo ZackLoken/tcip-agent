@@ -21,14 +21,14 @@ leaves three lines: the archive door's own line, then the route's own line about
 both in the open project's own log, and the removed project's own last line, naming the marker
 just written, in the target's own log; a refused or failed archive leaves the target's own
 state, and its own log, untouched, since the marker is written before any log line. A crash
-between the marker (d) and the target's own request line (e) leaves a marker with no request
-line on the target, and the next start then moves a tree whose log ends with the completion and
-no request. Phase two's own completion line lands on the moved tree at the next backend start,
-so a moved tree's own audit trail ends by saying what happened to it; a crash between the rename
-and the marker's own delete leaves a moved tree still carrying its marker, one row-delete wide,
-so a tree moved back by hand inside that window is pending again. Undoing a completed move by
-hand (outside ``tcip import-project``) means renaming ``<name>-<stamp>/`` back under the
-workspace as ``<name>``, since the stamped holding name is not itself a project name.
+between the marker being written and the target's own request line landing leaves a marker with
+no request line on the target, and the next start then moves a tree whose log ends with the
+completion and no request. Phase two's own completion line lands on the moved tree at the next
+backend start, so a moved tree's own audit trail ends by saying what happened to it; a crash
+between the rename and the marker's own delete leaves a moved tree still carrying its marker,
+one row-delete wide, so a tree moved back by hand inside that window is pending again. Undoing a
+completed move by hand (outside ``tcip import-project``) means renaming ``<name>-<stamp>/`` back
+under the workspace as ``<name>``, since the stamped holding name is not itself a project name.
 
 A denied rename in phase two means some process still holds the target's database open: this
 backend's own request thread (refusal checks read the target's experiment records and keep that
@@ -133,56 +133,90 @@ def _same_path(target: Path, other: str | os.PathLike | None) -> bool:
         return False
 
 
-def _open_project_conflict(target: Path) -> Optional[str]:
-    """The target compared, by filesystem identity, against the three spellings of "the open
-    project": the workspace's active-project marker, this process's own platform root, and the
-    GUI's canvas-open binding. Each is its own message naming the spelling and its remedy in
-    terms the breeder can act on, the same strings :func:`identity_conflict` answers the
-    listing's own per-project reason with."""
+@dataclass(frozen=True)
+class OpenProjectState:
+    """The three spellings of "the open project", read once: the active-project marker's raw
+    name, this process's own bound platform root (:func:`tcip_mcp.project_paths.root_binding`),
+    and the GUI's canvas-open binding (or the message naming why it would not read). Built by
+    :func:`read_open_project_state` and passed to :func:`identity_conflict` for every project a
+    caller checks, rather than each check re-reading the marker, the binding and the canvas
+    record on its own."""
+    marker_name: Optional[str]
+    binding_root: Optional[Path]
+    canvas: Optional[dict]
+    canvas_problem: Optional[str]
+
+
+def read_open_project_state() -> OpenProjectState:
+    """Read the marker, the bound platform root and the canvas binding exactly once. The
+    workspace listing calls this once per request and passes the result to
+    :func:`identity_conflict` for every project it summarizes; the door's own refusal chain
+    (:func:`_preview`) does the same for its own single target, rather than either caller
+    re-reading the three per project or per call."""
     from tcip_mcp.project_paths import root_binding
     from tcip_mcp.web_client import GuiBindingUnreadable, read_canvas_binding
 
-    marker_name = workspace.read_active_project()
-    if marker_name:
-        try:
-            marker_root = workspace.project_path(marker_name, create=False)
-        except ValueError:
-            marker_root = None
-        if marker_root is not None and _same_path(target, marker_root):
-            return (f"{marker_name} is the project this workspace opens by default; choose a "
-                    "different default first")
-
     binding = root_binding()
-    if binding is not None and _same_path(target, binding.root):
-        name = workspace.workspace_project_name(target) or target.name
-        return f"{name} is the project this backend started on; restart on a different project first"
-
+    canvas: Optional[dict] = None
+    canvas_problem: Optional[str] = None
     try:
         canvas = read_canvas_binding()
     except GuiBindingUnreadable as exc:
-        return f"the GUI's open-project binding could not be read: {exc}"
-    if canvas and (canvas.get("project_name") or canvas.get("root")):
-        root = canvas.get("root")
+        canvas_problem = str(exc)
+    return OpenProjectState(
+        marker_name=workspace.read_active_project(),
+        binding_root=binding.root if binding is not None else None,
+        canvas=canvas,
+        canvas_problem=canvas_problem,
+    )
+
+
+def _open_project_conflict(target: Path, state: OpenProjectState) -> Optional[str]:
+    """The target compared, by filesystem identity, against the three spellings of "the open
+    project" carried on ``state``: the workspace's active-project marker, this process's own
+    platform root, and the GUI's canvas-open binding. Each is its own message naming the
+    spelling and its remedy in terms the breeder can act on, the same strings
+    :func:`identity_conflict` answers the listing's own per-project reason with."""
+    if state.marker_name:
+        try:
+            marker_root = workspace.project_path(state.marker_name, create=False)
+        except ValueError:
+            marker_root = None
+        if marker_root is not None and _same_path(target, marker_root):
+            return (f"{state.marker_name} is the project this workspace opens by default; "
+                    "choose a different default first")
+
+    if state.binding_root is not None and _same_path(target, state.binding_root):
+        name = workspace.workspace_project_name(target) or target.name
+        return f"{name} is the project this backend started on; restart on a different project first"
+
+    if state.canvas_problem is not None:
+        return f"the GUI's open-project binding could not be read: {state.canvas_problem}"
+    if state.canvas and (state.canvas.get("project_name") or state.canvas.get("root")):
+        root = state.canvas.get("root")
         if root and _same_path(target, root):
-            label = canvas.get("project_name") or root
+            label = state.canvas.get("project_name") or root
             return f"{label} is the project the GUI has open; open a different project first"
     return None
 
 
-def identity_conflict(target: Path) -> Optional[str]:
+def identity_conflict(target: Path, state: Optional[OpenProjectState] = None) -> Optional[str]:
     """The no-project-open case and the three spellings of "the open project"
     (:func:`_open_project_conflict`): the cheap identity checks in :func:`_ordered_refusal`'s own
-    chain, a marker read, a binding read and a canvas-binding read, none of them the live-run or
-    job-registry scans that open a database connection. Shared verbatim by the door's own refusal
-    chain and by the workspace listing's own per-project ``removal_refusal``, so the two answer
-    with the same string rather than each composing its own."""
-    from tcip_mcp.project_paths import root_binding
-
-    binding = root_binding()
-    open_name = workspace.workspace_project_name(binding.root) if binding is not None else None
+    chain, none of them the live-run or job-registry scans that open a database connection.
+    Shared verbatim by the door's own refusal chain and by the workspace listing's own
+    per-project ``removal_refusal``, so the two answer with the same string rather than each
+    composing its own. ``state`` is the marker/binding/canvas triple a caller checking several
+    projects reads once (:func:`read_open_project_state`) and passes in for each; a caller with
+    none of its own gets one built for this single call."""
+    if state is None:
+        state = read_open_project_state()
+    open_name = (
+        workspace.workspace_project_name(state.binding_root) if state.binding_root is not None else None
+    )
     if open_name is None:
         return "no project is open in this backend; open one first so the request is recorded in its log"
-    return _open_project_conflict(target)
+    return _open_project_conflict(target, state)
 
 
 def _live_run_conflict(target: Path) -> Optional[str]:
@@ -197,15 +231,13 @@ def _live_run_conflict(target: Path) -> Optional[str]:
     return None
 
 
-def _ordered_refusal(name: str, job_conflict: JobConflict) -> Optional[_Refusal]:
-    """Decision order: name shape, existence, a link, the marker, the two cheap identity checks
-    (:func:`identity_conflict`), a live run, a non-terminal job. The first refusal wins; ``None``
-    means the removal may proceed. Confirmation is checked by :func:`request_project_removal`
-    itself, ahead of this chain, since only that door takes a ``confirm_name`` of its own; this
-    chain runs once per request either way (:func:`_preview`), never once for the preview and
-    again for the door. ``job_conflict`` is the caller's own function of the target root
-    answering the refusal text or ``None``, the one edge into tcip-web's job registries this
-    module holds no import of."""
+def _name_shape_refusal(name: str) -> Optional[_Refusal]:
+    """The three syntactic checks that open :func:`_ordered_refusal`'s own chain: an invalid
+    name, one carrying leading or trailing whitespace, or the workspace's own holding-directory
+    name. Also called by :func:`request_project_removal` ahead of its own confirm-name mismatch
+    check, so a malformed name answers with its own text rather than the mismatch's, whatever
+    ``confirm_name`` carries; cheap enough to run twice rather than thread a result across that
+    boundary."""
     if not workspace.is_valid_name(name):
         return _Refusal(400, f"invalid project name: {name!r}")
     if name != name.strip():
@@ -213,6 +245,23 @@ def _ordered_refusal(name: str, job_conflict: JobConflict) -> Optional[_Refusal]
     if name == REMOVED_DIRNAME:
         return _Refusal(400, f"{REMOVED_DIRNAME!r} is the workspace's own holding directory, "
                               "not a project")
+    return None
+
+
+def _ordered_refusal(
+    name: str, job_conflict: JobConflict, state: OpenProjectState,
+) -> Optional[_Refusal]:
+    """Decision order: name shape (:func:`_name_shape_refusal`), existence, a link, the marker,
+    the two cheap identity checks (:func:`identity_conflict`), a live run, a non-terminal job.
+    The first refusal wins; ``None`` means the removal may proceed. This chain runs once per
+    request either way (:func:`_preview`), never once for the preview and again for the door.
+    ``job_conflict`` is the caller's own function of the target root answering the refusal text
+    or ``None``, the one edge into tcip-web's job registries this module holds no import of.
+    ``state`` is :func:`_preview`'s own single :func:`read_open_project_state` call, passed
+    through to :func:`identity_conflict` rather than read again here."""
+    shape_refusal = _name_shape_refusal(name)
+    if shape_refusal is not None:
+        return shape_refusal
 
     try:
         project = workspace.workspace_project_root(name)
@@ -236,7 +285,7 @@ def _ordered_refusal(name: str, job_conflict: JobConflict) -> Optional[_Refusal]
             "next backend start, or through tcip complete-removals",
         )
 
-    conflict = identity_conflict(project)
+    conflict = identity_conflict(project, state)
     if conflict is not None:
         return _Refusal(409, conflict)
 
@@ -253,10 +302,12 @@ def _ordered_refusal(name: str, job_conflict: JobConflict) -> Optional[_Refusal]
 
 def _preview(name: str, job_conflict: JobConflict) -> tuple[dict, Optional[_Refusal]]:
     """The shared implementation behind :func:`removal_preview` and :func:`request_project_removal`:
-    runs :func:`_ordered_refusal` and the external-root/dependent scan exactly once, returning the
-    dialog's own dict beside the full refusal (status and text), so the door answers with the
-    status the chain actually found rather than re-deriving it, and the chain and the scan never
-    run a second time for the same request.
+    runs :func:`_ordered_refusal` exactly once, returning the dialog's own dict beside the full
+    refusal (status and text), so the door answers with the status the chain actually found
+    rather than re-deriving it, and the chain never runs a second time for the same request. A
+    refusal returns at once, with empty ``external_roots``/``dependent_projects``, before the
+    external-root/dependent scan below ever walks the sibling registries: a refused request has
+    nothing for the dialog to act on from that scan, so it never runs one.
 
     ``external_roots`` is every path ``tcip_mcp.store_catalogue.project_roots`` names for this
     project that is not under it, listed once per path with the layouts it serves and whether the
@@ -275,14 +326,17 @@ def _preview(name: str, job_conflict: JobConflict) -> tuple[dict, Optional[_Refu
     from tcip_mcp.store_catalogue import project_roots
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets_raw
 
-    refusal = _ordered_refusal(name, job_conflict)
+    state = read_open_project_state()
+    refusal = _ordered_refusal(name, job_conflict, state)
+    if refusal is not None:
+        return {"external_roots": [], "dependent_projects": [], "refusal": refusal.message}, refusal
 
     try:
         project = workspace.workspace_project_root(name)
-    except ValueError:
-        result: dict = {"external_roots": [], "dependent_projects": [],
-                        "refusal": refusal.message if refusal else None}
-        return result, refusal
+    except ValueError as exc:
+        # The chain above just resolved this name; a ValueError here means it vanished in the
+        # narrow window since, which the chain has not seen yet.
+        return {"external_roots": [], "dependent_projects": [], "refusal": str(exc)}, _Refusal(404, str(exc))
 
     roots_by_path: dict[str, list[str]] = {}
     external_roots_unreadable: Optional[str] = None
@@ -326,11 +380,11 @@ def _preview(name: str, job_conflict: JobConflict) -> tuple[dict, Optional[_Refu
     result = {
         "external_roots": external_roots,
         "dependent_projects": dependent_projects,
-        "refusal": refusal.message if refusal else None,
+        "refusal": None,
     }
     if external_roots_unreadable is not None:
         result["external_roots_unreadable"] = external_roots_unreadable
-    return result, refusal
+    return result, None
 
 
 def removal_preview(name: str, *, job_conflict: JobConflict) -> dict:
@@ -346,10 +400,13 @@ def request_project_removal(
 ) -> dict:
     """Phase one: archive the named workspace project, then mark it pending removal.
 
-    The confirm-name check runs first, since only this door takes a ``confirm_name`` of its own;
-    then one preview (:func:`_preview`) computes the ordered refusal chain and the external-root/
-    dependent scan exactly once, and this door answers with its ``refusal`` rather than running
-    the chain a second time. On success: the archive is under the workspace's holding directory,
+    The name-shape checks that open :func:`_ordered_refusal`'s own chain
+    (:func:`_name_shape_refusal`) run first, ahead of the confirm-name mismatch check, since only
+    this door takes a ``confirm_name`` of its own and a malformed name answers with its own text
+    whatever ``confirm_name`` carries. Once both pass, one preview (:func:`_preview`) computes
+    the rest of the ordered refusal chain and the external-root/dependent scan exactly once, and
+    this door answers with its ``refusal`` rather than running the chain a second time. On
+    success: the archive is under the workspace's holding directory,
     the marker is on the project, and this response carries ``{name, archive_path, holding_dir,
     external_roots, dependent_projects, completes, audit_scope}``. Three audit lines land: the
     archive door's own line, then this door's own line about the request, both in the open
@@ -359,6 +416,9 @@ def request_project_removal(
     caller's own edge into that package, not this module's).
     """
     with _request_lock:
+        shape_refusal = _name_shape_refusal(name)
+        if shape_refusal is not None:
+            return {"error": shape_refusal.message, "status": shape_refusal.status}
         if confirm_name != name:
             return {"error": "the typed name does not match the project's name", "status": 400}
 

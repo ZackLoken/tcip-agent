@@ -61,7 +61,6 @@ describe("openProjectByName", () => {
       active_path: null,
       projects: [p],
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
 
@@ -89,7 +88,6 @@ describe("openProjectByName", () => {
       active_path: null,
       projects: [p],
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
 
@@ -115,7 +113,6 @@ describe("openProjectByName", () => {
       active_path: null,
       projects: [p],
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
 
@@ -141,7 +138,6 @@ describe("openProjectByName", () => {
       active_path: null,
       projects: [p],
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
 
@@ -159,7 +155,6 @@ describe("openProjectByName", () => {
       active_path: null,
       projects: [],
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     expect(await openProjectByName("nope")).toBeNull();
@@ -174,7 +169,6 @@ describe("openProjectByName", () => {
       active_path: null,
       projects: [p],
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
 
@@ -193,7 +187,6 @@ describe("adoptProjectByName", () => {
       active_path: null,
       projects: [p],
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
 
@@ -210,7 +203,6 @@ describe("adoptProjectByName", () => {
       active_path: null,
       projects: [],
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
 
