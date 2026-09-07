@@ -301,14 +301,14 @@ def _kept_tiles(split, width, height):
 
 
 def test_spatial_strip_split_admits_valid_work():
-    split = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.7, 0.3, 0.0), seed=3)
+    split = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.7, 0.3, 0.0))
     assert split.kept_tiles["train"] > 0
     assert split.kept_tiles["val"] > 0
     assert 0.0 < split.realized_fractions["val"] < 1.0
 
 
 def test_spatial_strip_split_accounts_for_every_tile():
-    split = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.7, 0.3, 0.0), seed=3)
+    split = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.7, 0.3, 0.0))
     total = (sum(split.kept_tiles.values())
              + split.tiles_dropped_past_extent + split.tiles_dropped_outside_regions)
     assert total == split.total_tiles
@@ -316,7 +316,7 @@ def test_spatial_strip_split_accounts_for_every_tile():
 
 def test_spatial_strip_split_no_tile_shared_and_buffer_respected():
     width, height = 4000, 3000
-    split = spatial_strip_split(width, height, 320, 0.2, fractions=(0.7, 0.3, 0.0), seed=5)
+    split = spatial_strip_split(width, height, 320, 0.2, fractions=(0.7, 0.3, 0.0))
     by_name = _kept_tiles(split, width, height)
     train, val = by_name["train"], by_name["val"]
     assert train and val
@@ -348,56 +348,57 @@ def test_center_out_order_ties_resolve_in_declared_order():
 
 
 def test_spatial_strip_split_tied_shares_place_by_declared_order_not_seed():
-    """The center-out tie-break resolves equal shares in declared (``split_names``) order,
-    never by seed: at seed=0, the pre-fix shuffle-then-stable-sort placed the tied ``val`` and
-    ``test`` sides on opposite cardinal sides from where seed=1 placed them (val left of the
-    largest share, test right, at seed=1; the mirror image at seed=0), found by scanning small
-    seeds for one where the shuffle disagreed with declared order. Seed 0 flips the tie because
-    the pre-fix order shuffled the slots before a stable sort by descending share: at seed=0
-    the shuffle happened to put ``test`` before ``val`` in the pre-sort list, and a stable sort
-    preserves relative order among entries whose sort key ties, so ``test`` stayed ahead of
-    ``val`` after the sort too, on the opposite side from where seed=1's shuffle left them. The
-    fixed order gives the same layout at both seeds."""
-    a = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.6, 0.2, 0.2), seed=0)
-    b = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.6, 0.2, 0.2), seed=1)
-    assert a.regions == b.regions
-    assert a.seed == 0 and b.seed == 1
+    """The center-out tie-break resolves equal shares by their position in the declared
+    ``split_names`` order, never by any seed: permuting which of the two tied names comes
+    second swaps which cardinal side that name lands on, mirroring the swap in the declared
+    order, and the returned split carries no ``seed`` field a caller could have varied instead.
+    ``spatial_strip_split`` no longer takes a ``seed`` keyword at all, so this cannot be run
+    against a baseline that still required one; it is coverage of the tie-break's declared-order
+    property, the producer-fed home the retired seed-pair comparison left."""
+    forward = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.6, 0.2, 0.2),
+                                   split_names=("train", "val", "test"))
+    swapped = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.6, 0.2, 0.2),
+                                   split_names=("train", "test", "val"))
+    assert forward.regions["val"] != forward.regions["test"]
+    assert forward.regions["val"] == swapped.regions["test"]
+    assert forward.regions["test"] == swapped.regions["val"]
+    assert not hasattr(forward, "seed")
 
 
 def test_spatial_strip_split_deterministic():
-    a = spatial_strip_split(8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1), seed=11)
-    b = spatial_strip_split(8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1), seed=11)
+    a = spatial_strip_split(8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1))
+    b = spatial_strip_split(8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1))
     assert a == b
 
 
 def test_spatial_strip_split_buffer_defaults_to_tile_size():
-    split = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.8, 0.2, 0.0), seed=1)
+    split = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.8, 0.2, 0.0))
     assert split.buffer == 320
 
 
 def test_spatial_strip_split_explicit_buffer_below_tile_size_refuses():
     with pytest.raises(ValueError, match="buffer"):
-        spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.8, 0.2, 0.0), seed=1, buffer=100)
+        spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.8, 0.2, 0.0), buffer=100)
 
 
 def test_spatial_strip_split_refuses_when_no_tile_fits_extent():
     with pytest.raises(ValueError, match="no tile fits"):
-        spatial_strip_split(100, 100, 320, 0.2, fractions=(0.8, 0.2, 0.0), seed=1)
+        spatial_strip_split(100, 100, 320, 0.2, fractions=(0.8, 0.2, 0.0))
 
 
 def test_spatial_strip_split_refuses_when_geometry_is_too_tight():
     # An image barely larger than one tile: nothing survives the buffer margin on a second side.
     with pytest.raises(ValueError, match="no strip layout"):
-        spatial_strip_split(340, 340, 320, 0.2, fractions=(0.8, 0.2, 0.0), seed=1)
+        spatial_strip_split(340, 340, 320, 0.2, fractions=(0.8, 0.2, 0.0))
 
 
 def test_spatial_strip_split_fractions_must_sum_to_one():
     with pytest.raises(ValueError, match="sum to 1.0"):
-        spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.7, 0.2, 0.2), seed=1)
+        spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.7, 0.2, 0.2))
 
 
 def test_spatial_strip_split_three_way_populates_every_side():
-    split = spatial_strip_split(8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1), seed=3)
+    split = spatial_strip_split(8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1))
     assert split.kept_tiles["train"] > 0
     assert split.kept_tiles["val"] > 0
     assert split.kept_tiles["test"] > 0
@@ -406,7 +407,7 @@ def test_spatial_strip_split_three_way_populates_every_side():
 def test_spatial_strip_split_realized_fractions_stay_near_requested():
     # A generous but real tolerance: catches a regression to arbitrary quantization, not
     # merely "nonzero on every side".
-    split = spatial_strip_split(16000, 12000, 320, 0.2, fractions=(0.7, 0.2, 0.1), seed=3)
+    split = spatial_strip_split(16000, 12000, 320, 0.2, fractions=(0.7, 0.2, 0.1))
     for name, requested in zip(split.split_names, split.requested_fractions):
         assert abs(split.realized_fractions[name] - requested) < 0.05
 

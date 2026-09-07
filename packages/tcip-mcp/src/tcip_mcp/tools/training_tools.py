@@ -2964,9 +2964,11 @@ _SEED_AXIS_REMEDY = (
     "is one the native generator builds (random, grid, variant_generator, or unset); scheduler "
     "prunes nothing (none, fifo, or unset); split_draw_seeds is one per draw and distinct; no "
     "baseline_params names the seed under a warm start; and no other data.* axis is in "
-    "param_space. A single fixed seed belongs in base_config's own data.split.seed, which the "
-    "drawn path reads and a config with data.val_images_dir, or bound to a manifest without "
-    "redraw_within_manifest, never does."
+    "param_space. A single fixed seed belongs in base_config's own data.split.seed: the drawn "
+    "path's partition depends on it, and the single-source spatial path's, a config with "
+    "data.val_images_dir's, or a manifest-bound config's without redraw_within_manifest never "
+    "does (the spatial path still records the config's value on the split record, a different "
+    "fact, not claimed here)."
 )
 
 

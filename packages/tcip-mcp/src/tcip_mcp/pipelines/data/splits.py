@@ -864,7 +864,6 @@ class SpatialStripSplit:
     stride: int
     axis: str
     buffer: int
-    seed: int
     split_names: tuple[str, ...]
     requested_fractions: tuple[float, ...]
     stripes_per_split: int
@@ -996,7 +995,7 @@ def _strip_regions(
 
 def spatial_strip_split(
     width: int, height: int, tile_size: int, overlap: float, *,
-    fractions: tuple[float, ...], seed: int,
+    fractions: tuple[float, ...],
     split_names: tuple[str, ...] = ("train", "val", "test"),
     buffer: int | None = None, discard_ceiling: float = 0.05, stripes_per_split: int = 1,
 ) -> SpatialStripSplit:
@@ -1019,10 +1018,6 @@ def spatial_strip_split(
     is the smaller sides that actually end up scattered into pieces flanking it, trading their
     own discard for a guard against those sides correlating with a spatial gradient in the
     field.
-
-    ``seed`` is recorded on the returned split for the manifest and governs no layout
-    decision: :func:`_center_out_order` places every side by descending share and declared
-    order alone.
 
     ``buffer`` (pixels) is the minimum gap kept around every boundary between two
     differently-assigned strips: an explicit value below ``tile_size`` is refused, since a
@@ -1125,7 +1120,7 @@ def spatial_strip_split(
     tiles_within_extent = len(in_extent)
     return SpatialStripSplit(
         width=width, height=height, tile_size=tile_size, overlap=overlap, stride=stride,
-        axis=axis, buffer=buffer, seed=seed, split_names=split_names,
+        axis=axis, buffer=buffer, split_names=split_names,
         requested_fractions=fractions, stripes_per_split=stripes_per_split,
         discard_ceiling=discard_ceiling, regions=regions, region_bounds=region_bounds,
         total_tiles=total_tiles, tiles_dropped_past_extent=tiles_dropped_past_extent,

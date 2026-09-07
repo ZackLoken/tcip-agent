@@ -134,3 +134,31 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
     leaked = _train_disjointness("exp_four_way", set(), {stem},
                                  hold_rects={stem: beyond_extent})
     assert leaked["leaked_groups"] == [stem]
+
+
+def test_persisted_split_record_spatial_block_carries_no_seed_while_top_level_seed_stays(
+        tmp_path):
+    """The spatial-strip layout is governed by declared order alone, so the persisted
+    ``experiment_split`` record's ``spatial`` block carries no ``seed`` key; the record's own
+    top-level ``seed`` (the config's ``data.split.seed``, a different fact the drawn path reads
+    and this one does not) is unaffected and still lands on every run.
+    """
+    import tcip_store as ts
+    from tcip_mcp.experiments import create_experiment, split_key
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
+
+    images_dir, labels_dir, stem = _mosaic_dataset(tmp_path / "ds")
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 7},
+    }
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    assert val_ds is not None
+
+    create_experiment("exp_spatial_no_seed", {})
+    persist_split_manifest("exp_spatial_no_seed", train_ds, val_ds, data_cfg)
+    record = ts.read(split_key("exp_spatial_no_seed"))
+
+    assert record["seed"] == 7
+    assert "seed" not in record["spatial"]
