@@ -31,6 +31,13 @@ variant up to the search's ceiling already carries a verdict, the resolver no lo
 to an unchecked, never-searched ``<name>@r100``; it raises :class:`BucketHasVerdicts` naming no
 suggestion. ``stage_prediction_shapes``, the one caller left that never opts into the document
 guard, meets this same refusal on exhaustion where it previously wrote into ``@r100`` unchecked.
+
+A bucket's documents leave it through exactly one audited door,
+:func:`~tcip_mcp.tools.inference_tools.clear_prediction_bucket`, which moves a terminal
+experiment's own recorded bucket into a dated archive so the path re-publishes; it is a different
+act from anything here, since it moves the whole bucket rather than resolving a writer's target,
+and this module's guards never see the archive it moves into. A bucket emptied by hand, outside
+that door, is invisible to every guard here the same way it always was.
 """
 
 from __future__ import annotations
@@ -373,7 +380,11 @@ def resolve_writable_bucket(
     writes, the same window the verdict guard already has. Nor does a documentless bucket answer
     for a verdict the review store still holds against it: ``_bucket_verdicts`` skips a directory
     with no stems without consulting the store, so a bucket whose documents were removed after
-    review answers zero verdicts here regardless of what the store still holds.
+    review answers zero verdicts here regardless of what the store still holds. The one audited
+    door that empties a bucket on purpose,
+    :func:`~tcip_mcp.tools.inference_tools.clear_prediction_bucket`, refuses one carrying review
+    state for exactly that reason; a bucket emptied by hand, outside it, reaches this same silent
+    admission.
     """
     requested_dirs = dirs_for(requested)
     base = _bucket_verdicts(review_state_dir, requested_dirs)

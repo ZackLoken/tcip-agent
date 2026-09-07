@@ -377,9 +377,10 @@ def run_inference(
     suggested fresh bucket), whatever ``overwrite`` says. No publish begins into a bucket that
     held prediction documents when this door resolved it; it does not guard against two runs
     racing into one bucket after both resolve it clean, the same window the verdict guard already
-    has. A completed experiment's bucket the pointer below already locks is unreachable through
-    the suggested bucket too, so a completed experiment's predictions publish once through this
-    door with no audited remedy to clear one for republication.
+    has. A terminal (completed or failed) experiment's bucket the pointer below already locks is
+    unreachable through the suggested bucket too, so its own predictions publish once through
+    this door; ``clear_prediction_bucket`` is the audited remedy that clears one for
+    republication, moving it into a dated archive rather than deleting it.
 
     A bucket stamped validated names the validation record its claim was earned from. The gate
     for that record runs before any file is written, and the record is appended over the
@@ -1358,10 +1359,18 @@ def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, tr
     if exp_id:
         # Checked before the publisher writes the bucket, ahead of this door's own @audited entry
         # (appended only after the caller's body returns), so nothing on disk needs unwinding.
-        from tcip_mcp.experiments import pointer_frozen
+        from tcip_mcp.experiments import (
+            _TERMINAL_STATES, lineage_key, pointer_frozen, read_member, status_key,
+        )
 
         frozen = pointer_frozen(exp_id, "lineage", "predictions", str(out))
         if frozen is not None:
+            # Names the door only for a terminal experiment whose recorded pointer is this exact
+            # path; a non-terminal experiment's own @r<n> variant is its remedy instead.
+            state = (read_member(status_key(exp_id), {}) or {}).get("state")
+            lineage = read_member(lineage_key(exp_id), {}) or {}
+            if state in _TERMINAL_STATES and lineage.get("predictions") == str(out):
+                frozen = f"{frozen} clear_prediction_bucket clears it for re-publication."
             return {"refusal": {"error": frozen}, "written": [], "dropped_boxes": 0,
                     "op_stamp": {}, "tile_size_validated": tile_size_validated,
                     "lineage_linked": None}
@@ -1386,6 +1395,475 @@ def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, tr
     return {"refusal": None, "written": written, "dropped_boxes": dropped_boxes,
             "op_stamp": op_stamp, "tile_size_validated": tile_size_validated,
             "lineage_linked": lineage_linked}
+
+
+# --- clearing a terminal experiment's bucket for re-publication ---
+
+_OTHER_STAMP_DOCUMENTS = ("classifier_operating_point", "ordinal_operating_point",
+                          "regression_operating_point", "resolve_scale")
+"""The four sidecar stamps beside ``operating_point``, sorted: the door reconciles ``operating_point``
+first, by its own value-aware rule, then each of these by the plain copy-or-refuse rule every
+other stamp and every document share."""
+
+
+def _reconcile_op_stamp(source: Path, destination: Path) -> tuple[bool, dict | None]:
+    """Move (or finish moving) the ``operating_point`` stamp between ``source`` and
+    ``destination``. Returns ``(moved_this_call, refusal)``.
+
+    Absent at the destination with a value at the source: copied, then the source's is deleted
+    (the value just written is what the delete compares against). Present at both and equal: the
+    move already landed the value, so only the source's own delete remains. Present at both and
+    different: a fresh publish's merge writer (a count calibration or a promotion, both of which
+    write into a bucket that still reads as published) landed on the source since the copy, so the
+    destination's copy is replaced by the source's current value before the source is deleted,
+    never the other way, since the destination's is the stale one. Present at the destination
+    alone: already finished, nothing to do. Absent at both: a store written past this door, since
+    the value the resume was proven against must live at one side or the other.
+    """
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    dest_key, source_key = sidecar_key(destination, "operating_point"), sidecar_key(source, "operating_point")
+    dest_v = store.read_versioned(dest_key, default=None)
+    source_v = store.read_versioned(source_key, default=None)
+    dest_present, source_present = dest_v.value is not None, source_v.value is not None
+
+    if not dest_present and not source_present:
+        return False, {"error": f"operating_point.json is present at neither {source} nor "
+                                f"{destination}: a store written past this door."}
+    if not dest_present:
+        store.replace(dest_key, source_v.value, expect=Version.ABSENT)
+        store.delete(source_key, expect=source_v.version)
+        return True, None
+    if source_present:
+        if dest_v.value != source_v.value:
+            store.replace(dest_key, source_v.value, expect=dest_v.version)
+        store.delete(source_key, expect=source_v.version)
+        return True, None
+    return False, None  # present at the destination alone: already finished
+
+
+def _reconcile_secondary_stamp(source: Path, destination: Path, document: str) -> tuple[bool, dict | None]:
+    """Move (or finish moving) one of :data:`_OTHER_STAMP_DOCUMENTS` between ``source`` and
+    ``destination``. Returns ``(moved_this_call, refusal)``.
+
+    Absent at the destination with a value at the source: copied, then the source's deleted.
+    Present at both and equal: the source's delete finishes it. Present at both and different: one
+    of the three producers that write a fresh stamp into any directory it is given
+    (``resolve_scale``, ``classifier_operating_point``, ``ordinal_operating_point`` or
+    ``regression_operating_point``) wrote into the half-cleared source after this clear began;
+    refused naming them, since no door removes such an entry. Present at neither, or at the
+    destination alone: nothing to do.
+    """
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    dest_key, source_key = sidecar_key(destination, document), sidecar_key(source, document)
+    dest_v = store.read_versioned(dest_key, default=None)
+    source_v = store.read_versioned(source_key, default=None)
+    dest_present, source_present = dest_v.value is not None, source_v.value is not None
+
+    if not dest_present and source_present:
+        store.replace(dest_key, source_v.value, expect=Version.ABSENT)
+        store.delete(source_key, expect=source_v.version)
+        return True, None
+    if dest_present and source_present:
+        if dest_v.value == source_v.value:
+            store.delete(source_key, expect=source_v.version)
+            return True, None
+        return False, {"error": f"{document}.json differs between {source} and {destination}: "
+                                "resolve_scale, classifier_operating_point, "
+                                "ordinal_operating_point or regression_operating_point wrote a "
+                                "fresh stamp into the source after this clear began; a person "
+                                "must reconcile it, no door removes it."}
+    return False, None
+
+
+def _reconcile_document(source: Path, destination: Path, stem: str) -> tuple[bool, dict | None]:
+    """Move (or finish moving) one prediction document between ``source`` and ``destination``.
+    Returns ``(moved_this_call, refusal)``.
+
+    Absent at the destination with bytes at the source: copied, then the source's deleted.
+    Present at both with equal bytes: the source's delete finishes it. Present at both and
+    different: the staging door (the one caller admitting a stampless bucket) wrote a same-stem
+    document over one this clear had already copied but not yet deleted at the source; refused
+    naming it, since no door removes it. Present at neither, or at the destination alone: nothing
+    to do.
+    """
+    from tcip_annotation.json_io import annotation_record_key
+
+    dest_key = annotation_record_key(destination, stem)
+    source_key = annotation_record_key(source, stem)
+    dest_v = store.read_blob_versioned(dest_key, default=None)
+    source_v = store.read_blob_versioned(source_key, default=None)
+    dest_present, source_present = dest_v.value is not None, source_v.value is not None
+
+    if not dest_present and source_present:
+        store.put_blob(dest_key, source_v.value, expect=Version.ABSENT)
+        store.delete(source_key, expect=source_v.version)
+        return True, None
+    if dest_present and source_present:
+        if dest_v.value == source_v.value:
+            store.delete(source_key, expect=source_v.version)
+            return True, None
+        return False, {"error": f"{stem}.json differs between {source} and {destination}: the "
+                                "staging door wrote a same-stem document over one this clear had "
+                                "already copied; a person must reconcile it, no door removes it."}
+    return False, None
+
+
+def _cleared_artifact_matches(entry_path: str, dataset_root: Path, model: str, date: str | None) -> bool:
+    """Whether an artifact's recorded ``path`` resolves, through ``cleared_bucket_of``, to the
+    same dataset root, model and date as the source this clear (or resume) is scoped to."""
+    from tcip_mcp.dataset_layout import cleared_bucket_of
+
+    resolved = cleared_bucket_of(entry_path)
+    if resolved is None:
+        return False
+    entry_root, entry_model, _entry_stamp, entry_date = resolved
+    return (Path(entry_root).resolve(), entry_model, entry_date) == (dataset_root.resolve(), model, date)
+
+
+def _newest_cleared_artifact_for_source(
+    experiment_id: str, dataset_root: Path, model: str, date: str | None,
+) -> dict | None:
+    """The newest ``cleared:`` artifact on ``experiment_id`` whose path names a cleared bucket of
+    this source (``dataset_root``, ``model``, ``date``), by the artifacts' own ``recorded`` times,
+    or ``None`` when it names none. An older artifact of a source cleared twice is never returned:
+    a resume is proven against the newest, since naming an older one would merge this clear's
+    documents into a finished, earlier publication."""
+    from tcip_mcp.experiments import artifacts_key, read_member
+
+    artifacts = read_member(artifacts_key(experiment_id), {})
+    if not isinstance(artifacts, dict):
+        return None
+    best: tuple[str, str, str] | None = None  # (recorded, name, path)
+    for name, entry in artifacts.items():
+        if not name.startswith("cleared:") or not isinstance(entry, dict):
+            continue
+        path = entry.get("path")
+        if not path or not _cleared_artifact_matches(path, dataset_root, model, date):
+            continue
+        recorded = entry.get("recorded", "")
+        if best is None or recorded > best[0]:
+            best = (recorded, name, path)
+    return None if best is None else {"name": best[1], "path": best[2], "recorded": best[0]}
+
+
+def _find_cleared_candidate_with_no_source_stamp(
+    dataset_root: Path, model: str, date: str | None,
+) -> dict | None:
+    """When the source holds no ``operating_point`` stamp at all: the resume candidate the
+    no-stamp refusal names, found by walking the cleared archive rather than reading one
+    experiment's own artifacts (there is no experiment to read yet). Every cleared bucket
+    :func:`~tcip_mcp.dataset_layout.cleared_bucket_of` resolves to this source's model and date is
+    read for its own stamp's experiment, and the newest ``cleared:`` artifact that experiment
+    records for it is the candidate; one carrying no stamp, or whose experiment records no
+    artifact for it, is never named as the remedy.
+    """
+    from tcip_mcp.dataset_layout import cleared_bucket_of, is_cleared_bucket, prediction_bucket_dirs
+    from tcip_mcp.pipelines.resolution import sidecar_key
+    from tcip_store import StoreError
+
+    best: tuple[str, str] | None = None  # (recorded, path)
+    for cand in prediction_bucket_dirs(dataset_root, include_cleared=True):
+        if not is_cleared_bucket(cand):
+            continue
+        resolved = cleared_bucket_of(cand)
+        if resolved is None:
+            continue
+        cand_root, cand_model, _cand_stamp, cand_date = resolved
+        if (Path(cand_root).resolve(), cand_model, cand_date) != (dataset_root.resolve(), model, date):
+            continue
+        try:
+            cand_stamp = store.read(sidecar_key(cand, "operating_point"), default=None)
+        except StoreError:
+            continue
+        if not isinstance(cand_stamp, dict):
+            continue
+        cand_exp_id = cand_stamp.get("experiment_id")
+        if not cand_exp_id:
+            continue
+        newest = _newest_cleared_artifact_for_source(cand_exp_id, dataset_root, model, date)
+        if newest is None or Path(newest["path"]).resolve() != Path(cand).resolve():
+            continue
+        recorded = newest["recorded"]
+        if best is None or recorded > best[0]:
+            best = (recorded, str(cand))
+    return None if best is None else {"path": best[1]}
+
+
+@mcp.tool()
+@audited(scope_arg="predictions_dir", scope_via=resolve_output_path)
+def clear_prediction_bucket(
+    predictions_dir: str, reason: str, cleared_bucket: str | None = None,
+) -> dict:
+    """Move a terminal experiment's own recorded prediction bucket into a dated archive under
+    ``predictions/.cleared/``, so the path re-publishes: the audited remedy ``run_inference``'s
+    own docstring and ``delivery.md`` name for a bucket the pointer lock has otherwise made
+    unreachable a second time (a completed or failed experiment's bucket publishes once through
+    the ordinary doors).
+
+    ``reason`` is required and non-empty: the confirmation with the person this destructive act
+    requires, recorded as this door's own statement (never a ``user:`` name minted from the
+    string), the way ``supersede_delivery`` and ``redraw_calibration_holdout`` record theirs. The
+    bucket cleared is ``resolve_output_path(predictions_dir)``, and it must be a canonical bucket
+    under a dataset root (``predictions/<model>[/<date>]``); a bespoke path is refused naming the
+    layout this door clears instead.
+
+    Refuses, before any write, each with its own sentence: an empty reason; a bucket already under
+    the cleared archive; a bespoke bucket; a bucket carrying no ``operating_point.json`` stamp (and
+    no resumable clear on record); any stamp that will not decode; a stamp naming a whole-raster
+    pass (the raster regime keeps its own resume state and is out of scope here); a stamp naming no
+    experiment, one that is not terminal (``completed`` or ``failed``), or one whose recorded
+    ``lineage.predictions`` is not this path; a bucket with no document to clear; an interrupted
+    clear of this bucket already on record and unfinished; and a bucket carrying review state.
+
+    The review-state refusal is a preflight over the state present when this call resolved the
+    bucket, bucket-wide (a detection verdict or a bulk-accepted image alike, whether or not the
+    image's own document still exists), never scoped to the stems a document exists for today.
+    Review state that lands on the source between that preflight and the last document's delete is
+    not caught by it: the moved documents cannot be unmoved once moved, and it is counted once more
+    after the last delete and reported in ``review_state_landed_during_clear`` instead. The
+    resolver's own document-guard publishers (``resolve_writable_bucket``) count a detection
+    verdict alone until a separate, owner-gated family widens that guard, so refusing here is not
+    yet a platform-wide lock against writing beside review state; it is this door's own gate. A
+    person who deletes the source's remaining documents by hand during an interrupted clear (never
+    through an audited door) defeats the resume's own "does the destination hold a document"
+    conjunct below, since a hand deletion is outside every door this platform ships.
+
+    The move goes through the storage seam one key at a time (``operating_point`` first, then
+    every other stamp present, then the documents), the artifact recorded on the experiment before
+    any write, so a crash at any point leaves a state this door itself can finish: call again,
+    naming ``cleared_bucket`` as the archive path this call (or an earlier refusal) reports. A
+    keyword-less call this door's own record shows as interrupted refuses naming that remedy
+    instead of starting a second clear.
+
+    Bypasses ``write_sidecar`` and ``write_annotations`` on purpose for the move itself: each
+    value already passed its writer's own checks when it was first written, so a stamp moves by
+    value under the record codec and a document byte for byte, never re-validated. The moved
+    ``operating_point`` stamp keeps its ``validated: true`` and ``validated_by`` pointer as
+    written, but the validation record it names covers the source's own dataset-relative key, not
+    the cleared one, so a cleared bucket's stamp reads as a claim for another bucket and floors at
+    every delivery door (a person opening the file alone still sees a validated stamp).
+
+    Returns ``predictions_dir``, ``cleared_bucket``, ``resumed``, ``source_republished``,
+    ``documents_moved_this_call``, ``stamps_moved_this_call``,
+    ``review_state_landed_during_clear``, ``source_digest_before_call`` (the source's own document
+    digest as this call found it), ``experiment_id``, ``checkpoint_sha256`` and ``validated_by``
+    (read from wherever the ``operating_point`` stamp sits), ``cleared_artifact_recorded`` and
+    ``reason``. The audit entry is the decorator's own; this door appends no second line.
+    """
+    from tcip_mcp.dataset_layout import (
+        canonical_prediction_bucket, cleared_bucket_of, cleared_prediction_dir,
+        current_cleared_stamp, is_cleared_bucket,
+    )
+    from tcip_mcp.experiments import (
+        _TERMINAL_STATES, lineage_key, read_member, record_artifact, status_key,
+    )
+    from tcip_mcp.pipelines.resolution import (
+        StampScopeUnstated, scope_of_stamp, sidecar_key, stamp_names_raster,
+    )
+    from tcip_mcp.prediction_buckets import (
+        bucket_content_digest, bucket_key_of, bucket_stems, review_state_count, review_state_dir_of,
+    )
+    from tcip_store import StoreError
+
+    if not (reason or "").strip():
+        return {"error": "clear_prediction_bucket needs a non-empty reason: the confirmation "
+                         "with the person this destructive act requires."}
+
+    source = resolve_output_path(predictions_dir)
+
+    if is_cleared_bucket(source):
+        return {"error": f"{source} is already under the cleared archive; a bucket clears once."}
+
+    canonical = canonical_prediction_bucket(source)
+    if canonical is None:
+        return {"error": f"{source} is not a canonical prediction bucket under a dataset root; "
+                         "publish into the dataset's own predictions/<model>[/<date>] layout, "
+                         "which is what this door clears, rather than a bespoke path."}
+    dataset_root, model, date = canonical
+
+    try:
+        source_op = store.read_versioned(sidecar_key(source, "operating_point"), default=None)
+    except StoreError as exc:
+        return {"error": f"{source}: operating_point.json will not decode ({exc}); refused as "
+                         "unreadable, since the record codec cannot move what it cannot decode."}
+
+    review_state_dir = review_state_dir_of(dataset_root)
+    source_key = bucket_key_of(source)
+    resuming = cleared_bucket is not None
+    destination: Path
+
+    if source_op.value is None and not resuming:
+        found = _find_cleared_candidate_with_no_source_stamp(dataset_root, model, date)
+        if found is not None:
+            return {"error": f"{source} carries no operating_point.json; this is not a "
+                             "published bucket. A candidate on record may finish it: call again "
+                             f"with cleared_bucket={found['path']!r}."}
+        return {"error": f"{source} carries no operating_point.json and no cleared bucket on "
+                         "record names it; this is not a published bucket."}
+
+    if resuming:
+        destination = resolve_output_path(cleared_bucket)
+        resolved = cleared_bucket_of(destination)
+        if resolved is None or not _cleared_artifact_matches(str(destination), dataset_root, model, date):
+            return {"error": f"{cleared_bucket!r} does not name {source}'s own cleared "
+                             "destination."}
+        if source_op.value is not None:
+            live_stamp, live_bucket = source_op.value, source
+        else:
+            try:
+                dest_op = store.read_versioned(sidecar_key(destination, "operating_point"), default=None)
+            except StoreError as exc:
+                return {"error": f"{destination}: operating_point.json will not decode ({exc})."}
+            if dest_op.value is None:
+                return {"error": f"operating_point.json is present at neither {source} nor "
+                                 f"{destination}: a store written past this door."}
+            live_stamp, live_bucket = dest_op.value, destination
+    else:
+        live_stamp, live_bucket = source_op.value, source
+
+    for document in _OTHER_STAMP_DOCUMENTS:
+        try:
+            store.read_versioned(sidecar_key(source, document), default=None)
+        except StoreError as exc:
+            return {"error": f"{source}: {document}.json will not decode ({exc})."}
+
+    try:
+        scope_of_stamp(live_stamp, live_bucket)
+    except StampScopeUnstated as exc:
+        return {"error": str(exc)}
+
+    if stamp_names_raster(live_stamp):
+        return {"error": f"{live_bucket}: operating_point.json names raster_path; the raster "
+                         "regime keeps its own resume state under <bucket>/.tcip/ and is out of "
+                         "scope for this door."}
+
+    experiment_id = live_stamp.get("experiment_id")
+    if not experiment_id:
+        return {"error": f"{live_bucket}: operating_point.json names no experiment_id; "
+                         "clear_prediction_bucket clears only a bucket a run recorded against a "
+                         "specific experiment."}
+    state = (read_member(status_key(experiment_id), {}) or {}).get("state")
+    if state not in _TERMINAL_STATES:
+        return {"error": f"experiment {experiment_id!r} is {state!r}, not terminal (completed or "
+                         "failed); this door clears only a terminal experiment's own recorded "
+                         "bucket. A non-terminal experiment's bucket already republishes in "
+                         "place through run_inference's own <name>@r<n> redirect."}
+    lineage = read_member(lineage_key(experiment_id), {}) or {}
+    if lineage.get("predictions") != str(source):
+        return {"error": f"experiment {experiment_id!r}'s recorded lineage.predictions is "
+                         f"{lineage.get('predictions')!r}, not {str(source)!r}; this door clears "
+                         "only the bucket an experiment's own pointer names."}
+
+    if resuming:
+        newest = _newest_cleared_artifact_for_source(experiment_id, dataset_root, model, date)
+        if newest is None:
+            return {"error": f"no cleared: artifact on experiment {experiment_id!r} names "
+                             f"{cleared_bucket!r} as {source}'s own cleared destination."}
+        if Path(newest["path"]).resolve() != destination.resolve():
+            return {"error": f"{cleared_bucket!r} is not the newest cleared bucket on record for "
+                             f"{source}; the newest is {newest['name']!r}, naming "
+                             f"{newest['path']!r}. Call again with cleared_bucket="
+                             f"{newest['path']!r} to finish the interrupted clear."}
+    else:
+        if not bucket_stems(source):
+            return {"error": f"{source} holds no prediction document; nothing to clear. A "
+                             "stamp-only bucket is already re-publishable in place through "
+                             "run_inference."}
+        unfinished = _newest_cleared_artifact_for_source(experiment_id, dataset_root, model, date)
+        if unfinished is not None and not bucket_stems(Path(unfinished["path"])):
+            return {"error": f"an earlier clear of {source} is on record and unfinished "
+                             f"({unfinished['name']!r} names {unfinished['path']!r}, which holds "
+                             f"no document yet). Call again with "
+                             f"cleared_bucket={unfinished['path']!r} to finish it."}
+
+    count = review_state_count(review_state_dir, source_key)
+    if count:
+        noun = "entry" if count == 1 else "entries"
+        return {"error": f"{source} carries {count} review {noun} (a detection verdict or a "
+                         "bulk-accepted image); this door refuses a bucket carrying review "
+                         "state, not only its documents."}
+
+    source_digest_before_call = bucket_content_digest(source)
+    cleared_artifact_recorded = True
+
+    if not resuming:
+        destination = cleared_prediction_dir(dataset_root, model, date, current_cleared_stamp())
+        if destination.exists():
+            return {"error": f"{destination} already exists; pass cleared_bucket={str(destination)!r} "
+                             "if it is this clear's own destination, or wait a second and retry."}
+        from tcip_mcp.pipelines.resolution import bucket_relative_key
+
+        relative_key = bucket_relative_key(destination, dataset_root, document="cleared")
+        artifact = record_artifact(experiment_id, f"cleared:{relative_key}", str(destination))
+        if "error" in artifact:
+            return {"error": f"could not record the cleared artifact on {experiment_id!r}: "
+                             f"{artifact['error']}"}
+        destination.mkdir(parents=True, exist_ok=True)
+
+    stamps_moved_this_call: list[str] = []
+    documents_moved_this_call = 0
+    source_republished = False
+
+    if len(bucket_stems(destination)) == 0:
+        moved, refusal = _reconcile_op_stamp(source, destination)
+        if refusal is not None:
+            return refusal
+        if moved:
+            stamps_moved_this_call.append("operating_point")
+        for document in _OTHER_STAMP_DOCUMENTS:
+            moved, refusal = _reconcile_secondary_stamp(source, destination, document)
+            if refusal is not None:
+                return refusal
+            if moved:
+                stamps_moved_this_call.append(document)
+        for stem in sorted(bucket_stems(source) | bucket_stems(destination)):
+            moved, refusal = _reconcile_document(source, destination, stem)
+            if refusal is not None:
+                return refusal
+            if moved:
+                documents_moved_this_call += 1
+    elif store.read(sidecar_key(source, "operating_point"), default=None) is not None:
+        source_republished = True
+    else:
+        for document in _OTHER_STAMP_DOCUMENTS:
+            moved, refusal = _reconcile_secondary_stamp(source, destination, document)
+            if refusal is not None:
+                return refusal
+            if moved:
+                stamps_moved_this_call.append(document)
+        for stem in sorted(bucket_stems(source) | bucket_stems(destination)):
+            moved, refusal = _reconcile_document(source, destination, stem)
+            if refusal is not None:
+                return refusal
+            if moved:
+                documents_moved_this_call += 1
+
+    if not source_republished:
+        arrived = bucket_stems(source)
+        if arrived:
+            return {"error": f"{sorted(arrived)} arrived at {source} during the clear (the "
+                             "staging door admits a stampless bucket); call again with "
+                             f"cleared_bucket={str(destination)!r} to move them."}
+
+    review_state_landed_during_clear = review_state_count(review_state_dir, source_key)
+
+    return {
+        "predictions_dir": str(source),
+        "cleared_bucket": str(destination),
+        "resumed": resuming,
+        "source_republished": source_republished,
+        "documents_moved_this_call": documents_moved_this_call,
+        "stamps_moved_this_call": stamps_moved_this_call,
+        "review_state_landed_during_clear": review_state_landed_during_clear,
+        "source_digest_before_call": source_digest_before_call,
+        "experiment_id": experiment_id,
+        "checkpoint_sha256": live_stamp.get("checkpoint_sha256"),
+        "validated_by": live_stamp.get("validated_by"),
+        "cleared_artifact_recorded": cleared_artifact_recorded,
+        "reason": reason,
+    }
 
 
 # --- resuming an interrupted tiled raster pass (the raster regime only) ---

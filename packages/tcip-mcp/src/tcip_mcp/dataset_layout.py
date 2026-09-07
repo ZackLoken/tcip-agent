@@ -1127,20 +1127,27 @@ _CLEARED_SEGMENT = ".cleared"
 excludes any dot-prefixed segment) and enumerated only by the archive's own named walk
 (``prediction_bucket_dirs(..., include_cleared=True)``)."""
 
-_CLEARED_STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
+CLEARED_STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 """The UTC stamp format a cleared bucket's own directory name carries, admitted by
 ``workspace.is_valid_name`` (which forbids ``:`` but admits ``@``) on every platform."""
 
 
 def _is_cleared_stamp(value: str) -> bool:
-    """Whether ``value`` parses as a :data:`_CLEARED_STAMP_FORMAT` UTC stamp: the one check
+    """Whether ``value`` parses as a :data:`CLEARED_STAMP_FORMAT` UTC stamp: the one check
     :func:`cleared_bucket_of` applies to the tail of a cleared segment's last ``@``-split, never a
     filesystem or clock read."""
     try:
-        datetime.strptime(value, _CLEARED_STAMP_FORMAT)
+        datetime.strptime(value, CLEARED_STAMP_FORMAT)
     except ValueError:
         return False
     return True
+
+
+def current_cleared_stamp() -> str:
+    """The current UTC time in :data:`CLEARED_STAMP_FORMAT`: the one call
+    :func:`~tcip_mcp.tools.inference_tools.clear_prediction_bucket` makes to name a fresh
+    archive entry, so the format its own inverse checks is never spelled a second way."""
+    return datetime.now(timezone.utc).strftime(CLEARED_STAMP_FORMAT)
 
 
 def cleared_prediction_dir(
@@ -1162,7 +1169,7 @@ def cleared_bucket_of(
     (:func:`cleared_prediction_dir`'s own shape), or ``None`` when ``path`` is not one: the
     declared inverse, splitting the cleared segment on its *last* ``@`` (so a model whose own name
     carries one, such as a resolver's own ``baseline@r2`` variant, resolves whole) and requiring
-    the tail to parse as :data:`_CLEARED_STAMP_FORMAT`. Reads the tail arity for the date, never
+    the tail to parse as :data:`CLEARED_STAMP_FORMAT`. Reads the tail arity for the date, never
     the filesystem: a third segment past the cleared model directory is the date, a second is
     none.
     """
