@@ -587,7 +587,7 @@ describe("TrainingTab chart accessibility", () => {
     expect(toggle.getAttribute("aria-controls")).toBe(table.parentElement?.id);
   });
 
-  it("resolves aria-controls to an element even while the table disclosure is closed", async () => {
+  it("leaves aria-controls unset while the table disclosure is closed, since nothing is rendered to name", async () => {
     useStore.setState((s) => ({
       gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
     }));
@@ -604,9 +604,14 @@ describe("TrainingTab chart accessibility", () => {
     fireEvent.click(await screen.findByText("train-controls-closed"));
     const toggle = await screen.findByRole("button", { name: "as table" });
 
+    expect(toggle.getAttribute("aria-controls")).toBeNull();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    const table = await screen.findByRole("table");
     const controlsId = toggle.getAttribute("aria-controls");
     expect(controlsId).toBeTruthy();
-    expect(document.getElementById(controlsId as string)).not.toBeNull();
+    expect(document.getElementById(controlsId as string)).toBe(table.parentElement);
   });
 
   it("marks the metrics placeholder as a live region so its swap to the chart is announced", async () => {

@@ -517,7 +517,7 @@ export function TrainingTab() {
                     type="button"
                     onClick={toggleChartTable}
                     aria-expanded={chartTableOpen}
-                    aria-controls={chartTableId}
+                    aria-controls={chartTableOpen ? chartTableId : undefined}
                     className="flex items-center gap-1 text-[11px] text-tcip-muted hover:text-tcip-fg"
                   >
                     <DisclosureChevron open={chartTableOpen} />
@@ -606,12 +606,8 @@ export function TrainingTab() {
                 )}
               </div>
 
-              {selectedRun && chartData.length > 0 && (
-                <div
-                  id={chartTableId}
-                  hidden={!chartTableOpen}
-                  className="overflow-auto max-h-64 shrink-0"
-                >
+              {selectedRun && chartData.length > 0 && chartTableOpen && (
+                <div id={chartTableId} className="overflow-auto max-h-64 shrink-0">
                   <table className="w-full text-[11px]">
                     <caption className="sr-only">{`${selectedRun} metrics as a table`}</caption>
                     <thead>
