@@ -692,7 +692,7 @@ def _deliver_via_writer(
     pred_dirs = list(predictions_by_date.values())
     recon = reconcile_operating_point_validity(pred_dirs, trait=trait)
     classifier_recon = reconcile_classifier_validity(classifier_pred_dirs or [])
-    classifier_state, _note = bind_classifier_validity(
+    classifier_state, note = bind_classifier_validity(
         classifier_recon["validated"], classifier_pred_dirs, pred_dirs, trait=trait)
     tile_recon = reconcile_tile_size_validity(pred_dirs)
     flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
@@ -706,8 +706,14 @@ def _deliver_via_writer(
     return phenology.write_phenology_csv(
         "test", result["rows"], Path(output_csv_path), spec, flags=flags,
         acknowledgement=acknowledgement, basis=stated.basis,
-        operating_point_confs=recon["confs"],
-        producer={}, bindings=recon["bindings"], predictions_by_date=predictions_by_date,
+        document_reconciliations={
+            "operating_point": recon,
+            "classifier_operating_point": {
+                **classifier_recon, "bound_validated": classifier_state, "delivery_note": note,
+            },
+        },
+        producer={}, dimension_reconciliations={"tile_size": tile_recon},
+        predictions_by_date=predictions_by_date,
         project_root=platform_root, plant_mapping=disclosure)
 
 
