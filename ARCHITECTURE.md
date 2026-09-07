@@ -1491,8 +1491,8 @@ log are one file at one key. That path is what the file backend places the log a
 `tcip export-store` writes back out; on the default database backend the rows live in that
 root's `.tcip/store.db` until they are exported.
 
-Writers: three write paths, `packages/tcip-mcp/src/tcip_mcp/audit.py:281` (`audited`),
-`audit.py:211` (`record_event`) and `audit.py:230` (`record_event_or_raise`), all resolving a
+Writers: three write paths, `packages/tcip-mcp/src/tcip_mcp/audit.py:286` (`audited`),
+`audit.py:216` (`record_event`) and `audit.py:235` (`record_event_or_raise`), all resolving a
 caller's scope through one shared helper, `audit.py:138` (`_stamp_scope`), so the root a line's
 `scope` field names and the root its Key addresses are always the one resolution, never two
 independently taken. It stamps `entry["scope"]` with the resolved root only when the caller passed
@@ -1502,7 +1502,7 @@ store.
 
 `audited` covers the platform's doors (every MCP tool in `tools/`, plus the script-invoked doors
 demoted from them): bare, a platform event; `@audited(scope_arg=...)` names the argument carrying
-a dataset or project location, resolved via `dataset_scope_of` (`audit.py:254`) (through the tool's own
+a dataset or project location, resolved via `dataset_scope_of` (`audit.py:259`) (through the tool's own
 canonicalizer when the declaration passes one as `scope_via`). Ten doors declare one: eight
 dataset-scoped (`save_annotations`, `tools/annotation_tools.py:146`; `write_class_map`,
 `tools/annotation_tools.py:512`; `redraw_calibration_holdout`, `tools/calibration_tools.py:25`;
@@ -1750,8 +1750,8 @@ on the staging tree before accounting for it and before the rename.
 
 Readers: `read_registry_index`, `model_registry.py:145`, the read path for anything outside the
 module (`packages/tcip-mcp/src/tcip_mcp/cli/doctor.py:409`, `"metrics_source"`), and the entry-by-entry accessors built on
-it: `ModelRegistry.list_models`, `model_registry.py:884`; `get_model`, `model_registry.py:895`;
-`best_model`, `model_registry.py:902`; `verify_model`, `model_registry.py:858`. `best_model` takes `metric_key` and `higher_is_better` as required
+it: `ModelRegistry.list_models`, `model_registry.py:887`; `get_model`, `model_registry.py:898`;
+`best_model`, `model_registry.py:905`; `verify_model`, `model_registry.py:861`. `best_model` takes `metric_key` and `higher_is_better` as required
 keywords, no default and no name heuristic, and by default ranks only entries whose
 `metrics_source` is `"trainer"` (`include_unverified=True` also ranks the rest). The
 `rank_registered_models` tool (`tools/model_tools.py:123`) resolves `higher_is_better` from
@@ -2252,9 +2252,9 @@ Must agree: mutations from any process land in the log the scope names, the plat
 default, a dataset's own for a record travelling with the data, a project's own for a record
 that is the project's, all with the same entry shape; and the project's own receipt gate
 (`plant_mapping.load_mapping`) trusts only what that project's own log actually recorded.
-Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:281` (`def audited(`, taking a declared
+Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:286` (`def audited(`, taking a declared
 `scope_arg` naming which tool argument carries the dataset or project a scoped tool mutates a
-record of) and `record_event` (`audit.py:211`)/`record_event_or_raise` (`audit.py:230`), the two emitters for code
+record of) and `record_event` (`audit.py:216`)/`record_event_or_raise` (`audit.py:235`), the two emitters for code
 that is neither an MCP tool nor a script-invoked door demoted from one; all three resolve a
 caller's scope through the one shared `_stamp_scope`, `audit.py:138`, and differ only in what a failed
 append means: `record_event` warns through `_write_entry`, `audit.py:190`; `record_event_or_raise`
@@ -2692,7 +2692,7 @@ Phase 3 verdict: single.
 
 Must agree: the hook command strings in the committed profile resolve to real guard files from whatever cwd the terminal starts in.
 Side A: `packages/tcip-web/src/tcip_web/agent_terminal.settings.json` (hook commands are repo-relative).
-Side B: `packages/tcip-web/src/tcip_web/terminal.py:81` (`def _materialize_fence_settings() -> Optional[Path]:`).
+Side B: `packages/tcip-web/src/tcip_web/terminal.py:85` (`def _materialize_fence_settings() -> Optional[Path]:`).
 Phase 3 verdict: duplicated.
 
 ## S64. MCP tool registry against documented tool names  <!-- queued: P5-303 unify -->
