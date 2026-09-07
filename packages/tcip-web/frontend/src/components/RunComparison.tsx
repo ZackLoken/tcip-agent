@@ -259,7 +259,7 @@ export function RunComparison({
           : null;
 
   const runSeries: RunSeries[] = marked.map((m) => ({
-    runId: m.experimentId,
+    experimentId: m.experimentId,
     rows: seriesByRun[m.experimentId] ?? [],
   }));
   const overlayMetricOptions = metricKeysAcross(runSeries);

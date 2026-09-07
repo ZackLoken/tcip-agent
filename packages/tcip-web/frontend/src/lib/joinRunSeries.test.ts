@@ -8,14 +8,14 @@ describe("joinRunSeries", () => {
     const { points } = joinRunSeries(
       [
         {
-          runId: "a",
+          experimentId: "a",
           rows: [
             { epoch: 0, loss: 1 },
             { epoch: 1, loss: 0.5 },
           ],
         },
         {
-          runId: "b",
+          experimentId: "b",
           rows: [
             { epoch: 0, loss: 2 },
             { epoch: 1, loss: 1.5 },
@@ -35,14 +35,14 @@ describe("joinRunSeries", () => {
     const { points } = joinRunSeries(
       [
         {
-          runId: "a",
+          experimentId: "a",
           rows: [
             { epoch: 0, loss: 1 },
             { epoch: 1, loss: 0.5 },
             { epoch: 2, loss: 0.2 },
           ],
         },
-        { runId: "b", rows: [{ epoch: 0, loss: 2 }] },
+        { experimentId: "b", rows: [{ epoch: 0, loss: 2 }] },
       ],
       "loss",
     );
@@ -57,13 +57,16 @@ describe("joinRunSeries", () => {
   });
 
   it("keys by step when a run's rows carry no epoch, matching the tab's one row identity", () => {
-    const { points } = joinRunSeries([{ runId: "a", rows: [{ step: 5, loss: 0.9 }] }], "loss");
+    const { points } = joinRunSeries(
+      [{ experimentId: "a", rows: [{ step: 5, loss: 0.9 }] }],
+      "loss",
+    );
     expect(points).toEqual([{ x: 5, a: 0.9 }]);
   });
 
   it("drops a keyless row (no epoch or step) from the overlay rather than guessing a position", () => {
     const { points } = joinRunSeries(
-      [{ runId: "a", rows: [{ loss: 0.9 }, { epoch: 0, loss: 0.5 }] }],
+      [{ experimentId: "a", rows: [{ loss: 0.9 }, { epoch: 0, loss: 0.5 }] }],
       "loss",
     );
     expect(points).toEqual([{ x: 0, a: 0.5 }]);
@@ -72,8 +75,8 @@ describe("joinRunSeries", () => {
   it("skips a non-finite value at a shared epoch, never plotting it as zero", () => {
     const { points } = joinRunSeries(
       [
-        { runId: "a", rows: [{ epoch: 0, loss: Number.NaN }] },
-        { runId: "b", rows: [{ epoch: 0, loss: 0.3 }] },
+        { experimentId: "a", rows: [{ epoch: 0, loss: Number.NaN }] },
+        { experimentId: "b", rows: [{ epoch: 0, loss: 0.3 }] },
       ],
       "loss",
     );
@@ -83,8 +86,8 @@ describe("joinRunSeries", () => {
   it("counts a dropped row per run, independent of the metric being charted", () => {
     const { droppedByRun } = joinRunSeries(
       [
-        { runId: "a", rows: [{ loss: 0.9 }, { epoch: 0, loss: 0.5 }] },
-        { runId: "b", rows: [{ epoch: 0, loss: 0.3 }] },
+        { experimentId: "a", rows: [{ loss: 0.9 }, { epoch: 0, loss: 0.5 }] },
+        { experimentId: "b", rows: [{ epoch: 0, loss: 0.3 }] },
       ],
       "loss",
     );
@@ -95,7 +98,7 @@ describe("joinRunSeries", () => {
     // epoch: null is not typeof "number", so metricKey treats it the same as a missing epoch;
     // a caller re-implementing the rule as `=== undefined` would miss this row.
     const { points, droppedByRun } = joinRunSeries(
-      [{ runId: "a", rows: [{ epoch: null, loss: 0.9 } as unknown as MetricRow] }],
+      [{ experimentId: "a", rows: [{ epoch: null, loss: 0.9 } as unknown as MetricRow] }],
       "loss",
     );
     expect(points).toEqual([]);
@@ -106,8 +109,8 @@ describe("joinRunSeries", () => {
 describe("metricKeysAcross", () => {
   it("unions the numeric keys across every run, excluding epoch/step", () => {
     const keys = metricKeysAcross([
-      { runId: "a", rows: [{ epoch: 0, loss: 1, val_map50: 0.4 }] },
-      { runId: "b", rows: [{ step: 1, val_loss: 0.2 }] },
+      { experimentId: "a", rows: [{ epoch: 0, loss: 1, val_map50: 0.4 }] },
+      { experimentId: "b", rows: [{ step: 1, val_loss: 0.2 }] },
     ]);
     expect(keys).toEqual(["loss", "val_loss", "val_map50"]);
   });

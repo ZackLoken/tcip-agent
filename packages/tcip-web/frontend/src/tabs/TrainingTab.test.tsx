@@ -540,9 +540,9 @@ describe("TrainingTab chart accessibility", () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-chart", status: "running" })],
     });
-    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 1, loss: 0.5 } });
-      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 2, loss: 0.3 } });
+    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+      onMessage({ type: "metric", experiment_id: experimentId, row: { epoch: 1, loss: 0.5 } });
+      onMessage({ type: "metric", experiment_id: experimentId, row: { epoch: 2, loss: 0.3 } });
       return () => {};
     });
 
@@ -572,8 +572,8 @@ describe("TrainingTab chart accessibility", () => {
       runs: [run({ experiment_id: "train-controls", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 1, loss: 0.5 } });
+    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+      onMessage({ type: "metric", experiment_id: experimentId, row: { epoch: 1, loss: 0.5 } });
       return () => {};
     });
 
@@ -594,8 +594,8 @@ describe("TrainingTab chart accessibility", () => {
       runs: [run({ experiment_id: "train-controls-closed", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 1, loss: 0.5 } });
+    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+      onMessage({ type: "metric", experiment_id: experimentId, row: { epoch: 1, loss: 0.5 } });
       return () => {};
     });
 
@@ -636,8 +636,8 @@ describe("TrainingTab chart accessibility", () => {
       runs: [run({ experiment_id: "train-axis-label", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 1, loss: 0.5 } });
+    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+      onMessage({ type: "metric", experiment_id: experimentId, row: { epoch: 1, loss: 0.5 } });
       return () => {};
     });
 
@@ -657,8 +657,12 @@ describe("TrainingTab chart accessibility", () => {
       runs: [run({ experiment_id: "train-both-ordinals", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 1, step: 99, loss: 0.5 } });
+    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+      onMessage({
+        type: "metric",
+        experiment_id: experimentId,
+        row: { epoch: 1, step: 99, loss: 0.5 },
+      });
       return () => {};
     });
 
@@ -679,8 +683,8 @@ describe("TrainingTab chart accessibility", () => {
       runs: [run({ experiment_id: "train-no-ordinal", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "metric", experiment_id: runId, row: { loss: 0.5 } });
+    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+      onMessage({ type: "metric", experiment_id: experimentId, row: { loss: 0.5 } });
       return () => {};
     });
 
@@ -702,9 +706,9 @@ describe("TrainingTab chart accessibility", () => {
       runs: [run({ experiment_id: "train-nonfinite", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 1, loss: 0.5 } });
-      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 2, loss: null } });
+    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+      onMessage({ type: "metric", experiment_id: experimentId, row: { epoch: 1, loss: 0.5 } });
+      onMessage({ type: "metric", experiment_id: experimentId, row: { epoch: 2, loss: null } });
       return () => {};
     });
 
@@ -726,10 +730,10 @@ describe("TrainingTab chart accessibility", () => {
       runs: [run({ experiment_id: "train-bookkeeping", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
       onMessage({
         type: "metric",
-        experiment_id: runId,
+        experiment_id: experimentId,
         row: { epoch: 1, loss: 0.5, loss_state: "nan", timestamp: 1735689600 },
       });
       return () => {};
@@ -753,10 +757,10 @@ describe("TrainingTab chart default series", () => {
       runs: [run({ experiment_id: "train-validated", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
       onMessage({
         type: "metric",
-        experiment_id: runId,
+        experiment_id: experimentId,
         row: {
           epoch: 1,
           train_loss: 0.9,
@@ -791,10 +795,10 @@ describe("TrainingTab chart default series", () => {
       runs: [run({ experiment_id: "train-no-loss-key", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
       onMessage({
         type: "metric",
-        experiment_id: runId,
+        experiment_id: experimentId,
         row: { epoch: 1, val_map50: 0.7, lr: 0.001 },
       });
       return () => {};
@@ -820,10 +824,10 @@ describe("TrainingTab status toast", () => {
       runs: [run({ experiment_id: "train-old-done", status: "completed" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
       onMessage({
         type: "status",
-        experiment_id: runId,
+        experiment_id: experimentId,
         status: { status: "completed" },
         error: null,
       });
@@ -846,10 +850,10 @@ describe("TrainingTab status toast", () => {
       runs: [run({ experiment_id: "train-live-done", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
       onMessage({
         type: "status",
-        experiment_id: runId,
+        experiment_id: experimentId,
         status: { status: "completed" },
         error: null,
       });
@@ -873,20 +877,20 @@ describe("TrainingTab status toast", () => {
       runs: [run({ experiment_id: "train-just-launched", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
       onMessage({
         type: "status",
-        experiment_id: runId,
+        experiment_id: experimentId,
         status: null,
         error: "unknown run: train-just-launched",
       });
       onMessage({
         type: "status",
-        experiment_id: runId,
+        experiment_id: experimentId,
         status: null,
         error: "unknown run: train-just-launched",
       });
-      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 1, loss: 0.5 } });
+      onMessage({ type: "metric", experiment_id: experimentId, row: { epoch: 1, loss: 0.5 } });
       return () => {};
     });
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
@@ -945,13 +949,13 @@ describe("TrainingTab switching between runs directly", () => {
         run({ experiment_id: "train-y", status: "completed" }),
       ],
     });
-    vi.spyOn(trainingApi, "getRun").mockImplementation((runId: string) =>
-      Promise.resolve({ experiment_id: runId, status: "completed", tensorboard_url: null }),
+    vi.spyOn(trainingApi, "getRun").mockImplementation((experimentId: string) =>
+      Promise.resolve({ experiment_id: experimentId, status: "completed", tensorboard_url: null }),
     );
     const launchSpy = vi
       .spyOn(trainingApi, "launchTensorboard")
-      .mockImplementation((runId: string) =>
-        Promise.resolve({ url: `http://localhost:6006/${runId}` }),
+      .mockImplementation((experimentId: string) =>
+        Promise.resolve({ url: `http://localhost:6006/${experimentId}` }),
       );
 
     render(<TrainingTab />);

@@ -6,13 +6,13 @@ import type { MetricRow } from "@/api/training";
 import { metricKey } from "@/tabs/trainingMetrics";
 
 export interface RunSeries {
-  runId: string;
+  experimentId: string;
   rows: MetricRow[];
 }
 
 export interface JoinedPoint {
   x: number;
-  [runId: string]: number | undefined;
+  [experimentId: string]: number | undefined;
 }
 
 export interface JoinedSeries {
@@ -34,7 +34,7 @@ export interface JoinedSeries {
 export function joinRunSeries(series: RunSeries[], metric: string): JoinedSeries {
   const byX = new Map<number, JoinedPoint>();
   const droppedByRun: Record<string, number> = {};
-  for (const { runId, rows } of series) {
+  for (const { experimentId, rows } of series) {
     let dropped = 0;
     for (const row of rows) {
       const x = metricKey(row);
@@ -49,9 +49,9 @@ export function joinRunSeries(series: RunSeries[], metric: string): JoinedSeries
         point = { x };
         byX.set(x, point);
       }
-      point[runId] = value;
+      point[experimentId] = value;
     }
-    droppedByRun[runId] = dropped;
+    droppedByRun[experimentId] = dropped;
   }
   return { points: Array.from(byX.values()).sort((a, b) => a.x - b.x), droppedByRun };
 }
