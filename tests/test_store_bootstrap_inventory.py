@@ -16,6 +16,8 @@ of near misses the row must reject.
 from __future__ import annotations
 
 import ast
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -193,3 +195,29 @@ def _names_register_store(func: ast.expr) -> bool:
     if isinstance(func, ast.Name):
         return func.id == "register_store"
     return isinstance(func, ast.Attribute) and func.attr == "register_store"
+
+
+_CATALOGUE_IMPORT_ONLY = """\
+import sys
+
+from tcip_mcp.store_catalogue import bootstrapped_stores
+
+stores = bootstrapped_stores()
+assert "tcip_web" not in sys.modules, sorted(sys.modules)
+assert "learning_capture" in stores, stores
+assert "job_registry" in stores, stores
+assert "annotation_stats" in stores, stores
+print("ok")
+"""
+
+
+def test_the_catalogue_reaches_every_web_owned_store_without_importing_tcip_web():
+    """A caller that only needs the catalogue (``export-store``, ``adopt-store``, this test
+    suite) must not pull the web package in as a side effect: the three stores the web package
+    owns register through :mod:`tcip_mcp.web_client`, which the catalogue already imports."""
+    result = subprocess.run(
+        [sys.executable, "-c", _CATALOGUE_IMPORT_ONLY],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
