@@ -300,8 +300,8 @@ def test_run_hyperparameter_search_refuses_a_caller_split_seed_axis_at_zero_draw
 
 @pytest.mark.parametrize("value, expected", [
     pytest.param(2.5, None, id="a-fractional-float"),
-    pytest.param(False, None, id="the-bool-False"),
-    pytest.param(True, None, id="the-bool-True"),
+    pytest.param(False, 0, id="the-bool-False-reads-as-the-tool-reads-it"),
+    pytest.param(True, 1, id="the-bool-True-reads-as-the-tool-reads-it"),
     pytest.param("2.0", None, id="a-decimal-string"),
     pytest.param("2", 2, id="an-integer-string"),
     pytest.param(2.0, 2, id="a-whole-float"),
@@ -312,14 +312,14 @@ def test_run_hyperparameter_search_refuses_a_caller_split_seed_axis_at_zero_draw
     pytest.param(-3.0, -3, id="a-negative-float-reads-as-one-draw-everywhere"),
 ])
 def test_coerce_split_draws_verdicts(value, expected):
-    """coerce_split_draws answers an int for an int that is not a bool, whatever its sign, or
-    for a str or finite float whose int() equals the value it was given; a bool (int(True) would
-    otherwise silently read as 1), a fractional float (int(2.5) would otherwise silently
-    truncate to 2), a non-numeric string and a non-finite float are none of those and answer
-    None. This helper carries no lower bound: zero and a negative value read as the integers they
-    name and read as one draw at every consumer, since _split_draws_refusal and
-    _base_config_for_split_draws both already read split_draws <= 1 as one draw, the tool's own
-    argument's own regime. The 1e30 row admits that magnitude only
+    """coerce_split_draws answers an int for any int, a bool included and whatever its sign, or
+    for a str or finite float whose int() equals the value it was given; a fractional float
+    (int(2.5) would otherwise silently truncate to 2), a non-numeric string and a non-finite
+    float are none of those and answer None. This helper carries no lower bound: a bool, zero
+    and a negative value read as the integers they name and read as one draw at every consumer,
+    since _split_draws_refusal and _base_config_for_split_draws both already read
+    split_draws <= 1 as one draw, the regime of the tool's own argument, and a seed axis is
+    refused at every one of them. The 1e30 row admits that magnitude only
     because run_hyperparameter_search's own split_draws argument carries no upper bound either
     (_split_draws_refusal refuses nothing above one on size); this row states no ceiling of its
     own, only that a whole number reads through whatever its size."""
