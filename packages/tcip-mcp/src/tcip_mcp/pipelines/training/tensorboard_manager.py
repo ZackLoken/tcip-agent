@@ -17,12 +17,15 @@ grace of its own) must stay more than a second under ``_STOP_WAIT_SECONDS``, the
 ``stop_tensorboard`` gives the guardian to end before force-killing it; a module-level check at
 import raises if it does not, so the two never drift apart silently. With the constraint held,
 the guardian's kill of a stubborn TensorBoard lands, and the guardian itself exits, before this
-process's own wait gives up and reports stopped with TensorBoard still alive underneath it. The
-guardian failing to exit within that first wait despite the margin is the one case left
-uncovered; ``stop_tensorboard``'s own docstring states what its own kill of the guardian then
-does to a TensorBoard still mid-escalation. The half-second startup grace below now also covers
-the guardian's own start (about 0.2 to 0.3 s measured), leaving about 0.2 to 0.3 s of it as the
-margin left for TensorBoard's own failure to surface in time.
+process's own wait gives up and reports stopped with TensorBoard still alive underneath it. Two
+cases are left uncovered: the guardian failing to exit within that first wait despite the
+margin, and a guardian the kernel ends outright rather than through its own signal handling
+(``entry.proc.poll()`` is then already set, so ``stop_tensorboard`` skips its own terminate and
+kill and answers stopped while TensorBoard keeps running with nothing watching it).
+``stop_tensorboard``'s own docstring states what its own kill of the guardian then does to a
+TensorBoard still mid-escalation. The half-second startup grace below covers the guardian's own
+start (about 0.2 to 0.3 s measured), leaving about 0.2 to 0.3 s of it as the margin left for
+TensorBoard's own failure to surface in time.
 """
 
 from __future__ import annotations
@@ -356,18 +359,23 @@ def stop_tensorboard(key: str | None = None, logdir: str | None = None) -> dict:
 
     Waits up to ``_STOP_WAIT_SECONDS`` for the process to end on its own, then force-kills it
     and waits the same bound again for the kill to be reaped, so the worst case is twice the
-    wait, never unbounded; the entry is dropped from tracking either way, since whatever
-    platform tie the launch got still holds the child regardless of whether this function's own
-    wait confirms the kill (the job object still assigned on Windows, the guardian still
-    watching its own child on POSIX). A kill this cannot confirm reaped within that second wait
-    is logged (the key and pid) and answered ``{"status": "kill_unconfirmed", "pid": ...}``
-    rather than left to raise a ``TimeoutExpired`` out of this function. On POSIX, ``entry.proc``
-    is the guardian, not TensorBoard itself: reaching the second wait means the first one gave up
-    on the guardian's own graceful exit, so this function's own ``kill()`` call lands on the
-    guardian directly, a signal it cannot catch or forward, and if TensorBoard had not yet been
-    stopped by the guardian's own escalation that TensorBoard is now orphaned; the answer is
-    then ``stopped`` (the guardian's own death is reaped by the second wait) or
-    ``kill_unconfirmed`` (it is not).
+    wait, never unbounded; the entry is dropped from tracking either way. What is left watching
+    the child once this function returns depends on ``entry.lifetime_tie``: with ``"job"``,
+    ``entry.proc`` is TensorBoard itself and the Windows job object stays assigned regardless of
+    this function's own outcome, so a parent-process death later still ends it; with
+    ``"guardian"``, ``entry.proc`` is the guardian, not TensorBoard, and this function's own
+    terminate/kill is what ends the guardian, so nothing is left watching TensorBoard once this
+    function returns, whatever its answer; with ``"none: ..."``, ``entry.proc`` is TensorBoard
+    itself and nothing was ever tied to this process's life beyond this function's own wait. A
+    kill this cannot confirm reaped within that second wait is logged (the key and pid) and
+    answered ``{"status": "kill_unconfirmed", "pid": ...}`` rather than left to raise a
+    ``TimeoutExpired`` out of this function. On a guardian tie, reaching the second wait means
+    the first one gave up on the guardian's own graceful exit (forwarding ``SIGTERM`` to
+    TensorBoard and waiting on it), so this function's own ``kill()`` call lands on the guardian
+    directly, a signal it cannot catch or forward, and if TensorBoard had not yet been stopped by
+    the guardian's own escalation that TensorBoard is now orphaned; the answer is then
+    ``stopped`` (the guardian's own death is reaped by the second wait) or ``kill_unconfirmed``
+    (it is not).
     """
     key = key or (str(Path(logdir).resolve()) if logdir else None)
     if not key or key not in _TB_PROCESSES:
