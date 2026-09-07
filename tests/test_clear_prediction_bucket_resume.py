@@ -104,6 +104,49 @@ def test_fault_between_op_stamp_copy_and_delete_leaves_it_at_both_finished_by_re
     assert bucket_stems(destination) == {"img"}
 
 
+def test_a_merge_landed_on_the_source_in_the_stamp_at_both_state_is_carried_to_the_destination(
+        tmp_path, monkeypatch):
+    """While the source still reads as published (the stamp-at-both state), a merge writer can
+    still land on it: the count calibrator's own merge (calibrate_count_operating_point, through
+    resolution.update_sidecar) folds an earned conf into the stored stamp without replacing it
+    wholesale, the same shape produced here directly through update_sidecar with an updater that
+    keeps the stored (subject, attribute) pair and adds a calibration-shaped key the writer rail
+    admits, rather than running the full calibration pass. The resume carries the merged value to
+    the destination, replacing its stale copy."""
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, update_sidecar
+    from tcip_mcp.prediction_buckets import bucket_stems
+    from tcip_mcp.tools.inference_tools import clear_prediction_bucket
+
+    built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expMergeCarried")
+    _fix_stamp(monkeypatch)
+    destination = _expected_destination(built)
+
+    fault = inject_store_fault(
+        monkeypatch, method_name="delete", predicate=key_in_store("operating_point_sidecar"))
+    with pytest.raises(RuntimeError):
+        clear_prediction_bucket(str(built["bucket"]), "should crash with the stamp at both")
+    assert fault.fired
+    stale_at_destination = read_operating_point_sidecar(destination)
+    assert stale_at_destination is not None
+
+    def merge_a_calibration_shaped_key(stored: dict) -> dict:
+        conf = dict(stored.get("operating_point", {}).get("conf", {}))
+        conf["validated_against"] = "held_out_annotations"
+        return {**stored, "operating_point": {**stored.get("operating_point", {}), "conf": conf}}
+
+    assert update_sidecar(built["bucket"], merge_a_calibration_shaped_key) is True
+    merged_at_source = read_operating_point_sidecar(built["bucket"])
+    assert merged_at_source != stale_at_destination
+
+    result = clear_prediction_bucket(
+        str(built["bucket"]), "resume after a count calibration merged into the still-published source",
+        cleared_bucket=str(destination))
+    assert "error" not in result, result
+    assert bucket_stems(built["bucket"]) == set()
+    assert read_operating_point_sidecar(built["bucket"]) is None
+    assert read_operating_point_sidecar(destination) == merged_at_source
+
+
 def test_fault_between_document_write_and_source_delete_finished_by_resume(tmp_path, monkeypatch):
     from tcip_annotation.json_io import ANNOTATION_RECORDS_STORE
     from tcip_mcp.prediction_buckets import bucket_stems
@@ -478,3 +521,41 @@ def test_review_state_landed_during_clear_is_reported(tmp_path, monkeypatch):
     result = clear_prediction_bucket(str(built["bucket"]), "review lands mid-move")
     assert "error" not in result, result
     assert result["review_state_landed_during_clear"] == 1
+
+
+def test_a_resume_naming_an_older_finished_archive_of_a_source_cleared_twice_refuses_naming_the_newest(
+        tmp_path, monkeypatch):
+    """A source cleared, republished and cleared again carries two cleared: artifacts on the same
+    experiment. A keyword-less call after the republication proceeds as a new, second clear with
+    its own second artifact (coverage: the pass-through baseline proceeds too), and a resume
+    naming the older archive refuses, naming the newest instead of merging this clear's own
+    reconciliation into a finished, earlier publication."""
+    from tcip_mcp.prediction_buckets import bucket_stems
+    from tcip_mcp.tools.inference_tools import clear_prediction_bucket, run_inference
+
+    exp_id = "expClearedTwice"
+    built = build_published_bucket(tmp_path, monkeypatch, experiment_id=exp_id)
+    source = built["bucket"]
+
+    first = clear_prediction_bucket(str(source), "first clear")
+    assert "error" not in first, first
+    first_destination = first["cleared_bucket"]
+    assert bucket_stems(source) == set()
+
+    republish = run_inference(
+        str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(source), tile=False,
+        experiment_id=exp_id)
+    assert "error" not in republish, republish
+    assert bucket_stems(source) == {"img"}
+
+    second = clear_prediction_bucket(str(source), "second clear over the re-published source")
+    assert "error" not in second, second
+    second_destination = second["cleared_bucket"]
+    assert second_destination != first_destination
+    assert bucket_stems(source) == set()
+
+    resume_on_older = clear_prediction_bucket(
+        str(source), "resume naming the older archive", cleared_bucket=first_destination)
+    assert "error" in resume_on_older
+    assert "is not the newest cleared bucket on record" in resume_on_older["error"]
+    assert f"cleared_bucket={second_destination!r}" in resume_on_older["error"]
