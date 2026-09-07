@@ -74,7 +74,6 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/cli/check_dataset_identity.py | Check a dataset's on-disk content against its recorded identity: detect changed / moved data. | 5 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/complete_removals.py | Move every workspace project carrying a pending-removal marker onto its own holding directory, from the command line. | 3 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/doctor.py | Data-state doctor: scan a live project for state inconsistencies code audits can't see. | 18 | 0 |
-| packages/tcip-mcp/src/tcip_mcp/cli/drop_spatial_split_seed.py | Drop the recorded ``seed`` key from every persisted spatial-strip split manifest under a project root: the key never governed the strip layout (a spatial-strip split places every side by declared order and share alone, never by seed) and the record no longer carries it. | 4 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/export_store.py | Write a root's database-held records and logs back out as files. | 6 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/import_project.py | Import an annotation project from a bundle ``tcip archive-project`` wrote: a ZIP archive, or a directory tree written by its ``--output-dir`` mode. | 3 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/inspect_compute_resources.py | Report the host's current compute headroom. | 3 | 0 |
@@ -570,7 +569,6 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/cli/check_dataset_identity.py |
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/cli/complete_removals.py |
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/cli/doctor.py |
-| tcip-mcp | packages/tcip-mcp/src/tcip_mcp/cli/drop_spatial_split_seed.py |
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/cli/export_store.py |
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/cli/import_project.py |
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/cli/inspect_compute_resources.py |
