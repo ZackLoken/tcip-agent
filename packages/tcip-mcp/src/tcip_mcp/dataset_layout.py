@@ -251,6 +251,11 @@ def prediction_bucket_date(path: str | Path) -> Optional[str]:
     or ``None`` for an undated bucket (``<root>/predictions/<model>/``): the same declared-inverse
     contract :func:`annotation_date` states for the ``annotations/<date>/`` tree, mirrored for the
     ``predictions/<model>/`` tree instead, one model segment further in.
+
+    Answers ``None`` for a path whose model slot fails :func:`is_bucket_name`, which is every
+    shape under the cleared archive (``predictions/.cleared/...``): its own model slot is always
+    the dot-prefixed ``.cleared`` segment, so neither of the two consumers of this function reads
+    a cleared bucket's own archive segment as a capture date.
     """
     p = Path(path)
     parts = p.parts
@@ -260,7 +265,9 @@ def prediction_bucket_date(path: str | Path) -> Optional[str]:
     rest = parts[i + 1:]
     if not rest:
         return None
-    rest = rest[1:]  # drop <model>
+    model, rest = rest[0], rest[1:]  # drop <model>
+    if not is_bucket_name(model):
+        return None
     if rest and rest[-1].endswith(".json"):
         rest = rest[:-1]
     return rest[0] if len(rest) == 1 else None
@@ -1081,6 +1088,108 @@ def prediction_dir(dataset_root: str | Path, model: Optional[str], date: Optiona
     return prediction_root(dataset_root).joinpath(model or DEFAULT_MODEL, *_date_seg(date))
 
 
+def canonical_prediction_bucket(
+    path: str | Path,
+) -> tuple[Path, str, Optional[str]] | None:
+    """``(dataset_root, model, date)`` for a canonical prediction bucket path
+    (``<dataset_root>/predictions/<model>[/<date>]``), or ``None`` when ``path`` is not one: not
+    under a ``predictions/`` tree at all, its model segment fails :func:`is_bucket_name`, or the
+    round trip through :func:`prediction_dir` does not spell ``path`` back exactly.
+
+    The one recognizer :func:`~tcip_mcp.tools.inference_tools._resolve_writable_bucket_for` and
+    :func:`clear_prediction_bucket` both apply, so a bucket one calls canonical is a bucket the
+    other does too. Answers ``None`` for both cleared shapes without a special case for either:
+    the dated cleared shape (``predictions/.cleared/<model>@<stamp>/<date>``) fails the round trip
+    (a third segment past the model slot is never a canonical bucket's own shape), and the
+    undated one (``predictions/.cleared/<model>@<stamp>``) fails on its model slot, since
+    ``is_bucket_name(".cleared")`` is ``False``.
+    """
+    p = Path(path)
+    parts = p.parts
+    if "predictions" not in parts:
+        return None
+    i = len(parts) - 1 - parts[::-1].index("predictions")
+    rest = parts[i + 1:]
+    if not rest or len(rest) > 2:
+        return None
+    model, date = rest[0], (rest[1] if len(rest) == 2 else None)
+    if not is_bucket_name(model):
+        return None
+    dataset_root = Path(*parts[:i])
+    if prediction_dir(dataset_root, model, date) != p:
+        return None
+    return dataset_root, model, date
+
+
+_CLEARED_SEGMENT = ".cleared"
+"""The dot-prefixed directory a canonical prediction bucket moves into once
+:func:`clear_prediction_bucket` clears it, invisible to every model reader (``is_bucket_name``
+excludes any dot-prefixed segment) and enumerated only by the archive's own named walk
+(``prediction_bucket_dirs(..., include_cleared=True)``)."""
+
+_CLEARED_STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
+"""The UTC stamp format a cleared bucket's own directory name carries, admitted by
+``workspace.is_valid_name`` (which forbids ``:`` but admits ``@``) on every platform."""
+
+
+def _is_cleared_stamp(value: str) -> bool:
+    """Whether ``value`` parses as a :data:`_CLEARED_STAMP_FORMAT` UTC stamp: the one check
+    :func:`cleared_bucket_of` applies to the tail of a cleared segment's last ``@``-split, never a
+    filesystem or clock read."""
+    try:
+        datetime.strptime(value, _CLEARED_STAMP_FORMAT)
+    except ValueError:
+        return False
+    return True
+
+
+def cleared_prediction_dir(
+    dataset_root: str | Path, model: str, date: Optional[str], stamp: str,
+) -> Path:
+    """``<dataset_root>/predictions/.cleared/<model>@<stamp>/[<date>/]``: where
+    :func:`clear_prediction_bucket` archives a canonical bucket it moves out from under a
+    terminal experiment's own recorded path, one entry per call. ``stamp`` is the UTC time of the
+    call, ``%Y%m%dT%H%M%SZ`` (``:`` forbidden by ``workspace.is_valid_name``, ``@`` admitted).
+    """
+    return prediction_root(dataset_root).joinpath(
+        _CLEARED_SEGMENT, f"{model}@{stamp}", *_date_seg(date))
+
+
+def cleared_bucket_of(
+    path: str | Path,
+) -> tuple[Path, str, str, Optional[str]] | None:
+    """``(dataset_root, model, stamp, date)`` for a cleared-bucket path
+    (:func:`cleared_prediction_dir`'s own shape), or ``None`` when ``path`` is not one: the
+    declared inverse, splitting the cleared segment on its *last* ``@`` (so a model whose own name
+    carries one, such as a resolver's own ``baseline@r2`` variant, resolves whole) and requiring
+    the tail to parse as :data:`_CLEARED_STAMP_FORMAT`. Reads the tail arity for the date, never
+    the filesystem: a third segment past the cleared model directory is the date, a second is
+    none.
+    """
+    p = Path(path)
+    parts = p.parts
+    if "predictions" not in parts:
+        return None
+    i = len(parts) - 1 - parts[::-1].index("predictions")
+    rest = parts[i + 1:]
+    if not rest or rest[0] != _CLEARED_SEGMENT:
+        return None
+    rest = rest[1:]
+    if not rest or len(rest) > 2:
+        return None
+    cleared_segment, date = rest[0], (rest[1] if len(rest) == 2 else None)
+    model, sep, stamp = cleared_segment.rpartition("@")
+    if not sep or not model or not _is_cleared_stamp(stamp):
+        return None
+    dataset_root = Path(*parts[:i])
+    return dataset_root, model, stamp, date
+
+
+def is_cleared_bucket(path: str | Path) -> bool:
+    """Whether ``path`` is a cleared bucket (:func:`cleared_bucket_of` recognizes it)."""
+    return cleared_bucket_of(path) is not None
+
+
 def label_filename(stem: str, fmt: str = "json") -> str:
     """The file name one image's label or prediction record is written under.
 
@@ -1185,21 +1294,38 @@ def subjects_with_labels(
 
 
 def list_models(dataset_root: str | Path) -> list[str]:
-    """Sorted model bucket names under ``predictions/``. A dot-prefixed directory is never a
-    bucket (see ``is_bucket_name``) and is excluded, the same grammar ``list_dates`` applies."""
+    """Sorted live model bucket names under ``predictions/``. A dot-prefixed directory is never a
+    bucket (see ``is_bucket_name``) and is excluded, the same grammar ``list_dates`` applies; this
+    also excludes the cleared archive (``predictions/.cleared/``), whose own name is dot-prefixed.
+    A cleared bucket is reachable only by the path :func:`clear_prediction_bucket` names in its
+    response, never through this listing or anything built on it (a model picker, ``find_prediction``'s
+    implicit search)."""
     preds = prediction_root(dataset_root)
     if not preds.is_dir():
         return []
     return sorted(p.name for p in preds.iterdir() if p.is_dir() and is_bucket_name(p.name))
 
 
-def prediction_bucket_dirs(dataset_root: str | Path) -> list[Path]:
-    """Every directory under ``predictions/`` a bucket's own sidecar could sit in: each model's
-    own directory, and each of its date subdirectories, whether or not either actually holds one.
+def prediction_bucket_dirs(dataset_root: str | Path, *, include_cleared: bool) -> list[Path]:
+    """Every directory under ``predictions/`` a live bucket's own sidecar could sit in: each
+    model's own directory, and each of its date subdirectories, whether or not either actually
+    holds one.
+
+    ``include_cleared`` takes no default: every caller states which walk it wants. ``False`` is
+    today's walk, live buckets alone. ``True`` appends a second, named walk over the cleared
+    archive (``predictions/.cleared/``, populated only by :func:`clear_prediction_bucket`): each
+    directory :func:`cleared_bucket_of` recognizes as a cleared model directory, and each of its
+    date children in the same two shapes the first walk enumerates, following the first; never
+    the ``.cleared`` directory itself, which no store owns, and never a directory under it the
+    inverse does not recognize.
 
     The one walk the ``doctor`` command's registry check and
-    :func:`~tcip_mcp.store_catalogue.project_roots` both read through, so a directory one calls
-    a bucket is a directory the other calls one too.
+    :func:`~tcip_mcp.store_catalogue.project_roots` both read through (each with
+    ``include_cleared=True``, so the cleared archive's own records are enumerated for adoption
+    and export too, and a de-registered checkpoint behind a cleared stamp is still flagged), and
+    the repair command's own ``bucket_dirs_under`` (``include_cleared=False``, since the archive
+    is never rewritten), so a directory one caller calls a bucket is a directory every other
+    caller of this walk calls one too.
     """
     pred_root = prediction_root(dataset_root)
     if not pred_root.is_dir():
@@ -1211,6 +1337,15 @@ def prediction_bucket_dirs(dataset_root: str | Path) -> list[Path]:
             continue
         found.append(model_dir)
         found.extend(sorted(p for p in model_dir.iterdir() if p.is_dir()))
+    if include_cleared:
+        cleared_root = pred_root / _CLEARED_SEGMENT
+        if cleared_root.is_dir():
+            for entry in sorted(p for p in cleared_root.iterdir() if p.is_dir()):
+                if not is_cleared_bucket(entry):
+                    continue
+                found.append(entry)
+                found.extend(sorted(
+                    p for p in entry.iterdir() if p.is_dir() and is_cleared_bucket(p)))
     return found
 
 
@@ -1268,11 +1403,21 @@ def find_prediction(
     fmt: Optional[str] = None,
 ) -> Optional[Path]:
     """Find an existing prediction file for an image: a specific ``model`` if given, else every
-    model. Returns the first existing file, or ``None``."""
+    live model. Returns the first existing file, or ``None``.
+
+    Raises ``ValueError`` when an explicit ``model`` fails :func:`is_bucket_name`: a cleared
+    bucket's own archive segment (``.cleared/<model>@<stamp>``) would otherwise be reachable
+    through this resolver by spelling it as a literal ``model`` argument, the one door into the
+    archive every other caller of this module is refused."""
     root, img_date, stem = parse_image_path(image_path)
     d = date if date is not None else img_date
     exts = [label_ext(fmt)] if fmt else list(_ANY_EXTS)
 
+    if model is not None and not is_bucket_name(model):
+        raise ValueError(
+            f"find_prediction: {model!r} is not a canonical model bucket name; the cleared "
+            "archive and any other dot-prefixed segment are never addressed through this resolver"
+        )
     models = [model] if model else list_models(root)
     for m in models:
         pdir = prediction_dir(root, m, d)

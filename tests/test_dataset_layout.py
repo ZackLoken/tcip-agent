@@ -216,7 +216,7 @@ def test_prediction_bucket_dirs_finds_a_dated_and_a_model_directory_bucket(tmp_p
     prediction_dir(root, "modelA", "2026-03-02").mkdir(parents=True)
     prediction_dir(root, "modelB", None).mkdir(parents=True)
 
-    found = prediction_bucket_dirs(root)
+    found = prediction_bucket_dirs(root, include_cleared=False)
 
     assert prediction_dir(root, "modelA", None) in found
     assert prediction_dir(root, "modelA", "2026-03-02") in found
@@ -264,3 +264,117 @@ def test_resolve_image_name_is_none_for_an_unresolvable_stem(tmp_path: Path) -> 
     (tmp_path / "images" / "d1").mkdir(parents=True)
 
     assert resolve_image_name(tmp_path, "d1", "no_such_stem") is None
+
+
+def test_canonical_prediction_bucket_recognizes_the_dated_and_undated_live_shapes(
+    tmp_path: Path,
+) -> None:
+    from tcip_mcp.dataset_layout import canonical_prediction_bucket
+
+    dated = prediction_dir(tmp_path, "modelA", "2026-03-02")
+    undated = prediction_dir(tmp_path, "modelB", None)
+
+    assert canonical_prediction_bucket(dated) == (tmp_path, "modelA", "2026-03-02")
+    assert canonical_prediction_bucket(undated) == (tmp_path, "modelB", None)
+
+
+def test_canonical_prediction_bucket_refuses_a_dot_prefixed_model_segment(tmp_path: Path) -> None:
+    from tcip_mcp.dataset_layout import canonical_prediction_bucket
+
+    assert canonical_prediction_bucket(tmp_path / "predictions" / ".cleared") is None
+    assert canonical_prediction_bucket(tmp_path / "predictions" / ".cleared" / "m@x") is None
+
+
+def test_canonical_prediction_bucket_is_none_outside_a_predictions_tree(tmp_path: Path) -> None:
+    from tcip_mcp.dataset_layout import canonical_prediction_bucket
+
+    assert canonical_prediction_bucket(tmp_path / "images" / "2026-03-02") is None
+
+
+def test_cleared_prediction_dir_and_its_inverse_round_trip_dated_and_undated(
+    tmp_path: Path,
+) -> None:
+    """``cleared_bucket_of`` is the declared inverse of ``cleared_prediction_dir``, for both the
+    dated and undated archive shapes, and splits on the *last* ``@`` so a model whose own name
+    already carries one (a resolver variant) resolves whole."""
+    from tcip_mcp.dataset_layout import cleared_bucket_of, cleared_prediction_dir
+
+    stamp = "20260906T120000Z"
+    dated = cleared_prediction_dir(tmp_path, "modelA", "2026-03-02", stamp)
+    undated = cleared_prediction_dir(tmp_path, "modelB", None, stamp)
+    variant = cleared_prediction_dir(tmp_path, "baseline@r2", "2026-03-02", stamp)
+
+    assert dated == tmp_path / "predictions" / ".cleared" / f"modelA@{stamp}" / "2026-03-02"
+    assert cleared_bucket_of(dated) == (tmp_path, "modelA", stamp, "2026-03-02")
+    assert cleared_bucket_of(undated) == (tmp_path, "modelB", stamp, None)
+    assert cleared_bucket_of(variant) == (tmp_path, "baseline@r2", stamp, "2026-03-02")
+
+
+def test_cleared_bucket_of_refuses_a_tail_that_does_not_parse_as_the_stamp(tmp_path: Path) -> None:
+    from tcip_mcp.dataset_layout import cleared_bucket_of, is_cleared_bucket
+
+    junk = tmp_path / "predictions" / ".cleared" / "modelA@not-a-stamp"
+    assert cleared_bucket_of(junk) is None
+    assert is_cleared_bucket(junk) is False
+
+
+def test_is_cleared_bucket_agrees_with_the_inverse(tmp_path: Path) -> None:
+    from tcip_mcp.dataset_layout import cleared_prediction_dir, is_cleared_bucket
+
+    cleared = cleared_prediction_dir(tmp_path, "modelA", None, "20260906T120000Z")
+    assert is_cleared_bucket(cleared) is True
+    assert is_cleared_bucket(prediction_dir(tmp_path, "modelA", None)) is False
+
+
+def test_prediction_bucket_dirs_include_cleared_walks_the_archive_alongside_the_live_walk(
+    tmp_path: Path,
+) -> None:
+    from tcip_mcp.dataset_layout import cleared_prediction_dir, prediction_bucket_dirs
+
+    prediction_dir(tmp_path, "modelA", "2026-03-02").mkdir(parents=True)
+    dated_cleared = cleared_prediction_dir(tmp_path, "modelA", "2026-03-02", "20260906T120000Z")
+    dated_cleared.mkdir(parents=True)
+    undated_cleared = cleared_prediction_dir(tmp_path, "modelB", None, "20260906T130000Z")
+    undated_cleared.mkdir(parents=True)
+
+    live_only = prediction_bucket_dirs(tmp_path, include_cleared=False)
+    assert dated_cleared not in live_only
+    assert undated_cleared not in live_only
+
+    with_archive = prediction_bucket_dirs(tmp_path, include_cleared=True)
+    assert dated_cleared.parent in with_archive  # the model@stamp directory itself
+    assert dated_cleared in with_archive
+    assert undated_cleared in with_archive
+    assert (tmp_path / "predictions" / ".cleared") not in with_archive
+
+
+def test_prediction_bucket_dirs_include_cleared_skips_an_unrecognized_archive_directory(
+    tmp_path: Path,
+) -> None:
+    """A directory under ``.cleared`` the inverse does not recognize (no ``@<stamp>`` tail) is
+    walked by neither this walk nor anything built on it."""
+    from tcip_mcp.dataset_layout import prediction_bucket_dirs
+
+    junk = tmp_path / "predictions" / ".cleared" / "not-a-cleared-bucket"
+    junk.mkdir(parents=True)
+
+    assert junk not in prediction_bucket_dirs(tmp_path, include_cleared=True)
+
+
+def test_prediction_bucket_date_answers_none_for_both_cleared_shapes(tmp_path: Path) -> None:
+    from tcip_mcp.dataset_layout import cleared_prediction_dir, prediction_bucket_date
+
+    stamp = "20260906T120000Z"
+    dated = cleared_prediction_dir(tmp_path, "modelA", "2026-03-02", stamp)
+    undated = cleared_prediction_dir(tmp_path, "modelB", None, stamp)
+
+    assert prediction_bucket_date(dated) is None
+    assert prediction_bucket_date(undated) is None
+
+
+def test_find_prediction_refuses_an_explicit_model_failing_is_bucket_name(tmp_path: Path) -> None:
+    from tcip_mcp.dataset_layout import find_prediction
+
+    image = tmp_path / "images" / "2026-03-02" / "IMG_1.jpg"
+    with pytest.raises(ValueError, match="is not a canonical model bucket name"):
+        find_prediction(image, model=".cleared")

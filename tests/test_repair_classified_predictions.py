@@ -985,7 +985,7 @@ def test_bucket_dirs_under_agrees_with_the_shared_walk_over_a_dot_prefixed_date_
     _write_doc(real_date, "img1", [Annotation(subject="leaf", geometry=BBox(0, 0, 10, 10))])
     _write_doc(hidden_date, "img1", [Annotation(subject="leaf", geometry=BBox(0, 0, 10, 10))])
 
-    shared = prediction_bucket_dirs(dataset_root)
+    shared = prediction_bucket_dirs(dataset_root, include_cleared=False)
     assert hidden_date in shared, "the shared walk admits a directory without regard to its name"
 
     found = module.bucket_dirs_under(dataset_root)
