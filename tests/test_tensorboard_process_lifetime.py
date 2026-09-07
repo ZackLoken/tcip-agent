@@ -4,12 +4,13 @@ Each test here spawns a real parent process (``_tensorboard_parent.py``) that la
 child through the manager, with the child's own command swapped for a sleep loop so no
 TensorBoard install is required, then watches what becomes of the child once the parent is gone.
 The parent prints the pid ``launch_tensorboard`` returned and the TensorBoard stand-in's own pid
-on one line; on POSIX these differ (a guardian process sits in front of the stand-in) and both
-deaths are asserted, on Windows they are the same pid. The normal-exit test disables the platform
-tie (``--no-tie``) so it proves the ``atexit`` hook alone, since the job object and the guardian
-each end the child on a normal exit too; the hard-kill tests keep the tie and prove it directly,
-one launching from the main thread and one from a background thread that has already exited by
-the time the parent is killed.
+on one line; on POSIX these differ only when the tie is in place, since a guardian process then
+sits in front of the stand-in, and both deaths are asserted. On Windows, and under ``--no-tie``
+where no guardian exists, the two pids are the same, so the ``--no-tie`` test asserts one process.
+The normal-exit test disables the platform tie (``--no-tie``) so it proves the ``atexit`` hook
+alone, since the job object and the guardian each end the child on a normal exit too; the
+hard-kill tests keep the tie and prove it directly, one launching from the main thread and one
+from a background thread that has already exited by the time the parent is killed.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import time
 from pathlib import Path
 
 import psutil
+import pytest
 
 _PARENT_SCRIPT = Path(__file__).parent / "_tensorboard_parent.py"
 _DEATH_TIMEOUT = 10.0
@@ -88,8 +90,15 @@ def _read_pids(parent: subprocess.Popen) -> tuple[tuple[int, float], tuple[int, 
     """The pid ``launch_tensorboard`` returned and the TensorBoard stand-in's own pid, each read
     and paired with its creation time immediately as it arrives, since a pid's identity is bound
     to the process alive at the moment its creation time was captured, not to the number itself.
+
+    Raises naming the parent's stderr if the pid line never arrives, so a parent that died before
+    printing is diagnosed rather than failing on an empty line's unpacking.
     """
     line = parent.stdout.readline()
+    if not line:
+        raise RuntimeError(
+            f"parent process printed no pid line; stderr:\n{parent.stderr.read()}"
+        )
     returned_pid, standin_pid = (int(p) for p in line.split())
     returned = (returned_pid, psutil.Process(returned_pid).create_time())
     standin = (standin_pid, psutil.Process(standin_pid).create_time())
@@ -156,3 +165,44 @@ def test_child_is_gone_within_ten_seconds_of_a_normal_exit(tmp_path):
         _kill_and_wait_parent(parent)
         parent.stdout.close()
         parent.stderr.close()
+
+
+def _wait_for_guardian_child(guardian_pid: int, timeout: float = 5.0) -> psutil.Process:
+    deadline = time.monotonic() + timeout
+    children: list = []
+    while time.monotonic() < deadline:
+        children = psutil.Process(guardian_pid).children()
+        if len(children) == 1:
+            return children[0]
+        time.sleep(0.1)
+    raise AssertionError(
+        f"expected exactly one guardian child of pid {guardian_pid} within {timeout} seconds, "
+        f"found {len(children)}"
+    )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="no guardian there")
+def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypatch, tmp_path):
+    """A regression guard for the guardian's grace against the manager's wait: the pre-fix
+    baseline orphaned this stand-in in four of five runs, a race rather than a deterministic
+    failure.
+    """
+    from tcip_mcp.pipelines.training import tensorboard_manager as tb
+
+    monkeypatch.setattr(
+        tb, "_tensorboard_argv",
+        lambda logdir, port: [
+            sys.executable, "-c",
+            "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(120)",
+        ],
+    )
+
+    info = tb.launch_tensorboard(str(tmp_path), run_id="stubborn-run")
+    standin = _wait_for_guardian_child(info["pid"])
+    standin_pid, standin_create_time = standin.pid, standin.create_time()
+    try:
+        result = tb.stop_tensorboard(run_id="stubborn-run")
+        assert result["status"] == "stopped"
+        assert not _child_alive(standin_pid, standin_create_time)
+    finally:
+        _force_kill_and_wait(standin_pid, standin_create_time)
