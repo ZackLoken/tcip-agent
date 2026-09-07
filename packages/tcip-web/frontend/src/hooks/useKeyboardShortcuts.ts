@@ -8,25 +8,21 @@ export interface Shortcut {
 
 const FOCUSABLE_ROLES = new Set(["button", "tab", "checkbox", "switch", "menuitem"]);
 
-/** A native form control or contenteditable whose own key handling a shortcut never overrides:
- *  typing must never be intercepted. */
-function isTextEntryControl(tgt: EventTarget | null): boolean {
+/** Whether a keydown's target is a widget that owns its own key handling (a native form
+ *  control, a contenteditable, or anything carrying an interactive ARIA role): the app's
+ *  shortcuts never intercept a keydown aimed at one, so Enter/Space still activate a focused
+ *  button and arrow keys still move within a focused tab list or checkbox group. */
+function isFocusableControl(tgt: EventTarget | null): boolean {
   if (!tgt || !(tgt instanceof Element)) return false;
-  return (
+  if (
     tgt.tagName === "INPUT" ||
     tgt.tagName === "TEXTAREA" ||
     tgt.tagName === "SELECT" ||
+    tgt.tagName === "BUTTON" ||
     (tgt instanceof HTMLElement && tgt.isContentEditable)
-  );
-}
-
-/** Whether a keydown's target is a widget that owns its own key handling (a text-entry control
- *  or anything carrying an interactive ARIA role): the app's shortcuts never intercept a keydown
- *  aimed at one, so Enter/Space still activate a focused button and arrow keys still move within
- *  a focused tab list or checkbox group. */
-function isFocusableControl(tgt: EventTarget | null): boolean {
-  if (!tgt || !(tgt instanceof Element)) return false;
-  if (isTextEntryControl(tgt) || tgt.tagName === "BUTTON") return true;
+  ) {
+    return true;
+  }
   const role = tgt.getAttribute("role");
   return !!role && FOCUSABLE_ROLES.has(role);
 }
@@ -53,17 +49,12 @@ function matches(e: KeyboardEvent, keys: string): boolean {
 export function useKeyboardShortcuts(shortcuts: Shortcut[]): void {
   useEffect(() => {
     function handler(e: KeyboardEvent) {
-      // A text-entry control's own key handling is never overridden.
-      if (isTextEntryControl(e.target)) {
+      // A control that owns its own key handling keeps it: Enter/Space still activate a button.
+      if (isFocusableControl(e.target)) {
         return;
       }
-      const focusable = isFocusableControl(e.target);
       for (const s of shortcuts) {
         if (!matches(e, s.keys)) continue;
-        // A focusable control keeps its own handling; no shortcut overrides it.
-        if (focusable) {
-          return;
-        }
         if (s.when && !s.when()) {
           // A gated-off modifier combo still hits browser chrome (Ctrl+S on a locked image
           // opens the Save-Page dialog); a gated-off bare key is left alone.
