@@ -442,6 +442,9 @@ describe("ProjectPicker", () => {
       active: null,
       active_path: null,
       projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -461,6 +464,9 @@ describe("ProjectPicker", () => {
       active: null,
       active_path: null,
       projects: [spaced, PROJECTS[1]],
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -475,6 +481,9 @@ describe("ProjectPicker", () => {
       active: null,
       active_path: null,
       projects: PROJECTS,
+      pending_removal: [],
+      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
+      removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
     fireEvent.click(await screen.findByText("crop_a_subject_a_valley-farm"));
