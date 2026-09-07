@@ -93,8 +93,10 @@ describe("StateSocket.connect", () => {
     vi.advanceTimersByTime(1);
     expect(FakeWebSocket.instances).toHaveLength(7);
 
-    // A successful open puts the next delay back to 500ms.
+    // A frame following a successful open puts the next delay back to 500ms; the open alone
+    // does not, so a server that answers and closes without ever opening cleanly still grows.
     lastSocket().open();
+    lastSocket().message(JSON.stringify({ type: "noop" }));
     lastSocket().drop();
     vi.advanceTimersByTime(500);
     expect(FakeWebSocket.instances).toHaveLength(8);
@@ -271,8 +273,9 @@ describe("StateSocket.subscribePanel", () => {
     vi.advanceTimersByTime(1);
     expect(FakeWebSocket.instances).toHaveLength(saturated + 1);
 
-    // A successful open resets the backoff to 500ms.
+    // A frame following a successful reopen resets the backoff to 500ms.
     lastSocket().open();
+    lastSocket().message("{}");
     lastSocket().drop();
     vi.advanceTimersByTime(500);
     expect(FakeWebSocket.instances).toHaveLength(saturated + 2);

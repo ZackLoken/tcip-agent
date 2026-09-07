@@ -226,6 +226,32 @@ describe("openTrainingStream", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
+  it("grows the reconnect delay across open-then-close cycles with no frame, and a metric frame resets it", () => {
+    openTrainingStream("/data/proj", "r1", vi.fn());
+    lastSocket().open();
+    lastSocket().drop();
+    vi.advanceTimersByTime(500);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    lastSocket().open();
+    lastSocket().drop();
+    vi.advanceTimersByTime(1000);
+    expect(FakeWebSocket.instances).toHaveLength(3);
+
+    lastSocket().open();
+    lastSocket().drop();
+    vi.advanceTimersByTime(2000);
+    expect(FakeWebSocket.instances).toHaveLength(4);
+
+    lastSocket().open();
+    lastSocket().message(JSON.stringify({ type: "metric", run_id: "r1", row: { epoch: 1 } }));
+    lastSocket().drop();
+    vi.advanceTimersByTime(499);
+    expect(FakeWebSocket.instances).toHaveLength(4);
+    vi.advanceTimersByTime(1);
+    expect(FakeWebSocket.instances).toHaveLength(5);
+  });
+
   it("closing the stream suppresses any further reconnect", () => {
     const stop = openTrainingStream("/data/proj", "r1", vi.fn());
     lastSocket().open();
