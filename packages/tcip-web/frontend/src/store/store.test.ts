@@ -388,15 +388,17 @@ describe("content-based dirty tracking", () => {
 });
 
 describe("agent activity", () => {
-  it("pushAgentActivity records the event and increments seq", () => {
-    s().pushAgentActivity("annotate", "labels_written", { stem: "IMG_1" });
+  it("pushAgentActivity records the event, its actor, and increments seq", () => {
+    s().pushAgentActivity("annotate", "labels_written", { stem: "IMG_1" }, "claude-code 2.1.238");
     const first = s().agentActivity;
     expect(first?.panel).toBe("annotate");
     expect(first?.eventType).toBe("labels_written");
     expect(first?.data.stem).toBe("IMG_1");
+    expect(first?.actor).toBe("claude-code 2.1.238");
 
-    s().pushAgentActivity("annotate", "labels_written", { stem: "IMG_2" });
+    s().pushAgentActivity("annotate", "labels_written", { stem: "IMG_2" }, null);
     expect(s().agentActivity?.seq).toBe((first?.seq ?? 0) + 1);
     expect(s().agentActivity?.data.stem).toBe("IMG_2");
+    expect(s().agentActivity?.actor).toBeNull();
   });
 });

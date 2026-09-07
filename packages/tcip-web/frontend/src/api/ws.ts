@@ -83,6 +83,14 @@ export class StateSocket {
       // Stamped per event by the backend: the ring buffer replays on every reconnect, so a
       // handler that acts once per event (dismissing a banner) needs to tell them apart.
       event_id: string;
+      // Every field agent_identity.HEADERS names, spread at the top level by the backend's own
+      // broadcast payload, each null when the sender declared none (tcip_mcp.agent_identity).
+      agent_client_name?: string | null;
+      agent_client_version?: string | null;
+      agent_session?: string | null;
+      terminal_session?: string | null;
+      harness_session?: string | null;
+      harness_effort_at_connect?: string | null;
     }) => void,
   ) {
     const socket = createReconnectingSocket({
