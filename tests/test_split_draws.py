@@ -275,6 +275,19 @@ def test_run_hyperparameter_search_refuses_a_caller_split_seed_axis_at_one_draw(
     assert not ran
 
 
+def test_caller_split_seed_refusal_tolerates_an_infinite_split_draws_value():
+    """A JSON Infinity literal decodes to float("inf") through the store's own plain
+    json.loads even though its encode refuses to write one, so a manifest of unknown
+    provenance can carry it; int(float("inf")) raises OverflowError, which once escaped
+    caller_split_seed_refusal uncaught. It is now unreadable as a draw count and refuses
+    nothing, the same tolerance an unreadable string already has."""
+    import tcip_mcp.tools.training_tools as tt
+
+    assert tt.caller_split_seed_refusal(
+        {"data.split.seed": {"type": "categorical", "choices": [1, 2]}}, float("inf"),
+    ) is None
+
+
 def test_run_hyperparameter_search_refuses_repeated_split_draw_seeds(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
@@ -776,7 +789,14 @@ def test_run_hyperparameter_search_records_a_null_best_when_no_point_is_eligible
 
     assert result["best_params"] is None
     assert result["best_value"] is None
-    assert "no eligible point" in result["best_value_state"]
+    assert "no eligible point" in result["best_value_reason"]
+    assert "best_value_state" not in result
+
+    import tcip_store as ts
+
+    manifest = ts.read(tt.sweep_manifest_key(result["study_name"], str(tmp_path)))
+    assert manifest["result"]["best_value_reason"] == result["best_value_reason"]
+    assert "best_value_state" not in manifest["result"]
 
 
 def test_run_hyperparameter_search_result_and_manifest_explain_their_own_point_and_draw_counts(

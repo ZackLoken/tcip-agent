@@ -962,7 +962,7 @@ describe("TuningTab split draws spread", () => {
     expect(await screen.findByText("never answered")).toBeInTheDocument();
   });
 
-  it("renders the best-state text alone when no point is eligible for best", async () => {
+  it("renders the best-reason text alone when no point is eligible for best", async () => {
     vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
       sweeps: [sweep({ sweep_id: "hpo-draws-no-best", status: "completed" })],
     });
@@ -973,7 +973,7 @@ describe("TuningTab split draws spread", () => {
         result: {
           split_draws: 2,
           best_value_spread: null,
-          best_value_state:
+          best_value_reason:
             "no eligible point: every drawn point had an errored or never-answered draw",
           split_sensitivity: [],
         },
@@ -994,6 +994,63 @@ describe("TuningTab split draws spread", () => {
         "no eligible point: every drawn point had an errored or never-answered draw",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("renders no best line when neither a best value nor a reason is present", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-draws-no-best-no-reason", status: "completed" })],
+    });
+    vi.spyOn(tuningApi, "getSweep").mockResolvedValue(
+      sweepDetail({
+        sweep_id: "hpo-draws-no-best-no-reason",
+        status: "completed",
+        result: {
+          split_draws: 2,
+          best_value_spread: null,
+          split_sensitivity: [],
+        },
+      }),
+    );
+    vi.spyOn(tuningApi, "listTrials").mockResolvedValue({
+      sweep_id: "hpo-draws-no-best-no-reason",
+      trials: [],
+    });
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
+    vi.spyOn(tuningApi, "launchSweepTensorboard").mockResolvedValue({ error: "no cluster" });
+
+    render(<TuningTab />);
+    fireEvent.click(await screen.findByText("hpo-draws-no-best-no-reason"));
+
+    expect(await screen.findByText("The spread across draws")).toBeInTheDocument();
+    expect(screen.queryByText("no best recorded")).not.toBeInTheDocument();
+  });
+
+  it("labels the best line's seed list as completed seeds", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-draws-best-label", status: "completed" })],
+    });
+    vi.spyOn(tuningApi, "getSweep").mockResolvedValue(
+      sweepDetail({
+        sweep_id: "hpo-draws-best-label",
+        status: "completed",
+        result: {
+          split_draws: 2,
+          best_value_spread: { mean: 1.5, std: 0.1, min: 1.4, max: 1.6, seeds_complete: [1, 2] },
+          split_sensitivity: [],
+        },
+      }),
+    );
+    vi.spyOn(tuningApi, "listTrials").mockResolvedValue({
+      sweep_id: "hpo-draws-best-label",
+      trials: [],
+    });
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
+    vi.spyOn(tuningApi, "launchSweepTensorboard").mockResolvedValue({ error: "no cluster" });
+
+    render(<TuningTab />);
+    fireEvent.click(await screen.findByText("hpo-draws-best-label"));
+
+    expect(await screen.findByText(/completed seeds/)).toBeInTheDocument();
   });
 
   it("carries the seed-axis reason alone on the row caption, never the remedy", async () => {

@@ -67,9 +67,8 @@ describe("sweepDrawsOf", () => {
 
   it("narrows a malformed block to null cells rather than dropping the group", () => {
     const result = {
-      split_draws: 1,
       best_value_spread: null,
-      best_value_state:
+      best_value_reason:
         "no eligible point: every drawn point had an errored or never-answered draw",
       split_sensitivity: [
         { point: null, block: { mean: "not a number", seeds: "not an array" }, eligible: "yes" },
@@ -81,7 +80,8 @@ describe("sweepDrawsOf", () => {
 
     expect(draws).not.toBeNull();
     expect(draws?.best).toBeNull();
-    expect(draws?.bestState).toBe(
+    expect(draws?.splitDraws).toBeNull();
+    expect(draws?.bestReason).toBe(
       "no eligible point: every drawn point had an errored or never-answered draw",
     );
     expect(draws?.groups).toEqual([
