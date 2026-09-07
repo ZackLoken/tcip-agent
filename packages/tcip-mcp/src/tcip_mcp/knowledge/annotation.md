@@ -9,14 +9,18 @@ description: "Annotation and review workflows for TCIP's native per-image JSON l
 
 The on-disk default for both GT and predictions is one per-image, COCO-shaped `.json`
 (`tcip_annotation.json_io`), carrying `created_by` / `created_at` / `accepted_by` /
-`accepted_at` provenance per object. `stage_proposals` writes this schema without reading any
-label document (its `assignments` regime reads back the proposal record `propose_annotations`
-staged in a prior run, not a label file); `run_inference` reads it only
+`accepted_at` / `accepted_by_rule` provenance per object. `stage_proposals` writes this schema
+without reading any label document (its `assignments` regime reads back the proposal record
+`propose_annotations` staged in a prior run, not a label file); `run_inference` reads it only
 when it calibrates a confidence operating point. A dataset-level
 COCO training set is assembled from these per-image files (`tcip_annotation.json_io`'s
 `to_coco_dataset`, called from `pipelines/data/label_queries.py`'s `assemble_coco`), not authored
 directly. An unspecified format resolves to `.json`
-(`dataset_layout.py`'s `label_ext()`).
+(`dataset_layout.py`'s `label_ext()`). A breeder can confirm every prediction a bucket's own
+validated count operating point pre-admits in one Review action; on a false positive this writes
+`accepted_by_rule` beside the person's `accepted_by` on the ground-truth record it adds, while a
+matched prediction's confirmation is a verdict alone and its ground-truth record is left as it
+was.
 
 ## Import/export formats
 
