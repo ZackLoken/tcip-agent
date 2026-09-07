@@ -14,7 +14,7 @@ export interface AgentActivity {
 }
 
 export interface AgentActivitySlice {
-  /** Last panel event pushed by the MCP agent (via /ws/panel subscription). */
+  /** The last panel event and the actor it declared, or null when none has arrived. */
   agentActivity: AgentActivity | null;
   pushAgentActivity: (
     panel: string,
