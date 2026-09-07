@@ -48,6 +48,9 @@ export function ConfirmDialog({ heading, onClose, children, busy }: Props) {
   const openerRef = useRef<HTMLElement | null>(null);
   const [host] = useState(dialogHost);
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     const appRoot = document.getElementById("root");
     appRoot?.setAttribute("inert", "");
@@ -56,8 +59,16 @@ export function ConfirmDialog({ heading, onClose, children, busy }: Props) {
     };
   }, []);
 
+  // Recorded once on mount, restored once on unmount: kept out of the trap effect below, whose
+  // own onClose reference changes on every parent render.
   useEffect(() => {
     openerRef.current = document.activeElement as HTMLElement | null;
+    return () => {
+      openerRef.current?.focus();
+    };
+  }, []);
+
+  useEffect(() => {
     const node = dialogRef.current;
     const first = node?.querySelector<HTMLElement>(FOCUSABLE);
     first?.focus();
@@ -65,7 +76,7 @@ export function ConfirmDialog({ heading, onClose, children, busy }: Props) {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab" || !node) return;
@@ -84,9 +95,8 @@ export function ConfirmDialog({ heading, onClose, children, busy }: Props) {
     window.addEventListener("keydown", onKeyDown);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
-      openerRef.current?.focus();
     };
-  }, [onClose]);
+  }, []);
 
   return createPortal(
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center">

@@ -104,15 +104,19 @@ function RemovalDialog({
       const res = await api.projects.remove({ name, confirm_name: confirmText, user });
       forgetRecentProject(name);
       const archiveName = res.archive_path.split(/[/\\]/).filter(Boolean).pop() ?? res.archive_path;
-      const suffix = res.recorded_in_open_project
+      const openSuffix = res.recorded_in_open_project
         ? ""
         : ` This backend has no project open, so the request is recorded in ${name}'s own log.`;
+      const dependentsSuffix =
+        res.dependent_projects.length > 0
+          ? ` ${res.dependent_projects.length} project(s) depend on it; see their cards.`
+          : "";
       useStore
         .getState()
         .pushToast(
           `Removal requested: ${name} is archived at ${archiveName} under the workspace's ` +
             "holding directory and moves beside it at the next backend start. Nothing is " +
-            `deleted.${suffix}`,
+            `deleted.${dependentsSuffix}${openSuffix}`,
           "success",
         );
       onRemoved();
@@ -124,15 +128,22 @@ function RemovalDialog({
     }
   }
 
+  function releaseToastBody(markerCleared: boolean, canvasReleased: boolean): string {
+    if (markerCleared && canvasReleased) return "as the default and as the open project";
+    if (markerCleared) return "as the default";
+    if (canvasReleased) return "as the open project";
+    return "as neither the default nor the open project: nothing named it any more";
+  }
+
   async function releaseBinding() {
     setReleasing(true);
     setReleaseError(null);
     try {
-      await api.projects.releaseBinding(name, user);
+      const res = await api.projects.releaseBinding(name, user);
       useStore
         .getState()
         .pushToast(
-          `Released ${name}: it no longer opens by default and the GUI no longer counts it open.`,
+          `Released ${name} ${releaseToastBody(res.marker_cleared, res.canvas_binding_released)}.`,
           "success",
         );
       await loadPreview();
@@ -146,12 +157,9 @@ function RemovalDialog({
 
   function dependentLine(d: DependentProject): string {
     if (d.unreadable) {
-      return `${d.project}: its dataset registry could not be read (${d.unreadable})`;
+      return `${d.project}: its dataset registry has an entry the platform cannot name: ${d.unreadable}`;
     }
-    return (
-      `${d.project} registers images from this project as dataset ${d.dataset_id}; its ` +
-      "training fails on a missing image once the move completes"
-    );
+    return `${d.project} registers images from this project as dataset ${d.dataset_id}`;
   }
 
   function externalLine(r: ExternalRoot): string {
@@ -183,8 +191,8 @@ function RemovalDialog({
                 {releasing ? "Releasing…" : `Release ${name}`}
               </button>
               <p className="text-tcip-muted">
-                Stops it opening by default and forgets it as the GUI&apos;s open project; nothing
-                else changes.
+                Stops it opening by default, and forgets it as the GUI&apos;s open project if the
+                GUI has it open; nothing else changes.
               </p>
               {releaseError && <p className="text-tcip-fp">{releaseError}</p>}
             </div>
@@ -279,17 +287,39 @@ function holdingDirName(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
-function dependencyWarningLine(w: DependencyWarning): string {
-  if (w.present) {
+interface DependencyWarningGroup {
+  target: string;
+  present: boolean;
+  count: number;
+}
+
+// Grouped by target: a dependent registering several datasets under one target names it once,
+// how many when more than one; the dataset ids stay in dependency_warnings for the agent.
+function groupDependencyWarnings(warnings: DependencyWarning[]): DependencyWarningGroup[] {
+  const byTarget = new Map<string, DependencyWarningGroup>();
+  for (const w of warnings) {
+    const existing = byTarget.get(w.target);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      byTarget.set(w.target, { target: w.target, present: w.present, count: 1 });
+    }
+  }
+  return Array.from(byTarget.values());
+}
+
+function dependencyWarningLine(g: DependencyWarningGroup): string {
+  const countSuffix = g.count > 1 ? ` (${g.count} datasets)` : "";
+  if (g.present) {
     return (
-      `Depends on ${w.target} (dataset ${w.dataset_id}), which is pending removal; its images ` +
-      "move to the workspace's holding directory at the next backend start, and this warning " +
-      "clears once the dataset is registered again from where they are then"
+      `Depends on ${g.target}${countSuffix}, which is pending removal; its images move to the ` +
+      "workspace's holding directory at the next backend start. Register the dataset again " +
+      "from where they are then to clear this."
     );
   }
   return (
-    `Depends on ${w.target} (dataset ${w.dataset_id}), which is no longer in the workspace; ` +
-    "this warning clears once the dataset is registered again from where its images now are"
+    `Depends on ${g.target}${countSuffix}, which is no longer in the workspace. Register the ` +
+    "dataset again from where its images now are to clear this."
   );
 }
 
@@ -330,6 +360,18 @@ export function ProjectPicker() {
   const [removalOutcomes, setRemovalOutcomes] = useState<RemovalOutcome[]>([]);
   const [removalTarget, setRemovalTarget] = useState<string | null>(null);
   const openedRef = useRef(false);
+  const annotatorFieldRef = useRef<HTMLInputElement | null>(null);
+  const prevRemovalTargetRef = useRef<string | null>(null);
+
+  // A removed card's own "Remove..." button (the dialog's recorded opener) can unmount with it,
+  // dropping focus to body; restore it to the field every refetch leaves in place instead.
+  useEffect(() => {
+    const wasOpen = prevRemovalTargetRef.current !== null;
+    prevRemovalTargetRef.current = removalTarget;
+    if (wasOpen && removalTarget === null && document.activeElement === document.body) {
+      annotatorFieldRef.current?.focus();
+    }
+  }, [removalTarget]);
 
   function selectCard(p: ProjectSummary) {
     setSelected(p.name);
@@ -443,6 +485,7 @@ export function ProjectPicker() {
         <label className="flex flex-col gap-1 animate-tcip-rise">
           <span className="tcip-label">Annotator</span>
           <input
+            ref={annotatorFieldRef}
             type="text"
             className="tcip-input max-w-xs"
             placeholder="your name (e.g. jordan)"
@@ -488,21 +531,21 @@ export function ProjectPicker() {
                     className="flex flex-col gap-2 w-full text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg"
                     onClick={() => selectCard(p)}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span
-                        id={`project-name-${index}`}
-                        className="font-medium text-tcip-fg truncate"
-                        title={p.name}
-                      >
-                        {p.name}
-                      </span>
-                      {p.is_active && (
-                        <span className="tcip-badge bg-tcip-accent/20 text-tcip-accent">
-                          active
-                        </span>
-                      )}
-                    </div>
                     <div id={`project-desc-${index}`} className="contents">
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          id={`project-name-${index}`}
+                          className="font-medium text-tcip-fg truncate"
+                          title={p.name}
+                        >
+                          {p.name}
+                        </span>
+                        {p.is_active && (
+                          <span className="tcip-badge bg-tcip-accent/20 text-tcip-accent">
+                            active
+                          </span>
+                        )}
+                      </div>
                       {p.site ? (
                         <span className="text-[11px] text-tcip-muted truncate" title={p.site}>
                           {p.site}
@@ -522,9 +565,9 @@ export function ProjectPicker() {
                           {p.label_problem}
                         </span>
                       )}
-                      {p.dependency_warnings.map((w, i) => (
-                        <span key={i} className="text-[11px] text-tcip-fp">
-                          {dependencyWarningLine(w)}
+                      {groupDependencyWarnings(p.dependency_warnings).map((g) => (
+                        <span key={g.target} className="text-[11px] text-tcip-fp">
+                          {dependencyWarningLine(g)}
                         </span>
                       ))}
                       {p.dependency_problem && (
@@ -648,7 +691,7 @@ export function ProjectPicker() {
                                 Remove…
                               </button>
                               {reason && (
-                                <span id={reasonId} className="text-[11px] text-tcip-muted">
+                                <span id={reasonId} className="text-[11px] text-tcip-fp">
                                   {reason}
                                 </span>
                               )}

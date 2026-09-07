@@ -153,6 +153,8 @@ export interface DependencyWarning {
   dataset_path: string;
   target: string;
   present: boolean;
+  archive_path?: string | null;
+  holding_dir?: string | null;
 }
 
 export interface DependentProject {
