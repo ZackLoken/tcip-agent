@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { StructuredRefusalError } from "@/api/http";
 import {
@@ -12,6 +12,7 @@ import {
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { useStore } from "@/store";
 import { TrainingTab, dataPickerFor } from "@/tabs/TrainingTab";
+import { RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 
 // The live metrics stream owns a real WebSocket; only the run list and its controls are under
 // test here, so the transport is replaced while the rest of the module stays real.
