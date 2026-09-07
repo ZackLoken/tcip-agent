@@ -397,7 +397,43 @@ def test_route_answers_409_with_the_committed_response_on_a_lost_audit_line(
     client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
     """The stamp already committed; the 409 carries the same response a 200 would, with
-    ``validated`` and ``buckets_stamped`` exactly as they were written."""
+    ``validated`` and ``buckets_stamped`` exactly as they were written.
+
+    Refuses the route's own line (``audit_gap.record_event_or_raise``, the module-level name
+    ``record_committed`` calls through) rather than every append: the sealed record's own line,
+    inside ``seal_validation``, has its own narrower case below."""
+    import tcip_mcp.audit as audit_module
+    import tcip_web.routes.audit_gap as audit_gap_module
+
+    class _AppendRefused(RuntimeError):
+        pass
+
+    def _refuse_record(tool: str, arguments: dict, *, scope: str | None, **extra: object) -> None:
+        raise audit_module.AuditEntryNotWritten(tool, _AppendRefused(
+            "the audit log could not be appended to"))
+
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path)
+    monkeypatch.setattr(audit_gap_module, "record_event_or_raise", _refuse_record)
+    resp = client.post("/api/review/validate_reference", json={
+        "dataset_root": proj, "trait": "bud_opening", "pred_dir": pred_dir, "subject": "bud"})
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["error"] == "audit_entry_not_written"
+    committed = detail["committed"]
+    assert committed["validated"] is True
+    assert committed["reference"] == "reviewer_confirmed_annotations"
+    assert committed["buckets_stamped"] == [pred_dir]
+    sc = _read_sidecar(pred_dir)
+    assert sc["validated"] is True
+
+
+def test_route_answers_409_with_the_committed_response_on_a_lost_sealed_record_line(
+    client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """``seal_validation``'s own audit line (inside the bucket loop, before the route's own line
+    is ever reached) can fail the same way: the validation row it appends is already on disk, so
+    the 409 carries the buckets stamped before the raise, never a 500, and the sidecar this
+    bucket would have been promoted to stays as the earlier, unpromoted call left it."""
     import tcip_mcp.audit as audit_module
 
     class _AppendRefused(RuntimeError):
@@ -416,9 +452,10 @@ def test_route_answers_409_with_the_committed_response_on_a_lost_audit_line(
     committed = detail["committed"]
     assert committed["validated"] is True
     assert committed["reference"] == "reviewer_confirmed_annotations"
-    assert committed["buckets_stamped"] == [pred_dir]
+    # seal_validation raised before update_sidecar ran for this bucket: never promoted.
+    assert committed["buckets_stamped"] == []
     sc = _read_sidecar(pred_dir)
-    assert sc["validated"] is True
+    assert sc["validated"] is False
 
 
 def test_route_promotion_carries_an_old_vintage_member_and_stamps_no_schema_version(

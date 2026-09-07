@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 def _audit_events(root: Path, tool: str) -> list[dict]:
     import tcip_store
@@ -70,6 +72,37 @@ def test_force_redraw_records_old_to_new_membership_diff(tmp_path: Path):
     assert ev["arguments"]["reason"] == "original holdout coincided with the demo set"
     assert ev["old_membership"] == result["old_membership"]
     assert ev["new_membership"] == result["new_membership"]
+
+
+def test_force_redraw_raises_and_stays_committed_when_its_audit_line_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """The lock is already redrawn by the time the audit line is attempted, so a failed append
+    must not be swallowed: the tool raises AuditEntryNotWritten, and the new lock stands."""
+    import tcip_mcp.audit as audit_module
+    from tcip_mcp.pipelines.data.splits import (
+        cal_holdout_lock_key, resolve_locked_cal_holdout_split,
+    )
+    from tcip_mcp.tools.calibration_tools import redraw_calibration_holdout
+    from tcip_store import read
+
+    stems = [f"src{g}_{r}_0" for g in range(6) for r in range(3)]
+    resolve_locked_cal_holdout_split(
+        stems, identity_hash="redraw-audit-gap-test", scope_root=tmp_path, seed=1)
+
+    def _refuse(*args, **kwargs):
+        raise RuntimeError("the audit log could not be appended to")
+
+    monkeypatch.setattr(audit_module, "append", _refuse)
+
+    with pytest.raises(audit_module.AuditEntryNotWritten) as caught:
+        redraw_calibration_holdout(
+            dataset_root=str(tmp_path), identity_hash="redraw-audit-gap-test", seed=2,
+            reason="proving the audit line's own failure is not swallowed")
+
+    assert caught.value.tool == "redraw_calibration_holdout_result"
+    locked_after = read(cal_holdout_lock_key("redraw-audit-gap-test", scope_root=tmp_path))
+    assert locked_after["seed"] == 2
 
 
 def test_force_redraw_with_labels_dir_rescans_stems(tmp_path: Path):

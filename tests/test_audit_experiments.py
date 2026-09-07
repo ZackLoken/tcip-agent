@@ -485,6 +485,34 @@ class TestModelRegistryReplaceAudit:
 
         audit_mod.AUDIT_ROOT = original
 
+    def test_replace_raises_and_stays_committed_when_its_audit_line_fails(self, monkeypatch):
+        """The transaction has already replaced the entry by the time the audit line is
+        attempted, so a failed append must not be swallowed: the caller is told through
+        AuditEntryNotWritten, and the registry keeps the replace regardless."""
+        import tcip_mcp.audit as audit_mod
+        from tcip_mcp.model_registry import ModelRegistry
+
+        original = audit_mod.AUDIT_ROOT
+        audit_mod.AUDIT_ROOT = self.tmpdir
+
+        reg = ModelRegistry(str(self.tmpdir))
+        reg.register_model("exp1", self._ckpt("a.pt", b"first"), {}, metrics_source=None)
+        second_ckpt = self._ckpt("b.pt", b"second, different")
+
+        def _refuse(*args, **kwargs):
+            raise RuntimeError("the audit log could not be appended to")
+
+        monkeypatch.setattr(audit_mod, "append", _refuse)
+
+        with pytest.raises(audit_mod.AuditEntryNotWritten) as caught:
+            reg.register_model("exp1", second_ckpt, {}, metrics_source=None)
+
+        assert caught.value.tool == "model_registry_replace"
+        reloaded = ModelRegistry(str(self.tmpdir)).get_model("exp1")
+        assert reloaded["file_size_bytes"] == len(b"second, different")
+
+        audit_mod.AUDIT_ROOT = original
+
     def test_first_registration_under_a_name_is_not_audited_as_a_replace(self):
         import tcip_mcp.audit as audit_mod
         from tcip_mcp.model_registry import ModelRegistry

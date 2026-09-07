@@ -304,6 +304,54 @@ def test_a_row_earned_through_the_real_gate_round_trips(tmp_path):
     assert validation_digest(rows[0]) == digest
 
 
+def test_append_validation_raises_when_its_audit_line_cannot_be_written(tmp_path, monkeypatch):
+    """The row is already on disk by the time the audit line is attempted, so a failed append
+    must not be swallowed: the caller is told through AuditEntryNotWritten, not a log line."""
+    import tcip_mcp.audit as audit_module
+    from tcip_mcp.experiments import _append_validation, create_experiment, read_validations
+
+    experiment_id = "exp-029-quince-second-vintage-det"
+    create_experiment(experiment_id, TRAINING_CONFIG)
+
+    def _refuse(*args, **kwargs):
+        raise RuntimeError("the audit log could not be appended to")
+
+    monkeypatch.setattr(audit_module, "append", _refuse)
+
+    with pytest.raises(audit_module.AuditEntryNotWritten) as caught:
+        _append_validation(experiment_id, _row())
+
+    assert caught.value.tool == "experiment_validation_recorded"
+    assert read_validations(experiment_id) == [_row()]
+
+
+def test_ensure_calibration_experiment_raises_when_its_audit_line_cannot_be_written(
+    tmp_path, monkeypatch,
+):
+    """The experiment record is already created by the time the audit line is attempted, so a
+    failed append must not be swallowed the same way."""
+    import tcip_mcp.audit as audit_module
+    from tcip_mcp.experiments import config_key, ensure_calibration_experiment, list_experiments
+
+    def _refuse(*args, **kwargs):
+        raise RuntimeError("the audit log could not be appended to")
+
+    monkeypatch.setattr(audit_module, "append", _refuse)
+
+    with pytest.raises(audit_module.AuditEntryNotWritten) as caught:
+        ensure_calibration_experiment(
+            document="classifier_operating_point", checkpoint_sha256=None,
+            reference_identity=REFERENCE_IDENTITY, trait="bud_50per_date",
+            config={"notes": "refused append"},
+        )
+
+    assert caught.value.tool == "calibration_experiment_created"
+    listing = list_experiments()
+    assert len(listing) == 1
+    config = ts.read(config_key(listing[0]["experiment_id"]))
+    assert config["trait"] == "bud_50per_date"
+
+
 def test_read_validations_admits_a_row_with_no_schema_version_beside_one_stamped_one(tmp_path):
     """Lazy absence: a row carrying no schema_version key (what every real producer writes today)
     reads as the frozen version 1, and a row explicitly stamped 1 reads identically, the store's
