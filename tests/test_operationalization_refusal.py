@@ -346,8 +346,11 @@ def _crossing_call(root: Path):
 def test_state_operationalization_refuses_with_no_trait_spec_statement(tmp_path: Path):
     root = _unconfirmed_project(tmp_path)
 
-    with pytest.raises(traits.TraitSpecUnconfirmed, match="no trait-spec statement on record"):
+    with pytest.raises(ValueError, match="no trait-spec statement on record") as excinfo:
         _crossing_call(root)
+
+    assert "revise_trait_spec(project_root=" in str(excinfo.value)
+    assert "fields={}" in str(excinfo.value)
 
 
 def test_state_operationalization_refuses_with_a_stale_confirmed_trait_spec_statement(
@@ -357,8 +360,11 @@ def test_state_operationalization_refuses_with_a_stale_confirmed_trait_spec_stat
     fx.confirm_spec_statement(root, fx.CROSSING_TRAIT)
     fx.write_spec(root, dataclasses.replace(fx.CROSSING_SPEC, notes="moved after confirmation"))
 
-    with pytest.raises(traits.TraitSpecUnconfirmed, match="no longer matches"):
+    with pytest.raises(traits.TraitSpecUnconfirmed, match="no longer matches") as excinfo:
         _crossing_call(root)
+
+    assert "revise_trait_spec(project_root=" in str(excinfo.value)
+    assert "rationale=" in str(excinfo.value)
 
 
 def test_state_operationalization_refuses_with_a_stale_unconfirmed_trait_spec_statement(
@@ -371,8 +377,11 @@ def test_state_operationalization_refuses_with_a_stale_unconfirmed_trait_spec_st
     )
     fx.write_spec(root, dataclasses.replace(fx.CROSSING_SPEC, notes="moved after the statement"))
 
-    with pytest.raises(traits.TraitSpecUnconfirmed, match="no longer matches"):
+    with pytest.raises(traits.TraitSpecUnconfirmed, match="no longer matches") as excinfo:
         _crossing_call(root)
+
+    assert "revise_trait_spec(project_root=" in str(excinfo.value)
+    assert "rationale=" in str(excinfo.value)
 
 
 def test_state_operationalization_refuses_with_a_current_unconfirmed_trait_spec_statement(
@@ -384,8 +393,10 @@ def test_state_operationalization_refuses_with_a_current_unconfirmed_trait_spec_
         rationale="an initial account of the crossing trait's measurement",
     )
 
-    with pytest.raises(traits.TraitSpecUnconfirmed, match="not confirmed"):
+    with pytest.raises(traits.TraitSpecUnconfirmed, match="not confirmed") as excinfo:
         _crossing_call(root)
+
+    assert "Results tab" in str(excinfo.value)
 
 
 def test_state_operationalization_succeeds_once_the_trait_spec_statement_is_confirmed(
