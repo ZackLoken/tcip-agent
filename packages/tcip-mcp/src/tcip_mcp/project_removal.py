@@ -290,8 +290,8 @@ def dependency_warnings(project_root: Path) -> tuple[list[dict], Optional[str]]:
     :func:`_same_path`) earn no warning, since neither names a dependency on another project. An
     entry that does name a dependency but carries no ``id`` is malformed, the same treatment
     :func:`_preview`'s own dependent scan gives it: it earns the problem naming the entry rather
-    than a warning with a null id, and the scan stops looking at further entries only in the
-    sense that the first such entry wins the problem text; every other entry is still considered.
+    than a warning with a null id; the first such entry names the problem, and every other
+    entry is still considered.
     The condition is the entry itself, never the holding directory an eventual move leaves
     behind: a child directory that no longer exists on disk is a warning with ``present`` false
     and ``archive_path``/``holding_dir`` both null, whatever ``.removed/`` holds, since the
