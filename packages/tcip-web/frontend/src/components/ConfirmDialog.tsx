@@ -18,12 +18,34 @@ interface Props {
   heading: string;
   onClose: () => void;
   children: React.ReactNode;
+  /** Set while the dialog is still waiting on something (a preview fetch); carried as
+   *  aria-busy so assistive technology knows the content is not yet final. */
+  busy?: boolean;
 }
 
-export function ConfirmDialog({ heading, onClose, children }: Props) {
+export function ConfirmDialog({ heading, onClose, children, busy }: Props) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const headingId = useId();
   const openerRef = useRef<HTMLElement | null>(null);
+
+  // The application root's other children go inert while this dialog is open, restored on
+  // close: a screen reader or a stray Tab must not reach content behind the modal.
+  useEffect(() => {
+    const node = dialogRef.current;
+    const appRoot = document.getElementById("root");
+    const marked: HTMLElement[] = [];
+    if (appRoot && node) {
+      for (const child of Array.from(appRoot.children)) {
+        if (child instanceof HTMLElement && !child.contains(node)) {
+          child.setAttribute("inert", "");
+          marked.push(child);
+        }
+      }
+    }
+    return () => {
+      for (const el of marked) el.removeAttribute("inert");
+    };
+  }, []);
 
   useEffect(() => {
     openerRef.current = document.activeElement as HTMLElement | null;
@@ -64,11 +86,12 @@ export function ConfirmDialog({ heading, onClose, children }: Props) {
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}
+        aria-busy={busy ? "true" : undefined}
         className="tcip-panel rounded-lg p-5 w-[440px] max-h-[85vh] overflow-auto"
       >
-        <div id={headingId} className="text-[13px] font-semibold mb-3">
+        <h2 id={headingId} className="text-[13px] font-semibold mb-3">
           {heading}
-        </div>
+        </h2>
         {children}
       </div>
     </div>

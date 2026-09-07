@@ -75,6 +75,48 @@ describe("ConfirmDialog", () => {
     expect(last).toHaveFocus();
   });
 
+  it("titles the dialog with a heading element", () => {
+    render(
+      <ConfirmDialog heading="Remove x" onClose={vi.fn()}>
+        {"body"}
+      </ConfirmDialog>,
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "Remove x" })).toBeInTheDocument();
+  });
+
+  it("carries aria-busy when told it is still waiting on something", () => {
+    render(
+      <ConfirmDialog heading="Remove x" onClose={vi.fn()} busy>
+        {"body"}
+      </ConfirmDialog>,
+    );
+    expect(screen.getByRole("dialog")).toHaveAttribute("aria-busy", "true");
+  });
+
+  it("marks the application root's other children inert while open, restored on close", () => {
+    const appRoot = document.createElement("div");
+    appRoot.id = "root";
+    const sibling = document.createElement("div");
+    sibling.textContent = "sibling content";
+    appRoot.appendChild(sibling);
+    const dialogHost = document.createElement("div");
+    appRoot.appendChild(dialogHost);
+    document.body.appendChild(appRoot);
+
+    const { unmount } = render(
+      <ConfirmDialog heading="Remove x" onClose={vi.fn()}>
+        <input aria-label="name" />
+      </ConfirmDialog>,
+      { container: dialogHost },
+    );
+
+    expect(sibling).toHaveAttribute("inert");
+    expect(dialogHost).not.toHaveAttribute("inert");
+    unmount();
+    expect(sibling).not.toHaveAttribute("inert");
+    appRoot.remove();
+  });
+
   it("does not close on a backdrop click", () => {
     const onClose = vi.fn();
     const { container } = render(
