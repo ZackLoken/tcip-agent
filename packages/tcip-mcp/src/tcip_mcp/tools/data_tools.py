@@ -433,6 +433,10 @@ def _scan_dataset(root: str) -> dict:
     known exclusion rather than a disagreement. ``reserved_name_images`` names every image whose
     own stem is reserved the same way, since such an image otherwise counts as an ordinary
     unlabelled one with no signal at all that its label can never be read through any bucket walk.
+    ``predictions`` drops every bucket under the cleared archive
+    (``tcip_mcp.dataset_layout.is_cleared_bucket``), so a document
+    :func:`~tcip_mcp.tools.inference_tools.clear_prediction_bucket` has moved out from under a
+    terminal experiment's own path is never counted as a live prediction here.
 
     ``images``, unlike ``labels``, is built per bucket through
     :func:`~tcip_mcp.pipelines.image_utils.list_logical_images`: a stem collision within one
@@ -445,7 +449,9 @@ def _scan_dataset(root: str) -> dict:
     """
     from tcip_annotation.json_io import is_sidecar_name, prediction_documents
     from tcip_annotation.review_engine import BASELINE_DIRNAME
-    from tcip_mcp.dataset_layout import annotation_root, image_root, prediction_root
+    from tcip_mcp.dataset_layout import (
+        annotation_root, image_root, is_cleared_bucket, prediction_root,
+    )
     from tcip_mcp.pipelines.image_utils import BandGroupRef, IMAGE_EXTS, list_logical_images
 
     root_path = Path(root)
@@ -510,6 +516,7 @@ def _scan_dataset(root: str) -> dict:
         preds = [
             str(f)
             for bucket in sorted({p.parent for p in pred_dir.rglob("*.json")})
+            if not is_cleared_bucket(bucket)
             for f in prediction_documents(bucket)
         ]
 
