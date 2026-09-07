@@ -4,6 +4,7 @@ import Konva from "konva";
 
 import { api } from "@/api/client";
 import { classesApi, subjectColor, type ImageStatus } from "@/api/classes";
+import { isAuditEntryNotWritten } from "@/api/http";
 import { sessionsApi } from "@/api/sessions";
 import { AnnotateLegend } from "@/components/annotate/AnnotateLegend";
 import { AnnotationShapes } from "@/components/annotate/AnnotationShapes";
@@ -504,6 +505,10 @@ export function AnnotateTab() {
       return;
     }
 
+    if (result.status === "unrecorded") {
+      useStore.getState().pushToast(result.message);
+    }
+
     // Heals an unconfirmed status from the saved content; a confirmed name (complete or
     // negative) is a human mark, rewritten only through the toolbar's re-confirm action.
     const name = paths.image.split(/[/\\]/).pop() ?? "";
@@ -536,7 +541,11 @@ export function AnnotateTab() {
                 dataset.annotations_dir,
                 useStore.getState().user || undefined,
               )
-              .catch(() => {});
+              .catch((e: unknown) => {
+                if (isAuditEntryNotWritten(e)) {
+                  useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
+                }
+              });
           }
         }
       }

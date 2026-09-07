@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
 import { classesApi, FINISHED_STATUSES } from "@/api/classes";
+import { isAuditEntryNotWritten } from "@/api/http";
 import { reconcileImageStatuses } from "@/lib/imageStatus";
 import { useStore } from "@/store";
 
@@ -78,15 +79,20 @@ export function useImageStatusHydrate({
             );
         }
         if (Object.keys(writes).length) {
-          await classesApi.setImageStatusBulk(
-            projectRoot,
-            writes,
-            subject,
-            datasetDate,
-            datasetRoot,
-            annotationsDir,
-            useStore.getState().user || undefined,
-          );
+          try {
+            await classesApi.setImageStatusBulk(
+              projectRoot,
+              writes,
+              subject,
+              datasetDate,
+              datasetRoot,
+              annotationsDir,
+              useStore.getState().user || undefined,
+            );
+          } catch (e) {
+            if (!isAuditEntryNotWritten(e)) throw e;
+            useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
+          }
         }
         if (cancelled) return;
         useStore.getState().setImageStatuses({ ...stored, ...writes }, staleMarks);

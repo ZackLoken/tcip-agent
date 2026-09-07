@@ -33,6 +33,9 @@ export interface InferenceJob {
   output_dir: string;
   error: string | null;
   warning: string | null;
+  // Set when the worker's own audit line for this run could not be written; the predictions are
+  // on disk regardless. A distinct fact from warning, never carried on it.
+  audit_warning: string | null;
 }
 
 /** A run is named, not spelled: the backend resolves both the images dir and the prediction

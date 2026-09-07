@@ -11,7 +11,7 @@ import {
 } from "recharts";
 
 import { api } from "@/api/client";
-import { StructuredRefusalError } from "@/api/http";
+import { committedOf, StructuredRefusalError } from "@/api/http";
 import {
   deliveryGateRefusalOf,
   operationalizationRefusalOf,
@@ -711,9 +711,20 @@ export function ResultsTab() {
       setBuildMsg(`Mapping built + saved as ${mappingName}`);
       refreshMappingNames();
     } catch (e) {
+      const committed = committedOf<Awaited<ReturnType<typeof resultsApi.buildPlantMapping>>>(e);
+      if (committed) {
+        setBuildSummary(committed.summary);
+        setBuildTolerance(committed.nn_tolerance_m);
+        setBuildMaxMatchDistance(committed.max_match_distance_m);
+        refreshMappingNames();
+        setBuildMsg(
+          `Mapping built + saved as ${mappingName}. ` +
+            (e instanceof Error ? e.message : String(e)),
+        );
+        return;
+      }
       if (e instanceof StructuredRefusalError && e.status === 409) {
-        // A rebuild a delivery event still cites: show the citing events here, beside the
-        // checkbox that resolves it, rather than only as a toast.
+        // A rebuild cited by a delivery event, or an audit-gap refusal with no mapping saved.
         setBuildMsg(e.message);
       } else {
         useStore
@@ -815,6 +826,16 @@ export function ResultsTab() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
+      const committed = committedOf<{ saved_path: string }>(e);
+      if (committed) {
+        useStore
+          .getState()
+          .pushToast(
+            `The file is already written at ${committed.saved_path}. ` +
+              (e instanceof Error ? e.message : String(e)),
+          );
+        return;
+      }
       // The download door refuses through the same structured family, so it lands in the panel.
       const refusal = operationalizationRefusalOf(e);
       if (refusal) {
@@ -874,6 +895,14 @@ export function ResultsTab() {
       setCountResultHeaders(headers);
       setCountShowAck(false);
     } catch (e) {
+      const committed = committedOf<{ saved_path: string }>(e);
+      if (committed) {
+        setCountError(
+          `The file is already written at ${committed.saved_path}. ` +
+            (e instanceof Error ? e.message : String(e)),
+        );
+        return;
+      }
       const opRefusal = operationalizationRefusalOf(e);
       if (opRefusal) {
         setCountOperationalizationRefusal(opRefusal);

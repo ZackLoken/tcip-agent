@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { classesApi, type AttributeDef, type Registry } from "@/api/classes";
+import {
+  classesApi,
+  type AttributeDef,
+  type Registry,
+  type SchemaChangeSweep,
+} from "@/api/classes";
+import { committedOf } from "@/api/http";
 import { AttributeEditors } from "@/components/annotate/AttributeEditors";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { schemaChangeSweepToast } from "@/lib/registrySweep";
@@ -89,6 +95,20 @@ export function AttributePanel({
       const toast = schemaChangeSweepToast(saved.schema_change_sweep);
       if (toast) useStore.getState().pushToast(toast, "info");
     } catch (e) {
+      const saved = committedOf<{
+        status: string;
+        n_subjects: number;
+        classes_path: string;
+        version: string;
+        schema_change_sweep: SchemaChangeSweep;
+      }>(e);
+      if (saved) {
+        setRegistry(next, saved.version);
+        const toast = schemaChangeSweepToast(saved.schema_change_sweep);
+        if (toast) useStore.getState().pushToast(toast, "info");
+        useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
+        return;
+      }
       // A refusal means this browser's registry is not trustworthy: reload rather than keep it.
       useStore
         .getState()
