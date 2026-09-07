@@ -182,12 +182,17 @@ export function ProjectPicker() {
                   <button
                     type="button"
                     aria-pressed={isSelected}
-                    aria-label={p.name}
+                    aria-labelledby={`project-name-${p.name}`}
+                    aria-describedby={`project-desc-${p.name}`}
                     className="flex flex-col gap-2 w-full text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg"
                     onClick={() => selectCard(p)}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium text-tcip-fg truncate" title={p.name}>
+                      <span
+                        id={`project-name-${p.name}`}
+                        className="font-medium text-tcip-fg truncate"
+                        title={p.name}
+                      >
                         {p.name}
                       </span>
                       {p.is_active && (
@@ -196,44 +201,49 @@ export function ProjectPicker() {
                         </span>
                       )}
                     </div>
-                    {p.site ? (
-                      <span className="text-[11px] text-tcip-muted truncate" title={p.site}>
-                        {p.site}
-                      </span>
-                    ) : (
-                      p.site_problem && (
-                        <span className="text-[11px] text-tcip-fp truncate" title={p.site_problem}>
-                          {p.site_problem}
+                    <div id={`project-desc-${p.name}`} className="contents">
+                      {p.site ? (
+                        <span className="text-[11px] text-tcip-muted truncate" title={p.site}>
+                          {p.site}
                         </span>
-                      )
-                    )}
-                    {p.label_problem && (
-                      <span className="text-[11px] text-tcip-fp truncate" title={p.label_problem}>
-                        {p.label_problem}
-                      </span>
-                    )}
-                    {/* Signature: the project's captures across the season, each date labelled. */}
-                    <SeasonRail
-                      dates={p.dates}
-                      showLabels
-                      active={date || null}
-                      className="my-0.5"
-                    />
-                    <div className="text-[11px] text-tcip-muted flex flex-wrap gap-x-3 gap-y-0.5">
-                      <span>{p.image_count} image(s)</span>
-                      <span>
-                        {p.dates.length} date{p.dates.length === 1 ? "" : "s"}
-                      </span>
-                      <span>
-                        {p.subjects.length} subject{p.subjects.length === 1 ? "" : "s"}
-                      </span>
-                      <span>
-                        {p.models.length} model{p.models.length === 1 ? "" : "s"}
+                      ) : (
+                        p.site_problem && (
+                          <span
+                            className="text-[11px] text-tcip-fp truncate"
+                            title={p.site_problem}
+                          >
+                            {p.site_problem}
+                          </span>
+                        )
+                      )}
+                      {p.label_problem && (
+                        <span className="text-[11px] text-tcip-fp truncate" title={p.label_problem}>
+                          {p.label_problem}
+                        </span>
+                      )}
+                      {/* Signature: the project's captures across the season, each date labelled. */}
+                      <SeasonRail
+                        dates={p.dates}
+                        showLabels
+                        active={date || null}
+                        className="my-0.5"
+                      />
+                      <div className="text-[11px] text-tcip-muted flex flex-wrap gap-x-3 gap-y-0.5">
+                        <span>{p.image_count} image(s)</span>
+                        <span>
+                          {p.dates.length} date{p.dates.length === 1 ? "" : "s"}
+                        </span>
+                        <span>
+                          {p.subjects.length} subject{p.subjects.length === 1 ? "" : "s"}
+                        </span>
+                        <span>
+                          {p.models.length} model{p.models.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-tcip-muted">
+                        Updated {relativeTime(p.modified)}
                       </span>
                     </div>
-                    <span className="text-[10px] text-tcip-muted">
-                      Updated {relativeTime(p.modified)}
-                    </span>
                   </button>
 
                   {isSelected && (
@@ -302,7 +312,7 @@ export function ProjectPicker() {
                       {openError && <span className="text-[11px] text-tcip-fp">{openError}</span>}
                       <div className="flex gap-2">
                         <button
-                          className="tcip-btn-primary"
+                          className="tcip-btn-primary flex-1"
                           disabled={opening || !date}
                           onClick={() => openProject(p, date, subject, model)}
                         >

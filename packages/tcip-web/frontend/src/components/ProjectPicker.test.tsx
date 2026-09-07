@@ -388,6 +388,34 @@ describe("ProjectPicker", () => {
     expect(card).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("describes the card with its site and counts, without folding them into its name", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+    });
+    render(<ProjectPicker />);
+
+    const card = await screen.findByRole("button", { name: "crop_a_subject_a_valley-farm" });
+    expect(card).toHaveAccessibleName("crop_a_subject_a_valley-farm");
+    expect(card).toHaveAccessibleDescription(/north orchard/);
+    expect(card).toHaveAccessibleDescription(/42 image\(s\)/);
+  });
+
+  it("gives the Open project button the full width of its action row", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+    });
+    render(<ProjectPicker />);
+    fireEvent.click(await screen.findByText("crop_a_subject_a_valley-farm"));
+
+    expect(screen.getByText("Open project")).toHaveClass("flex-1");
+  });
+
   it("keeps the selected panel's controls outside any role=button nesting", async () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
