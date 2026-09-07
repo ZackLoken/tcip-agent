@@ -170,7 +170,7 @@ export function ProjectPicker() {
 
         {projects && projects.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {projects.map((p) => {
+            {projects.map((p, index) => {
               const isSelected = p.name === selected;
               return (
                 <div
@@ -182,14 +182,14 @@ export function ProjectPicker() {
                   <button
                     type="button"
                     aria-pressed={isSelected}
-                    aria-labelledby={`project-name-${p.name}`}
-                    aria-describedby={`project-desc-${p.name}`}
+                    aria-labelledby={`project-name-${index}`}
+                    aria-describedby={`project-desc-${index}`}
                     className="flex flex-col gap-2 w-full text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg"
                     onClick={() => selectCard(p)}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span
-                        id={`project-name-${p.name}`}
+                        id={`project-name-${index}`}
                         className="font-medium text-tcip-fg truncate"
                         title={p.name}
                       >
@@ -201,7 +201,7 @@ export function ProjectPicker() {
                         </span>
                       )}
                     </div>
-                    <div id={`project-desc-${p.name}`} className="contents">
+                    <div id={`project-desc-${index}`} className="contents">
                       {p.site ? (
                         <span className="text-[11px] text-tcip-muted truncate" title={p.site}>
                           {p.site}
