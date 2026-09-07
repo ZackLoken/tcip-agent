@@ -889,8 +889,8 @@ anything.
 | `monitor_training` | `training_tools.py:1015` | yes | Check the status of a training run, or of a hyperparameter sweep. |
 | `cancel_training` | `training_tools.py:1455` | yes | Request graceful cancellation of a running training run. |
 | `run_hyperparameter_search` | `training_tools.py:2193` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hyperparameter_search` | `training_tools.py:2602` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:3368` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `cancel_hyperparameter_search` | `training_tools.py:2603` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:3367` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (1 tool)
 
@@ -1494,8 +1494,8 @@ log are one file at one key. That path is what the file backend places the log a
 `tcip export-store` writes back out; on the default database backend the rows live in that
 root's `.tcip/store.db` until they are exported.
 
-Writers: three write paths, `packages/tcip-mcp/src/tcip_mcp/audit.py:290` (`audited`),
-`audit.py:220` (`record_event`) and `audit.py:239` (`record_event_or_raise`), all resolving a
+Writers: three write paths, `packages/tcip-mcp/src/tcip_mcp/audit.py:291` (`audited`),
+`audit.py:221` (`record_event`) and `audit.py:240` (`record_event_or_raise`), all resolving a
 caller's scope through one shared helper, `audit.py:138` (`_stamp_scope`), so the root a line's
 `scope` field names and the root its Key addresses are always the one resolution, never two
 independently taken. It stamps `entry["scope"]` with the resolved root only when the caller passed
@@ -1505,7 +1505,7 @@ store.
 
 `audited` covers the platform's doors (every MCP tool in `tools/`, plus the script-invoked doors
 demoted from them): bare, a platform event; `@audited(scope_arg=...)` names the argument carrying
-a dataset or project location, resolved via `dataset_scope_of` (`audit.py:263`) (through the tool's own
+a dataset or project location, resolved via `dataset_scope_of` (`audit.py:264`) (through the tool's own
 canonicalizer when the declaration passes one as `scope_via`). Ten doors declare one: eight
 dataset-scoped (`save_annotations`, `tools/annotation_tools.py:146`; `write_class_map`,
 `tools/annotation_tools.py:512`; `redraw_calibration_holdout`, `tools/calibration_tools.py:25`;
@@ -2255,9 +2255,9 @@ Must agree: mutations from any process land in the log the scope names, the plat
 default, a dataset's own for a record travelling with the data, a project's own for a record
 that is the project's, all with the same entry shape; and the project's own receipt gate
 (`plant_mapping.load_mapping`) trusts only what that project's own log actually recorded.
-Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:290` (`def audited(`, taking a declared
+Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:291` (`def audited(`, taking a declared
 `scope_arg` naming which tool argument carries the dataset or project a scoped tool mutates a
-record of) and `record_event` (`audit.py:220`)/`record_event_or_raise` (`audit.py:239`), the two emitters for code
+record of) and `record_event` (`audit.py:221`)/`record_event_or_raise` (`audit.py:240`), the two emitters for code
 that is neither an MCP tool nor a script-invoked door demoted from one; all three resolve a
 caller's scope through the one shared `_stamp_scope`, `audit.py:138`, and differ only in what a failed
 append means: `record_event` warns through `_write_entry`, `audit.py:190`; `record_event_or_raise`
