@@ -1155,10 +1155,12 @@ def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
 def test_run_hyperparameter_search_over_a_misrouted_coco_is_not_refused_by_this_leg(
     tmp_path, monkeypatch,
 ):
-    """A dataset-level COCO document misrouted as data.labels_dir raises inside
-    checked_label_format, a caller-config error this leg answers with no refusal of its own
-    (the trial or the preflight that follows reports it in its own words), never folded into
-    this leg's own single-source message."""
+    """A dataset-level COCO document misrouted as data.labels_dir admits no stem (every image
+    reads as unannotated, not a document this leg's checked_label_format/build_full_admitted_
+    dataset calls fail on), so len(stems) != 1 and this leg answers no refusal of its own;
+    preflight_config reports the same admission gap in its own words, as a warning that never
+    blocks, and the sweep proceeds past this leg and past preflight to the search, with neither
+    this leg's single-source message nor an "error" key anywhere in the result."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import json
@@ -1173,12 +1175,17 @@ def test_run_hyperparameter_search_over_a_misrouted_coco_is_not_refused_by_this_
         {"images": [{"id": 1, "file_name": "img0.png"}], "annotations": [], "categories": []}))
     cfg = _one_source_tiled_cfg(images_dir, labels_dir)
 
+    preflight = tt.preflight_config(cfg)
+    assert preflight["valid"] is True
+    assert any("0 stem(s) admitted" in warning for warning in preflight["warnings"])
+
     ran = []
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
 
     result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
 
-    if "error" in result:
-        assert "one trainable source" not in result["error"]
-        assert "spatial strip path" not in result["error"]
+    assert "error" not in result
+    assert ran == [1]
+    assert "one trainable source" not in result["best_value_reason"]
+    assert "spatial strip path" not in result["best_value_reason"]
