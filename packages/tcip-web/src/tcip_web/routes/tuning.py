@@ -16,7 +16,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -62,8 +62,11 @@ def _manifest_fields(manifest: dict) -> dict:
     ``relaunchable`` and ``reason`` are :func:`_relaunch_refusal`'s own absence and presence: the
     same function :func:`relaunch_sweep` calls for its own 409, so the marker and the route can
     never name different conditions, or the same conditions in a different order, for the same
-    manifest. Any failure among them is reported with a reason rather than a reconstructed
-    config. ``cancel_requested`` is the manifest's own field, set by
+    manifest. ``_relaunch_refusal`` answers a ``reason``/``remedy`` pair for a failing condition;
+    ``reason`` here is that pair's own ``reason`` alone, never joined with its ``remedy``, since
+    the row caption is a sentence a breeder can act on and the remedy is Ray mechanics addressed
+    to the tool's own caller. Any failure among them is reported with a reason rather than a
+    reconstructed config. ``cancel_requested`` is the manifest's own field, set by
     ``cancel_hyperparameter_search`` and never derived from a side file this route cannot see across roots.
     ``relaunched_from`` projects as ``None`` for a manifest predating the field, the same as
     for one that genuinely was not a relaunch: a relaunch of an older sweep must still work
@@ -97,8 +100,9 @@ def _manifest_fields(manifest: dict) -> dict:
     param_space = manifest.get("param_space")
     if not isinstance(param_space, dict):
         param_space = {}
-    reason = _relaunch_refusal(manifest)
-    relaunchable = reason is None
+    refusal = _relaunch_refusal(manifest)
+    relaunchable = refusal is None
+    reason = refusal.reason if refusal is not None else None
     base_config = manifest.get("base_config") or {}
     base_split = (base_config.get("data") or {}).get("split") or {}
     return {
@@ -418,29 +422,46 @@ def _invalid_split_draws_field(manifest: dict) -> bool:
     return coerce_split_draws(manifest["split_draws"]) is None
 
 
-def _relaunch_refusal(manifest: dict) -> str | None:
-    """The 409 text for the first of a relaunch's own conditions ``manifest`` fails, checked in
+class _RelaunchRefusal(NamedTuple):
+    """The text for one of a relaunch's own refused conditions, split the way
+    :class:`training_tools.SeedAxisRefusal` already splits the seed-axis case: ``reason`` is the
+    sentence the listing caption shows alone, ``remedy`` the extra text (``None`` for the three
+    conditions that name none) :func:`relaunch_sweep`'s 409 and :func:`_manifest_fields`'s own
+    ``reason`` field join to it with one space where a remedy exists, so the three surfaces carry
+    one text from one function."""
+
+    reason: str
+    remedy: str | None
+
+
+def _relaunch_refusal(manifest: dict) -> _RelaunchRefusal | None:
+    """The refusal for the first of a relaunch's own conditions ``manifest`` fails, checked in
     this order: a missing ``base_config``, a relaunch field :func:`_missing_relaunch_fields`
     names absent, an unreadable ``split_draws`` (:func:`_invalid_split_draws_field`), and a
     caller-supplied ``data.split.seed`` axis at one draw
     (:func:`training_tools.caller_split_seed_refusal`); ``None`` when every condition passes.
-    Shared by :func:`relaunch_sweep`, whose 409 detail is exactly this text, and
-    :func:`_manifest_fields`, whose ``relaunchable``/``reason`` pair is this function's own
-    absence and presence, so the marker and the route refuse a manifest the same way for the
-    same reason.
+    The first three carry no remedy of their own; the seed-axis case carries
+    ``caller_split_seed_refusal``'s own ``reason``/``remedy`` pair unchanged. Shared by
+    :func:`relaunch_sweep`, whose 409 detail joins ``reason`` and, when present, ``remedy`` with
+    one space, and :func:`_manifest_fields`, whose ``relaunchable``/``reason`` pair is this
+    function's own absence and this function's own ``reason`` alone, so the marker and the route
+    refuse a manifest the same way for the same reason and the row caption never carries the
+    remedy.
     """
     from tcip_mcp.tools.training_tools import caller_split_seed_refusal
 
     if "base_config" not in manifest:
-        return "this sweep's record holds no base config"
+        return _RelaunchRefusal(reason="this sweep's record holds no base config", remedy=None)
     missing = _missing_relaunch_fields(manifest)
     if missing:
-        return f"this sweep's record is missing {missing}: cannot relaunch"
+        return _RelaunchRefusal(
+            reason=f"this sweep's record is missing {missing}: cannot relaunch", remedy=None)
     if _invalid_split_draws_field(manifest):
-        return f"{_INVALID_SPLIT_DRAWS_REASON}: cannot relaunch"
+        return _RelaunchRefusal(
+            reason=f"{_INVALID_SPLIT_DRAWS_REASON}: cannot relaunch", remedy=None)
     seed_axis_refusal = caller_split_seed_refusal(manifest.get("param_space"), manifest.get("split_draws"))
     if seed_axis_refusal is not None:
-        return f"{seed_axis_refusal.reason} {seed_axis_refusal.remedy}"
+        return _RelaunchRefusal(reason=seed_axis_refusal.reason, remedy=seed_axis_refusal.remedy)
     return None
 
 
@@ -562,7 +583,8 @@ def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
         raise HTTPException(404, f"sweep not found: {payload.study_name}")
     refusal = _relaunch_refusal(manifest)
     if refusal is not None:
-        raise HTTPException(409, refusal)
+        detail = refusal.reason if refusal.remedy is None else f"{refusal.reason} {refusal.remedy}"
+        raise HTTPException(409, detail)
 
     output_dir = str(hpo_root())
     spec = _relaunch_spec(manifest)
