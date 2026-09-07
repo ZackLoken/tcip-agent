@@ -249,9 +249,11 @@ async def select_dataset(req: SelectionRequest) -> dict:
     the guard resolves rather than the client's raw string. The guard's own excluded-roots check
     (``assert_path_allowed``) already refuses a path under a pending project by identity, ahead
     of everything else, with a 403; this route re-reads the marker to answer that same 403 with
-    the pending door's own message rather than the guard's generic one. When the guard admits the
-    root instead, this route reads the marker again on the guard's own resolved path and answers
-    409 the same way, so a refused select changes no binding and bumps no generation either way.
+    the pending door's own message rather than the guard's generic one. The route's own marker
+    read that runs when the guard admits the root instead can only fire for a marker written in
+    the narrow window between the guard's own read and this one, since the guard would otherwise
+    already have refused; that race still answers 409 the same way, so a refused select changes
+    no binding and bumps no generation either way.
     """
     try:
         project_root = _guarded(req.project_root)
