@@ -1151,6 +1151,42 @@ def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path
     assert state["detections"][0]["action"] == "accepted"
 
 
+def test_review_action_records_before_building_the_response_so_a_build_failure_still_logs(
+    dataset_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The order is record, then build, then answer: a response build that fails after a
+    recorded line answers 500 with the line already on the log (coverage of the order)."""
+    import tcip_web.routes.review as review_mod
+
+    def _raise(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("boom building the response")
+
+    monkeypatch.setattr(review_mod, "_matches_response", _raise)
+
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])
+    pred = tmp_path / "pred.json"
+    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+
+    no_raise_client = TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
+    resp = no_raise_client.post(
+        "/api/review/action",
+        json={
+            "dataset_root": str(dataset_root),
+            "image_name": "IMG_0000.JPG",
+            "image_path": str(img_path),
+            "gt_path": str(gt),
+            "pred_path": str(pred),
+            "det_type": "tp", "class_name": "bud", "conf": 0.9, "iou": 0.95,
+            "gt_idx": 0, "pred_idx": 0,
+            "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
+        },
+    )
+    assert resp.status_code == 500
+    assert any(e.get("tool") == "gui_review_action" for e in _audit_entries(dataset_root))
+
+
 def test_review_action_resolves_class_id_from_bucket_id_map(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
