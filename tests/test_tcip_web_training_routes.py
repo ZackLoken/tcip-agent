@@ -153,6 +153,9 @@ def test_metrics_stream_serves_the_rows_the_run_logged(client: TestClient, tmp_p
     rows = [f["row"] for f in frames if f["type"] == "metric"]
     assert [(r["epoch"], r["loss"]) for r in rows] == [(1, 0.9), (2, 0.4)]
     assert frames[-1]["type"] == "status"
+    for frame in frames:
+        assert frame["experiment_id"] == run_id
+        assert "run_id" not in frame
 
 
 def test_metrics_stream_pushes_complete_entries_and_defers_a_partial_one(tmp_path: Path) -> None:

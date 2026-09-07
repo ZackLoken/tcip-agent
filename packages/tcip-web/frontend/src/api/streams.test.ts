@@ -232,7 +232,7 @@ describe("openTrainingStream", () => {
     for (const delay of [499, 999, 1999]) {
       lastSocket().open();
       lastSocket().message(
-        JSON.stringify({ type: "status", run_id: "r1", status: null, error: "unknown run" }),
+        JSON.stringify({ type: "status", experiment_id: "r1", status: null, error: "unknown run" }),
       );
       lastSocket().drop();
       const before = FakeWebSocket.instances.length;
@@ -243,7 +243,9 @@ describe("openTrainingStream", () => {
     }
 
     lastSocket().open();
-    lastSocket().message(JSON.stringify({ type: "metric", run_id: "r1", row: { epoch: 1 } }));
+    lastSocket().message(
+      JSON.stringify({ type: "metric", experiment_id: "r1", row: { epoch: 1 } }),
+    );
     lastSocket().drop();
     const before = FakeWebSocket.instances.length;
     vi.advanceTimersByTime(499);
