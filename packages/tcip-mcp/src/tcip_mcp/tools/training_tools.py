@@ -2043,6 +2043,9 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
     selected hyperparameters won't transfer.
     """
     merged = _apply_hpo_params(base_config, config)
+    # Track which top-level keys the trial reads, so an unconsumed swept param is caught by
+    # observation, never off merged: this tree, not merged, is what the trial actually reads.
+    tracked_config = _AccessTrackingConfig(merged)
 
     from tcip_mcp.pipelines.training.envelope import TrainContext, dispatch_train_body
     from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
@@ -2058,13 +2061,13 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
     from tcip_mcp.pipelines.schemas import evaluation_section
     from torch.utils.data import DataLoader
 
-    model_source = merged.get(MODEL_SOURCE_KEY)
-    # setdefault, not get: the geometry stamp below mutates this dict and must land in the
-    # resolved-config snapshot written from merged.
-    data_cfg = merged.setdefault("data", {})
-    train_cfg = merged.get("training", {})
+    model_source = tracked_config.get(MODEL_SOURCE_KEY)
+    # setdefault, not get: creates "data" if base_config omitted it, and the geometry stamp
+    # below mutates the wrapped tree the resolved-config snapshot is spread from below.
+    data_cfg = tracked_config.setdefault("data", {})
+    train_cfg = tracked_config.get("training", {})
     task = (model_source.get("task") if model_source else None) or data_cfg.get("task", "detection")
-    eval_cfg = evaluation_section(merged)
+    eval_cfg = evaluation_section(tracked_config)
     try:
         higher_is_better = HIGHER_IS_BETTER_BY_METRIC[resolve_selection_metric(
             task, eval_cfg.get("trait"), eval_cfg.get("selection_metric"))]
@@ -2084,9 +2087,6 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         report(losing_side)
         return
 
-    # Track which top-level keys the trial reads, so an unconsumed swept param is caught by
-    # observation, not a whitelist that would forbid a bespoke training_source's own axes.
-    tracked_config = _AccessTrackingConfig(merged)
     draw_seed_if_unset(tracked_config)  # marks a swept "seed" consumed, same as any other read
     # An id no tool takes, unique across concurrent sweeps where a directory basename is not.
     trial_id = str(Path(trial_dir).resolve())
@@ -2104,7 +2104,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
 
     try:
         transforms = None
-        aug_cfg = merged.get("augmentation", {})
+        aug_cfg = tracked_config.get("augmentation", {})
         if aug_cfg:
             from tcip_mcp.pipelines.data.augmentations import build_augmentation
             transforms = build_augmentation(aug_cfg)
@@ -2118,7 +2118,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         num_workers = train_cfg.get("num_workers", 0)
         # Built after the loader context is known: a sampler whose read order depends on the
         # worker regime and batching consumes both.
-        sampler = build_sampler(merged.get("sampler", "random"), train_ds,
+        sampler = build_sampler(tracked_config.get("sampler", "random"), train_ds,
                                 num_workers=num_workers, batch_size=batch_size)
         # run.config's seed is draw_seed_if_unset-resolved; read off run.config, not merged, so
         # the loader is seeded with the value actually used.
@@ -2163,12 +2163,13 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         unconsumed = sorted(key for key in swept if key not in tracked_config.accessed)
         try:
             # trial_params is the sampled point itself, the only record of which axes this
-            # sweep actually varied (the merged config cannot say that).
+            # sweep actually varied (the config as sampled cannot say that).
             trial_path = Path(trial_dir)
-            # merged never gets draw_seed_if_unset's drawn seed (tracked_config is separate).
+            # run.config is tracked_config itself; read seed explicitly to also cover a nested
+            # training.seed the top-level spread below wouldn't reach.
             seed = run.config.get("seed", run.config.get("training", {}).get("seed"))
             store.replace(trial_config_key(trial_path.parent, trial_path.name),
-                          {**merged, "trial_params": dict(config),
+                          {**tracked_config, "trial_params": dict(config),
                            "unconsumed_params": unconsumed, "seed": seed})
         except (OSError, StoreError):
             logger.warning("could not persist the resolved config for %s", trial_dir, exc_info=True)
