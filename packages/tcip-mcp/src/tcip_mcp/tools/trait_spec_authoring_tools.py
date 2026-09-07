@@ -169,7 +169,8 @@ def revise_trait_spec(
         rationale: The agent's account of why it chose these values, from the breeder's own
             words. Prose, read by a breeder, not parsed. Required, and must say something.
         relayed_note: What the breeder said away from the GUI, recorded as a relay attributed to
-            the agent. It is surfaced in a delivery refusal and never clears it.
+            the agent, on the trait-spec statement this call writes; the breeder reads it in the
+            Results tab's statement panel. Nothing surfaces it in a refusal.
 
     Returns the updated spec, `superseded`, `statement_restated` (true when this call stated or
     restated the trait's trait-spec statement) and `statement_note`; when it did, also

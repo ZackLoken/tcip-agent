@@ -747,8 +747,8 @@ def state_operationalization(
     Refuses with :class:`~tcip_mcp.traits.TraitSpecUnconfirmed` when this trait's own trait-spec
     statement, the breeder's account of what the trait itself measures, is not both confirmed and
     current: the breeder confirms what a trait is before the agent states what its delivered
-    number means. Checked before anything else here, so a caller sees the trait-spec door before
-    any delivery-kind-specific validation.
+    number means. Checked right after the spec and record are resolved and before any
+    delivery-kind-specific validation, so a caller sees the trait-spec door before that.
 
     The writer behind the ``state_trait_operationalization`` tool, and the only path that writes a
     statement. It stamps ``stated_by`` and ``stated_at`` itself and refuses any further payload
