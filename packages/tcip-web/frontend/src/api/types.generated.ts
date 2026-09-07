@@ -149,7 +149,7 @@ export interface TerminalResizeFrame {
 }
 
 export interface DependencyWarning {
-  dataset_id?: string | null;
+  dataset_id: string;
   dataset_path: string;
   target: string;
   present: boolean;
