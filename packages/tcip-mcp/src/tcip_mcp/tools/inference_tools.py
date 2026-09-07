@@ -1080,7 +1080,7 @@ def _resolve_writable_bucket_for(output_dir: str, *, overwrite: bool):
     root, whose verdict guard alone is inoperative (the document guard is not, see
     ``_NO_DATASET_ROOT_NOTE``). ``dataset_root`` is ``None`` for a bucket under no dataset.
     """
-    from tcip_mcp.dataset_layout import prediction_dir
+    from tcip_mcp.dataset_layout import canonical_prediction_bucket, prediction_dir
     from tcip_mcp.prediction_buckets import (
         BucketHasVerdicts,
         BucketHoldsDocuments,
@@ -1092,20 +1092,19 @@ def _resolve_writable_bucket_for(output_dir: str, *, overwrite: bool):
     out_path = resolve_output_path(output_dir)
     parent, base_name = out_path.parent, out_path.name
 
-    canonical_dataset_root = None
-    if parent.name and parent.parent.name == "predictions":
-        candidate_root = parent.parent.parent
-        if Path(prediction_dir(candidate_root, parent.name, base_name)).resolve() == out_path.resolve():
-            canonical_dataset_root = candidate_root
+    canonical = canonical_prediction_bucket(out_path)
+    canonical_dataset_root = canonical[0] if canonical is not None else None
+    canonical_date = canonical[2] if canonical is not None else None
 
     # The guard reads the bucket's own dataset verdict store; no dataset root means no store to guard against.
     dataset_root = _bucket_dataset_root(out_path)
     review_state_dir = None if dataset_root is None else review_state_dir_of(dataset_root)
 
     try:
-        if canonical_dataset_root is not None:
+        if canonical is not None:
+            _, model, _ = canonical
             out, resolution = resolve_prediction_bucket(
-                canonical_dataset_root, parent.name, base_name,
+                canonical_dataset_root, model, canonical_date,
                 review_state_dir=review_state_dir, overwrite=overwrite, refuse_documents=True)
         else:
             resolution = resolve_writable_bucket(
@@ -1116,7 +1115,7 @@ def _resolve_writable_bucket_for(output_dir: str, *, overwrite: bool):
         suggested = None
         if exc.suggested is not None:
             suggested = (
-                str(prediction_dir(canonical_dataset_root, exc.suggested, base_name))
+                str(prediction_dir(canonical_dataset_root, exc.suggested, canonical_date))
                 if canonical_dataset_root is not None
                 else str(parent / exc.suggested)
             )
