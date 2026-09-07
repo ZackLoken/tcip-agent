@@ -101,6 +101,10 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     resolved: no producer ever named a checkpoint, an experiment or a generation conf for such a
     bucket to validate. A raw store write straight to the stamp's key can still manufacture one
     past this refusal, the accepted limit of the scope rail itself (``resolution._check_stamp_claim``).
+
+    The sealed record's own audit line (inside ``seal_validation``, one bucket at a time) can
+    also fail this way: the validation row it appends lands before that line, so a dropped
+    append there answers 409 with the buckets stamped so far, not a 500.
     """
     if not req.subject:
         raise HTTPException(
@@ -455,6 +459,9 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
 
         return _promote
 
+    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_web.routes.audit_gap import audit_gap_409
+
     try:
         for d in bucket_dirs:
             if bindings[d].claimed and bindings[d].ok:
@@ -474,6 +481,17 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         raise HTTPException(503, str(exc)) from exc
     except (ValueError, SchemaVersionRefused, DecodeError) as exc:
         raise HTTPException(400, str(exc)) from None
+    except AuditEntryNotWritten as gap:
+        # seal_validation's own validation row already landed; only its audit line failed. The
+        # buckets this call had not yet stamped when it raised stay unstamped.
+        raise audit_gap_409(gap, ValidateReferenceResponse(
+            validated=bool(result["validated"]),
+            reference=result["reference"],
+            reviewed_image_count=n,
+            conf=result["conf"],
+            reason=result["reason"],
+            buckets_stamped=stamped,
+        )) from gap
 
     committed = ValidateReferenceResponse(
         validated=bool(result["validated"]),
@@ -483,8 +501,6 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         reason=result["reason"],
         buckets_stamped=stamped,
     )
-    from tcip_mcp.audit import AuditEntryNotWritten
-    from tcip_web.routes.audit_gap import audit_gap_409
 
     # The sidecar this stamps sits in the prediction bucket, which travels with the dataset.
     try:
