@@ -7,7 +7,9 @@ guardian exists). Then either sleeps until killed or exits, depending on the ``m
 the test can watch what becomes of each process on each path. ``--no-tie`` disables the platform
 lifetime tie before launching, so a test can prove the ``atexit`` hook in isolation; ``--thread``
 launches from a background thread that has already finished before the pids are printed, since
-every real launch site runs on a worker thread rather than the main one.
+every real launch site runs on a worker thread rather than the main one. ``_standin_pid`` is also
+imported directly by ``tests.test_tensorboard_process_lifetime``, which needs the same
+guardian-child lookup against a process it launched in-process rather than through this script.
 """
 
 from __future__ import annotations
@@ -27,9 +29,10 @@ def _standin_pid(returned_pid: int, guardian_expected: bool) -> int:
     When a guardian is expected (POSIX with the tie enabled) the returned pid is the guardian's
     and its one child is the stand-in; this waits up to five seconds for that child to appear,
     since the guardian may not have spawned it yet, and exits naming the condition if it never
-    settles on exactly one, including the guardian itself having already died. Otherwise
-    (Windows, or the tie disabled under ``--no-tie``) nothing sits in front of the stand-in, so
-    the returned pid is used directly and children are never consulted.
+    settles on exactly one, including the guardian itself having already died, whether or not it
+    had spawned a child before then. Otherwise (Windows, or the tie disabled under ``--no-tie``)
+    nothing sits in front of the stand-in, so the returned pid is used directly and children are
+    never consulted.
     """
     if not guardian_expected:
         return returned_pid
@@ -41,7 +44,7 @@ def _standin_pid(returned_pid: int, guardian_expected: bool) -> int:
         try:
             children = psutil.Process(returned_pid).children()
         except psutil.NoSuchProcess:
-            sys.exit(f"guardian pid {returned_pid} died before spawning its child")
+            sys.exit(f"guardian pid {returned_pid} not found (gone before this lookup)")
         if len(children) == 1:
             return children[0].pid
         time.sleep(0.1)
