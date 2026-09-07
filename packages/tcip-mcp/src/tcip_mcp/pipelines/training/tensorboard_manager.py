@@ -367,9 +367,9 @@ def stop_tensorboard(key: str | None = None, logdir: str | None = None) -> dict:
     TensorBoard once this function returns, whatever its answer: either this function's own
     terminate/kill ends the guardian, or the guardian's ``poll()`` was already set (the kernel
     ended it outright) and this function's own signals never reach it at all; with
-    ``"none: ..."``, ``entry.proc`` is TensorBoard itself, watched by nothing beyond this
-    function's own wait apart from the atexit sweep, which holds every tracked entry regardless
-    of its tie. A
+    ``"none: ..."``, ``entry.proc`` is TensorBoard itself, held until this call by the atexit
+    sweep (which holds every tracked entry regardless of its tie) beside this function's own
+    wait, and by nothing at all once this call has dropped it from tracking. A
     kill this cannot confirm reaped within that second wait is logged (the key and pid) and
     answered ``{"status": "kill_unconfirmed", "pid": ...}`` rather than left to raise a
     ``TimeoutExpired`` out of this function. On a guardian tie, reaching the second wait means
