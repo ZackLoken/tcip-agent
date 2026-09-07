@@ -173,6 +173,7 @@ export function ReviewTab() {
   const [validationResult, setValidationResult] = useState<{
     validated: boolean;
     reason: string;
+    bucketsStamped: string[];
   } | null>(null);
   useEffect(() => {
     setValidationResult(null);
@@ -1021,12 +1022,20 @@ export function ReviewTab() {
         pred_dir: dataset.predictions_dir,
         subject: dataset.subject,
       });
-      setValidationResult({ validated: res.validated, reason: res.reason });
+      setValidationResult({
+        validated: res.validated,
+        reason: res.reason,
+        bucketsStamped: res.buckets_stamped,
+      });
       useStore.getState().pushToast(res.reason);
     } catch (e) {
       const committed = committedOf<Awaited<ReturnType<typeof api.review.validateReference>>>(e);
       if (committed) {
-        setValidationResult({ validated: committed.validated, reason: committed.reason });
+        setValidationResult({
+          validated: committed.validated,
+          reason: committed.reason,
+          bucketsStamped: committed.buckets_stamped,
+        });
         useStore
           .getState()
           .pushToast(`${committed.reason} ${e instanceof Error ? e.message : String(e)}`);
@@ -1390,6 +1399,14 @@ export function ReviewTab() {
                   {validationResult.reason}
                 </span>
               )}
+              {/* Discloses what was actually stamped, on both the 200 path and a 409 whose
+                  sealed record landed with no bucket promoted, so "Validated" never implies
+                  more than the stamp itself claims. */}
+              <span className="text-[11px] text-tcip-muted">
+                {validationResult.bucketsStamped.length > 0
+                  ? `Stamped ${validationResult.bucketsStamped.length} bucket(s).`
+                  : "No bucket was stamped."}
+              </span>
             </span>
           )}
 
