@@ -25,21 +25,21 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD cbe2bec2.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD c58827f0.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD cbe2bec2 has 435 modules across the six scanned roots (143847 total lines):
+HEAD c58827f0 has 435 modules across the six scanned roots (144159 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 137 | 63705 |
+| tcip-mcp | 137 | 63761 |
 | tcip-annotation | 12 | 4341 |
-| tcip-web | 40 | 14066 |
+| tcip-web | 40 | 14084 |
 | tcip-store | 13 | 5282 |
-| tcip-web-frontend | 216 | 51497 |
+| tcip-web-frontend | 216 | 51735 |
 | tools | 17 | 4956 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
@@ -2175,7 +2175,8 @@ dependent_projects}`, one document per project. Written once, `concurrency="cas"
 (`packages/tcip-mcp/src/tcip_mcp/project_removal.py:605`); deleted, at the version the
 completing walk read it at, by `complete_pending_removals` (`project_removal.py:886`).
 
-Readers: `pending_removal_record`/`pending_removal_or_none` (`workspace.py:252`, `:247`), the
+Readers: `pending_removal_record` (`workspace.py:240`) and `pending_removal_or_none`
+(`workspace.py:252`), the
 predicate `adoptable_project_root`, `ingest_images` and `tcip_web.paths.allowed_roots`'s
 excluded roots all consult, so an opener or a guarded route refuses a marked project from the
 moment this document lands.
