@@ -190,8 +190,10 @@ def _open_project_conflict(target: Path, state: OpenProjectState) -> Optional[st
     project" carried on ``state``: the workspace's active-project marker, this process's own
     platform root, and the GUI's canvas-open binding (a released binding never matches: it names
     what the GUI last had open, not what it has open now). Each is its own message naming the
-    spelling, that a breeder-triggered release clears it, and the remedy otherwise, the same
-    strings :func:`identity_conflict` answers the listing's own per-project reason with.
+    spelling and its own remedy: the marker and canvas messages name a breeder-triggered release
+    (:func:`release_project_binding`); the bound-root message, which no release clears, names a
+    restart instead. The same strings :func:`identity_conflict` answers the listing's own
+    per-project reason with.
     """
     if state.marker_name:
         try:
@@ -205,16 +207,19 @@ def _open_project_conflict(target: Path, state: OpenProjectState) -> Optional[st
     if state.binding_root is not None and _same_path(target, state.binding_root):
         name = workspace.workspace_project_name(target) or target.name
         return (f"{name} is the project this backend started on; restart the backend first, "
-                "started without TCIP_STATE_ROOT naming it")
+                "and start it without a state root naming this project")
+
+    from tcip_mcp.web_client import binding_released_or_absent
 
     if state.canvas_problem is not None:
         return f"the GUI's open-project binding could not be read: {state.canvas_problem}"
-    if state.canvas and not state.canvas.get("released") and (
-        state.canvas.get("project_name") or state.canvas.get("root")
+    canvas = state.canvas
+    if canvas is not None and not binding_released_or_absent(canvas) and (
+        canvas.get("project_name") or canvas.get("root")
     ):
-        root = state.canvas.get("root")
+        root = canvas.get("root")
         if root and _same_path(target, root):
-            label = state.canvas.get("project_name") or root
+            label = canvas.get("project_name") or root
             return (f"{label} is the project the GUI has open; open a different project first, "
                     "or release it as the open project")
     return None
@@ -230,7 +235,11 @@ def identity_conflict(target: Path, state: OpenProjectState) -> Optional[str]:
     the workspace listing's own per-project ``removal_refusal``, so the two answer with the same
     string rather than each composing its own. ``state`` is the marker/binding/canvas triple
     every caller reads once (:func:`read_open_project_state`) and passes in, per project when
-    checking several, so no call pays the reads on its own."""
+    checking several, so no call pays the reads on its own. An unreadable canvas record
+    (``state.canvas_problem``) is the one remaining state in which every project refuses,
+    fail-closed: with no project bound and the marker silent, that unreadable record still
+    answers every target rather than letting a request through on a binding this process
+    could not confirm."""
     return _open_project_conflict(target, state)
 
 
@@ -256,11 +265,9 @@ def _workspace_child_of(path: Path, workspace_root: Path) -> Optional[Path]:
         return None
     chain = [path, *path.parents]
     anchor = nearest_containing_ancestor(path, workspace_root, tolerant=True)
-    if anchor is None or anchor not in chain:
+    if anchor is None:
         return None
     idx = chain.index(anchor)
-    if idx == 0:
-        return None
     child = chain[idx - 1]
     if child.name == REMOVED_DIRNAME:
         return None
@@ -270,7 +277,7 @@ def _workspace_child_of(path: Path, workspace_root: Path) -> Optional[Path]:
 def dependency_warnings(project_root: Path) -> tuple[list[dict], Optional[str]]:
     """Every warning ``project_root``'s own registry earns from a dataset it registered under
     another workspace project that is now pending removal or gone, plus the registry's own
-    problem when it will not read at all.
+    problem when it will not read at all or carries an entry the platform cannot name.
 
     Reads through :func:`~tcip_mcp.tools.project_tools.read_datasets_raw`; a registry that will
     not read (``StoreError``, ``DecodeError``, ``SchemaVersionRefused``, or a fingerprint
@@ -280,22 +287,29 @@ def dependency_warnings(project_root: Path) -> tuple[list[dict], Optional[str]]:
     workspace child through :func:`_workspace_child_of`; an entry ``_workspace_child_of`` answers
     ``None`` for (outside the workspace, the holding directory) and an entry whose child is
     ``project_root`` itself (a project's own dataset registered under its own tree, compared by
-    :func:`_same_path`) earn no warning, since neither names a dependency on another project. The
-    condition is the entry itself, never the holding directory an eventual move leaves behind: a
-    child directory that no longer exists on disk is a warning with ``present`` false, whatever
-    ``.removed/`` holds, since the holding directory is not state this platform owns and a project
-    gone by any means leaves the entry dangling the same way; a child directory that still exists,
-    still carries ``.tcip``, and carries a pending-removal marker
-    (:func:`~tcip_mcp.workspace.pending_removal_or_none`) is a warning with ``present`` true;
-    every other entry earns none. Q46's lifetime is met as the registry can express it: no door
-    removes an entry, and ``register_dataset`` refreshes an entry's own path by id, so a warning
-    stands while the entry's path resolves under a pending or absent workspace child and clears
-    once the entry is refreshed to a path that resolves elsewhere, or the child is present again;
-    a project re-created under the removed one's own name resolves the entry into an unrelated
-    tree and clears the warning too, which the dataset-identity rail (the fingerprint the entry
-    carries against the data actually there) catches at training time and this function does not.
-    Each warning is ``{dataset_id, dataset_path, target, present}``, ``target`` the dependency's
-    own workspace-child name.
+    :func:`_same_path`) earn no warning, since neither names a dependency on another project. An
+    entry that does name a dependency but carries no ``id`` is malformed, the same treatment
+    :func:`_preview`'s own dependent scan gives it: it earns the problem naming the entry rather
+    than a warning with a null id, and the scan stops looking at further entries only in the
+    sense that the first such entry wins the problem text; every other entry is still considered.
+    The condition is the entry itself, never the holding directory an eventual move leaves
+    behind: a child directory that no longer exists on disk is a warning with ``present`` false
+    and ``archive_path``/``holding_dir`` both null, whatever ``.removed/`` holds, since the
+    holding directory is not state this platform owns and a project gone by any means leaves the
+    entry dangling the same way; a child directory that still exists, still carries ``.tcip``,
+    and carries a pending-removal marker (:func:`~tcip_mcp.workspace.pending_removal_or_none`) is
+    a warning with ``present`` true and ``archive_path``/``holding_dir`` from that same marker
+    record, so an agent reading the warning can answer "from where" without the dependent's own
+    log; every other entry earns none. The warning's own lifetime is bounded by what the
+    registry can express: no door removes an entry, and ``register_dataset`` refreshes an
+    entry's own path by id, so a
+    warning stands while the entry's path resolves under a pending or absent workspace child and
+    clears once the entry is refreshed to a path that resolves elsewhere, or the child is present
+    again; a project re-created under the removed one's own name resolves the entry into an
+    unrelated tree and clears the warning too, which the dataset-identity rail (the fingerprint
+    the entry carries against the data actually there) catches at training time and this function
+    does not. Each warning is ``{dataset_id, dataset_path, target, present, archive_path,
+    holding_dir}``, ``target`` the dependency's own workspace-child name.
     """
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets_raw
 
@@ -307,6 +321,7 @@ def dependency_warnings(project_root: Path) -> tuple[list[dict], Optional[str]]:
         return [], str(exc)
 
     warnings: list[dict] = []
+    problem: Optional[str] = None
     for entry in entries:
         if not entry.get("path"):
             continue
@@ -317,16 +332,28 @@ def dependency_warnings(project_root: Path) -> tuple[list[dict], Optional[str]]:
         child = _workspace_child_of(entry_path, ws)
         if child is None or _same_path(child, project_root):
             continue
+        dataset_id = entry.get("id")
+        if not dataset_id:
+            if problem is None:
+                problem = (
+                    "its dataset registry has an entry the platform cannot name: registry "
+                    f"entry {entry_path} carries no id"
+                )
+            continue
         if not child.exists():
-            warnings.append({"dataset_id": entry.get("id"), "dataset_path": str(entry_path),
-                              "target": child.name, "present": False})
+            warnings.append({"dataset_id": dataset_id, "dataset_path": str(entry_path),
+                              "target": child.name, "present": False,
+                              "archive_path": None, "holding_dir": None})
             continue
         if not (child / ".tcip").is_dir():
             continue
-        if workspace.pending_removal_or_none(child) is not None:
-            warnings.append({"dataset_id": entry.get("id"), "dataset_path": str(entry_path),
-                              "target": child.name, "present": True})
-    return warnings, None
+        pending = workspace.pending_removal_or_none(child)
+        if pending is not None:
+            warnings.append({"dataset_id": dataset_id, "dataset_path": str(entry_path),
+                              "target": child.name, "present": True,
+                              "archive_path": pending.get("archive_path"),
+                              "holding_dir": pending.get("holding_dir")})
+    return warnings, problem
 
 
 def binding_release_available(target: Optional[Path], state: OpenProjectState) -> bool:
@@ -339,6 +366,8 @@ def binding_release_available(target: Optional[Path], state: OpenProjectState) -
     the workspace listing's own per-project ``removal_releasable``
     (``tcip_web.routes.projects._summarize``), the same split :func:`identity_conflict` and
     ``removal_refusal`` already keep."""
+    from tcip_mcp.web_client import binding_released_or_absent
+
     if target is None:
         return False
     if state.marker_name:
@@ -348,8 +377,9 @@ def binding_release_available(target: Optional[Path], state: OpenProjectState) -
             marker_root = None
         if marker_root is not None and _same_path(target, marker_root):
             return True
-    if state.canvas and not state.canvas.get("released"):
-        root = state.canvas.get("root")
+    canvas = state.canvas
+    if canvas is not None and not binding_released_or_absent(canvas):
+        root = canvas.get("root")
         if root and _same_path(target, root):
             return True
     return False
@@ -596,8 +626,9 @@ def request_project_removal(
     (``recorded_in_open_project`` true), or in the target's own log otherwise, so a workspace with
     nothing bound still records the whole request against the project it names. ``audit_scope``
     is that root either way; ``audit_note`` names, in one sentence, where the request's two lines
-    and the archive door's own line went (the archive door's own line is a bare ``@audited`` door,
-    unmoved by this decision: it always lands wherever ``$TCIP_STATE_ROOT`` names). A dependent's
+    and the archive door's own line went (the archive door's own line is a bare ``@audited`` door
+    that always lands wherever ``$TCIP_STATE_ROOT`` names, whatever project this request
+    concerns). A dependent's
     line failing to append never costs another dependent its own line, or the route its own
     attempt: every failure is collected and the loop continues, and one 409 at the end names each
     line that did not land beside the ones that did, stating that the marker and the target's own
@@ -701,7 +732,7 @@ def request_project_removal(
             unwritten.append(f"the route's own line: {exc}")
 
         if unwritten:
-            return {"error": f"the marker and {name!r}'s own line stand; every other line was "
+            return {"error": f"the marker and {name}'s own line stand; every other line was "
                               f"written except: {'; '.join(unwritten)}. The removal still "
                               "completes at the next backend start.",
                     "status": 409}
@@ -709,14 +740,16 @@ def request_project_removal(
         if bound_root is not None:
             bound_name = workspace.workspace_project_name(bound_root)
             audit_note = (
-                f"{name!r}'s own line is in its own log; the route's own line and the archive "
-                f"door's own line are in {bound_name!r}'s log."
+                f"{name}'s own line is in its own log; the route's own line and the archive "
+                f"door's own line are in {bound_name}'s log."
             )
         else:
+            from tcip_mcp.audit import platform_audit_scope
+
             audit_note = (
-                f"this backend has no project bound, so {name!r}'s own line and the route's own "
-                "line are both in its own log; the archive door's own line is under the root "
-                "$TCIP_STATE_ROOT names."
+                f"this backend has no project open, so {name}'s own line and the route's own "
+                f"line are both in its own log; the archive door's own line is under "
+                f"{str(platform_audit_scope())!r}."
             )
 
         return {
@@ -747,14 +780,19 @@ def release_project_binding(name: str, *, released_by: str) -> dict:
     The marker: read through :func:`~tcip_mcp.workspace.active_project_key`, cleared with
     ``delete(key, expect=version)`` only when it names ``name`` by identity; a ``VersionConflict``
     (``activate_project`` landing between the read and the delete) is answered 409 naming it, with
-    nothing cleared and no line. The canvas-open binding is never deleted, so a caller still
+    nothing cleared and no line. An unreadable marker (``OSError``, ``DecodeError``) folds to "no
+    marker" the way its sibling reader (:func:`~tcip_mcp.workspace.read_active_project`) folds
+    it, so a marker this door cannot read never 500s the release of a project the canvas binding
+    alone names; nothing is cleared for it either way. The canvas-open binding is never deleted,
+    so a caller still
     holding its generation keeps failing its own fence and its own push exactly as it would
     against any other stale generation: inside one transaction on
     :func:`~tcip_mcp.web_client.canvas_open_binding_key`, the record is read, and when its
     ``root`` names ``name`` by identity it is rewritten with ``generation + 1``, ``released: True``
-    and a fresh ``issued_at``, ``root`` and ``project_name`` kept. A transaction failure
-    (``StoreBusy``, or any other exception the backend raises attempting it) is caught and
-    answered after the marker's own outcome is settled, never silently.
+    and a fresh ``issued_at``, ``root`` and ``project_name`` kept. Any ``tcip_store.StoreError``
+    the transaction raises reading or writing the record (``StoreBusy``, ``VersionConflict``, a
+    ``DecodeError`` or ``SchemaVersionRefused`` on a damaged record) is caught and answered after
+    the marker's own outcome is settled, never silently.
 
     When either binding actually changed, ``project_binding_released`` is recorded under the
     project's own root before any answer, naming ``released_by``, ``marker_cleared`` and
@@ -780,8 +818,11 @@ def release_project_binding(name: str, *, released_by: str) -> dict:
 
     marker_cleared = False
     marker_key = workspace.active_project_key()
-    versioned = tcip_store.read_versioned(marker_key, default=None)
-    marker_value = (versioned.value or "").strip()
+    try:
+        versioned = tcip_store.read_versioned(marker_key, default=None)
+        marker_value = (versioned.value or "").strip()
+    except (OSError, tcip_store.DecodeError):
+        marker_value = ""
     if marker_value:
         try:
             marker_root: Optional[Path] = workspace.project_path(marker_value, create=False)
@@ -810,7 +851,7 @@ def release_project_binding(name: str, *, released_by: str) -> dict:
                     "issued_at": datetime.now(timezone.utc).isoformat(),
                 })
                 canvas_binding_released = True
-    except (tcip_store.StoreBusy, tcip_store.VersionConflict) as exc:
+    except tcip_store.StoreError as exc:
         canvas_failure = exc
 
     if marker_cleared or canvas_binding_released:
