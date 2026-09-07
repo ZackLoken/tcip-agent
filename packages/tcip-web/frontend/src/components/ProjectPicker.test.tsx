@@ -658,6 +658,7 @@ describe("ProjectPicker removal", () => {
       /dependents and refusals could not be checked: backend unreachable\. Close and try again\./,
     );
     expect(within(dialog).queryByText(/^backend unreachable$/)).not.toBeInTheDocument();
+    expect(dialog).not.toHaveAttribute("aria-busy");
     const nameField = within(dialog).getByLabelText(/type the project name to confirm/i);
     expect(nameField).not.toBeDisabled();
     fireEvent.change(nameField, { target: { value: PROJECTS[0].name } });
