@@ -851,6 +851,75 @@ print("ok")
     assert out_csv.exists()
 
 
+# ── a cleared bucket's moved stamp floors: the validation it names covers the source ──
+
+def test_bucket_regime_over_a_cleared_bucket_refuses_the_floored_binding_naming_the_source(
+        tmp_path):
+    """A cleared bucket's moved stamp still claims validated, but the record it names covers the
+    source's own dataset-relative key, not the cleared one: the bucket regime reads it,
+    verify_stamp_binding floors it, and the refusal names the source's key among what the record
+    covers. The validation row is earned through the real two-phase gate (open_validation, then
+    seal_validation) over the bucket a terminal experiment's own lineage already names."""
+    import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.experiments import create_experiment, update_lineage, update_status
+    from tcip_mcp.pipelines.resolution import (
+        open_validation, operating_point_stamp, seal_validation, write_sidecar,
+    )
+    from tcip_mcp.tools.inference_tools import clear_prediction_bucket
+    from tests._dense_op_fixtures import dense_records
+
+    exp_id = "expClearedDeliveryFloor"
+    dataset_root = tmp_path / "ds"
+    bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
+    _write_real_prediction(bucket, "a")
+
+    create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
+    update_status(exp_id, "running")
+    relink = update_lineage(exp_id, predictions=str(bucket))
+    assert "error" not in relink, relink
+    update_status(exp_id, "completed")
+
+    common = dict(n_images=20, objects_per_image=80, miss_pattern=[0] * 20,
+                  fp_pattern=[1] * 20, score=0.9, fp_score=0.05)
+    cal = dense_records(id_prefix="c", **common)
+    hold = dense_records(id_prefix="h", shift=5.0, **common)
+
+    draft = open_validation(
+        document="operating_point",
+        evidence={"resolver": "resolve_operating_point",
+                  "inputs": {"dataset_hash": "H", "calibration_records": cal,
+                             "holdout_records": hold, "staged_conf_floor": 0.01,
+                             "tiled": False}},
+        trait=fx.COUNT_TRAIT, checkpoint_sha256="deadbeef", producing_experiment_id=None,
+        reference_inputs={"dataset_root": str(dataset_root),
+                          "label_dirs": {"calibration": str(tmp_path)},
+                          "stated_values": {"split_identity": "cleared-delivery-floor"}},
+    )
+    earned_body = operating_point_stamp(
+        draft.result.to_provenance()["operating_point"], validated=True, validated_by=None,
+        tile_size_validated=None, shippable_issues=draft.result.shippable_issues(),
+        id_map={fx.COUNT_SUBJECT: 0}, subject=fx.COUNT_SUBJECT, attribute=None,
+        trait=fx.COUNT_TRAIT, dataset_hash="H", checkpoint="best", checkpoint_sha256="deadbeef",
+        experiment_id=exp_id, images_dir=str(tmp_path), raster_path=None,
+        produced_at="2026-01-01T00:00:00Z",
+    )
+    _digest, stamped = seal_validation(
+        draft, dataset_root=dataset_root, bucket_dirs=[bucket], stamp_body=earned_body)
+    write_sidecar(bucket, stamped)
+
+    cleared = clear_prediction_bucket(str(bucket), "clearing a validated bucket")
+    assert "error" not in cleared, cleared
+    cleared_path = cleared["cleared_bucket"]
+
+    cleared_csv = tmp_path / "cleared.csv"
+    result = itools.deliver_per_image_counts(
+        predictions_dir=cleared_path, output_path=str(cleared_csv), trait=fx.COUNT_TRAIT)
+    assert "error" in result
+    assert "claims a validated count" in result["error"]
+    assert "predictions/baseline/2026-01-01" in result["error"]
+    assert not cleared_csv.exists()
+
+
 # ── the provisional path re-delivers identically ────────────────────────────
 
 def test_bucket_regime_re_delivers_the_provisional_floor_identically(tmp_path, monkeypatch):
