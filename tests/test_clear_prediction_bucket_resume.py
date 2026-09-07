@@ -1,5 +1,5 @@
 """clear_prediction_bucket: interrupted clears finished by a second call naming cleared_bucket,
-each crash point the design's Tests section names, plus the D5 refusals that only arise from an
+each crash point the door itself can recover from, plus the refusals that only arise from an
 interrupted or racing clear (an unfinished clear on record, a document that arrived mid-move, a
 secondary stamp written fresh into a half-cleared source) and review_state_landed_during_clear."""
 
@@ -12,7 +12,9 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from tests._clear_prediction_bucket_faults import inject_store_fault, key_in_store, raise_on_nth_call
-from tests._clear_prediction_bucket_fixtures import build_published_bucket, record_review_verdict
+from tests._clear_prediction_bucket_fixtures import (
+    assert_source_stamps_absent, build_published_bucket, record_review_verdict,
+)
 
 
 FIXED_STAMP = "20260906T120000Z"
@@ -50,6 +52,7 @@ def test_fault_at_first_document_write_after_stamps_moved_is_finished_by_resume(
     assert result["resumed"] is True
     assert result["source_republished"] is False
     assert bucket_stems(built["bucket"]) == set()
+    assert_source_stamps_absent(built["bucket"])
     assert bucket_stems(destination) == {"img"}
 
 
@@ -73,6 +76,7 @@ def test_fault_between_artifact_record_and_first_stamp_write_is_finished_by_resu
     assert "error" not in result, result
     assert result["resumed"] is True
     assert bucket_stems(built["bucket"]) == set()
+    assert_source_stamps_absent(built["bucket"])
     assert bucket_stems(destination) == {"img"}
 
 
@@ -101,6 +105,7 @@ def test_fault_between_op_stamp_copy_and_delete_leaves_it_at_both_finished_by_re
     assert result["resumed"] is True
     assert read_operating_point_sidecar(built["bucket"]) is None
     assert bucket_stems(built["bucket"]) == set()
+    assert_source_stamps_absent(built["bucket"])
     assert bucket_stems(destination) == {"img"}
 
 
@@ -143,6 +148,7 @@ def test_a_merge_landed_on_the_source_in_the_stamp_at_both_state_is_carried_to_t
         cleared_bucket=str(destination))
     assert "error" not in result, result
     assert bucket_stems(built["bucket"]) == set()
+    assert_source_stamps_absent(built["bucket"])
     assert read_operating_point_sidecar(built["bucket"]) is None
     assert read_operating_point_sidecar(destination) == merged_at_source
 
@@ -170,6 +176,7 @@ def test_fault_between_document_write_and_source_delete_finished_by_resume(tmp_p
     assert "error" not in result, result
     assert result["resumed"] is True
     assert bucket_stems(built["bucket"]) == set()
+    assert_source_stamps_absent(built["bucket"])
     assert bucket_stems(destination) == {"img"}
 
 
@@ -185,12 +192,13 @@ def test_fault_after_last_source_delete_reports_republication_on_resume(tmp_path
     _fix_stamp(monkeypatch)
     destination = _expected_destination(built)
 
-    # review_state_count runs twice per call (the D5 gate, then the final count); raising on the
+    # review_state_count runs twice per call (the review-state refusal, then the final count); raising on the
     # second crashes after every write has landed, before the body returns.
     raise_on_nth_call(monkeypatch, prediction_buckets_mod, "review_state_count", 2)
     with pytest.raises(RuntimeError):
         clear_prediction_bucket(str(built["bucket"]), "should crash after the last write")
     assert bucket_stems(built["bucket"]) == set()
+    assert_source_stamps_absent(built["bucket"])
     assert bucket_stems(destination) == {"img"}
 
     # A fresh publish lands into the now-empty, still-terminal, same-pointer source.
@@ -242,6 +250,7 @@ def test_a_version_conflict_during_reconcile_refuses_naming_the_key_and_what_mov
     # the stamps moved before the conflicting document write still stand at the destination.
     assert read_operating_point_sidecar(destination) is not None
     assert read_operating_point_sidecar(built["bucket"]) is None
+    assert_source_stamps_absent(built["bucket"])
     assert bucket_stems(destination) == set()
 
 
@@ -357,6 +366,7 @@ def test_a_keyword_less_call_in_the_emptied_state_refuses_naming_the_newest_arch
     with pytest.raises(RuntimeError):
         clear_prediction_bucket(str(built["bucket"]), "should crash after the last write")
     assert bucket_stems(built["bucket"]) == set()
+    assert_source_stamps_absent(built["bucket"])
     assert bucket_stems(destination) == {"img"}
 
     result = clear_prediction_bucket(str(built["bucket"]), "keyword-less call over the empty source")
@@ -430,6 +440,7 @@ def test_a_secondary_stamp_present_at_the_source_alone_moves_or_refuses_by_the_o
     assert _read_sidecar(destination_a, "resolve_scale") == {"conf": {"value": 0.1}}
     assert _read_sidecar(built_a["bucket"], "resolve_scale") is None
     assert bucket_stems(built_a["bucket"]) == set()
+    assert_source_stamps_absent(built_a["bucket"])
 
     built_b = build_published_bucket(
         tmp_path, monkeypatch, experiment_id="expSecondaryOpMoved", dataset_root=tmp_path / "ds_b")
@@ -498,7 +509,7 @@ def test_a_same_stem_document_staged_over_a_copied_one_refuses_on_resume(tmp_pat
 
 def test_review_state_landed_during_clear_is_reported(tmp_path, monkeypatch):
     """Review state recorded on the source between the preflight and the last document's delete
-    is not caught by the D5 refusal (which read the state before this call began); it is counted
+    is not caught by the review-state refusal (which read the state before this call began); it is counted
     once more after the last delete and reported, never silently dropped."""
     from tcip_mcp.prediction_buckets import review_state_dir_of
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
@@ -545,6 +556,7 @@ def test_a_resume_naming_an_older_finished_archive_of_a_source_cleared_twice_ref
     assert "error" not in first, first
     first_destination = first["cleared_bucket"]
     assert bucket_stems(source) == set()
+    assert_source_stamps_absent(source)
 
     republish = run_inference(
         str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(source), tile=False,
@@ -557,6 +569,7 @@ def test_a_resume_naming_an_older_finished_archive_of_a_source_cleared_twice_ref
     second_destination = second["cleared_bucket"]
     assert second_destination != first_destination
     assert bucket_stems(source) == set()
+    assert_source_stamps_absent(source)
 
     resume_on_older = clear_prediction_bucket(
         str(source), "resume naming the older archive", cleared_bucket=first_destination)
