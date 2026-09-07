@@ -190,20 +190,32 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypa
         ],
     )
 
-    standin_pid = standin_create_time = None
+    guardian_pid = None
+    descendants: list[psutil.Process] = []
     try:
         info = tb.launch_tensorboard(str(tmp_path), key="stubborn-run")
-        standin_num = _standin_pid(info["pid"], guardian_expected=True)
+        guardian_pid = info["pid"]
+        standin_num = _standin_pid(guardian_pid, guardian_expected=True)
         standin = psutil.Process(standin_num)
         standin_pid, standin_create_time = standin.pid, standin.create_time()
         result = tb.stop_tensorboard(key="stubborn-run")
         assert result["status"] == "stopped"
         assert not _child_alive(standin_pid, standin_create_time)
     finally:
-        # a partway failure above must not leave the run tracked or its child running.
+        # captured before either cleanup below might end the guardian, so a partway failure
+        # above (inside _standin_pid's own wait included) still leaves every descendant found.
+        if guardian_pid is not None:
+            try:
+                descendants = psutil.Process(guardian_pid).children(recursive=True)
+            except psutil.NoSuchProcess:
+                descendants = []
         tb.stop_tensorboard(key="stubborn-run")
-        if standin_pid is not None:
-            _force_kill_and_wait(standin_pid, standin_create_time)
+        for proc in descendants:
+            try:
+                proc.kill()
+            except psutil.NoSuchProcess:
+                pass
+        psutil.wait_procs(descendants, timeout=_DEATH_TIMEOUT)
 
 
 def _run_guardian(*args: str) -> subprocess.CompletedProcess:
