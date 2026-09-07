@@ -197,7 +197,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py | Vision tools: render annotations and predictions for visual analysis. | 22 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/traits.py | Trait knowledge, the human-defined *semantics* of each measurable trait (Tier C). | 7 | 22 |
 | packages/tcip-mcp/src/tcip_mcp/utils/__init__.py | Shared low-level utilities for tcip-mcp. | 0 | 0 |
-| packages/tcip-mcp/src/tcip_mcp/web_client.py | HTTP client for MCP tools to push state to the tcip-web backend. | 5 | 20 |
+| packages/tcip-mcp/src/tcip_mcp/web_client.py | HTTP client for MCP tools to push state to the tcip-web backend. | 5 | 19 |
 | packages/tcip-mcp/src/tcip_mcp/workspace.py | Workspace resolver: where TCIP projects live on disk. | 4 | 23 |
 
 ## tcip-annotation
@@ -270,7 +270,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/routes/images.py | Image serving: the one path pixels reach the browser through. | 11 | 3 |
 | packages/tcip-web/src/tcip_web/routes/inference.py | Inference routes: async tiled runs + live progress WebSocket. | 16 | 3 |
 | packages/tcip-web/src/tcip_web/routes/meta.py | Meta-loop routes: surface Claude's friction reports and retrospectives. | 2 | 1 |
-| packages/tcip-web/src/tcip_web/routes/projects.py | Workspace project discovery + the active-project marker. | 14 | 2 |
+| packages/tcip-web/src/tcip_web/routes/projects.py | Workspace project discovery + the active-project marker. | 13 | 2 |
 | packages/tcip-web/src/tcip_web/routes/results.py | Results routes: plant-mapping, per-plant phenology curves, CSV export (phenology and count), the operationalization record surface, the trait-spec statement surface, and the read-only delivery-event list. | 23 | 1 |
 | packages/tcip-web/src/tcip_web/routes/review.py | Review routes: verdict/GT recording plus the image-status group and the priority queue; validate_reference moved to routes/validation.py. | 19 | 5 |
 | packages/tcip-web/src/tcip_web/routes/sessions.py | Session-tracking routes: annotation_stats.json equivalent. | 4 | 1 |
@@ -534,18 +534,19 @@ The following sentences are checked against every in-repo Python import edge in 
 
 Non-zero cross-package edge counts at HEAD:
 
-- `tools` -> `tcip-annotation`: 0 import edges.
 - `tools` -> `tcip-mcp`: 20 import edges.
 - `tools` -> `tcip-web`: 18 import edges.
 - `tcip-mcp` -> `tcip-annotation`: 76 import edges.
-- `tcip-mcp` -> `tcip-web`: 0 import edges. The inventory walks the whole AST, so a
-  function-body import counts; `project_removal.py`'s doors take the job-registry walk as a
-  `job_conflict` callable and the requesting identity as a string, both supplied by
-  `tcip_web.routes.projects`, so the package holds no edge into the layer above it.
 - `tcip-web` -> `tcip-annotation`: 13 import edges.
 - `tcip-web` -> `tcip-mcp`: 120 import edges, two of them `routes/projects.py`'s own
   `_job_conflict` importing `tcip_mcp.registry_paths.nearest_containing_ancestor` and
   `tcip_mcp.tools.training_tools`, the edges the job-registry walk carries.
+
+Two directions hold zero import edges at HEAD. `tools` -> `tcip-annotation` is zero. `tcip-mcp` ->
+`tcip-web` is zero too: the inventory walks the whole AST, so a function-body import counts;
+`project_removal.py`'s doors take the job-registry walk as a `job_conflict` callable and the
+requesting identity as a string, both supplied by `tcip_web.routes.projects`, so the package
+holds no edge into the layer above it.
 
 `packages/tcip-web/frontend/src` (`tcip-web-frontend`) has zero in-repo import edges to any Python module in any of the five Python roots: `build_module_inventory.py` resolves a TypeScript specifier only against a relative path or the `@/` alias into `packages/tcip-web/frontend/src` itself (`tools/build_module_inventory.py:307-327`), so no specifier in the frontend source tree can resolve to a file outside that tree.
 
@@ -975,7 +976,7 @@ registered at HEAD.
 |---|---|---|---|
 | GET | `/tree` | `get_dataset_tree` | `routes/dataset.py:152` |  <!-- queued: P5-83 unify -->
 | POST | `/select` | `select_dataset` | `routes/dataset.py:245` |
-| POST | `/nav` | `set_current_image` | `routes/dataset.py:385` |
+| POST | `/nav` | `set_current_image` | `routes/dataset.py:387` |
 
 ### routes/fs.py, prefix `/api/fs` (1 route)
 
@@ -1008,12 +1009,14 @@ registered at HEAD.
 | GET | `/reports` | `get_reports` | `routes/meta.py:36` |
 | GET | `/retrospectives` | `get_retrospectives` | `routes/meta.py:58` |
 
-### routes/projects.py, prefix `/api/projects` (2 routes)  <!-- queued: P5-88 unify -->
+### routes/projects.py, prefix `/api/projects` (4 routes)  <!-- queued: P5-88 unify -->
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `` (root) | `list_projects` | `routes/projects.py:143` |
-| POST | `/active` | `activate_project` | `routes/projects.py:214` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
+| GET | `` (root) | `list_projects` | `routes/projects.py:121` |
+| POST | `/active` | `activate_project` | `routes/projects.py:191` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
+| GET | `/{name}/removal-preview` | `removal_preview_route` | `routes/projects.py:302` |
+| POST | `/remove` | `remove_project` | `routes/projects.py:311` |
 
 ### routes/results.py, prefix `/api/results` (15 routes)
 
@@ -2163,8 +2166,8 @@ suffix=".json")`, the same shape `dataset_registry` and `.tcip/project.json` (fo
 Shape: `{requested_at, requested_by, archive_path, holding_dir, external_roots,
 dependent_projects}`, one document per project. Written once, `concurrency="cas"` with
 `expect=Version.ABSENT`, by `request_project_removal`
-(`packages/tcip-mcp/src/tcip_mcp/project_removal.py:344`); deleted, at the version the
-completing walk read it at, by `complete_pending_removals` (`project_removal.py:443`).
+(`packages/tcip-mcp/src/tcip_mcp/project_removal.py:398`); deleted, at the version the
+completing walk read it at, by `complete_pending_removals` (`project_removal.py:503`).
 
 Readers: `pending_removal_record`/`pending_removal_or_none` (`workspace.py:247`, `:247`), the
 predicate `adoptable_project_root`, `ingest_images` and `tcip_web.paths.allowed_roots`'s
