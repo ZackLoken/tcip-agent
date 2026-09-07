@@ -1542,30 +1542,33 @@ _HPO_KNOWN_KEYS = {"lr", "batch_size", "weight_decay"}
 
 class _AccessTrackingConfig(dict):
     """Dict subclass recording which dotted paths are ever read via ``__getitem__``/``get``/
-    ``__contains__``, installed on ``run.config`` for one HPO trial's dispatch, so
+    ``__contains__``/``setdefault``, installed on ``run.config`` for one HPO trial's dispatch, so
     ``unconsumed_params`` reflects genuine runtime access (did anything read this key during
     this trial), not a static comparison against ``train()``'s known key list, which would
     falsely flag a bespoke ``training_source``'s own legitimate custom sweep key.
 
-    A nested dict value returned by ``__getitem__``/``get`` is itself wrapped the same way,
-    sharing this instance's own ``accessed`` set under its own dotted prefix, so
-    ``ctx.config["model_source"]["builder_kwargs"]["width"]`` records ``"model_source"``,
-    ``"model_source.builder_kwargs"`` and ``"model_source.builder_kwargs.width"`` in one read, and
-    a misspelled leaf under an otherwise-read block is reported by its own dotted name rather
-    than being hidden behind the block it lives in.
+    A nested dict value returned by ``__getitem__``/``get``/``setdefault`` is wrapped the same
+    way, sharing this instance's own ``accessed`` set under its own dotted prefix, and installed
+    back onto the key it was read from, so every later read of that key answers the identical
+    wrapper: ``ctx.config["model_source"]["builder_kwargs"]["width"]`` records ``"model_source"``,
+    ``"model_source.builder_kwargs"`` and ``"model_source.builder_kwargs.width"`` in one read, a
+    misspelled leaf under an otherwise-read block is reported by its own dotted name rather than
+    being hidden behind the block it lives in, and a write through that nested read
+    (``cfg["model_source"]["builder_kwargs"]["width"] = 8``) lands on the same tree ``cfg`` itself
+    holds, not a throwaway copy.
 
     Real, stated limitations (never gates the run, warn-only, so a false positive costs a log
-    line, not a failed trial): ``dict(cfg)``/``**cfg`` copies bypass the overrides entirely
-    (CPython copies at the C level, and the copy is a plain dict with no wrapping of its own);
-    whole-dict iteration (``.items()``/``.values()``/``.keys()``) isn't tracked per-key. A nested
-    value ``_wrap`` returns is itself a freshly constructed ``_AccessTrackingConfig``, its own
-    copy of that nested dict's items, never a live view over the original: a write through it
-    (``cfg["model_source"]["builder_kwargs"]["width"] = 8``) lands on that throwaway copy and is
-    never visible on ``cfg``. Only a write straight onto a config already held (``cfg["width"] =
-    8``, or a reference to a nested block kept before further indexing) lands. ``dict`` offers no
-    way to make a subclass instance alias another dict's own storage, so this only avoids
-    surprise by being read, not fixed without replacing the class with a proxy that stops being a
-    plain ``dict`` (breaking every consumer that relies on it being one).
+    line, not a failed trial): a C-level copy (``dict(cfg)``, ``**cfg``) bypasses the overrides
+    entirely, since this class doesn't override ``__iter__`` and CPython's dict-merge and
+    dict-construction paths read a dict subclass's own storage directly rather than through
+    ``__getitem__``/``get`` whenever that's true, so the copy is a plain dict with none of this
+    class's own wrapping. Whole-dict iteration (``.items()``/``.values()``/``.keys()``) isn't
+    tracked per key either, for the same reason. A reference to a nested dict taken before the
+    tracker's first read of that key (the ``merged`` dict ``_apply_hpo_params`` returned, for one,
+    before anything here has wrapped it) diverges from the tracked tree from that first read on:
+    the old reference still points at the pre-wrap plain dict, while ``cfg`` now holds the
+    wrapper in its place. The tracked tree, reached off ``cfg`` itself (or a value ``cfg`` already
+    returned), is the one to read and to persist.
     """
 
     def __init__(self, *args: Any, _prefix: str = "", _accessed: set[str] | None = None,
@@ -1579,7 +1582,9 @@ class _AccessTrackingConfig(dict):
 
     def _wrap(self, key: Any, value: Any) -> Any:
         if isinstance(value, dict) and not isinstance(value, _AccessTrackingConfig):
-            return _AccessTrackingConfig(value, _prefix=self._dotted(key), _accessed=self.accessed)
+            wrapped = _AccessTrackingConfig(value, _prefix=self._dotted(key), _accessed=self.accessed)
+            dict.__setitem__(self, key, wrapped)
+            return wrapped
         return value
 
     def __getitem__(self, key: Any) -> Any:
@@ -1591,6 +1596,12 @@ class _AccessTrackingConfig(dict):
         if not dict.__contains__(self, key):
             return default
         return self._wrap(key, super().__getitem__(key))
+
+    def setdefault(self, key: Any, default: Any = None) -> Any:
+        self.accessed.add(self._dotted(key))
+        if not dict.__contains__(self, key):
+            dict.__setitem__(self, key, default)
+        return self._wrap(key, dict.__getitem__(self, key))
 
     def __contains__(self, key: Any) -> bool:
         self.accessed.add(self._dotted(key))
