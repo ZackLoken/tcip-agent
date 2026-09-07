@@ -166,17 +166,56 @@ def bucket_key_of(bucket_dir: str | Path | None) -> str:
     return d.relative_to(root).as_posix()
 
 
-def verdict_count(review_state_dir: Path | str, bucket: str, names: Iterable[str]) -> int:
-    """Review verdicts recorded against ``names`` (image stems) on ``bucket``. 0 when the store
-    holds no verdicts at all: no engine is created for a never-reviewed dataset."""
+def _open_review_engine(review_state_dir: Path | str):
+    """The review engine over ``review_state_dir``, or ``None`` when its store holds no verdicts
+    at all: no engine is created for a never-reviewed dataset. The one store-emptiness guard and
+    engine construction :func:`verdict_count` and :func:`review_state_count` both open through,
+    so neither carries its own copy."""
     import tcip_store
 
     from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE, ReviewEngine
 
     d = Path(review_state_dir)
     if not tcip_store.keys(REVIEW_VERDICTS_STORE, str(d)):
+        return None
+    return ReviewEngine(d)
+
+
+def verdict_count(review_state_dir: Path | str, bucket: str, names: Iterable[str]) -> int:
+    """Review verdicts recorded against ``names`` (image stems) on ``bucket``. 0 when the store
+    holds no verdicts at all: no engine is created for a never-reviewed dataset."""
+    engine = _open_review_engine(review_state_dir)
+    if engine is None:
         return 0
-    return ReviewEngine(d).verdict_count_for_images(bucket, names)
+    return engine.verdict_count_for_images(bucket, names)
+
+
+_REVIEWED_IMAGE_STATUSES = ("completed", "started")
+"""The two image-review states :func:`review_state_count` counts: a reviewer has recorded
+something against the image, a detection verdict or a bulk accept alike. A ``not_started`` shard
+an ``unmark_image_reviewed`` call leaves behind never counts: it names no review decision."""
+
+
+def review_state_count(review_state_dir: Path | str, bucket: str) -> int:
+    """Every image the review engine holds state for on ``bucket``, whether or not that state
+    carries a detection verdict: a bulk-accepted image (``img_status`` ``completed`` with no
+    verdict entries) counts here and not in :func:`verdict_count`, and so does a reviewed image
+    whose prediction document has since been removed, since this counts over every image name the
+    engine holds state for, not only the stems a document exists for today (the resolver's own
+    residual, see :func:`resolve_writable_bucket`). A ``not_started`` shard never counts. 0 when
+    the store holds no verdicts at all, the same fold :func:`verdict_count` applies.
+
+    Bucket-wide, not stem-scoped: the door this backs (``clear_prediction_bucket``) refuses a
+    bucket carrying review state, not its documents, so an image whose document is gone must
+    still be counted.
+    """
+    engine = _open_review_engine(review_state_dir)
+    if engine is None:
+        return 0
+    return sum(
+        1 for data in engine.image_states(bucket).values()
+        if data.get("img_status") in _REVIEWED_IMAGE_STATUSES
+    )
 
 
 class BucketHasVerdicts(Exception):
