@@ -261,6 +261,7 @@ def test_existing_destination_without_cleared_bucket_refuses(tmp_path, monkeypat
     result = clear_prediction_bucket(str(built["bucket"]), "should refuse: destination exists")
     assert "error" in result
     assert "already exists" in result["error"]
+    assert "cleared_bucket=" not in result["error"]
 
 
 def test_cleared_bucket_naming_the_source_itself_refuses(tmp_path, monkeypatch):
