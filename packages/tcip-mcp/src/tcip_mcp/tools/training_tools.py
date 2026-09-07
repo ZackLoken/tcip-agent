@@ -1151,10 +1151,13 @@ def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
     ``experiment_id``: the row's own resolved field
     (``TrainRun.experiment_id``, set by ``launch_training`` once ``_ensure_experiment`` resolves
     it) when it has one, the disk overlay's own id only as a fallback for a row that has none.
-    ``launched_by`` is never carried on ``TrainRun``: every live row reads it fresh from the
-    resolved experiment's own status record (``reconstruct_from_status``), the same source a
-    disk-only row uses, so a row never states a launcher the record itself does not hold; a run
-    whose stamp failed reads ``None`` here exactly as it does on disk, never the caller's
+    ``launched_by`` is never carried on ``TrainRun``: a ``pid``-bearing row with a disk overlay
+    takes the overlay's own ``launched_by``, already reconstructed through
+    ``reconstruct_from_status`` when that overlay's status record was read, rather than reading
+    the record a second time; a ``pid``-less row (no overlay to reuse) reads its resolved
+    experiment's status record directly, since no other status read exists for it. Either way the
+    value is the record's own, so a row never states a launcher the record itself does not hold; a
+    run whose stamp failed reads ``None`` here exactly as it does on disk, never the caller's
     in-memory intent.
     Rows: this process's own, in registry order, then the disk-only rows, sorted by experiment id.
     """
@@ -1182,8 +1185,10 @@ def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
                 row["best_metric_name"] = overlay["best_metric_name"]
             if not row.get("experiment_id"):
                 row["experiment_id"] = overlay["experiment_id"]
-        exp_id = row.get("experiment_id")
-        row["launched_by"] = read_member(status_key(exp_id), {}).get("launched_by") if exp_id else None
+            row["launched_by"] = overlay["launched_by"]
+        else:
+            exp_id = row.get("experiment_id")
+            row["launched_by"] = read_member(status_key(exp_id), {}).get("launched_by") if exp_id else None
         merged.append(row)
 
     live_run_ids = {r["run_id"] for r in live}

@@ -219,3 +219,41 @@ def test_all_training_runs_reads_launched_by_from_the_record_not_the_live_row(tm
     rows = _all_training_runs(read_progress=False)
     row = next(r for r in rows if r["run_id"] == run.run_id)
     assert row["launched_by"] is None
+
+
+def test_a_pid_bearing_live_row_takes_launched_by_from_its_disk_overlay(tmp_path, monkeypatch):
+    """A pid-bearing row's launched_by is the disk overlay's own reconstructed value, not a
+    second independent read of the record: the overlay is made to carry a different launcher
+    than the record on disk, and the row renders the overlay's value."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import create_experiment, stamp_run_identity, update_status
+    from tcip_mcp.pipelines.training.run_registry import create_run
+    from tcip_mcp.tools import training_tools
+
+    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"))
+    run.pid = 424242
+    run.experiment_id = "exp-overlay-wins"
+
+    create_experiment("exp-overlay-wins", {"model_source": {"builder": "x:y"}})
+    stamp_run_identity("exp-overlay-wins", run.run_id, str(tmp_path / "out"),
+                        launched_by={"launcher": "process"})
+    update_status("exp-overlay-wins", "running")
+
+    overlay_row = {
+        "run_id": run.run_id,
+        "experiment_id": "exp-overlay-wins",
+        "status": "running",
+        "current_epoch": None,
+        "best_metric": None,
+        "best_metric_name": None,
+        "output_dir": str(tmp_path / "out"),
+        "error": None,
+        "launched_by": {"launcher": "gui"},
+        "heartbeat": None,
+        "external": True,
+    }
+    monkeypatch.setattr(training_tools, "_launched_training_runs", lambda **kwargs: [overlay_row])
+
+    rows = training_tools._all_training_runs(read_progress=False)
+    row = next(r for r in rows if r["run_id"] == run.run_id)
+    assert row["launched_by"] == {"launcher": "gui"}
