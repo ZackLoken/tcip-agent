@@ -329,13 +329,35 @@ def test_spatial_strip_split_no_tile_shared_and_buffer_respected():
             assert max(gap_x, gap_y) >= split.buffer
 
 
+def test_center_out_order_ties_resolve_in_declared_order():
+    """Coverage of ``_center_out_order`` directly: the private function's signature changed
+    (it dropped its ``seed`` parameter), so this cannot be run against the baseline commit; the
+    property is proven through :func:`spatial_strip_split` in the test below instead, and this
+    one documents ``_center_out_order`` itself rather than guarding a regression.
+
+    Two equal-share slots resolve center-out in the order they were given, whichever order
+    that is: swapping the input order swaps which cardinal side each lands on, so the tie is
+    the caller's declared order, never a coin flip."""
+    from tcip_mcp.pipelines.data.splits import _center_out_order
+
+    forward = _center_out_order([("val", 0.2), ("test", 0.2), ("train", 0.6)])
+    reversed_input = _center_out_order([("test", 0.2), ("val", 0.2), ("train", 0.6)])
+
+    assert [name for name, _ in forward] == ["val", "train", "test"]
+    assert [name for name, _ in reversed_input] == ["test", "train", "val"]
+
+
 def test_spatial_strip_split_tied_shares_place_by_declared_order_not_seed():
     """The center-out tie-break resolves equal shares in declared (``split_names``) order,
     never by seed: at seed=0, the pre-fix shuffle-then-stable-sort placed the tied ``val`` and
     ``test`` sides on opposite cardinal sides from where seed=1 placed them (val left of the
     largest share, test right, at seed=1; the mirror image at seed=0), found by scanning small
-    seeds for one where the shuffle disagreed with declared order. The fixed order gives the
-    same layout at both seeds."""
+    seeds for one where the shuffle disagreed with declared order. Seed 0 flips the tie because
+    the pre-fix order shuffled the slots before a stable sort by descending share: at seed=0
+    the shuffle happened to put ``test`` before ``val`` in the pre-sort list, and a stable sort
+    preserves relative order among entries whose sort key ties, so ``test`` stayed ahead of
+    ``val`` after the sort too, on the opposite side from where seed=1's shuffle left them. The
+    fixed order gives the same layout at both seeds."""
     a = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.6, 0.2, 0.2), seed=0)
     b = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.6, 0.2, 0.2), seed=1)
     assert a.regions == b.regions
