@@ -4,7 +4,7 @@
  */
 
 import type { ImageStatus } from "@/api/classes";
-import { asJson } from "@/api/http";
+import { AUDIT_ENTRY_NOT_WRITTEN, asJson } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import { stateSocket } from "@/api/ws";
 import {
@@ -83,7 +83,12 @@ export interface SaveLabelsBody {
   user?: string | null;
 }
 
-export type SaveResult = { status: "ok"; base_mtime: string | null } | { status: "conflict" };
+export type SaveResult =
+  | { status: "ok"; base_mtime: string | null }
+  | { status: "conflict" }
+  // The save committed but its audit line did not: base_mtime is the new token (the write did
+  // land), so the client heals exactly as it does on "ok"; message names the gap for a toast.
+  | { status: "unrecorded"; base_mtime: string | null; message: string };
 
 /** One band's symbology, as `GET /api/images/bands` reports it: a declared name where the
  *  source has one (else its 0-index as a string), the sensor's own wavelength when known. */
@@ -384,7 +389,29 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (resp.status === 409) return { status: "conflict" };
+      if (resp.status === 409) {
+        try {
+          const detail = ((await resp.json()) as { detail?: unknown })?.detail;
+          const parsed =
+            typeof detail === "object" && detail !== null
+              ? (detail as { error?: unknown; message?: unknown; committed?: unknown })
+              : null;
+          if (parsed?.error === AUDIT_ENTRY_NOT_WRITTEN) {
+            const committed =
+              typeof parsed.committed === "object" && parsed.committed !== null
+                ? (parsed.committed as { base_mtime?: unknown })
+                : null;
+            return {
+              status: "unrecorded",
+              base_mtime: typeof committed?.base_mtime === "string" ? committed.base_mtime : null,
+              message: typeof parsed.message === "string" ? parsed.message : "",
+            };
+          }
+        } catch {
+          /* an unparseable 409 body stays conflict below */
+        }
+        return { status: "conflict" };
+      }
       if (!resp.ok) {
         const text = await resp.text().catch(() => "");
         throw new Error(`${resp.status} ${resp.statusText}: ${text}`);
