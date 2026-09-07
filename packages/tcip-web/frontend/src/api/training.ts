@@ -6,7 +6,8 @@ import type { TrainingMetricFrame, TrainingStatusFrame } from "@/api/types.gener
 import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
 
 export interface TrainingRunSummary {
-  run_id: string;
+  /** A training run's own id: an experiment record's, always (no record, no run). */
+  experiment_id: string;
   status: string;
   current_epoch?: number;
   best_metric?: number;
@@ -23,10 +24,6 @@ export interface TrainingRunSummary {
    * | <other>}``, the identity fields alongside ``"agent"`` when an MCP handshake declared them,
    * or absent when the launch's tracking never reached the stamp, or the stamp failed. */
   launched_by?: Record<string, unknown> | null;
-  /** Set once _ensure_experiment resolves this run's tracked experiment; null until then. */
-  experiment_id?: string | null;
-  /** Set when experiment tracking itself raised; null when it succeeded or never ran. */
-  experiment_error?: string | null;
   /** The status record's own last-heartbeat instant (ISO-8601), when the record carries one:
    * no process id is persisted anywhere, so this is the one signal a stale ``running`` row
    * (its process gone, read as live for the rest of the heartbeat window) can show. */
@@ -34,7 +31,7 @@ export interface TrainingRunSummary {
 }
 
 export interface TrainingRunDetail {
-  run_id?: string;
+  experiment_id?: string;
   status?: string;
   epoch?: number | null;
   best_metric?: number | null;
@@ -183,21 +180,22 @@ export const trainingApi = {
     getJson<SplitChoices>(ROUTES.getTrainingConfigsByExperimentIdSplits(experiment_id)),
 
   relaunch: (experiment_id: string, split_manifest_dir?: string | null) =>
-    postJson<{ run_id?: string; experiment_id?: string; [k: string]: unknown }>(
+    postJson<{ experiment_id?: string; [k: string]: unknown }>(
       ROUTES.postTrainingRuns,
       split_manifest_dir ? { experiment_id, split_manifest_dir } : { experiment_id },
     ),
 
   listRuns: () => getJson<{ runs: TrainingRunSummary[] }>(ROUTES.getTrainingRuns),
 
-  getRun: (run_id: string) => getJson<TrainingRunDetail>(ROUTES.getTrainingRunsByRunId(run_id)),
+  getRun: (experiment_id: string) =>
+    getJson<TrainingRunDetail>(ROUTES.getTrainingRunsByExperimentId(experiment_id)),
 
-  launchTensorboard: (run_id: string) =>
-    postJson<TensorboardLaunch>(ROUTES.postTrainingRunsByRunIdTensorboard(run_id), {}),
+  launchTensorboard: (experiment_id: string) =>
+    postJson<TensorboardLaunch>(ROUTES.postTrainingRunsByExperimentIdTensorboard(experiment_id), {}),
 
-  cancel: (run_id: string) =>
-    postJson<{ run_id: string; status: string; cancel_requested: boolean }>(
-      ROUTES.postTrainingRunsByRunIdCancel(run_id),
+  cancel: (experiment_id: string) =>
+    postJson<{ experiment_id: string; status: string; cancel_requested: boolean }>(
+      ROUTES.postTrainingRunsByExperimentIdCancel(experiment_id),
       {},
     ),
 
@@ -223,17 +221,18 @@ export type TrainingStreamMsg = TrainingMetricFrame | TrainingStatusFrame;
  * Open a live metrics stream for a training run, auto-reconnecting with capped backoff.
  * The server replays all rows from the start on each (re)connect, so the consumer must
  * dedupe by epoch/step. A ``status`` frame carrying a report is terminal; one carrying only
- * ``error`` means the run's record does not exist yet (selected at its launch moment), and
- * the socket keeps reconnecting under backoff until a report arrives. That error-only frame
- * never resets the backoff, so the reconnect delay grows to the cap while the run stays unknown.
+ * ``error`` names an id no record claims (selected at its launch moment, before the record
+ * exists, or simply unknown), and the socket keeps reconnecting under backoff until a report
+ * arrives. That error-only frame never resets the backoff, so the reconnect delay grows to the
+ * cap while the run stays unknown.
  */
 export function openTrainingStream(
   project_root: string,
-  run_id: string,
+  experiment_id: string,
   onMessage: (msg: TrainingStreamMsg) => void,
 ): () => void {
   const url = wsUrl(
-    `${ROUTES.socketTrainingRunsByRunIdStream(run_id)}?project_root=${encodeURIComponent(project_root)}`,
+    `${ROUTES.socketTrainingRunsByExperimentIdStream(experiment_id)}?project_root=${encodeURIComponent(project_root)}`,
   );
   const socket = createReconnectingSocket({
     url,

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { StructuredRefusalError } from "@/api/http";
 import {
@@ -12,7 +12,6 @@ import {
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { useStore } from "@/store";
 import { TrainingTab, dataPickerFor } from "@/tabs/TrainingTab";
-import { RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 
 // The live metrics stream owns a real WebSocket; only the run list and its controls are under
 // test here, so the transport is replaced while the rest of the module stays real.
@@ -23,7 +22,7 @@ vi.mock("@/api/training", async (importOriginal) => {
 
 const initialStoreState = useStore.getState();
 
-function run(overrides: Partial<TrainingRunSummary> & { run_id: string }): TrainingRunSummary {
+function run(overrides: Partial<TrainingRunSummary> & { experiment_id: string }): TrainingRunSummary {
   return {
     status: "running",
     ...overrides,
@@ -57,11 +56,11 @@ afterEach(() => {
 describe("TrainingTab run list", () => {
   it("offers a stop control for a run the platform reconstructed from another process, and cancels it by id", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-agent-1", status: "running", external: true })],
+      runs: [run({ experiment_id: "train-agent-1", status: "running", external: true })],
     });
     const cancelSpy = vi
       .spyOn(trainingApi, "cancel")
-      .mockResolvedValue({ run_id: "train-agent-1", status: "running", cancel_requested: true });
+      .mockResolvedValue({ experiment_id: "train-agent-1", status: "running", cancel_requested: true });
 
     render(<TrainingTab />);
     expect(await screen.findByText("train-agent-1")).toBeInTheDocument();
@@ -74,7 +73,7 @@ describe("TrainingTab run list", () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
         run({
-          run_id: "train-stale",
+          experiment_id: "train-stale",
           status: "running",
           external: true,
           heartbeat: new Date(Date.now() - 3 * 60_000).toISOString(),
@@ -101,8 +100,8 @@ describe("TrainingTab run list", () => {
   it("offers no stop control for a run in a terminal status, external or not", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
-        run({ run_id: "train-done", status: "completed", external: false }),
-        run({ run_id: "train-done-agent", status: "failed", external: true }),
+        run({ experiment_id: "train-done", status: "completed", external: false }),
+        run({ experiment_id: "train-done-agent", status: "failed", external: true }),
       ],
     });
 
@@ -112,40 +111,23 @@ describe("TrainingTab run list", () => {
     expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
   });
 
-  it("shows the experiment id beside the run id, once when the two are the same", async () => {
-    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [
-        run({ run_id: "train-forked", status: "running", experiment_id: "exp-forked" }),
-        run({ run_id: "train-same", status: "running", experiment_id: "train-same" }),
-        run({ run_id: "train-unresolved", status: "running", experiment_id: null }),
-      ],
-    });
-
-    render(<TrainingTab />);
-    expect(await screen.findByText("train-forked")).toBeInTheDocument();
-    expect(screen.getByText(/exp-forked/)).toBeInTheDocument();
-    expect(screen.getAllByText("train-same")).toHaveLength(1);
-    expect(screen.getByText("train-unresolved")).toBeInTheDocument();
-    expect(screen.queryByText("null")).not.toBeInTheDocument();
-  });
-
   it("names the best value's own metric exactly as the record carries it, and shows nothing when the row carries no name", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
         run({
-          run_id: "train-named",
+          experiment_id: "train-named",
           status: "completed",
           best_metric: 0.812,
           best_metric_name: "map50",
         }),
         run({
-          run_id: "train-loss-only",
+          experiment_id: "train-loss-only",
           status: "completed",
           best_metric: 0.907,
           best_metric_name: "loss",
         }),
         run({
-          run_id: "train-unnamed",
+          experiment_id: "train-unnamed",
           status: "completed",
           best_metric: 0.5,
           best_metric_name: null,
@@ -164,7 +146,7 @@ describe("TrainingTab run list", () => {
 
   it("states how the run list is ordered", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-a", status: "running" })],
+      runs: [run({ experiment_id: "train-a", status: "running" })],
     });
 
     render(<TrainingTab />);
@@ -176,15 +158,15 @@ describe("TrainingTab run list", () => {
     ).toBeInTheDocument();
   });
 
-  it("names the row's own select control with the id, its experiment id and status", async () => {
+  it("names the row's own select control with the id and status", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-named-row", status: "running", experiment_id: "exp-other" })],
+      runs: [run({ experiment_id: "train-named-row", status: "running" })],
     });
 
     render(<TrainingTab />);
     expect(
       await screen.findByRole("button", {
-        name: "train-named-row · exp-other running, launcher not recorded",
+        name: "train-named-row running, launcher not recorded",
       }),
     ).toBeInTheDocument();
   });
@@ -193,7 +175,7 @@ describe("TrainingTab run list", () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
         run({
-          run_id: "train-exact",
+          experiment_id: "train-exact",
           status: "completed",
           best_metric: 0.4130041,
           best_metric_name: "loss",
@@ -210,7 +192,7 @@ describe("TrainingTab run list", () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
         run({
-          run_id: "train-named-value",
+          experiment_id: "train-named-value",
           status: "completed",
           best_metric: 0.4130041,
           best_metric_name: "loss",
@@ -228,10 +210,10 @@ describe("TrainingTab run list", () => {
 
   it("shows an in-flight Cancel as a disabled, pending row control, and a failure in the row", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-cancel-flight", status: "running" })],
+      runs: [run({ experiment_id: "train-cancel-flight", status: "running" })],
     });
     let resolveCancel: (v: {
-      run_id: string;
+      experiment_id: string;
       status: string;
       cancel_requested: boolean;
     }) => void = () => {};
@@ -248,7 +230,7 @@ describe("TrainingTab run list", () => {
     expect(await screen.findByText("Cancelling…")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel train-cancel-flight" })).toBeDisabled();
 
-    resolveCancel({ run_id: "train-cancel-flight", status: "running", cancel_requested: true });
+    resolveCancel({ experiment_id: "train-cancel-flight", status: "running", cancel_requested: true });
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Cancel train-cancel-flight" })).not.toBeDisabled(),
     );
@@ -256,7 +238,7 @@ describe("TrainingTab run list", () => {
 
   it("shows a failed Cancel in the row, not only as a toast", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-cancel-fail", status: "running" })],
+      runs: [run({ experiment_id: "train-cancel-fail", status: "running" })],
     });
     vi.spyOn(trainingApi, "cancel").mockRejectedValue(new Error("network error"));
 
@@ -271,9 +253,9 @@ describe("TrainingTab run launcher mark", () => {
   it("states who launched the run from launched_by alone, not from external", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
-        run({ run_id: "train-gui", status: "running", launched_by: { launcher: "gui" } }),
+        run({ experiment_id: "train-gui", status: "running", launched_by: { launcher: "gui" } }),
         run({
-          run_id: "train-agent",
+          experiment_id: "train-agent",
           status: "running",
           launched_by: {
             launcher: "agent",
@@ -281,15 +263,18 @@ describe("TrainingTab run launcher mark", () => {
             agent_client_version: "2.1.238",
           },
         }),
-        run({ run_id: "train-process", status: "running", launched_by: { launcher: "process" } }),
         run({
-          run_id: "train-done-unrecorded",
+          experiment_id: "train-process",
+          status: "running",
+          launched_by: { launcher: "process" },
+        }),
+        run({
+          experiment_id: "train-done-unrecorded",
           status: "completed",
-          experiment_id: "exp-done-unrecorded",
           launched_by: null,
         }),
         run({
-          run_id: "train-other-value",
+          experiment_id: "train-other-value",
           status: "running",
           // external true carries no weight on the sentence any more: the record is the fact.
           external: true,
@@ -312,7 +297,7 @@ describe("TrainingTab run launcher mark", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
-        name: "train-done-unrecorded · exp-done-unrecorded completed, launcher not recorded",
+        name: "train-done-unrecorded completed, launcher not recorded",
       }),
     ).toBeInTheDocument();
     expect(
@@ -325,7 +310,7 @@ describe("TrainingTab run launcher mark", () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
         run({
-          run_id: "train-agent-desc",
+          experiment_id: "train-agent-desc",
           status: "running",
           launched_by: {
             launcher: "agent",
@@ -348,7 +333,7 @@ describe("TrainingTab run launcher mark", () => {
 
   it("makes an unrecorded launcher's explanation reachable by assistive technology", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-no-launcher", status: "running" })],
+      runs: [run({ experiment_id: "train-no-launcher", status: "running" })],
     });
 
     render(<TrainingTab />);
@@ -367,7 +352,7 @@ describe("TrainingTab run launcher mark", () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
         run({
-          run_id: "train-process-desc",
+          experiment_id: "train-process-desc",
           status: "running",
           launched_by: { launcher: "process" },
         }),
@@ -399,10 +384,10 @@ describe("TrainingTab heading", () => {
 
   it("carries the section titles as level-2 headings under that h1", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-heading", status: "completed" })],
+      runs: [run({ experiment_id: "train-heading", status: "completed" })],
     });
     vi.spyOn(trainingApi, "getRun").mockResolvedValue({
-      run_id: "train-heading",
+      experiment_id: "train-heading",
       status: "completed",
       tensorboard_url: "http://localhost:6006",
     });
@@ -420,10 +405,10 @@ describe("TrainingTab heading", () => {
 describe("TrainingTab tensorboard panel", () => {
   it("says a run produced no logs and offers no Try again, rather than a raw refusal", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-nologs", status: "failed" })],
+      runs: [run({ experiment_id: "train-nologs", status: "failed" })],
     });
     vi.spyOn(trainingApi, "getRun").mockResolvedValue({
-      run_id: "train-nologs",
+      experiment_id: "train-nologs",
       status: "failed",
       tensorboard_url: null,
     });
@@ -444,10 +429,10 @@ describe("TrainingTab tensorboard panel", () => {
 
   it("keeps Try again for an ordinary failed launch", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-broken", status: "failed" })],
+      runs: [run({ experiment_id: "train-broken", status: "failed" })],
     });
     vi.spyOn(trainingApi, "getRun").mockResolvedValue({
-      run_id: "train-broken",
+      experiment_id: "train-broken",
       status: "failed",
       tensorboard_url: null,
     });
@@ -462,10 +447,10 @@ describe("TrainingTab tensorboard panel", () => {
 
   it("keeps the run's own recorded crash reason for a no-logs run that failed with one", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-nologs-crashed", status: "failed" })],
+      runs: [run({ experiment_id: "train-nologs-crashed", status: "failed" })],
     });
     vi.spyOn(trainingApi, "getRun").mockResolvedValue({
-      run_id: "train-nologs-crashed",
+      experiment_id: "train-nologs-crashed",
       status: "failed",
       tensorboard_url: null,
       error: "[WinError 183] Cannot create a file when that file already exists: 'tensorboard'",
@@ -498,10 +483,10 @@ describe("TrainingTab tensorboard panel", () => {
 describe("TrainingTab chart placeholder", () => {
   it("says a terminal run recorded no metrics, rather than waiting on one that will never arrive", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-terminal-empty", status: "interrupted" })],
+      runs: [run({ experiment_id: "train-terminal-empty", status: "interrupted" })],
     });
     vi.spyOn(trainingApi, "getRun").mockResolvedValue({
-      run_id: "train-terminal-empty",
+      experiment_id: "train-terminal-empty",
       status: "interrupted",
       tensorboard_url: null,
     });
@@ -522,10 +507,10 @@ describe("TrainingTab chart placeholder", () => {
 
   it("keeps waiting for metrics on a non-terminal run with none yet", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-live-empty", status: "running" })],
+      runs: [run({ experiment_id: "train-live-empty", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockResolvedValue({
-      run_id: "train-live-empty",
+      experiment_id: "train-live-empty",
       status: "running",
       tensorboard_url: null,
     });
@@ -544,11 +529,11 @@ describe("TrainingTab chart accessibility", () => {
       gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
     }));
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-chart", status: "running" })],
+      runs: [run({ experiment_id: "train-chart", status: "running" })],
     });
     vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "metric", run_id: runId, row: { epoch: 1, loss: 0.5 } });
-      onMessage({ type: "metric", run_id: runId, row: { epoch: 2, loss: 0.3 } });
+      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 1, loss: 0.5 } });
+      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 2, loss: 0.3 } });
       return () => {};
     });
 
@@ -575,11 +560,11 @@ describe("TrainingTab chart accessibility", () => {
       gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
     }));
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-controls", status: "running" })],
+      runs: [run({ experiment_id: "train-controls", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "metric", run_id: runId, row: { epoch: 1, loss: 0.5 } });
+      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 1, loss: 0.5 } });
       return () => {};
     });
 
@@ -597,11 +582,11 @@ describe("TrainingTab chart accessibility", () => {
       gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
     }));
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-controls-closed", status: "running" })],
+      runs: [run({ experiment_id: "train-controls-closed", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "metric", run_id: runId, row: { epoch: 1, loss: 0.5 } });
+      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 1, loss: 0.5 } });
       return () => {};
     });
 
@@ -624,7 +609,7 @@ describe("TrainingTab chart accessibility", () => {
       gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
     }));
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-waiting-live", status: "running" })],
+      runs: [run({ experiment_id: "train-waiting-live", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
 
@@ -639,11 +624,11 @@ describe("TrainingTab chart accessibility", () => {
       gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
     }));
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-axis-label", status: "running" })],
+      runs: [run({ experiment_id: "train-axis-label", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "metric", run_id: runId, row: { epoch: 1, loss: 0.5 } });
+      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 1, loss: 0.5 } });
       return () => {};
     });
 
@@ -660,11 +645,11 @@ describe("TrainingTab chart accessibility", () => {
       gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
     }));
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-both-ordinals", status: "running" })],
+      runs: [run({ experiment_id: "train-both-ordinals", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "metric", run_id: runId, row: { epoch: 1, step: 99, loss: 0.5 } });
+      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 1, step: 99, loss: 0.5 } });
       return () => {};
     });
 
@@ -682,11 +667,11 @@ describe("TrainingTab chart accessibility", () => {
       gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
     }));
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-no-ordinal", status: "running" })],
+      runs: [run({ experiment_id: "train-no-ordinal", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "metric", run_id: runId, row: { loss: 0.5 } });
+      onMessage({ type: "metric", experiment_id: runId, row: { loss: 0.5 } });
       return () => {};
     });
 
@@ -705,12 +690,12 @@ describe("TrainingTab chart accessibility", () => {
       gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
     }));
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-nonfinite", status: "running" })],
+      runs: [run({ experiment_id: "train-nonfinite", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "metric", run_id: runId, row: { epoch: 1, loss: 0.5 } });
-      onMessage({ type: "metric", run_id: runId, row: { epoch: 2, loss: null } });
+      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 1, loss: 0.5 } });
+      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 2, loss: null } });
       return () => {};
     });
 
@@ -729,13 +714,13 @@ describe("TrainingTab chart accessibility", () => {
       gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
     }));
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-bookkeeping", status: "running" })],
+      runs: [run({ experiment_id: "train-bookkeeping", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
       onMessage({
         type: "metric",
-        run_id: runId,
+        experiment_id: runId,
         row: { epoch: 1, loss: 0.5, loss_state: "nan", timestamp: 1735689600 },
       });
       return () => {};
@@ -756,13 +741,13 @@ describe("TrainingTab chart default series", () => {
       gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
     }));
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-validated", status: "running" })],
+      runs: [run({ experiment_id: "train-validated", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
       onMessage({
         type: "metric",
-        run_id: runId,
+        experiment_id: runId,
         row: {
           epoch: 1,
           train_loss: 0.9,
@@ -794,11 +779,11 @@ describe("TrainingTab chart default series", () => {
       gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
     }));
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-no-loss-key", status: "running" })],
+      runs: [run({ experiment_id: "train-no-loss-key", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "metric", run_id: runId, row: { epoch: 1, val_map50: 0.7, lr: 0.001 } });
+      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 1, val_map50: 0.7, lr: 0.001 } });
       return () => {};
     });
 
@@ -819,11 +804,11 @@ describe("TrainingTab status toast", () => {
       gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
     }));
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-old-done", status: "completed" })],
+      runs: [run({ experiment_id: "train-old-done", status: "completed" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "status", run_id: runId, status: { status: "completed" }, error: null });
+      onMessage({ type: "status", experiment_id: runId, status: { status: "completed" }, error: null });
       return () => {};
     });
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
@@ -840,11 +825,11 @@ describe("TrainingTab status toast", () => {
       gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
     }));
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-live-done", status: "running" })],
+      runs: [run({ experiment_id: "train-live-done", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "status", run_id: runId, status: { status: "completed" }, error: null });
+      onMessage({ type: "status", experiment_id: runId, status: { status: "completed" }, error: null });
       return () => {};
     });
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
@@ -862,23 +847,23 @@ describe("TrainingTab status toast", () => {
       gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
     }));
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-just-launched", status: "running" })],
+      runs: [run({ experiment_id: "train-just-launched", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
       onMessage({
         type: "status",
-        run_id: runId,
+        experiment_id: runId,
         status: null,
         error: "unknown run: train-just-launched",
       });
       onMessage({
         type: "status",
-        run_id: runId,
+        experiment_id: runId,
         status: null,
         error: "unknown run: train-just-launched",
       });
-      onMessage({ type: "metric", run_id: runId, row: { epoch: 1, loss: 0.5 } });
+      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 1, loss: 0.5 } });
       return () => {};
     });
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
@@ -933,12 +918,12 @@ describe("TrainingTab switching between runs directly", () => {
   it("launches a fresh TensorBoard for the newly selected run, not the previous one's", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
-        run({ run_id: "train-x", status: "completed" }),
-        run({ run_id: "train-y", status: "completed" }),
+        run({ experiment_id: "train-x", status: "completed" }),
+        run({ experiment_id: "train-y", status: "completed" }),
       ],
     });
     vi.spyOn(trainingApi, "getRun").mockImplementation((runId: string) =>
-      Promise.resolve({ run_id: runId, status: "completed", tensorboard_url: null }),
+      Promise.resolve({ experiment_id: runId, status: "completed", tensorboard_url: null }),
     );
     const launchSpy = vi
       .spyOn(trainingApi, "launchTensorboard")
@@ -976,7 +961,7 @@ describe("TrainingTab config picker", () => {
     });
     const relaunchSpy = vi
       .spyOn(trainingApi, "relaunch")
-      .mockResolvedValue({ run_id: "run-new-1", experiment_id: "exp-pristine-1" });
+      .mockResolvedValue({ experiment_id: "exp-pristine-1" });
 
     render(<TrainingTab />);
     fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
@@ -1059,7 +1044,7 @@ describe("TrainingTab config picker", () => {
     });
     const relaunchSpy = vi
       .spyOn(trainingApi, "relaunch")
-      .mockResolvedValue({ run_id: "r1", experiment_id: "exp-1" });
+      .mockResolvedValue({ experiment_id: "exp-1" });
 
     render(<TrainingTab />);
     fireEvent.click(await screen.findByRole("button", { name: "Start a run" }));
@@ -1230,14 +1215,14 @@ describe("TrainingTab compare", () => {
     setProjectRoot("/proj");
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
-        run({ run_id: "run-a", status: "running", experiment_id: "exp-a" }),
-        run({ run_id: "run-b", status: "running", experiment_id: "exp-b" }),
+        run({ experiment_id: "run-a", status: "running" }),
+        run({ experiment_id: "run-b", status: "running" }),
       ],
     });
     const stopSingle = vi.fn();
     vi.mocked(openTrainingStream).mockReturnValueOnce(stopSingle);
     vi.spyOn(trainingApi, "compare").mockResolvedValue({
-      experiments: [{ experiment_id: "exp-a" }, { experiment_id: "exp-b" }] as unknown as Awaited<
+      experiments: [{ experiment_id: "run-a" }, { experiment_id: "run-b" }] as unknown as Awaited<
         ReturnType<typeof trainingApi.compare>
       >["experiments"],
       count: 2,
@@ -1258,10 +1243,23 @@ describe("TrainingTab compare", () => {
     expect(stopSingle).toHaveBeenCalled();
   });
 
+  it("every row's Compare toggle stays live: one id, no resolution to wait on", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ experiment_id: "run-fresh", status: "running" })],
+    });
+
+    render(<TrainingTab />);
+    await screen.findByText("run-fresh");
+
+    expect(
+      within(rowFor("run-fresh")).getByRole("button", { name: "Compare run-fresh" }),
+    ).not.toBeDisabled();
+  });
+
   it("caps the marked set and names the reason on a fifth toggle", async () => {
     setProjectRoot("/proj");
     const runs = ["run-1", "run-2", "run-3", "run-4", "run-5"].map((id) =>
-      run({ run_id: id, status: "running", experiment_id: `exp-${id}` }),
+      run({ experiment_id: id, status: "running" }),
     );
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({ runs });
     vi.spyOn(trainingApi, "compare").mockResolvedValue({
@@ -1290,46 +1288,9 @@ describe("TrainingTab compare", () => {
     );
   });
 
-  it("disables a row's Compare toggle and names the two reasons", async () => {
-    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [
-        run({ run_id: "run-unresolved", status: "running" }),
-        run({
-          run_id: "run-failed-tracking",
-          status: "running",
-          experiment_error: "dataset_identity failed: boom",
-        }),
-      ],
-    });
-
-    render(<TrainingTab />);
-    await screen.findByText("run-unresolved");
-
-    const unresolvedToggle = within(rowFor("run-unresolved")).getByRole("button", {
-      name: "Compare run-unresolved",
-    });
-    expect(unresolvedToggle).toBeDisabled();
-    expect(unresolvedToggle).not.toHaveAttribute("title");
-    const unresolvedReason = within(rowFor("run-unresolved")).getByText(
-      "experiment not resolved yet",
-    );
-    expect(unresolvedReason).toBeInTheDocument();
-    expect(unresolvedToggle).toHaveAttribute("aria-describedby", unresolvedReason.id);
-
-    const failedToggle = within(rowFor("run-failed-tracking")).getByRole("button", {
-      name: "Compare run-failed-tracking",
-    });
-    expect(failedToggle).toBeDisabled();
-    const failedReason = within(rowFor("run-failed-tracking")).getByText(
-      "experiment tracking failed: dataset_identity failed: boom",
-    );
-    expect(failedReason).toBeInTheDocument();
-    expect(failedToggle).toHaveAttribute("aria-describedby", failedReason.id);
-  });
-
   it("groups Compare and Cancel as one action group", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "run-grouped", status: "running", experiment_id: "exp-grouped" })],
+      runs: [run({ experiment_id: "run-grouped", status: "running" })],
     });
 
     render(<TrainingTab />);
@@ -1340,66 +1301,11 @@ describe("TrainingTab compare", () => {
     expect(within(group).getByRole("button", { name: "Cancel run-grouped" })).toBeInTheDocument();
   });
 
-  it("drops a run from the marked comparison the moment its own reason turns unmarkable, through the one implementation toggleMarked also consults", async () => {
-    setProjectRoot("/proj");
-    const listRuns = vi.spyOn(trainingApi, "listRuns");
-    listRuns.mockResolvedValueOnce({
-      runs: [
-        run({ run_id: "run-a", status: "running", experiment_id: "exp-a" }),
-        run({ run_id: "run-b", status: "running", experiment_id: "exp-b" }),
-      ],
-    });
-    vi.spyOn(trainingApi, "compare").mockResolvedValue({
-      experiments: [{ experiment_id: "exp-a" }, { experiment_id: "exp-b" }] as unknown as Awaited<
-        ReturnType<typeof trainingApi.compare>
-      >["experiments"],
-      count: 2,
-      same_dataset_fingerprint: null,
-    });
-
-    vi.useFakeTimers();
-    try {
-      render(<TrainingTab />);
-      await vi.waitFor(() => expect(screen.getByText("run-a")).toBeInTheDocument());
-      fireEvent.click(within(rowFor("run-a")).getByRole("button", { name: "Compare run-a" }));
-      fireEvent.click(within(rowFor("run-b")).getByRole("button", { name: "Compare run-b" }));
-      await vi.waitFor(() => expect(screen.getByText("Comparing")).toBeInTheDocument());
-
-      // run-b's own record now carries both a resolved id and a tracking failure: a naive
-      // `experiment_id` truthiness check would still call it markable, unlike unmarkableReason.
-      listRuns.mockResolvedValueOnce({
-        runs: [
-          run({ run_id: "run-a", status: "running", experiment_id: "exp-a" }),
-          run({
-            run_id: "run-b",
-            status: "running",
-            experiment_id: "exp-b",
-            experiment_error: "dataset_identity failed: boom",
-          }),
-        ],
-      });
-      // Advance one tick of the runs poll.
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(RUN_REFRESH_MS);
-      });
-
-      expect(
-        within(rowFor("run-b")).getByText(
-          "experiment tracking failed: dataset_identity failed: boom",
-        ),
-      ).toBeInTheDocument();
-      // Only one run is still markable, so the detail falls back out of the comparison view.
-      expect(screen.queryByText("Comparing")).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it("names each run's Cancel control with that run's own id", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
-        run({ run_id: "train-a", status: "running" }),
-        run({ run_id: "train-b", status: "running" }),
+        run({ experiment_id: "train-a", status: "running" }),
+        run({ experiment_id: "train-b", status: "running" }),
       ],
     });
 
@@ -1414,12 +1320,12 @@ describe("TrainingTab compare", () => {
     setProjectRoot("/proj");
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
-        run({ run_id: "run-a", status: "running", experiment_id: "exp-a" }),
-        run({ run_id: "run-b", status: "running", experiment_id: "exp-b" }),
+        run({ experiment_id: "run-a", status: "running" }),
+        run({ experiment_id: "run-b", status: "running" }),
       ],
     });
     vi.spyOn(trainingApi, "compare").mockResolvedValue({
-      experiments: [{ experiment_id: "exp-a" }, { experiment_id: "exp-b" }] as unknown as Awaited<
+      experiments: [{ experiment_id: "run-a" }, { experiment_id: "run-b" }] as unknown as Awaited<
         ReturnType<typeof trainingApi.compare>
       >["experiments"],
       count: 2,
@@ -1437,56 +1343,6 @@ describe("TrainingTab compare", () => {
     expect(screen.queryByText("Comparing")).not.toBeInTheDocument();
     expect(await screen.findByText("Waiting for metrics…")).toBeInTheDocument();
     expect(screen.queryByText("No run selected.")).not.toBeInTheDocument();
-  });
-
-  it("counts the cap against the same markable set the header prints, not a stale unmarkable id", async () => {
-    setProjectRoot("/proj");
-    const allRuns = ["run-1", "run-2", "run-3", "run-4", "run-5"].map((id) =>
-      run({ run_id: id, status: "running", experiment_id: `exp-${id}` }),
-    );
-    const listRuns = vi.spyOn(trainingApi, "listRuns").mockResolvedValue({ runs: allRuns });
-    vi.spyOn(trainingApi, "compare").mockResolvedValue({
-      experiments: [],
-      count: 0,
-      same_dataset_fingerprint: null,
-    });
-    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
-
-    vi.useFakeTimers();
-    try {
-      render(<TrainingTab />);
-      await vi.waitFor(() => expect(screen.getByText("run-1")).toBeInTheDocument());
-      for (const id of ["run-1", "run-2", "run-3", "run-4"]) {
-        fireEvent.click(within(rowFor(id)).getByRole("button", { name: `Compare ${id}` }));
-      }
-      await vi.waitFor(() => expect(screen.getByText("4 of 4 runs")).toBeInTheDocument());
-
-      // run-1 turns unmarkable without ever leaving markedRunIds: the header's own count (the
-      // markable set, marked.length) drops to 3 while the raw id set still holds four.
-      listRuns.mockResolvedValueOnce({
-        runs: [
-          run({
-            run_id: "run-1",
-            status: "running",
-            experiment_id: "exp-run-1",
-            experiment_error: "dataset_identity failed: boom",
-          }),
-          ...allRuns.slice(1),
-        ],
-      });
-      // Advance one tick of the runs poll.
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(RUN_REFRESH_MS);
-      });
-      expect(screen.getByText("3 of 4 runs")).toBeInTheDocument();
-
-      fireEvent.click(within(rowFor("run-5")).getByRole("button", { name: "Compare run-5" }));
-
-      expect(pushToast).not.toHaveBeenCalledWith(expect.stringContaining("at most 4 runs"));
-      await vi.waitFor(() => expect(screen.getByText("4 of 4 runs")).toBeInTheDocument());
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });
 

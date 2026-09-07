@@ -163,7 +163,7 @@ describe("openTrainingStream", () => {
   it("reconnects after a mid-run drop so metric rows resume", () => {
     openTrainingStream("/data/proj", "r1", vi.fn());
     lastSocket().open();
-    lastSocket().message(JSON.stringify({ type: "row", run_id: "r1", row: { epoch: 2 } }));
+    lastSocket().message(JSON.stringify({ type: "row", experiment_id: "r1", row: { epoch: 2 } }));
 
     lastSocket().drop();
     vi.advanceTimersByTime(499);
@@ -191,7 +191,7 @@ describe("openTrainingStream", () => {
     openTrainingStream("/data/proj", "r1", vi.fn());
     lastSocket().open();
     lastSocket().message(
-      JSON.stringify({ type: "status", run_id: "r1", status: { status: "completed" } }),
+      JSON.stringify({ type: "status", experiment_id: "r1", status: { status: "completed" } }),
     );
 
     lastSocket().drop();
@@ -204,11 +204,11 @@ describe("openTrainingStream", () => {
     openTrainingStream("/data/proj", "r1", onMessage);
     lastSocket().open();
     lastSocket().message(
-      JSON.stringify({ type: "status", run_id: "r1", status: null, error: "unknown run" }),
+      JSON.stringify({ type: "status", experiment_id: "r1", status: null, error: "unknown run" }),
     );
     expect(onMessage).toHaveBeenCalledWith({
       type: "status",
-      run_id: "r1",
+      experiment_id: "r1",
       status: null,
       error: "unknown run",
     });
@@ -219,7 +219,7 @@ describe("openTrainingStream", () => {
 
     lastSocket().open();
     lastSocket().message(
-      JSON.stringify({ type: "status", run_id: "r1", status: { status: "running" } }),
+      JSON.stringify({ type: "status", experiment_id: "r1", status: { status: "running" } }),
     );
     lastSocket().drop();
     vi.advanceTimersByTime(60_000);
@@ -264,7 +264,7 @@ describe("openTrainingStream", () => {
     openTrainingStream("/data/proj", "r1", vi.fn());
     lastSocket().open();
     const parseSpy = vi.spyOn(JSON, "parse");
-    lastSocket().message(JSON.stringify({ type: "row", run_id: "r1", row: { epoch: 2 } }));
+    lastSocket().message(JSON.stringify({ type: "row", experiment_id: "r1", row: { epoch: 2 } }));
     expect(parseSpy).toHaveBeenCalledTimes(1);
     parseSpy.mockRestore();
   });
