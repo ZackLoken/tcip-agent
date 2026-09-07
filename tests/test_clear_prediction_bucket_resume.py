@@ -394,7 +394,7 @@ def test_a_document_arrived_during_the_move_refuses_naming_the_stem(tmp_path, mo
         if not staged_once["done"]:
             staged_once["done"] = True
             stage_prediction_shapes(
-                str(built["dataset_root"]), "m", "2026-03-02", "arrived",
+                str(built["dataset_root"]), "m", "2026-03-02", "newcomer",
                 annotations=[Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))],
                 img_w=32, img_h=32,
             )
@@ -404,7 +404,7 @@ def test_a_document_arrived_during_the_move_refuses_naming_the_stem(tmp_path, mo
 
     result = clear_prediction_bucket(str(built["bucket"]), "a document arrives mid-move")
     assert "error" in result
-    assert "arrived" in result["error"]
+    assert "newcomer" in result["error"]
 
 
 def test_a_secondary_stamp_present_at_the_source_alone_moves_or_refuses_by_the_op_stamps_state(
