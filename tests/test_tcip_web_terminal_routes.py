@@ -72,6 +72,37 @@ def test_status_unavailable_without_cli(client, monkeypatch):
     assert "reason" in body
 
 
+def test_winpty_terminate_polls_isalive_rather_than_trusting_taskkills_return(monkeypatch):
+    """``_WinPty``'s own ``winpty`` import sits inside ``__init__``, never at module level, so
+    its class body is importable without winpty installed; this stubs the wrapped process
+    directly rather than spawning a real ConPTY. taskkill returning is not the process exiting:
+    terminate() polls ``isalive()`` (bounded by ``TERMINATE_WAIT_S``) rather than trusting it."""
+
+    class _StubProc:
+        pid = 4242
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def isalive(self) -> bool:
+            self.calls += 1
+            return self.calls == 1  # alive at the liveness guard, dead by the first poll
+
+    stub = _StubProc()
+    win_pty = pty_host._WinPty.__new__(pty_host._WinPty)
+    win_pty._p = stub
+    win_pty.pid = stub.pid
+
+    monkeypatch.setattr(pty_host.subprocess, "run", lambda *a, **kw: None)
+    sleeps: list[float] = []
+    monkeypatch.setattr(pty_host.time, "sleep", sleeps.append)
+
+    win_pty.terminate()
+
+    assert stub.calls == 2
+    assert sleeps == []
+
+
 # ── session lifecycle over a real PTY ───────────────────────────────────
 
 
