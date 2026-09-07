@@ -141,24 +141,35 @@ def test_build_workspace_worksheet_ignores_non_project_dirs(tmp_path):
 
 
 def test_build_workspace_worksheet_skips_a_pending_project(tmp_path):
-    import tcip_store as ts
-    from tcip_mcp import workspace
+    """A project the request door has marked pending removal is skipped by the walker even
+    though its own directory and log are still on disk (phase one moves nothing); the marker
+    is written through the door itself, the way test_project_removal.py's own tests do."""
+    from tcip_mcp import project_removal, workspace
+    from tcip_mcp.tools.project_tools import initialize_project
 
     distill = _load_distill()
-    (tmp_path / "proj_open").mkdir()
-    _seed_report(tmp_path / "proj_open", "r", {"category": "unexpected_behavior", "detail": "x"})
+    ws = tmp_path.parent
 
-    (tmp_path / "proj_pending").mkdir()
-    _seed_report(tmp_path / "proj_pending", "r", {"category": "unexpected_behavior", "detail": "y"})
-    ts.replace(workspace.pending_removal_key(tmp_path / "proj_pending"), {
-        "requested_at": "20260304T120000Z", "requested_by": "user:tester",
-        "archive_path": "archive.zip", "holding_dir": "holding",
-        "external_roots": [], "dependent_projects": [],
-    }, expect=ts.Version.ABSENT)
+    open_result = initialize_project(str(ws / "sample_plot_open"), site="a site")
+    assert "error" not in open_result, open_result
+    _seed_report(ws / "sample_plot_open", "r", {"category": "unexpected_behavior", "detail": "x"})
+    workspace.activate_project("sample_plot_open")
 
-    ws = distill.build_workspace_worksheet(tmp_path)
-    assert "proj_open" in ws
-    assert "proj_pending" not in ws
+    pending_result = initialize_project(str(ws / "sample_plot_pending"), site="a site")
+    assert "error" not in pending_result, pending_result
+    _seed_report(
+        ws / "sample_plot_pending", "r", {"category": "unexpected_behavior", "detail": "y"},
+    )
+
+    removal = project_removal.request_project_removal(
+        "sample_plot_pending", "sample_plot_pending",
+        requested_by="user:tester", job_conflict=lambda p: None,
+    )
+    assert "error" not in removal, removal
+
+    worksheet = distill.build_workspace_worksheet(ws)
+    assert "sample_plot_open" in worksheet
+    assert "sample_plot_pending" not in worksheet
 
 
 def test_workspace_mode_never_writes_anything(tmp_path):
