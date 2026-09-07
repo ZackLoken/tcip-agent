@@ -72,6 +72,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/cli/archive_project.py | Export an annotation project as a portable bundle: a ZIP archive, or, with --output-dir, the identical bundle written as a directory tree. | 4 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/calibrate_operating_point.py | Calibrate + held-out validate a detection operating point over a labeled split. | 3 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/check_dataset_identity.py | Check a dataset's on-disk content against its recorded identity: detect changed / moved data. | 5 | 0 |
+| packages/tcip-mcp/src/tcip_mcp/cli/complete_removals.py | Move every workspace project carrying a pending-removal marker onto its own holding directory, from the command line. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/doctor.py | Data-state doctor: scan a live project for state inconsistencies code audits can't see. | 18 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/export_store.py | Write a root's database-held records and logs back out as files. | 6 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/import_project.py | Import an annotation project from a bundle ``tcip archive-project`` wrote: a ZIP archive, or a directory tree written by its ``--output-dir`` mode. | 3 | 0 |
@@ -165,6 +166,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py | Prediction-bucket immutability: never silently overwrite predictions a human reviewed. | 7 | 11 |
 | packages/tcip-mcp/src/tcip_mcp/project_paths.py | Stable resolution of the platform state root, independent of a process's cwd. | 1 | 38 |
 | packages/tcip-mcp/src/tcip_mcp/project_record.py | The project record: the one document every project carries, holding its authored site. | 2 | 6 |
+| packages/tcip-mcp/src/tcip_mcp/project_removal.py | Project removal: archive now, mark for removal, move at the next backend start; the two doors, GUI-only. | 4 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/project_status.py | Per-project status pointer: a small, persisted summary of recent activity. | 2 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/registry_paths.py | The containment core and grammar-aware external test the checkpoint and dataset registries share, plus the resolver every stored registry path becomes an absolute one through. | 0 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/server.py | MCP server entry point: register all domain tools and run on stdio. | 25 | 24 |
@@ -2141,6 +2143,26 @@ helper (`routes/coverage.py:277`), so the lattice a breeder sees and the scale a
 never read the same entry two different ways.
 
 No seam id in `seam-coverage.json`'s inventory names this record.
+
+## 29. `pending_removal.json`, per-project removal marker
+
+Path: `<project_path>/.tcip/pending_removal.json`, addressed by `pending_removal_key`
+(`packages/tcip-mcp/src/tcip_mcp/workspace.py:224`), on the store `PENDING_REMOVAL_STORE`
+(`workspace.py:209`), `frozen: true`, locator `RootedFileLocator(prefix=(".tcip",),
+suffix=".json")`, the same shape `dataset_registry` and `.tcip/project.json` (format 25) use.
+
+Shape: `{requested_at, requested_by, archive_path, holding_dir, external_roots,
+dependent_projects}`, one document per project. Written once, `concurrency="cas"` with
+`expect=Version.ABSENT`, by `request_project_removal`
+(`packages/tcip-mcp/src/tcip_mcp/project_removal.py:342`); deleted, at the version the
+completing walk read it at, by `complete_pending_removals` (`project_removal.py:434`).
+
+Readers: `pending_removal_record`/`pending_removal_or_none` (`workspace.py:235`, `:247`), the
+predicate `adoptable_project_root`, `ingest_images` and `tcip_web.paths.allowed_roots`'s
+excluded roots all consult, so an opener or a guarded route refuses a marked project from the
+moment this document lands.
+
+No seam id in `seam-coverage.json`'s inventory names this record: the door is new.
 
 ## Formats with a general path-resolution seam but no per-format seam entry above
 
