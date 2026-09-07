@@ -903,22 +903,20 @@ class SpatialStripSplit:
         return spatial_strip_identity(stem, f"strip_{self.axis}_{idx}")
 
 
-def _center_out_order(slots: list[tuple[str, float]], seed: int) -> list[tuple[str, float]]:
+def _center_out_order(slots: list[tuple[str, float]]) -> list[tuple[str, float]]:
     """Order slots by descending share, largest first, then placed axis-center-out: each next
     (smaller) slot alternately extends the left or right end of the growing arrangement.
 
     A share sandwiched between two differently-assigned neighbors needs buffer margin on both
     sides at once, so the slot least likely to survive that is the smallest one, exactly the
-    one a uniform-random order can still place mid-axis. Center-out puts the largest share
-    (the most likely to have enough raw lattice positions to absorb a two-sided margin) in the
-    middle and tapers outward, so every other slot faces at most one differently-assigned
-    neighbor. ``seed`` only breaks ties among equal shares; which cardinal side a given split
-    lands on has no bearing on discard or ratio fit, so it is not itself randomized.
+    one placed last. Center-out puts the largest share (the most likely to have enough raw
+    lattice positions to absorb a two-sided margin) in the middle and tapers outward, so every
+    other slot faces at most one differently-assigned neighbor. A tie among equal shares
+    resolves in the order the slots were given, so which cardinal side a tied slot lands on is
+    fixed by the caller's declared order and never by a seed.
     """
-    rng = random.Random(seed)
     indexed = list(enumerate(slots))
-    rng.shuffle(indexed)
-    indexed.sort(key=lambda p: -p[1][1])
+    indexed.sort(key=lambda p: (-p[1][1], p[0]))
     ordered = [item for _, item in indexed]
     left: list[tuple[str, float]] = []
     right: list[tuple[str, float]] = []
@@ -930,7 +928,7 @@ def _center_out_order(slots: list[tuple[str, float]], seed: int) -> list[tuple[s
 def _strip_regions(
     positions: list[int], tile_size: int, buffer: int,
     split_names: tuple[str, ...], fractions: tuple[float, ...],
-    seed: int, discard_ceiling: float, stripes_per_split: int,
+    discard_ceiling: float, stripes_per_split: int,
 ) -> list[tuple[str, int, int]]:
     """Merged, buffer-shrunk ``(name, start, end)`` pixel regions along one axis, in axis
     order, cut and shrunk in the discrete tile-origin lattice rather than continuous pixel
@@ -957,7 +955,7 @@ def _strip_regions(
     slots: list[tuple[str, float]] = []
     for name, frac in zip(split_names, fractions):
         slots.extend([(name, frac / stripes)] * stripes)
-    slots = _center_out_order(slots, seed)
+    slots = _center_out_order(slots)
 
     raw: list[tuple[str, int, int]] = []
     cursor = 0.0
@@ -1009,8 +1007,12 @@ def spatial_strip_split(
     ``stripes_per_split=1`` each requested split is one contiguous region, minimizing discard
     and concentrating it at the internal cuts between sides. A higher ``stripes_per_split``
     (capped by ``discard_ceiling``, see :class:`SpatialStripSplit`) instead scatters each side
-    across several seeded-shuffled positions along the axis, trading discard for a guard
-    against any one side correlating with a spatial gradient in the field.
+    across several pieces placed by the same fixed center-out order, trading discard for a
+    guard against any one side correlating with a spatial gradient in the field.
+
+    ``seed`` is recorded on the returned split for the manifest and governs no layout
+    decision: :func:`_center_out_order` places every side by descending share and declared
+    order alone.
 
     ``buffer`` (pixels) is the minimum gap kept around every boundary between two
     differently-assigned strips: an explicit value below ``tile_size`` is refused, since a
@@ -1075,7 +1077,7 @@ def spatial_strip_split(
     positions = xs if axis == "x" else ys
 
     region_bounds = _strip_regions(
-        positions, tile_size, buffer, active_names, active_fracs, seed, discard_ceiling,
+        positions, tile_size, buffer, active_names, active_fracs, discard_ceiling,
         stripes_per_split,
     )
     if len({name for name, _, _ in region_bounds}) < len(active_names):
