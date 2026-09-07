@@ -536,9 +536,9 @@ def revise_trait_spec_fields(
     write path. ``moved`` is whether the merge changes any of ``_AUTHORED_SPEC_FIELDS`` from
     what is on file now, both sides parsed through :func:`_spec_from_config` so a field merely
     restated at its own value never reads as moved; a stored record the parser refuses has no
-    parsed values to compare, so a merge that repairs it back to a parseable spec is read as
-    having moved the authored fields the merge itself named, since such a repair can only work by
-    overwriting the very field that made the record unparseable. ``stale`` is whether the
+    parsed values to compare, so ``moved`` reads true for it whatever ``fields_`` names, naming
+    the authored keys in ``fields_`` when there are any and otherwise saying the stored record's
+    authored values could not be read. ``stale`` is whether the
     trait-spec statement on file, if any, is absent or no longer matches the candidate
     (:func:`trait_spec_statement_stale`). A call that moves an authored field over a trait
     carrying a statement and gives no rationale refuses by name, naming the fields that moved,
@@ -609,6 +609,7 @@ def revise_trait_spec_fields(
 
         stored_spec, _stored_reason = _spec_from_config(data, vocab)
         if stored_spec is None:
+            moved = True
             moved_fields = sorted(set(fields_) & set(_AUTHORED_SPEC_FIELDS))
         else:
             stored_snapshot = _statement_snapshot(stored_spec)
@@ -616,7 +617,11 @@ def revise_trait_spec_fields(
             moved_fields = sorted(
                 f for f in _AUTHORED_SPEC_FIELDS if stored_snapshot[f] != candidate_snapshot[f]
             )
-        moved = bool(moved_fields)
+            moved = bool(moved_fields)
+        moved_description = (
+            f"moves {moved_fields}" if moved_fields
+            else "repairs a stored record whose authored values could not be read"
+        )
 
         existing_statement = ts.read_versioned(statement_key, default=None)
         statement_on_file = existing_statement.value
@@ -624,7 +629,7 @@ def revise_trait_spec_fields(
 
         if moved and statement_on_file and rationale is None:
             raise ValueError(
-                f"update to trait spec {trait_name!r} moves {moved_fields}, and its authoring "
+                f"update to trait spec {trait_name!r} {moved_description}, and its authoring "
                 "statement already covers the old values; changing an authored field needs a "
                 "rationale so the statement restates for the breeder's re-confirmation. Pass "
                 "rationale=... naming why."
@@ -651,8 +656,13 @@ def revise_trait_spec_fields(
         note = "stated, since none was on record"
     elif stale:
         note = "restated, since the one on record was stale"
-    else:
+    elif moved_fields:
         note = f"restated for re-confirmation, since {moved_fields} moved"
+    else:
+        note = (
+            "restated for re-confirmation, since the stored record's authored values could "
+            "not be read and are read as moved by the repair"
+        )
 
     statement_expect = existing_statement.version
     while True:
