@@ -353,6 +353,20 @@ def test_an_identical_rewrite_leaves_a_held_token_valid(store):
     assert ts.replace(key, {"n": 2}, expect=held) != held
 
 
+def test_a_cas_record_delete_from_a_current_token_lands_and_a_stale_one_is_refused(store):
+    key = store.key(CAS, "conditional-delete")
+    held = ts.replace(key, {"n": 1}, expect=ts.Version.ABSENT)
+    moved = ts.replace(key, {"n": 2}, expect=held)
+
+    with pytest.raises(ts.VersionConflict) as raised:
+        ts.delete(key, expect=held)
+    assert raised.value.actual == moved
+    assert ts.read(key) == {"n": 2}
+
+    ts.delete(key, expect=moved)
+    assert ts.read(key, default=None) is None
+
+
 def test_a_transaction_applies_in_the_declared_order_and_a_crash_leaves_a_prefix(store):
     """The order comes from the declaration, not from the order the body wrote the keys."""
     only_on(store, FILE, "a crash mid-apply is what a backend applying key by key leaves, the "
@@ -2596,6 +2610,21 @@ def test_a_create_only_blob_write_refuses_an_existing_blob_and_keeps_its_bytes(s
     ts.put_blob(key, b"unconditional")
     with ts.open_blob(key) as handle:
         assert handle.read() == b"unconditional"
+
+
+def test_a_blob_delete_from_a_current_token_lands_and_a_stale_one_is_refused(store):
+    key = store.key(BLOB, "conditional-delete")
+    held = ts.put_blob(key, b"first", expect=ts.Version.ABSENT)
+    moved = ts.put_blob(key, b"second", expect=held)
+
+    with pytest.raises(ts.VersionConflict) as raised:
+        ts.delete(key, expect=held)
+    assert raised.value.actual == moved
+    with ts.open_blob(key) as handle:
+        assert handle.read() == b"second"
+
+    ts.delete(key, expect=moved)
+    assert not ts.exists(key)
 
 
 def test_a_streamed_blob_write_refuses_a_stale_token_before_the_producer_writes(store):
