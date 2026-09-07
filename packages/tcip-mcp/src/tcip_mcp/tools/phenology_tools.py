@@ -943,7 +943,14 @@ def deliver_phenology_milestones(
     cells = phenology.write_phenology_csv(
         "deliver_phenology_milestones", rows, Path(output_csv_path), spec,
         flags=flags, acknowledgement=None, basis=still_stated.basis,
-        operating_point_confs=recon["confs"], producer=producer, bindings=recon["bindings"],
+        document_reconciliations={
+            "operating_point": recon,
+            "classifier_operating_point": {
+                **classifier_recon, "bound_validated": classifier_state,
+                "delivery_note": classifier_binding_note,
+            },
+        },
+        producer=producer, dimension_reconciliations={"tile_size": tile_recon},
         predictions_by_date=predictions_by_date, project_root=platform_state_root(),
         plant_mapping=disclosure)
     # Per-milestone summary: report reached-counts for each milestone the spec actually declares.
