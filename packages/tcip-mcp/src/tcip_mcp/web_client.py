@@ -335,6 +335,21 @@ def read_canvas_binding() -> dict[str, Any] | None:
         raise GuiBindingUnreadable(f"Could not read the canvas-open binding: {exc}") from exc
 
 
+def binding_released_or_absent(binding: dict[str, Any] | None) -> bool:
+    """Whether ``binding`` means nothing is open: absent, or marked ``released`` by
+    :func:`tcip_mcp.project_removal.release_project_binding`.
+
+    The one predicate every reader of the canvas-open binding shares, so a released record
+    reads as nothing open everywhere rather than each caller re-deriving it:
+    :func:`gui_binding_matches`, :func:`binding_divergence`,
+    :func:`tcip_mcp.project_removal._open_project_conflict`'s canvas arm and
+    :func:`tcip_mcp.project_removal.binding_release_available`, ``tcip_web.routes.dataset.
+    _write_canvas_binding``'s bump rule, and the canvas push route
+    (``tcip_web.routes.canvas.push_canvas_state``).
+    """
+    return binding is None or bool(binding.get("released"))
+
+
 def gui_binding_matches(root: str | Path) -> tuple[bool, dict[str, Any] | None]:
     """Whether the GUI's currently open project is ``root``, and the binding compared against.
 
@@ -345,17 +360,17 @@ def gui_binding_matches(root: str | Path) -> tuple[bool, dict[str, Any] | None]:
     (nothing is open for any root to match); ``(False, binding)`` before ``root`` is even
     compared when the binding was released (``tcip_mcp.project_removal.
     release_project_binding``): a released record names what the GUI last had open, not what it
-    has open now, so it can never match. Otherwise ``(matches, binding)``, so a caller refusing a
-    mismatch can name the binding's own project straight from the second element without a
-    re-read. Raises :class:`GuiBindingUnreadable` when the record cannot be read, or reads as a
-    mapping with no ``root`` field: a record this seam itself never writes without one, so a
-    caller seeing it that way must be told the record is illegible rather than have the
-    comparison raise ``KeyError`` out to it.
+    has open now, so it can never match (:func:`binding_released_or_absent`). Otherwise
+    ``(matches, binding)``, so a caller refusing a mismatch can name the binding's own project
+    straight from the second element without a re-read. Raises :class:`GuiBindingUnreadable`
+    when the record cannot be read, or reads as a mapping with no ``root`` field: a record this
+    seam itself never writes without one, so a caller seeing it that way must be told the record
+    is illegible rather than have the comparison raise ``KeyError`` out to it.
     """
     binding = read_canvas_binding()
     if binding is None:
         return False, None
-    if binding.get("released"):
+    if binding_released_or_absent(binding):
         return False, binding
     try:
         bound_root = binding["root"]
@@ -384,9 +399,9 @@ def binding_divergence(binding: dict[str, Any] | None, own_root: str) -> dict[st
     """
     from tcip_mcp import workspace
 
-    released = bool(binding and binding.get("released"))
-    bound_root = binding.get("root") if binding and not released else None
-    bound_name = binding.get("project_name") if binding and not released else None
+    nothing_open = binding_released_or_absent(binding)
+    bound_root = binding.get("root") if binding is not None and not nothing_open else None
+    bound_name = binding.get("project_name") if binding is not None and not nothing_open else None
     own_name = workspace.workspace_project_name(Path(own_root))
     if bound_name:
         converge = (
