@@ -554,6 +554,31 @@ describe("ReviewTab audit-gap handling", () => {
       expect(useStore.getState().toasts.at(-1)?.message).toBe(`${committed.reason} ${gapMessage}`),
     );
   });
+
+  it("promoteReviewToValidationReference discloses no bucket stamped on a sealed-record 409", async () => {
+    const committed = {
+      validated: true,
+      reference: "review_confirmed",
+      reviewed_image_count: 4,
+      conf: 0.42,
+      reason: "Validated. Your review confirms this model's counts.",
+      buckets_stamped: [],
+    };
+    vi.spyOn(api.review, "validateReference").mockRejectedValue(
+      new StructuredRefusalError(
+        { error: "audit_entry_not_written", message: gapMessage, committed },
+        409,
+        gapMessage,
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+    const refBtn = () => screen.getByRole("button", { name: /validation reference/i });
+    await waitFor(() => expect(refBtn()).not.toBeDisabled());
+
+    fireEvent.click(refBtn());
+    expect(await screen.findByText("No bucket was stamped.")).toBeInTheDocument();
+  });
 });
 
 describe("ReviewTab Conf >= filter censoring warning", () => {
