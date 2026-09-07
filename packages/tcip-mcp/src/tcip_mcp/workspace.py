@@ -14,6 +14,13 @@ a project so the breeder flow ("I structured your images, opening
 ``<crop>_<subject>_<phenotype>``") closes the loop; adopting it also repins the adopting
 process's own platform-state root at once, the web backend on the agent's adopt signal, and
 the MCP server on its next start inside the platform's own agent terminal.
+
+A second, per-project marker (``<project>/.tcip/pending_removal.json``) records that a
+project's own directory has been archived and is waiting to move into the workspace's
+holding directory: a project carrying one is not adoptable
+(:func:`adoptable_project_root`), still names itself (:func:`workspace_project_root`,
+:func:`workspace_project_name`), and moves at the next backend start or through
+``tcip complete-removals`` (:mod:`tcip_mcp.project_removal`).
 """
 
 from __future__ import annotations
@@ -27,7 +34,9 @@ from tcip_store import (
     RECORD_JSON,
     DecodeError,
     Key,
+    SchemaVersionRefused,
     StoreDescriptor,
+    StoreError,
     read,
     register_store,
     replace,
@@ -227,28 +236,76 @@ def pending_removal_record(project_root: str | Path) -> Optional[dict]:
     """The project's pending-removal marker, or ``None`` when it carries none.
 
     Reads through the seam and lets the store's own refusals (``StoreError``, ``DecodeError``,
-    ``SchemaVersionRefused``) propagate rather than folding them to ``None``, for a caller that
-    must report the refusal as its own (the removal door's own read of the marker it is about
-    to write).
+    ``SchemaVersionRefused``) propagate rather than folding them to ``None``: a caller that
+    must treat an unreadable marker the same as no marker (:func:`adoptable_project_root`)
+    catches those itself, and a caller that must report the refusal as its own (the removal
+    door's own read of the marker it is about to write) lets it surface.
     """
     return read(pending_removal_key(project_root), default=None)
 
 
-def adoptable_project_root(name: str) -> Path:
-    """The path a workspace project's name resolves to, when it is safe to open.
+def pending_removal_or_none(project_root: str | Path) -> Optional[dict]:
+    """:func:`pending_removal_record`, with a marker the store refuses to read folded to
+    ``None``: shared by :func:`adoptable_project_root` and ``ingest_images``, the one other
+    writer by project name, so the two agree on what "no marker" means rather than each
+    catching the same three exceptions on its own.
+    """
+    try:
+        return pending_removal_record(project_root)
+    except (StoreError, DecodeError, SchemaVersionRefused):
+        return None
+
+
+class ProjectPendingRemoval(ValueError):
+    """A workspace project's own ``pending_removal`` marker names it, naming when the request
+    was made and that the move to the workspace's holding directory completes at the next
+    backend start, or through ``tcip complete-removals``. A ``ValueError`` subclass so every
+    caller that already catches that (:func:`active_project_if_present`, :func:`marker_problem`)
+    folds this refusal exactly as it folds any other unadoptable name, with no separate catch to
+    add; a caller that must answer this refusal on its own (the ``/api/projects/active`` route)
+    catches it ahead of the plain ``ValueError`` it still keeps for every other case."""
+
+
+def workspace_project_root(name: str) -> Path:
+    """The path a workspace project's name resolves to, when its ``.tcip`` exists on disk.
 
     Raises ``ValueError``, naming which check failed: an unsafe name (path separators, ``..``,
     empty) or a safely-named path whose ``.tcip`` is not a directory (nothing there to open).
-    The one predicate every reader that must tell "no marker" apart from "the marker names a
-    project that is not adoptable" calls: :func:`activate_project`, :func:`
-    active_project_if_present` (folding the raise to ``None``), and
-    ``tcip_mcp.project_paths.pin_platform_root`` when binding from the marker.
+    Says nothing about whether the project is pending removal: :func:`adoptable_project_root`
+    is the predicate that also asks that, and this one alone is what :func:`workspace_project_name`
+    calls, since naming a directory opens no store and a pending project's directory still
+    names it.
     """
     if not is_valid_name(name):
         raise ValueError(f"invalid project name: {name!r}")
     root = project_path(name, create=False)
     if not (root / ".tcip").is_dir():
         raise ValueError(f"no such workspace project (missing .tcip): {name!r}")
+    return root
+
+
+def adoptable_project_root(name: str) -> Path:
+    """The path a workspace project's name resolves to, when it is safe to open.
+
+    Raises ``ValueError``, naming which check failed: everything :func:`workspace_project_root`
+    already checks, plus a pending project (:class:`ProjectPendingRemoval`, naming when it was
+    requested and that it completes at the next backend start). A marker the store refuses to
+    read (``StoreError``, ``DecodeError``, ``SchemaVersionRefused``) is not treated as one: the
+    project stays adoptable exactly as it would with no marker at all, and the removal door's
+    own read of the same marker is where such a refusal is answered as its own 409. The one
+    predicate every reader that must tell "no marker" apart from "the marker names a project
+    that is not adoptable, pending removal included" calls: :func:`activate_project`, :func:`
+    active_project_if_present` (folding the raise to ``None``), and
+    ``tcip_mcp.project_paths.pin_platform_root`` when binding from the marker.
+    """
+    root = workspace_project_root(name)
+    pending = pending_removal_or_none(root)
+    if pending is not None:
+        raise ProjectPendingRemoval(
+            f"{name!r} is pending removal (requested {pending['requested_at']}); it moves to "
+            "the workspace's holding directory at the next backend start, or through "
+            "tcip complete-removals"
+        )
     return root
 
 
@@ -301,7 +358,12 @@ def marker_problem(*, create: bool = False) -> Optional[str]:
 
 
 def resolve_project_path(given: str) -> str:
-    """A given path wins; empty falls back to the active project's root (the live GUI session)."""
+    """A given path wins; empty falls back to the active project's root (the live GUI session).
+
+    Reads the marker's name raw, with no pending-removal check of its own: safe because the
+    marker's own project can never be pending, since the removal door refuses a request that
+    names the currently active marker's project before it writes anything.
+    """
     if given:
         return given
     name = read_active_project()
@@ -314,9 +376,13 @@ def workspace_project_name(root: Path) -> Optional[str]:
 
     Compared by filesystem identity (``os.path.samefile`` against the workspace root, not string
     equality), so a case variant or a substituted drive of the same directory still resolves. A
-    root nested inside a project, the workspace root itself, or a directory the workspace does
-    not consider adoptable (:func:`adoptable_project_root`) names no project. The one predicate
-    :mod:`tcip_web.routes.dataset` calls to name the ``canvas_open_binding`` record's
+    root nested inside a project, the workspace root itself, or a directory that is not one the
+    workspace holds (:func:`workspace_project_root`) names no project. Answers through that
+    predicate rather than :func:`adoptable_project_root`, since naming a directory opens no
+    store: a pending project still names itself here, so the canvas binding's own
+    ``project_name``, ``binding_divergence``'s advice, and the removal door's no-project-open
+    check all stay accurate whether or not a marker or a store refusal is in play. The one
+    predicate :mod:`tcip_web.routes.dataset` calls to name the ``canvas_open_binding`` record's
     ``project_name``, and :mod:`tcip_mcp.tools.vision_tools` calls the same way to name a
     divergent binding's project.
     """
@@ -333,7 +399,7 @@ def workspace_project_name(root: Path) -> Optional[str]:
     if not is_valid_name(name):
         return None
     try:
-        adoptable_project_root(name)
+        workspace_project_root(name)
     except ValueError:
         return None
     return name

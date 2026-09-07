@@ -148,13 +148,16 @@ class SetActiveRequest(BaseModel):
 @router.post("/active")
 def activate_project(req: SetActiveRequest) -> ActiveProject:
     """Set the active project (the marker the GUI auto-opens). Name must be a workspace
-    project; traversal/separators are rejected, and its ``.tcip`` must already exist."""
+    project; traversal/separators are rejected, its ``.tcip`` must already exist, and it must
+    not be pending removal (409, naming when the request was made)."""
     try:
         path = workspace.project_path(req.name)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     try:
         workspace.activate_project(req.name)
+    except workspace.ProjectPendingRemoval as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
     return ActiveProject(name=req.name, path=str(path))
