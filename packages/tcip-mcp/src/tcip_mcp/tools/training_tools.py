@@ -2266,7 +2266,8 @@ def run_hyperparameter_search(
             native one (``random``/``grid``/``variant_generator``: only the native generator
             pairs a grid axis), ``scheduler`` is not ``none`` (a pruned draw is not comparable
             with a completed one), ``split_draw_seeds`` is given at a length other than
-            ``split_draws``, ``warm_start``'s ``baseline_params`` names ``data.split.seed``
+            ``split_draws`` and distinct (a repeated seed is not a spread over distinct
+            partitions), ``warm_start``'s ``baseline_params`` names ``data.split.seed``
             (Ray's preset-variant pinning would pin every draw to one seed instead of pairing
             the grid), ``param_space`` already sweeps ``data.split.seed`` itself, or
             ``param_space`` sweeps any other ``data.*`` axis (a second data axis would change
@@ -2823,6 +2824,11 @@ def _split_draws_refusal(
     if split_draw_seeds is not None and len(split_draw_seeds) != split_draws:
         return (f"split_draw_seeds has {len(split_draw_seeds)} seed(s) but split_draws="
                 f"{split_draws}: one seed per draw.")
+    if split_draw_seeds is not None and len(set(split_draw_seeds)) != len(split_draw_seeds):
+        repeated = sorted({s for s in split_draw_seeds if split_draw_seeds.count(s) > 1})
+        return (f"split_draw_seeds repeats {repeated}: a spread over the same partition drawn "
+                "twice is not a spread, and group_split_draws only counts a point eligible on "
+                "its distinct planned seeds, not on one seed completed twice.")
     if warm_start and baseline_params and SPLIT_DRAW_SEED_KEY in baseline_params:
         return (f"warm_start's baseline_params names {SPLIT_DRAW_SEED_KEY!r}: Ray's own "
                 "preset-variant pinning would pin every draw to that one seed instead of "
