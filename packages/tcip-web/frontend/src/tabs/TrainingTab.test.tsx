@@ -78,7 +78,7 @@ describe("TrainingTab run list", () => {
           external: true,
           heartbeat: new Date(Date.now() - 3 * 60_000).toISOString(),
         }),
-        run({ run_id: "train-fresh", status: "created" }),
+        run({ experiment_id: "train-fresh", status: "created" }),
       ],
     });
 
@@ -888,7 +888,7 @@ describe("TrainingTab stream lifecycle", () => {
     }));
     const listRuns = vi.spyOn(trainingApi, "listRuns");
     listRuns.mockResolvedValueOnce({
-      runs: [run({ run_id: "train-vanishing", status: "running" })],
+      runs: [run({ experiment_id: "train-vanishing", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     const stop = vi.fn();
