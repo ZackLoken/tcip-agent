@@ -250,7 +250,6 @@ def spatial_single_source_split(
     overlap = tile_kwargs.get("overlap", 0.2)
     val_ratio = float(split_cfg.get("val_ratio", 0.2))
     test_ratio = float(split_cfg.get("test_ratio", 0.1))
-    seed = int(split_cfg.get("seed", 42))
     if reserve_cal:
         train_ratio = 1.0 - val_ratio - test_ratio - reserve_cal
         split_names: tuple[str, ...] = ("train", "val", "test", "calibration")
@@ -263,7 +262,7 @@ def spatial_single_source_split(
     try:
         spatial = spatial_strip_split(
             width, height, tile_size, overlap, fractions=fractions, split_names=split_names,
-            seed=seed, buffer=tiling.get("buffer"),
+            buffer=tiling.get("buffer"),
         )
     except ValueError as exc:
         if reserve_cal:
@@ -321,8 +320,7 @@ def spatial_single_source_split(
         "kept_calibration_tiles": spatial.kept_tiles.get("calibration", 0),
         "width": spatial.width, "height": spatial.height, "tile_size": spatial.tile_size,
         "overlap": spatial.overlap, "axis": spatial.axis, "buffer": spatial.buffer,
-        "seed": spatial.seed, "requested_fractions": dict(zip(spatial.split_names,
-                                                               spatial.requested_fractions)),
+        "requested_fractions": dict(zip(spatial.split_names, spatial.requested_fractions)),
         "realized_fractions": spatial.realized_fractions,
         "realized_discard_fraction": spatial.realized_discard_fraction,
         "kept_train_tiles": spatial.kept_tiles.get("train", 0),

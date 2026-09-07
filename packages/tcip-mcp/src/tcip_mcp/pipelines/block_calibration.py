@@ -62,19 +62,13 @@ def reserved_calibration_region_available(experiment_id: str) -> bool:
 
 def _band_rects(
     region_rect: tuple[int, int, int, int], k: int, tile_size: int, overlap: float,
-    buffer_px: int, seed: int, name_prefix: str,
+    buffer_px: int, name_prefix: str,
 ) -> dict[str, tuple[int, int, int, int]]:
     """``k`` non-overlapping, buffered bands over ``region_rect``, in full-mosaic coordinates.
 
     Recurses :func:`spatial_strip_split` over the region's own local extent (its lattice starts at
     local ``(0, 0)``), then translates every returned rect back by the region's own origin
     (``+ x0, + y0``), the clean, lattice-phase-safe translation confirmed by design review.
-
-    ``seed`` is handed to :func:`spatial_strip_split`, which only records it on the split this
-    function reads the rects from and discards; it governs no band placement:
-    :func:`spatial_strip_split` places every band by its fixed center-out order alone, band
-    names being interchangeable and only the set of band rects consumed by this function's
-    callers.
     """
     from tcip_mcp.pipelines.data.splits import spatial_strip_split
 
@@ -84,7 +78,7 @@ def _band_rects(
     fractions = tuple(1.0 / k for _ in range(k))
     spatial = spatial_strip_split(
         width, height, tile_size, overlap, fractions=fractions, split_names=names,
-        seed=seed, buffer=buffer_px,
+        buffer=buffer_px,
     )
     out: dict[str, tuple[int, int, int, int]] = {}
     for name in names:
@@ -186,7 +180,7 @@ def _density_uniformity_flags(gt_counts: dict[str, int], *, factor: float = 3.0)
 def resolve_block_calibration_records(
     predictor: Any, *, trait_name: str, experiment_id: str | None,
     global_nms_iou: float, export_tile_size: int, tile_batch_size: int = 96, postprocess: str = "nms",
-    k_cal: int = DEFAULT_K_CAL, k_test: int = DEFAULT_K_TEST, seed: int = 0,
+    k_cal: int = DEFAULT_K_CAL, k_test: int = DEFAULT_K_TEST,
 ) -> tuple[Any, dict, dict]:
     """Resolve a detection operating point directly against a mosaic's own reserved
     calibration/test regions. Returns ``(bundle, provenance, evidence)``: ``bundle`` is the same
@@ -369,8 +363,8 @@ def resolve_block_calibration_records(
         ) from exc
 
     try:
-        cal_bands = _band_rects(cal_rect, k_cal, tile_size, overlap, buffer_px, seed, "cal")
-        test_bands = _band_rects(test_rect, k_test, tile_size, overlap, buffer_px, seed, "test")
+        cal_bands = _band_rects(cal_rect, k_cal, tile_size, overlap, buffer_px, "cal")
+        test_bands = _band_rects(test_rect, k_test, tile_size, overlap, buffer_px, "test")
     except ValueError as exc:
         raise BlockCalibrationRefused(
             f"block calibration refused: the resolved band layout (k_cal={k_cal}, k_test={k_test}, "

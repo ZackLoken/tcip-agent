@@ -256,54 +256,48 @@ def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
     assert manifest["kept_test_tiles"] > 0
 
 
-def test_spatial_manifest_tied_val_test_fractions_place_by_declared_order_not_seed(
-    tmp_path: Path,
-):
+def test_spatial_manifest_tied_val_test_fractions_place_by_declared_order(tmp_path: Path):
     """``val_ratio == test_ratio`` ties their shares in the center-out tie-break, so which
-    strip val lands on must come from declared (``split_names``) order alone, never from the
-    seed: at seeds 0 and 1, the pre-fix shuffle-then-stable-sort placed val on opposite
-    cardinal sides (found by scanning small seeds for a pair that disagreed), so the manifest's
-    train/val/test regions must be identical across them while the recorded seed still isn't."""
+    strip val lands on comes from declared (``split_names``) order alone: ``spatial_single_
+    source_split`` fixes that order itself (``("train", "val", "test")``), so this pins the
+    resulting regions against the fixed order's own layout, the way the distinct-fractions
+    test above pins its own regions; the placement half is coverage. The manifest carries no
+    ``seed`` key, guarded against ``45bab2c1`` on its own assertion, since ``auto_train_val``'s
+    signature is unchanged and the baseline writes the key."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
-    manifests = {}
-    for seed in (0, 1):
-        data_cfg = {
-            "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
-            "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-            "split": {"val_ratio": 0.2, "test_ratio": 0.2, "seed": seed},
-        }
-        train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
-        assert val_ds is not None
-        manifests[seed] = data_cfg["split"]["spatial_manifest"]
-
-    assert manifests[0]["train_region"] == manifests[1]["train_region"]
-    assert manifests[0]["val_region"] == manifests[1]["val_region"]
-    assert manifests[0]["test_region"] == manifests[1]["test_region"]
-    assert manifests[0]["seed"] != manifests[1]["seed"]
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.2, "test_ratio": 0.2},
+    }
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    assert val_ds is not None
+    manifest = data_cfg["split"]["spatial_manifest"]
+    assert manifest["train_region"] == [(1020, 0, 3086, 3000)]
+    assert manifest["val_region"] == [(0, 0, 842, 3000)]
+    assert manifest["test_region"] == [(3264, 0, 3902, 3000)]
+    assert "seed" not in manifest
 
 
-def test_spatial_manifest_tied_test_calibration_fractions_place_by_declared_order_not_seed(
+def test_spatial_manifest_tied_test_calibration_fractions_place_by_declared_order(
     tmp_path: Path,
 ):
     """``reserve_calibration_fraction == test_ratio`` ties their shares the same way; the
-    manifest's calibration/test regions must be identical across the same seed pair the
-    val/test tie above uses, while the recorded seed still differs."""
+    fixed declared order (``("train", "val", "test", "calibration")``) pins the calibration/test
+    regions the same way the val/test tie above pins its own, coverage of the placement, and the
+    manifest carries no ``seed`` key, guarded against ``45bab2c1`` on its own assertion."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
-    manifests = {}
-    for seed in (0, 1):
-        data_cfg = {
-            "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
-            "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-            "split": {"val_ratio": 0.25, "test_ratio": 0.15, "seed": seed,
-                      "reserve_calibration_fraction": 0.15},
-        }
-        train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
-        assert val_ds is not None
-        manifests[seed] = data_cfg["split"]["spatial_manifest"]
-
-    assert manifests[0]["calibration_region"] == manifests[1]["calibration_region"]
-    assert manifests[0]["test_region"] == manifests[1]["test_region"]
-    assert manifests[0]["seed"] != manifests[1]["seed"]
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.25, "test_ratio": 0.15, "reserve_calibration_fraction": 0.15},
+    }
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    assert val_ds is not None
+    manifest = data_cfg["split"]["spatial_manifest"]
+    assert manifest["calibration_region"] == [(0, 0, 638, 3000)]
+    assert manifest["test_region"] == [(3468, 0, 3902, 3000)]
+    assert "seed" not in manifest
 
 
 def test_spatial_manifest_distinct_fractions_layout_is_unaffected_by_the_fixed_tie_break(

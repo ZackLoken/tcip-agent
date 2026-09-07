@@ -1137,8 +1137,11 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_trai
 
 
 def _fake_auto_train_val_reading_seed_like_split_construction(task, data_cfg, transforms):
-    """The exact reads split_construction.py's own auto_train_val performs at :682/:692 and
-    :253/:702: setdefault the split block, then get its seed off that block."""
+    """The exact reads split_construction.py's own auto_train_val performs on its multi-stem
+    drawn path: setdefault the split block, then get its seed off that block. The single-source
+    spatial-strip path (spatial_single_source_split) reads no seed at all; see
+    test_run_hpo_trial_producer_fed_data_split_seed_is_unconsumed_over_the_single_source_spatial_path
+    for that path's own, different, consumption fact."""
     split_cfg = data_cfg.setdefault("split", {})
     split_cfg.get("seed", 42)
     ds = _TiledFakeDataset()
@@ -1199,12 +1202,15 @@ def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_
     assert resolved["data"]["tiling"]["tile_size"] == 224
 
 
-def test_run_hpo_trial_producer_fed_data_split_seed_reaches_the_real_auto_train_val(
+def test_run_hpo_trial_producer_fed_data_split_seed_is_unconsumed_over_the_single_source_spatial_path(
     monkeypatch, tmp_path,
 ):
     """The producer path: a real one-source tiled dataset through the real, unstubbed
-    auto_train_val, so data.split.seed reaches the exact read split_construction.py performs,
-    and the resolved-config snapshot carries the real spatial_manifest and tiling it wrote."""
+    auto_train_val. Its single-source spatial-strip branch places every strip by declared order
+    alone and reads no seed at all, so a trial that sweeps data.split.seed over this path
+    genuinely never consumes it: unconsumed_params names it, a fact the training-body-access
+    tracker reports honestly rather than masking, while the resolved-config snapshot still
+    carries the real spatial_manifest and tiling auto_train_val wrote."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
@@ -1237,8 +1243,9 @@ def test_run_hpo_trial_producer_fed_data_split_seed_reaches_the_real_auto_train_
     _run_hpo_trial({"data.split.seed": 3}, [].append, base, str(trial_dir))
 
     resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert "data.split.seed" not in resolved["unconsumed_params"]
+    assert "data.split.seed" in resolved["unconsumed_params"]
     assert resolved["data"]["split"]["spatial_manifest"]
+    assert "seed" not in resolved["data"]["split"]["spatial_manifest"]
     assert resolved["data"]["tiling"]["tile_size"] == 128
 
 

@@ -80,14 +80,16 @@ def test_split_policy_provenance_carries_each_locked_field_under_its_own_name():
 
 def test_spatial_split_kind_provenance_names_the_split_and_its_own_geometry():
     """A block-calibrated bundle has no locked draw to read a policy off, only the mosaic's own
-    recorded geometry, and each of those fields likewise has to land under its own name.
+    recorded geometry, and each of those fields likewise has to land under its own name. The
+    partition is placed by declared order and share alone, so no seed governs it: a residual
+    ``seed`` key in the input manifest is not carried into the written policy.
     """
     b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h",
                                 calibration_records=_records("c", 0.0))
     conf = b.params["conf"]
     attach_spatial_split_kind_provenance(b, {"seed": 3, "tile_size": 512, "overlap": 0.25})
 
-    assert conf.gate_evidence["split_policy"] == {"group_by": "spatial_strip", "seed": 3,
+    assert conf.gate_evidence["split_policy"] == {"group_by": "spatial_strip",
                                           "tile_size": 512, "overlap": 0.25}
 
 

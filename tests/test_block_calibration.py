@@ -238,7 +238,10 @@ def test_block_calibration_refuses_when_export_tile_size_differs_from_manifest(t
 
 def test_block_calibration_admits_valid_work_once_attested(tmp_path: Path):
     """The rail-admits-valid-work paired test: once every reserved cell is attested complete, the
-    same call that refused above resolves a real bundle with real per-band cal/hold records."""
+    same call that refused above resolves a real bundle with real per-band cal/hold records. Also
+    proves, over this real persisted record rather than a hand-built one, that the attached
+    split_policy carries no seed: the spatial-strip split places every side by declared order,
+    never a seed, and nothing here claims otherwise."""
     exp = _build_experiment(tmp_path)
     manifest = exp["spatial_manifest"]
     _attest_regions_complete(
@@ -268,6 +271,8 @@ def test_block_calibration_admits_valid_work_once_attested(tmp_path: Path):
         "checked": True, "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
         "group_check": "spatial_strip_geometric",
     }
+    assert conf.gate_evidence["split_policy"]["group_by"] == "spatial_strip"
+    assert "seed" not in conf.gate_evidence["split_policy"]
 
 
 def test_block_calibration_prefers_plant_pitch_over_gt_spacing_when_configured(tmp_path: Path):
@@ -872,7 +877,7 @@ def test_band_rects_are_reported_in_full_mosaic_coordinates():
 
     region = (500, 60, 1300, 260)
     rx0, ry0, rx1, ry1 = region
-    bands = _band_rects(region, 3, TILE, 0.2, buffer_px=40, seed=0, name_prefix="cal")
+    bands = _band_rects(region, 3, TILE, 0.2, buffer_px=40, name_prefix="cal")
 
     assert len(bands) == 3
     for name, (bx0, by0, bx1, by1) in bands.items():

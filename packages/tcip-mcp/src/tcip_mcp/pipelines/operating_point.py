@@ -788,13 +788,15 @@ def attach_spatial_split_kind_provenance(bundle: ResolvedBundle, spatial: dict) 
     image set: there is no ``locked`` dict here to read a group policy off, only the split's own
     recorded geometry, so this writes the split-kind fact directly instead of reusing
     ``attach_split_policy_provenance``'s ``locked``-shaped signature. A no-op when the bundle has
-    no calibrated ``conf`` gate evidence to attach to, same as its sibling.
+    no calibrated ``conf`` gate evidence to attach to, same as its sibling. Carries no ``seed``:
+    the spatial-strip split places every side by declared order and share alone, so no seed
+    governs which partition this bundle's reference came from.
     """
     conf = bundle.params.get("conf")
     if conf is None or conf.gate_evidence is None:
         return
     conf.gate_evidence["split_policy"] = {
-        "group_by": "spatial_strip", "seed": spatial.get("seed"),
+        "group_by": "spatial_strip",
         "tile_size": spatial.get("tile_size"), "overlap": spatial.get("overlap"),
     }
 
