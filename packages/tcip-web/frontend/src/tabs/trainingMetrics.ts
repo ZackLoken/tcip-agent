@@ -101,7 +101,8 @@ export function defaultChartSeries(metricKeys: string[], rows: MetricRow[]): Cha
     const valKey = VAL_METRIC_PREFIX + selectionMetric;
     if (lossKeys.includes(valKey)) duplicateLossKey = valKey;
     else if (lossKeys.includes(selectionMetric)) duplicateLossKey = selectionMetric;
-    else if (selectionMetric === "loss" && lossKeys.includes("train_loss")) duplicateLossKey = "train_loss";
+    else if (selectionMetric === "loss" && lossKeys.includes("train_loss"))
+      duplicateLossKey = "train_loss";
   }
 
   const keys = hasSelection && !duplicateLossKey ? [...lossKeys, "selection"] : lossKeys;
