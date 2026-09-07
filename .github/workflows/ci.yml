@@ -167,6 +167,40 @@ jobs:
             exit 1
           }
 
+  # The denied-rename branch runs only where an open database denies a directory rename; this
+  # job is its only CI coverage, the shape of ray-exit-windows above.
+  project-removal-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: environment.yml
+          activate-environment: tcip-agent
+          auto-activate-base: false
+
+      - name: The denied-rename branches, on the database backend
+        run: |
+          set -o pipefail
+          pytest tests/test_project_removal.py::test_denied_completion_reports_blocked_by_and_admits_once_released \
+                 "tests/test_store_contract.py::test_close_connections_releases_a_handle_so_the_root_can_be_renamed[sqlite]" \
+                 -v --timeout=300 | tee project-removal-windows-output.txt
+
+      - name: Prove both selected tests passed by node id, not a bare count
+        run: |
+          grep -qE "^tests/test_project_removal\.py::test_denied_completion_reports_blocked_by_and_admits_once_released PASSED" project-removal-windows-output.txt || {
+            echo "the denied-completion test did not pass (skipped or none selected)"
+            exit 1
+          }
+          grep -qE "^tests/test_store_contract\.py::test_close_connections_releases_a_handle_so_the_root_can_be_renamed\[sqlite\] PASSED" project-removal-windows-output.txt || {
+            echo "the seam contract test's sqlite case did not pass (skipped or none selected)"
+            exit 1
+          }
+
   # The documented container path (packages/tcip-web/Dockerfile) is built and answers here, so a
   # broken image reaches CI before an adopter.
   docker:
