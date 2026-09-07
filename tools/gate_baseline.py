@@ -52,6 +52,12 @@ OUT_OF_SCOPE_JOBS = {
         "one test file is Windows-only, so a Windows host's own suite already covers it and any "
         "other host has nothing local to run in its place"
     ),
+    "project-removal-windows": (
+        "it creates the conda environment this gate's own process already runs inside, and its "
+        "two selected tests exercise the denied-rename branch only a Windows host reaches, so a "
+        "Windows host's own suite already covers it and any other host has nothing local to run "
+        "in its place"
+    ),
 }
 
 _SKIP_PREFIXES = ("pip", "npm ci", "conda", "mamba")

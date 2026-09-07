@@ -49,7 +49,7 @@ def test_ci_activate_environment_keys_match():
         for step in job.get("steps", [])
         if isinstance(step.get("with"), dict) and "activate-environment" in step["with"]
     ]
-    assert values == [_environment_name()] * 2
+    assert values == [_environment_name()] * 3
 
 
 def test_mcp_json_launch_argument_matches():
@@ -66,7 +66,7 @@ def test_environment_win_lock_name_matches():
 # Repo-relative file and the number of its lines carrying the name, the structured files above
 # included so the tree-wide comparison is total; environment.yml's count is its key plus a prose line.
 _EXPECTED_COUNTS = {
-    ".github/workflows/ci.yml": 2,
+    ".github/workflows/ci.yml": 3,
     ".mcp.json": 1,
     "ARCHITECTURE.md": 3,
     "CLAUDE.md": 1,
