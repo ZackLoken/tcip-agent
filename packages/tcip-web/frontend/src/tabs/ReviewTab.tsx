@@ -3,7 +3,7 @@ import type Konva from "konva";
 
 import { api } from "@/api/client";
 import { classesApi, subjectColor } from "@/api/classes";
-import { committedOf } from "@/api/http";
+import { committedOf, isAuditEntryNotWritten } from "@/api/http";
 import { resultsApi, type RegisteredModel } from "@/api/inference";
 import type { ActionPayload } from "@/api/types.generated";
 import { BandPicker } from "@/components/BandPicker";
@@ -907,6 +907,7 @@ export function ReviewTab() {
       if (committed) {
         setImageStatus(committed.image_status);
         if (imgName) setReviewImageStatus(imgName, committed.image_status);
+        useStore.getState().pushToast("Recorded: no missed objects found on this image.", "info");
         useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
         return true;
       }
@@ -949,7 +950,11 @@ export function ReviewTab() {
               dataset.annotations_dir,
               useStore.getState().user || undefined,
             )
-            .catch(() => {});
+            .catch((e: unknown) => {
+              if (isAuditEntryNotWritten(e)) {
+                useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
+              }
+            });
         }
       }
     } catch (e) {
@@ -971,7 +976,11 @@ export function ReviewTab() {
                 dataset.annotations_dir,
                 useStore.getState().user || undefined,
               )
-              .catch(() => {});
+              .catch((e2: unknown) => {
+                if (isAuditEntryNotWritten(e2)) {
+                  useStore.getState().pushToast(e2 instanceof Error ? e2.message : String(e2));
+                }
+              });
           }
         }
         useStore.getState().pushToast(e instanceof Error ? e.message : String(e));

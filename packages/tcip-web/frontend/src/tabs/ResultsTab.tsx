@@ -303,6 +303,14 @@ function TraitSpecStatementPanel({
  * Parse an ISO date (`YYYY-MM-DD`) into a sortable integer. Mirrors the backend `_date_key`
  * in results.py so the chart's date order matches the server-computed onset table.
  */
+function auditGapExportMessage(savedPath: string, detail: string): string {
+  return (
+    `The file is already written at ${savedPath}, but its delivery is unrecorded. Exporting ` +
+    "again is a second delivery with its own event; supersede_delivery is the remedy for the " +
+    `first. ${detail}`
+  );
+}
+
 function dateKey(date: string): number {
   const parts = date.split("-");
   if (parts.length !== 3) return 0;
@@ -831,8 +839,7 @@ export function ResultsTab() {
         useStore
           .getState()
           .pushToast(
-            `The file is already written at ${committed.saved_path}. ` +
-              (e instanceof Error ? e.message : String(e)),
+            auditGapExportMessage(committed.saved_path, e instanceof Error ? e.message : String(e)),
           );
         return;
       }
@@ -898,8 +905,7 @@ export function ResultsTab() {
       const committed = committedOf<{ saved_path: string }>(e);
       if (committed) {
         setCountError(
-          `The file is already written at ${committed.saved_path}. ` +
-            (e instanceof Error ? e.message : String(e)),
+          auditGapExportMessage(committed.saved_path, e instanceof Error ? e.message : String(e)),
         );
         return;
       }
