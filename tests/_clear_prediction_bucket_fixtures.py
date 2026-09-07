@@ -1,6 +1,6 @@
 """Shared fixtures for ``clear_prediction_bucket`` tests: a canonical bucket published through
-``run_inference`` with a fake predictor, its experiment carried to a terminal state, and the
-stamp producers the design names (``operating_point_stamp``/``write_sidecar``, ``ReviewEngine``).
+``run_inference`` with a fake predictor, its experiment carried to a terminal state, and review
+state recorded against it through ``ReviewEngine``.
 """
 
 from __future__ import annotations
@@ -11,6 +11,20 @@ from typing import Any
 import pytest
 
 torch = pytest.importorskip("torch")
+
+
+def assert_source_stamps_absent(bucket: Path) -> None:
+    """Assert a ``read_versioned`` of each of ``SIDECAR_FILENAMES``' five stamps answers absent at
+    ``bucket``: the one helper every source-empty assertion goes through, rather than each test
+    checking ``operating_point`` alone and calling the source empty of stamps on that one answer."""
+    import tcip_store as ts
+    from tcip_annotation.json_io import SIDECAR_FILENAMES
+
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    for filename in SIDECAR_FILENAMES:
+        document = filename.removesuffix(".json")
+        assert ts.read_versioned(sidecar_key(bucket, document), default=None).value is None, document
 
 
 def stub_predictor(monkeypatch, *, boxes: tuple[tuple[float, float, float, float], ...] = (

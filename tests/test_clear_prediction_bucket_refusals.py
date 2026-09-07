@@ -1,6 +1,7 @@
-"""clear_prediction_bucket: every D5 refusal, each asserted on its own sentence, and D7's bracket
-refusal naming the door. Interrupted clears, fault injection and the review-landed-during-move
-race live in test_clear_prediction_bucket_resume.py instead."""
+"""clear_prediction_bucket: every refusal it makes before any write, each asserted on its own
+sentence, and the bracket's own refusal naming the door for a terminal experiment's own bucket.
+Interrupted clears, fault injection and the review-landed-during-move race live in
+test_clear_prediction_bucket_resume.py instead."""
 
 from __future__ import annotations
 
@@ -213,8 +214,9 @@ def test_detection_verdict_refuses_carrying_review_state(tmp_path, monkeypatch):
 
 
 def test_zero_verdict_complete_refuses_carrying_review_state(tmp_path, monkeypatch):
-    """A bulk-accepted image carries no detection verdict, but Q34 refuses the bucket, not its
-    documents: review_state_count sees it where verdict_count would not."""
+    """A bulk-accepted image carries no detection verdict, but this door refuses a bucket carrying
+    review state, not only its documents: review_state_count sees it where verdict_count would
+    not."""
     from tcip_mcp.prediction_buckets import review_state_dir_of
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
 
@@ -228,8 +230,8 @@ def test_zero_verdict_complete_refuses_carrying_review_state(tmp_path, monkeypat
 
 
 def test_review_on_removed_document_still_refuses(tmp_path, monkeypatch):
-    """The bucket's review state survives a removed document: Q34 refuses the bucket, so this
-    still refuses even though the stem no longer holds a document."""
+    """The bucket's review state survives a removed document, so this still refuses even though
+    the stem no longer holds a document."""
     import tcip_store as ts
     from tcip_annotation.json_io import annotation_record_key
     from tcip_mcp.prediction_buckets import review_state_dir_of

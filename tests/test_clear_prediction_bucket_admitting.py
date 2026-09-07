@@ -9,7 +9,9 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from tests._clear_prediction_bucket_fixtures import build_published_bucket
+from tests._clear_prediction_bucket_fixtures import (
+    assert_source_stamps_absent, build_published_bucket,
+)
 
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
@@ -131,6 +133,7 @@ def test_admitting_round_trip_clears_and_admits_republication(tmp_path, monkeypa
     # The source reads empty and unpublished; the cleared bucket is invisible to list_models.
     assert bucket_stems(source) == set()
     assert read_operating_point_sidecar(source) is None
+    assert_source_stamps_absent(source)
     assert ".cleared" not in list_models(dataset_root)
     assert cleared_path.name not in list_models(dataset_root)
 

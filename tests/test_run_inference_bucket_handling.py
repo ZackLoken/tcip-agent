@@ -78,7 +78,7 @@ def test_run_inference_writes_json(tmp_path, monkeypatch):
 
 def test_resolve_writable_bucket_for_pins_both_canonical_shapes_suggestion_strings(tmp_path):
     """Coverage: ``_resolve_writable_bucket_for`` restructured around the recognizer's own triple
-    (D3) still suggests exactly the strings it named before the restructuring, for both the dated
+    still suggests exactly the strings it named before the restructuring, for both the dated
     and the undated canonical shape. The undated shape is the one this restructuring is for: its
     suggestion must never spell ``predictions/<model>@r2/<model>``, which reading ``base_name`` as
     the date would have named."""
