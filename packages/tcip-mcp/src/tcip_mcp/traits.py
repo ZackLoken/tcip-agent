@@ -14,10 +14,12 @@ errors canceling is the right tolerance for a fraction/ratio phenotype, the comm
 the breeder hasn't decided yet, rather than refusing to calibrate at all: nobody can meaningfully
 answer what a delivered number needs to be reliable for before any result exists to judge it
 against, so the real confirmation point is the delivered result itself (the review-confirmation
-loop), not a blind precondition. Either field, once a real answer is recorded, gets written through
-``write_trait_spec_fields`` and is read from the recorded value on every later call. A trait whose
-config omits either field must resolve its own
-default or derivation, never silently inherit another trait's value. ``resolve_operating_point``
+loop), not a blind precondition. ``count_objective`` is an authored field: once a real answer is recorded, it moves through
+``revise_trait_spec`` with a rationale, restating the trait spec's own authoring statement for
+the breeder's re-confirmation. ``localization`` is carried forward, never authored, and stays on
+the plain ``write_trait_spec_fields``. Both are read from the recorded value on every later call.
+A trait whose config omits either field must resolve its own default or derivation, never
+silently inherit another trait's value. ``resolve_operating_point``
 stamps whether a given run's ``count_objective`` was trait-authored or the platform default, so the
 distinction is never silently lost downstream.
 
@@ -35,7 +37,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import tcip_store as ts
 from tcip_store import (
@@ -93,7 +95,8 @@ class TraitSpec:
     # to COUNT_UNBIASED (the common case for a fraction/ratio phenotype) rather than refusing to
     # calibrate, since nobody can meaningfully answer this before a result exists to judge it
     # against, stamping the run's provenance as trait-authored or platform-default so the
-    # distinction is never lost downstream. Record a real breeder answer via write_trait_spec_fields.
+    # distinction is never lost downstream. It is authored: record a real breeder answer via
+    # revise_trait_spec, with a rationale, which restates the trait spec's own authoring statement.
     count_objective: str = ""
     # What "a hit" means when validating counts (center_match vs iou_match), not authored: derived
     # once from real GT the first time it's needed and recorded via
@@ -480,44 +483,114 @@ def load_trait_specs(
     return specs
 
 
+class TraitSpecRevision(NamedTuple):
+    """One call's full answer to updating a trait spec: the spec as written, the trait-spec
+    authoring statement as written when this call stated or restated it (``None`` when it did
+    neither), and one sentence saying what happened to the statement."""
+
+    spec: TraitSpec
+    statement: dict[str, Any] | None
+    statement_note: str
+
+
 def write_trait_spec_fields(
     trait_name: str, fields_: dict,
     specs_dir: Path | None = None, *, project_root: str | Path | None = None,
+    rationale: str | None = None, relayed_note: str = "",
 ) -> TraitSpec:
-    """Update one or more fields on an already-registered trait spec.
+    """Update one or more fields on an already-registered trait spec, returning it as written.
 
-    Refuses (raises ``ValueError``) if the trait has no spec record on file, creating a new trait
-    is a separate, still-manual authoring step, out of scope here. Re-validates the merged spec
-    through ``_spec_from_config``, the same crops.yml cross-check and field validation every
-    config-authored spec already goes through, reused rather than a second implementation, and
-    refuses to write anything that would silently fail to load or fall out of
-    ``registered_traits()`` afterward. The read, the merge and the write are one compare-and-set
-    against the version read, retried on conflict against whatever landed meanwhile, so a second
-    writer recording a different field cannot be overwritten by what this caller had read before
-    it landed.
+    This is the one write path for updating a trait spec anywhere in the platform: creating a
+    new trait is a separate, still-manual authoring step, out of scope here. Every existing call
+    keeps working unchanged; ``rationale`` and ``relayed_note`` are new, keyword-only. A thin
+    wrapper over :func:`revise_trait_spec_fields`, which holds the compare-and-set loop and the
+    trait-spec statement it restates; the ``revise_trait_spec`` MCP tool calls that function
+    directly for its fuller return, while the derived localization kind and every other
+    field-only caller keep calling this one for its plain ``TraitSpec``.
+    """
+    return revise_trait_spec_fields(
+        trait_name, fields_, specs_dir, project_root=project_root,
+        rationale=rationale, relayed_note=relayed_note,
+    ).spec
 
-    This is the only write path for updating a trait spec anywhere in the platform: creating a
-    new trait is a separate, still-manual authoring step, out of scope here, but once a spec
-    exists, this function is what the ``revise_trait_spec`` MCP tool calls, and what the
-    derived localization kind and the recorded count-objective decision both use to persist
-    themselves; neither gets its own write implementation.
 
-    Refuses (raises ``ValueError``) a caller-supplied ``schema_version`` in ``fields_``: it is
-    not a ``TraitSpec`` field, no caller sets it directly, and merging it in would let a config
-    editor stamp a version the store seam never validated. The stamp already on record, if any,
-    survives every field edit unchanged.
+def revise_trait_spec_fields(
+    trait_name: str, fields_: dict,
+    specs_dir: Path | None = None, *, project_root: str | Path | None = None,
+    rationale: str | None = None, relayed_note: str = "",
+) -> TraitSpecRevision:
+    """Update one or more fields on an already-registered trait spec, and state or restate its
+    trait-spec authoring statement when the update calls for it.
+
+    Refuses (raises ``ValueError``) if the trait has no spec record on file: creating one is
+    ``author_trait_spec``'s job. Refuses a caller-supplied ``schema_version`` in ``fields_``: it
+    is not a ``TraitSpec`` field, no caller sets it directly, and merging it in would let a
+    config editor stamp a version the store seam never validated; the stamp already on record,
+    if any, survives every field edit unchanged. A ``rationale`` that is given must say
+    something, checked before any read.
+
+    The read, the merge, the validation and the spec write are one compare-and-set against the
+    version read, retried on conflict against whatever landed meanwhile; the candidate is parsed
+    once here to decide whether to refuse and what moved, and a second time inside
+    :func:`_validate_and_write_spec` on the write itself, the cost of keeping that one shared
+    write path. ``moved`` is whether the merge changes any of ``_AUTHORED_SPEC_FIELDS`` from
+    what is on file now, both sides parsed through :func:`_spec_from_config` so a field merely
+    restated at its own value never reads as moved; a stored record the parser refuses has no
+    parsed values to compare, so a merge that repairs it back to a parseable spec is read as
+    having moved the authored fields the merge itself named, since such a repair can only work by
+    overwriting the very field that made the record unparseable. ``stale`` is whether the
+    trait-spec statement on file, if any, is absent or no longer matches the candidate
+    (:func:`trait_spec_statement_stale`). A call that moves an authored field over a trait
+    carrying a statement and gives no rationale refuses by name, naming the fields that moved,
+    before any write; every other combination writes the spec.
+
+    A rationale-bearing call then states or restates the trait-spec statement whenever no
+    statement is on file, the one on file is stale, or this call moved an authored field (a spec
+    moved past its confirmed statement by a raw write and then restated back to those same
+    confirmed values still needs a fresh statement and the breeder's second look, since ``moved``
+    is a condition of its own and is never folded into ``stale``); a current, unmoved statement
+    is left alone, and a rationale-less call never touches the statement at all, which is what
+    the derived localization kind's and every other carried-forward write's call relies on.
+    ``relayed_note`` is taken fresh on every statement written here, never carried forward from
+    the one it replaces, since a remark about the old values says nothing about the new ones.
+    The statement write is its own compare-and-set: on conflict, the spec on file is re-read and
+    compared to what this call wrote by authored snapshot; a different snapshot means a
+    concurrent revision to other values landed after this call's own write, and the restatement
+    is abandoned, since a concurrent writer that itself restates leaves its own statement current
+    and one that does not leaves a stale pair the read-time predicate, the doctor and this
+    refusal each catch on their own; an unchanged snapshot retries the statement write against
+    whatever is on file now, creating fresh when the statement was deleted meanwhile. No branch
+    ever leaves a statement whose snapshot already equals this call's own: such a record can only
+    be the old confirmed statement or a confirmation of it landing in the same window, and either
+    way this call's own rationale is what belongs on record for it.
+
+    Two keys in two stores are never written atomically: a crash between the spec write and the
+    statement write, or a no-rationale authored write racing this call's own statement create in
+    either ordering, can leave a spec whose statement is stale with no version conflict on either
+    side. Both are read-time facts the delivery refusal, the doctor and this function's own
+    no-rationale refusal each catch on their own, never assumed away here.
     """
     if "schema_version" in fields_:
         raise ValueError(
             f"update to trait spec {trait_name!r} cannot carry 'schema_version' in fields: it "
             "is not a TraitSpec field, and no caller writes it directly"
         )
+    if rationale is not None:
+        rationale = _require_text(rationale, "rationale")
+
     directory = _resolve_specs_dir(specs_dir, project_root)
-    key = trait_spec_key(directory, trait_name)
-    # A conflict means another writer committed, so the loop only repeats while the spec is
-    # actually changing under it and ends when this merge is the one that lands.
+    if specs_dir is not None and project_root is None:
+        statements_scope: str | Path = _trait_specs_state_root(directory)
+    else:
+        statements_scope = trait_spec_statements_scope(project_root)
+    spec_key = trait_spec_key(directory, trait_name)
+    statement_key = trait_spec_statement_key(statements_scope, trait_name)
+    vocab = _crops_vocab()
+
+    # A conflict at the spec key means another writer committed, so the loop only repeats while
+    # the spec is actually changing under it and ends when this merge is the one that lands.
     while True:
-        stored = ts.read_versioned(key, default=None)
+        stored = ts.read_versioned(spec_key, default=None)
         if stored.value is None:
             raise _no_spec_error(trait_name, directory)
         data = stored.value
@@ -527,19 +600,93 @@ def write_trait_spec_fields(
 
         merged = dict(data)
         merged.update(fields_)
-
-        try:
-            spec, reason = _validate_and_write_spec(
-                key, merged, expect=stored.version, schema_version=data.get("schema_version"),
-            )
-        except VersionConflict:
-            continue
-        if spec is None:
+        candidate, reason = _spec_from_config(merged, vocab)
+        if candidate is None:
             raise ValueError(
                 f"update to trait spec {trait_name!r} would produce an invalid spec: {reason}. "
                 "Refusing to write."
             )
-        return spec
+
+        stored_spec, _stored_reason = _spec_from_config(data, vocab)
+        if stored_spec is None:
+            moved_fields = sorted(set(fields_) & set(_AUTHORED_SPEC_FIELDS))
+        else:
+            stored_snapshot = _statement_snapshot(stored_spec)
+            candidate_snapshot = _statement_snapshot(candidate)
+            moved_fields = sorted(
+                f for f in _AUTHORED_SPEC_FIELDS if stored_snapshot[f] != candidate_snapshot[f]
+            )
+        moved = bool(moved_fields)
+
+        existing_statement = ts.read_versioned(statement_key, default=None)
+        statement_on_file = existing_statement.value
+        stale = trait_spec_statement_stale(candidate, statement_on_file)
+
+        if moved and statement_on_file and rationale is None:
+            raise ValueError(
+                f"update to trait spec {trait_name!r} moves {moved_fields}, and its authoring "
+                "statement already covers the old values; changing an authored field needs a "
+                "rationale so the statement restates for the breeder's re-confirmation. Pass "
+                "rationale=... naming why."
+            )
+
+        try:
+            written_spec, write_reason = _validate_and_write_spec(
+                spec_key, merged, expect=stored.version, schema_version=data.get("schema_version"),
+            )
+        except VersionConflict:
+            continue
+        if written_spec is None:
+            raise ValueError(
+                f"update to trait spec {trait_name!r} would produce an invalid spec: "
+                f"{write_reason}. Refusing to write."
+            )
+        break
+
+    if rationale is None:
+        return TraitSpecRevision(written_spec, None, "left untouched, no rationale")
+    if not (moved or stale or statement_on_file is None):
+        return TraitSpecRevision(written_spec, None, "left as it is, current")
+    if statement_on_file is None:
+        note = "stated, since none was on record"
+    elif stale:
+        note = "restated, since the one on record was stale"
+    else:
+        note = f"restated for re-confirmation, since {moved_fields} moved"
+
+    statement_expect = existing_statement.version
+    while True:
+        new_statement = {
+            "trait": trait_name,
+            "statement_fields": _statement_snapshot(written_spec),
+            "rationale": rationale,
+            "stated_by": TRAIT_SPEC_REVISION_SURFACE,
+            "stated_at": now_iso(),
+            "relayed_note": str(relayed_note or ""),
+            **agent_identity.statement_fields(),
+            **{field: None for field in TRAIT_SPEC_CONFIRMATION_FIELDS},
+        }
+        try:
+            ts.replace(statement_key, new_statement, expect=statement_expect)
+        except VersionConflict:
+            spec_reread = ts.read_versioned(spec_key, default=None)
+            reread_data = spec_reread.value
+            reread_spec = (
+                _spec_from_config(reread_data, vocab)[0]
+                if isinstance(reread_data, dict) else None
+            )
+            if (
+                reread_spec is None
+                or _statement_snapshot(reread_spec) != _statement_snapshot(written_spec)
+            ):
+                return TraitSpecRevision(
+                    written_spec, None,
+                    "abandoned: the spec's authored values moved again before this call's "
+                    "statement could land",
+                )
+            statement_expect = ts.read_versioned(statement_key, default=None).version
+            continue
+        return TraitSpecRevision(written_spec, new_statement, note)
 
 
 def _encode_spec(spec: TraitSpec, *, schema_version: Any = None) -> dict[str, Any]:
@@ -583,9 +730,9 @@ def _validate_and_write_spec(
     ``schema_version``, when given, rides through to the write unchanged; omitting it (the
     default) writes an unstamped record, which is what a fresh authoring means to do.
 
-    The one write every trait-spec writer shares: ``write_trait_spec_fields``'s retry loop,
-    ``author_trait_spec``'s single cas attempt, the phenology smoke script's seed and the
-    provenance-drop operator script all call this rather than repeating the
+    The one write every trait-spec writer shares: ``revise_trait_spec_fields``'s compare-and-set
+    loop, ``author_trait_spec``'s single cas attempt, and the test producer
+    ``_operationalization_fixtures.write_spec`` all call this rather than repeating the
     validate-encode-write shape.
     """
     spec, reason = _spec_from_config(data, _crops_vocab())
@@ -598,7 +745,7 @@ def _validate_and_write_spec(
 def _no_spec_error(trait_name: str, directory: Path) -> ValueError:
     return ValueError(
         f"no trait spec record for {trait_name!r} under {directory}, "
-        "write_trait_spec_fields only updates an already-registered trait; register it first "
+        "revise_trait_spec only updates an already-registered trait; register it first "
         "with author_trait_spec."
     )
 
@@ -614,6 +761,15 @@ _AUTHORED_SPEC_FIELDS = (
 )
 """Every ``TraitSpec`` field ``author_trait_spec`` accepts; see its own docstring for why the rest
 of ``TraitSpec`` is not here."""
+
+
+def _statement_snapshot(spec: TraitSpec) -> dict[str, Any]:
+    """The comparable snapshot a trait-spec statement's own ``statement_fields`` holds: every
+    authored field's canonical value. Shared by ``author_trait_spec``, ``revise_trait_spec_fields``
+    and :func:`trait_spec_statement_stale`, so the three sites cannot disagree over what a
+    statement's own fields snapshot means."""
+    return {field: canonical(getattr(spec, field)) for field in _AUTHORED_SPEC_FIELDS}
+
 
 _CARRIED_FORWARD_SPEC_FIELDS = (
     "localization", "localization_tolerance", "localization_tolerance_frac",
@@ -638,6 +794,11 @@ TRAIT_SPEC_STATEMENT_SURFACE = "author_trait_spec"
 statement came in through the authoring tool rather than through a file edit, nothing more. The
 harness and session that made the call are the agent identity fields beside it, declared by the
 connecting software and no evidence of who the person was."""
+
+TRAIT_SPEC_REVISION_SURFACE = "revise_trait_spec"
+"""The producing surface stamped into a restatement's ``stated_by``: the one platform caller
+that reaches ``revise_trait_spec_fields``'s statement branch, the field-editing door rather than
+the authoring one."""
 
 TRAIT_SPEC_STATEMENTS_STORE = "trait_spec_statements"
 _STATEMENT_FILE = RootedFileLocator(prefix=("trait_spec_statements",), suffix=".json")
@@ -706,7 +867,7 @@ def _spec_collision_text(trait_name: str) -> str:
         f"author_trait_spec cannot register trait {trait_name!r}: a trait spec and its authoring "
         "statement are both already on record for it. author_trait_spec only creates a trait that "
         "does not yet exist; change an already-registered spec's fields with "
-        "write_trait_spec_fields instead."
+        "revise_trait_spec instead."
     )
 
 
@@ -808,11 +969,9 @@ def author_trait_spec(
     if spec is None:
         raise ValueError(f"author_trait_spec cannot register trait {trait!r}: {reason}")
 
-    written = _encode_spec(spec)
-
     statement = {
         "trait": trait,
-        "statement_fields": {field: canonical(written[field]) for field in _AUTHORED_SPEC_FIELDS},
+        "statement_fields": _statement_snapshot(spec),
         "rationale": _require_text(rationale, "rationale"),
         "stated_by": TRAIT_SPEC_STATEMENT_SURFACE,
         "stated_at": now_iso(),
@@ -826,6 +985,13 @@ def author_trait_spec(
 
 class TraitSpecStatementNotFound(ValueError):
     """Raised when a confirmation arrives for a trait nothing has been stated for."""
+
+
+class TraitSpecUnconfirmed(ValueError):
+    """Raised when a delivery-meaning statement is attempted for a trait whose own trait-spec
+    statement is not both confirmed and current: absent, stale, or current but never confirmed by
+    the breeder. Defined here, beside :class:`TraitSpecStatementNotFound`, rather than in
+    ``operationalization``, since a trait-spec statement is this module's own record."""
 
 
 class TraitSpecStatementMoved(ValueError):
@@ -869,7 +1035,10 @@ def confirm_trait_spec(
     if not stated:
         raise TraitSpecStatementNotFound(
             f"nothing is stated for trait {trait!r}, so there is no trait-spec statement to "
-            "confirm; the agent records one with author_trait_spec first"
+            "confirm. This reads only the statement store, so it cannot tell whether a spec is "
+            "on record: if one is, state it with revise_trait_spec(project_root=..., "
+            f"trait_name={trait!r}, fields={{}}, rationale=...); if none is, register it with "
+            "author_trait_spec first"
         )
     current_seen = trait_spec_statement_seen_hash(stated)
     if record_seen != current_seen:
@@ -895,19 +1064,34 @@ def confirm_trait_spec(
     return updated
 
 
-def trait_spec_statement_current(spec: TraitSpec, statement: dict[str, Any] | None) -> bool:
-    """Whether ``statement``'s authored-field snapshot still matches ``spec``'s live values.
+def trait_spec_statement_stale(spec: TraitSpec, statement: dict[str, Any] | None) -> bool:
+    """Whether ``statement`` is absent, or its authored-field snapshot no longer matches
+    ``spec``'s live values.
 
-    Invalidation here is read-time, not write-time: ``write_trait_spec_fields`` does not clear a
-    confirmation when it lands, so a confirmed statement whose covered fields have since moved is
-    caught here, the same way an operationalization's constituting-field drift is caught by
-    comparison rather than by a write-time rule. Unstated or unconfirmed is never current.
+    The one staleness predicate ``revise_trait_spec_fields`` (against the candidate spec),
+    ``state_operationalization``'s trait-spec precondition and the doctor's own check all call,
+    so the three sites cannot disagree about what counts as stale.
+    """
+    if not statement:
+        return True
+    recorded = statement.get("statement_fields") or {}
+    return recorded != _statement_snapshot(spec)
+
+
+def trait_spec_statement_current(spec: TraitSpec, statement: dict[str, Any] | None) -> bool:
+    """Whether ``statement`` is both confirmed by the breeder and not stale against ``spec``'s
+    live values: "not stale and confirmed".
+
+    Invalidation here is read-time, not write-time: the write-time restatement inside
+    ``revise_trait_spec_fields`` is the platform's own mechanism for keeping a statement from
+    going stale in the first place, and this is the backstop for a spec written past it (a raw
+    store write, the evaluation's own carried-forward write, a crash between the spec write and
+    the statement write), the same way an operationalization's constituting-field drift is caught
+    by comparison rather than by a write-time rule. Unstated or unconfirmed is never current.
     """
     if not statement or not statement.get("confirmed_by"):
         return False
-    recorded = statement.get("statement_fields") or {}
-    live = {field: canonical(getattr(spec, field)) for field in _AUTHORED_SPEC_FIELDS}
-    return recorded == live
+    return not trait_spec_statement_stale(spec, statement)
 
 
 def _all_traits() -> dict[str, TraitSpec]:
