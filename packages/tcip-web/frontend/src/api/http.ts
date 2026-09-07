@@ -51,6 +51,25 @@ export async function asJson<T>(r: Response): Promise<T> {
   return (await r.json()) as T;
 }
 
+/** The stable marker a route answers with when a mutation it already committed could not be
+ *  recorded to the audit log (`routes/audit_gap.py`'s own name for it). Carried in `detail.error`
+ *  at whatever status the route answers: 409 for most GUI routes, 500 for coverage's own. */
+export const AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written";
+
+/** True when `e` is a refusal carrying that marker, at any status. */
+export function isAuditEntryNotWritten(e: unknown): e is StructuredRefusalError {
+  return e instanceof StructuredRefusalError && e.detail.error === AUDIT_ENTRY_NOT_WRITTEN;
+}
+
+/** The `committed` body an audit-gap refusal carries: the response a healthy call would have
+ *  returned, so a caller adopts it and reaches the state a 200 would have left it in. Null when
+ *  `e` is not one of these refusals, or the route itself could not say what committed. */
+export function committedOf<T>(e: unknown): T | null {
+  if (!isAuditEntryNotWritten(e)) return null;
+  const committed = e.detail.committed;
+  return committed === null || committed === undefined ? null : (committed as T);
+}
+
 /** Absolute ws:// or wss:// URL for a backend socket path, matching the page's own scheme. */
 export function wsUrl(path: string): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";

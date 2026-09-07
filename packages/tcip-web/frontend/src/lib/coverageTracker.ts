@@ -33,7 +33,9 @@ import {
   type GridCell,
   type GridGeometry,
 } from "@/lib/coverage";
-import { StructuredRefusalError } from "@/api/http";
+import { isAuditEntryNotWritten, StructuredRefusalError } from "@/api/http";
+
+export { isAuditEntryNotWritten };
 import type { PixelRect } from "@/lib/viewGeometry";
 
 export type { CoveragePayload, CoverageRecord, CoverageViewing, WorkingScale };
@@ -107,30 +109,11 @@ const COVERAGE_LATTICE_MISMATCH = "coverage_lattice_mismatch";
 /** How long a failed push stays queued before the outbox retries it. */
 const OUTBOX_RETRY_MS = 5000;
 
-/** The stable marker `post_coverage`'s 500 body carries when the record committed but its audit
- *  line could not be written (`routes/coverage.py`'s `AUDIT_ENTRY_NOT_WRITTEN`): a retry of the
- *  same payload merges to no change and writes no line, so this answer is terminal like a 4xx,
- *  never retried like an ordinary 5xx. */
-const AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written";
-
 /** The HTTP status a thrown push error carries, or null for one that carries none (a network
  *  failure, or a body with no structured `detail` at all): the single place that reads it, so
  *  the outbox's own terminality check and a live tracker's own retry stay one answer. */
 function pushErrorStatus(err: unknown): number | null {
   return err instanceof StructuredRefusalError ? err.status : null;
-}
-
-/** Whether `err` is the marked 500 a route answers when a write committed but its audit line
- *  could not be appended (see `AUDIT_ENTRY_NOT_WRITTEN`): terminal like a 4xx, never retried
- *  like an ordinary 5xx, since the write already landed and a retry recovers nothing. The one
- *  place either caller of this module -- this file's own outbox and `useRegionCompleteness`'s
- *  completeness write -- reads the marker, so both name the same failure the same way. */
-export function isAuditEntryNotWritten(err: unknown): boolean {
-  return (
-    err instanceof StructuredRefusalError &&
-    err.status === 500 &&
-    err.detail.error === AUDIT_ENTRY_NOT_WRITTEN
-  );
 }
 
 /** The stored grid and sweep count a coverage-lattice-mismatch 409 names, or null when `err` is
@@ -154,10 +137,10 @@ function coverageLatticeMismatchDetail(err: unknown): ReplaceRequired | null {
 
 /** Whether a failed push can never succeed by retrying the identical payload: any 4xx (an
  *  unknown cell, an unconformed stored record, a refused subject, or the lattice-mismatch 409)
- *  or the audit-gap 500, each terminal by status alone -- the 409 needs no marker check here,
+ *  or the audit-gap marker (terminal regardless of status) -- the 409 needs no marker check here,
  *  since a live tracker's own error path (`setHoldFromError`) reads the marker and turns it into
  *  the replace hold before this function or the outbox ever sees the failure. A network failure
- *  or an ordinary 5xx is not terminal and stays queued. */
+ *  or an ordinary 5xx with no marker is not terminal and stays queued. */
 function isTerminalPushFailure(err: unknown): boolean {
   if (isAuditEntryNotWritten(err)) return true;
   const status = pushErrorStatus(err);
