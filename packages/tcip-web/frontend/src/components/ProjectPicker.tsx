@@ -15,7 +15,12 @@ import {
   type ProjectSummary,
   type RemovalOutcome,
 } from "@/api/client";
-import type { DependentProject, ExternalRoot, RemovalPreview } from "@/api/types.generated";
+import type {
+  DependencyWarning,
+  DependentProject,
+  ExternalRoot,
+  RemovalPreview,
+} from "@/api/types.generated";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SeasonRail } from "@/components/SeasonRail";
 import { UNSET_GLYPH } from "@/lib/glyphs";
@@ -41,10 +46,12 @@ function RemovalDialog({
   name,
   onClose,
   onRemoved,
+  onRefetchListing,
 }: {
   name: string;
   onClose: () => void;
   onRemoved: () => void;
+  onRefetchListing: () => void;
 }) {
   const user = useStore((s) => s.user);
   const nameFieldId = useId();
@@ -53,6 +60,8 @@ function RemovalDialog({
   const [confirmText, setConfirmText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [releasing, setReleasing] = useState(false);
+  const [releaseError, setReleaseError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,6 +78,18 @@ function RemovalDialog({
     };
   }, [name]);
 
+  function loadPreview() {
+    return api.projects
+      .removalPreview(name)
+      .then((p) => {
+        setPreview(p);
+        setPreviewError(null);
+      })
+      .catch((e) => {
+        setPreviewError(e instanceof Error ? e.message : String(e));
+      });
+  }
+
   // A failed preview never settles (confirm stays disabled) but does end the check, so the
   // dialog stops being busy; the name field is never disabled, a refusal only blocks confirm.
   const previewSettled = preview !== null;
@@ -83,18 +104,43 @@ function RemovalDialog({
       const res = await api.projects.remove({ name, confirm_name: confirmText, user });
       forgetRecentProject(name);
       const archiveName = res.archive_path.split(/[/\\]/).filter(Boolean).pop() ?? res.archive_path;
+      const suffix = res.recorded_in_open_project
+        ? ""
+        : ` This backend has no project open, so the request is recorded in ${name}'s own log.`;
       useStore
         .getState()
         .pushToast(
           `Removal requested: ${name} is archived at ${archiveName} under the workspace's ` +
-            "holding directory and moves beside it at the next backend start. Nothing is deleted.",
+            "holding directory and moves beside it at the next backend start. Nothing is " +
+            `deleted.${suffix}`,
           "success",
         );
       onRemoved();
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : String(e));
+      onRefetchListing();
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function releaseBinding() {
+    setReleasing(true);
+    setReleaseError(null);
+    try {
+      await api.projects.releaseBinding(name, user);
+      useStore
+        .getState()
+        .pushToast(
+          `Released ${name}: it no longer opens by default and the GUI no longer counts it open.`,
+          "success",
+        );
+      await loadPreview();
+      onRefetchListing();
+    } catch (e) {
+      setReleaseError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReleasing(false);
     }
   }
 
@@ -126,6 +172,23 @@ function RemovalDialog({
             </p>
           )}
           {refusal && <p className="text-tcip-fp">{refusal}</p>}
+          {preview?.releasable && (
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                className="tcip-btn self-start"
+                disabled={releasing}
+                onClick={releaseBinding}
+              >
+                {releasing ? "Releasing…" : `Release ${name}`}
+              </button>
+              <p className="text-tcip-muted">
+                Stops it opening by default and forgets it as the GUI&apos;s open project; nothing
+                else changes.
+              </p>
+              {releaseError && <p className="text-tcip-fp">{releaseError}</p>}
+            </div>
+          )}
           {preview?.external_roots_unreadable && (
             <p className="text-tcip-fp">
               External roots could not be read: {preview.external_roots_unreadable}
@@ -214,6 +277,20 @@ export function localTime(compactUtc: string): string {
 function holdingDirName(path: string): string {
   const parts = path.split(/[/\\]/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
+}
+
+function dependencyWarningLine(w: DependencyWarning): string {
+  if (w.present) {
+    return (
+      `Depends on ${w.target} (dataset ${w.dataset_id}), which is pending removal; its images ` +
+      "move to the workspace's holding directory at the next backend start, and this warning " +
+      "clears once the dataset is registered again from where they are then"
+    );
+  }
+  return (
+    `Depends on ${w.target} (dataset ${w.dataset_id}), which is no longer in the workspace; ` +
+    "this warning clears once the dataset is registered again from where its images now are"
+  );
 }
 
 function removalOutcomeLine(o: RemovalOutcome): string {
@@ -445,6 +522,16 @@ export function ProjectPicker() {
                           {p.label_problem}
                         </span>
                       )}
+                      {p.dependency_warnings.map((w, i) => (
+                        <span key={i} className="text-[11px] text-tcip-fp">
+                          {dependencyWarningLine(w)}
+                        </span>
+                      ))}
+                      {p.dependency_problem && (
+                        <span className="text-[11px] text-tcip-fp">
+                          its dataset registry could not be read ({p.dependency_problem})
+                        </span>
+                      )}
                       {/* Signature: the project's captures across the season, each date labelled. */}
                       <SeasonRail
                         dates={p.dates}
@@ -554,7 +641,7 @@ export function ProjectPicker() {
                               <button
                                 type="button"
                                 className="tcip-btn"
-                                disabled={!!reason}
+                                disabled={!!reason && !p.removal_releasable}
                                 aria-describedby={reason ? reasonId : undefined}
                                 onClick={() => setRemovalTarget(p.name)}
                               >
@@ -611,6 +698,7 @@ export function ProjectPicker() {
             setRemovalTarget(null);
             void refetch();
           }}
+          onRefetchListing={() => void refetch()}
         />
       )}
     </div>

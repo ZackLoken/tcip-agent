@@ -12,6 +12,7 @@ vi.mock("@/api/client", () => {
         setActive: vi.fn().mockResolvedValue({ name: "x", path: "/x" }),
         removalPreview: vi.fn(),
         remove: vi.fn(),
+        releaseBinding: vi.fn(),
       },
       dataset: {
         select: vi.fn(),
@@ -42,6 +43,9 @@ const PROJECTS: ProjectSummary[] = [
     site_problem: null,
     label_problem: null,
     removal_refusal: null,
+    removal_releasable: false,
+    dependency_warnings: [],
+    dependency_problem: null,
   },
   {
     name: "crop_b_burr_site-b",
@@ -61,6 +65,9 @@ const PROJECTS: ProjectSummary[] = [
       "tcip write-project-site, for /ws/crop_b_burr_site-b",
     label_problem: null,
     removal_refusal: null,
+    removal_releasable: false,
+    dependency_warnings: [],
+    dependency_problem: null,
   },
 ];
 
@@ -74,9 +81,15 @@ beforeEach(() => {
   vi.mocked(api.projects.setActive).mockResolvedValue({ name: "x", path: "/x" });
   vi.mocked(api.projects.removalPreview).mockReset();
   vi.mocked(api.projects.remove).mockReset();
+  vi.mocked(api.projects.releaseBinding).mockReset();
 });
 
-const NO_REFUSAL_PREVIEW = { external_roots: [], dependent_projects: [], refusal: null };
+const NO_REFUSAL_PREVIEW = {
+  external_roots: [],
+  dependent_projects: [],
+  refusal: null,
+  releasable: false,
+};
 
 describe("ProjectPicker", () => {
   it("lists workspace projects with stats", async () => {
@@ -519,11 +532,17 @@ async function selectFirstCard() {
 
 describe("ProjectPicker removal", () => {
   it.each([
-    "sample plot is the project this workspace opens by default; choose a different default first",
-    "sample plot is the project this backend started on; restart on a different project first",
-    "sample plot is the project the GUI has open; open a different project first",
+    "sample plot is the project this workspace opens by default; choose a different default " +
+      "first, or release it as the default",
+    "sample plot is the project this backend started on; restart the backend first, started " +
+      "without TCIP_STATE_ROOT naming it",
+    "sample plot is the project the GUI has open; open a different project first, or release " +
+      "it as the open project",
   ])("disables Remove with the backend's own reason (%s)", async (reasonText) => {
-    const projectsWithReason = [{ ...PROJECTS[0], removal_refusal: reasonText }, PROJECTS[1]];
+    const projectsWithReason = [
+      { ...PROJECTS[0], removal_refusal: reasonText, removal_releasable: false },
+      PROJECTS[1],
+    ];
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
@@ -542,10 +561,14 @@ describe("ProjectPicker removal", () => {
     expect(reason).toHaveTextContent(reasonText);
   });
 
-  it("disables every card's Remove control when no project is open in the backend", async () => {
+  it("keeps Remove enabled, with the reason still described beside it, when the refusal is releasable", async () => {
     const reasonText =
-      "no project is open in this backend; open one first so the request is recorded in its log";
-    const projectsWithReason = PROJECTS.map((p) => ({ ...p, removal_refusal: reasonText }));
+      "sample plot is the project this workspace opens by default; choose a different " +
+      "default first, or release it as the default";
+    const projectsWithReason = [
+      { ...PROJECTS[0], removal_refusal: reasonText, removal_releasable: true },
+      PROJECTS[1],
+    ];
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
@@ -557,7 +580,11 @@ describe("ProjectPicker removal", () => {
     render(<ProjectPicker />);
     await selectFirstCard();
 
-    expect(screen.getByRole("button", { name: "Remove…" })).toBeDisabled();
+    const remove = screen.getByRole("button", { name: "Remove…" });
+    expect(remove).not.toBeDisabled();
+    expect(remove).toHaveAttribute("aria-describedby");
+    const reason = document.getElementById(remove.getAttribute("aria-describedby")!);
+    expect(reason).toHaveTextContent(reasonText);
   });
 
   it("enables Remove for a card the backend names no reason for", async () => {
@@ -588,6 +615,7 @@ describe("ProjectPicker removal", () => {
       external_roots: [{ path: "/data/external", layouts: ["root"], present: true }],
       dependent_projects: [{ project: "other_project", dataset_id: "ds1" }],
       refusal: "a live run is in progress",
+      releasable: false,
     });
     render(<ProjectPicker />);
     await selectFirstCard();
@@ -624,6 +652,7 @@ describe("ProjectPicker removal", () => {
       external_roots: [],
       dependent_projects: [],
       refusal: "a live run is in progress",
+      releasable: false,
     });
     render(<ProjectPicker />);
     await selectFirstCard();
@@ -736,6 +765,7 @@ describe("ProjectPicker removal", () => {
       external_roots: [{ path: "/data/external", layouts: ["root"], present: true }],
       dependent_projects: [{ project: "other_project", dataset_id: "ds1" }],
       refusal: null,
+      releasable: false,
     });
     render(<ProjectPicker />);
     await selectFirstCard();
@@ -802,6 +832,204 @@ describe("ProjectPicker removal", () => {
     expect(api.projects.remove).toHaveBeenCalled();
   });
 
+  it("re-fetches the listing behind the dialog on a refused submit", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
+    vi.mocked(api.projects.remove).mockRejectedValue(
+      new Error("another request already marked it for removal"),
+    );
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Remove…" }));
+    const dialog = await screen.findByRole("dialog");
+    const nameField = await within(dialog).findByLabelText(/type the project name to confirm/i);
+    fireEvent.change(nameField, { target: { value: PROJECTS[0].name } });
+    const listCallsBefore = vi.mocked(api.projects.list).mock.calls.length;
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Remove$/ }));
+
+    await within(dialog).findByText(/another request already marked it for removal/);
+    await waitFor(() =>
+      expect(vi.mocked(api.projects.list).mock.calls.length).toBeGreaterThan(listCallsBefore),
+    );
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("renders a release button only when the preview says releasable, with its own sentence, calls the release route, toasts, and re-fetches the preview and the listing", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.removalPreview)
+      .mockResolvedValueOnce({
+        external_roots: [],
+        dependent_projects: [],
+        refusal:
+          "sample plot is the project this workspace opens by default; choose a " +
+          "different default first, or release it as the default",
+        releasable: true,
+      })
+      .mockResolvedValueOnce({
+        external_roots: [],
+        dependent_projects: [],
+        refusal: null,
+        releasable: false,
+      });
+    vi.mocked(api.projects.releaseBinding).mockResolvedValue({
+      name: PROJECTS[0].name,
+      marker_cleared: true,
+      canvas_binding_released: false,
+      refusal: null,
+      releasable: false,
+    });
+    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Remove…" }));
+    const dialog = await screen.findByRole("dialog");
+
+    const releaseButton = await within(dialog).findByRole("button", {
+      name: `Release ${PROJECTS[0].name}`,
+    });
+    await within(dialog).findByText(
+      /Stops it opening by default and forgets it as the GUI's open project; nothing else changes\./,
+    );
+
+    fireEvent.click(releaseButton);
+
+    await waitFor(() =>
+      expect(api.projects.releaseBinding).toHaveBeenCalledWith(
+        PROJECTS[0].name,
+        expect.any(String),
+      ),
+    );
+    await waitFor(() =>
+      expect(pushToast).toHaveBeenCalledWith(
+        expect.stringContaining(`Released ${PROJECTS[0].name}`),
+        "success",
+      ),
+    );
+    await waitFor(() => expect(api.projects.removalPreview).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(api.projects.list).toHaveBeenCalledTimes(2));
+  });
+
+  it("renders no release button when the preview says not releasable", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.removalPreview).mockResolvedValue({
+      external_roots: [],
+      dependent_projects: [],
+      refusal: "a live run is in progress",
+      releasable: false,
+    });
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Remove…" }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText(/a live run is in progress/);
+    expect(within(dialog).queryByRole("button", { name: /^Release / })).not.toBeInTheDocument();
+  });
+
+  it("ends the toast with the no-project-open sentence when recorded_in_open_project is false", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
+    vi.mocked(api.projects.remove).mockResolvedValue({
+      name: PROJECTS[0].name,
+      archive_path: "/ws/.removed/x.zip",
+      holding_dir: "/ws/.removed/x",
+      external_roots: [],
+      dependent_projects: [],
+      completes: "at the next backend start, or tcip complete-removals",
+      audit_scope: "/ws/target",
+      recorded_in_open_project: false,
+      audit_note:
+        "its own line and the route's own line are both in its own log; the archive door's " +
+        "own line is under the root $TCIP_STATE_ROOT names.",
+    });
+    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Remove…" }));
+    const dialog = await screen.findByRole("dialog");
+    const nameField = await within(dialog).findByLabelText(/type the project name to confirm/i);
+    fireEvent.change(nameField, { target: { value: PROJECTS[0].name } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Remove$/ }));
+
+    await waitFor(() =>
+      expect(pushToast).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `This backend has no project open, so the request is recorded in ${PROJECTS[0].name}'s own log.`,
+        ),
+        "success",
+      ),
+    );
+  });
+
+  it("renders the card's dependency-warning sentences for both present states and the registry problem", async () => {
+    const withWarnings: ProjectSummary[] = [
+      {
+        ...PROJECTS[0],
+        dependency_warnings: [
+          {
+            dataset_id: "ds1",
+            dataset_path: "/ws/target/a",
+            target: "sample_plot_target",
+            present: true,
+          },
+          {
+            dataset_id: "ds2",
+            dataset_path: "/ws/target/b",
+            target: "sample_plot_gone",
+            present: false,
+          },
+        ],
+      },
+      { ...PROJECTS[1], dependency_problem: "not json" },
+    ];
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: withWarnings,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+    });
+    render(<ProjectPicker />);
+
+    await screen.findByText(
+      /Depends on sample_plot_target \(dataset ds1\), which is pending removal/,
+    );
+    await screen.findByText(
+      /Depends on sample_plot_gone \(dataset ds2\), which is no longer in the workspace/,
+    );
+    await screen.findByText(/its dataset registry could not be read \(not json\)/);
+  });
+
   it("on success, toasts at the success level, forgets the recent entry, refetches, and lists the project under pending removal", async () => {
     vi.mocked(api.projects.list)
       .mockResolvedValueOnce({
@@ -836,6 +1064,10 @@ describe("ProjectPicker removal", () => {
       dependent_projects: [],
       completes: "at the next backend start, or tcip complete-removals",
       audit_scope: "/ws/other",
+      recorded_in_open_project: true,
+      audit_note:
+        "its own line is in its own log; the route's own line and the archive " +
+        "door's own line are in the open project's log.",
     });
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
     localStorage.setItem(
