@@ -87,6 +87,27 @@ def test_a_stamp_naming_fewer_stems_than_the_bucket_holds_is_a_double_publish(tm
     assert not any("baseline@r2" in line for line in lines if "DOUBLE-PUBLISH" in line)
 
 
+def test_a_cleared_bucket_in_the_tree_is_not_reported(tmp_path, monkeypatch):
+    """A bucket already moved into the cleared archive is skipped by this census's walk over live
+    buckets: even a stamp shaped like a double-publish there is not reported, since a cleared
+    bucket holds one run's own documents and stamp, never a later run's overwrite."""
+    from tcip_mcp.dataset_layout import cleared_prediction_dir
+
+    project = _project(tmp_path, monkeypatch)
+    cleared = cleared_prediction_dir(project, "baseline", DATE, "20260402T000000Z")
+    for stem in ("a", "b"):
+        write_annotations(str(cleared / f"{stem}.json"), [], img_w=10, img_h=10, keep_empty=True)
+    _stamp(cleared, ["b"])  # shaped like a double-publish, were it a live bucket
+
+    census = _load().census_project(project)
+
+    assert census.buckets == []
+    assert census.mixed == []
+    lines = _load().render(census)
+    assert not any(str(cleared) in line for line in lines)
+    assert _load().main([str(project)]) == 0
+
+
 def test_a_validation_row_sealed_over_a_mixed_bucket_is_reported_with_its_digest_state(
     tmp_path, monkeypatch,
 ):
