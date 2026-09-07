@@ -147,8 +147,11 @@ def test_author_and_update_persist_through_the_same_shared_write(tmp_path: Path)
 
     Not a test of either caller's own discipline: the carried-forward restriction is
     ``test_a_restatement_over_an_existing_spec_carries_its_localization_and_sliver_fields_forward``
-    below; no test yet drives ``write_trait_spec_fields``'s own compare-and-set retry loop to
-    actually retry against a losing read.
+    below; the compare-and-set retry loop's own actual retries against a losing read are driven
+    by the concurrency cases under "the statement write's own compare-and-set" further down
+    (the concurrent-revision abandon, the concurrent-confirmation/withdrawal/same-values-restatement
+    retries, the concurrent carried-forward write, the no-rationale race and the deleted-statement
+    case), not by this test.
     """
     _author(tmp_path, trait="leaf", delivers=("leaf_length",), holdout_match_quality_floor=0.4)
 
@@ -600,3 +603,260 @@ def test_a_stamped_specs_schema_version_survives_a_non_restating_edit(tmp_path: 
     rewritten = ts.read_versioned(key).value
     assert rewritten["schema_version"] == 1
     assert rewritten["localization"] == traits.CENTER_MATCH
+
+
+# ── the statement write's own compare-and-set ────────────────────────────────
+
+
+def _once_before_the_statement_write(monkeypatch: pytest.MonkeyPatch, key, side_effect) -> None:
+    """Run ``side_effect`` for real the first time ``ts.replace`` targets ``key``, then let the
+    original call through with its own original arguments, so a real concurrent write lands
+    between this call's own read of the statement and its own attempt to write it. The second
+    and later calls to ``key`` pass straight through, so a retry after the resulting conflict is
+    not intercepted again."""
+    real_replace = ts.replace
+    fired = {"done": False}
+
+    def hook(target_key, value, *, expect):
+        if not fired["done"] and target_key == key:
+            fired["done"] = True
+            side_effect()
+        return real_replace(target_key, value, expect=expect)
+
+    monkeypatch.setattr(ts, "replace", hook)
+
+
+def test_a_concurrent_revision_to_other_values_abandons(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _confirmed_leaf(tmp_path)
+    directory = traits.trait_specs_dir(str(tmp_path))
+    spec_key = traits.trait_spec_key(directory, "leaf")
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    statement_key = traits.trait_spec_statement_key(scope, "leaf")
+
+    def side_effect() -> None:
+        # a real concurrent revision to a different authored field, landing on both keys
+        traits.revise_trait_spec_fields(
+            "leaf", {"notes": "an unrelated concurrent revision"}, project_root=tmp_path,
+            rationale="a second breeder answer, about something else entirely",
+        )
+
+    _once_before_the_statement_write(monkeypatch, statement_key, side_effect)
+
+    revision = traits.revise_trait_spec_fields(
+        "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
+        rationale="the breeder raised the minimum acceptable held-out match quality",
+    )
+
+    assert revision.statement is None
+    assert "abandoned" in revision.statement_note
+    reloaded = ts.read_versioned(statement_key).value
+    assert reloaded["rationale"] == "a second breeder answer, about something else entirely"
+
+
+def test_a_concurrent_confirmation_is_restated_over(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _confirmed_leaf(tmp_path)
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    statement_key = traits.trait_spec_statement_key(scope, "leaf")
+
+    def side_effect() -> None:
+        current = ts.read_versioned(statement_key).value
+        traits.confirm_trait_spec(
+            str(tmp_path), "leaf", user="fixture-breeder",
+            record_seen=traits.trait_spec_statement_seen_hash(current),
+            identity_from_request=True,
+        )
+
+    _once_before_the_statement_write(monkeypatch, statement_key, side_effect)
+
+    revision = traits.revise_trait_spec_fields(
+        "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
+        rationale="the breeder raised the minimum acceptable held-out match quality",
+    )
+
+    assert revision.statement is not None
+    assert "abandoned" not in revision.statement_note
+    reloaded = ts.read_versioned(statement_key).value
+    assert reloaded["confirmed_by"] is None
+    assert reloaded["rationale"] == (
+        "the breeder raised the minimum acceptable held-out match quality"
+    )
+
+
+def test_a_concurrent_withdrawal_is_restated_over(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _confirmed_leaf(tmp_path)
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    statement_key = traits.trait_spec_statement_key(scope, "leaf")
+
+    def side_effect() -> None:
+        current = ts.read_versioned(statement_key).value
+        traits.confirm_trait_spec(
+            str(tmp_path), "leaf", user="fixture-breeder",
+            record_seen=traits.trait_spec_statement_seen_hash(current),
+            identity_from_request=True, confirmed=False,
+        )
+
+    _once_before_the_statement_write(monkeypatch, statement_key, side_effect)
+
+    revision = traits.revise_trait_spec_fields(
+        "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
+        rationale="the breeder raised the minimum acceptable held-out match quality",
+    )
+
+    assert revision.statement is not None
+    assert "abandoned" not in revision.statement_note
+    reloaded = ts.read_versioned(statement_key).value
+    assert reloaded["confirmed_by"] is None
+    assert reloaded["rationale"] == (
+        "the breeder raised the minimum acceptable held-out match quality"
+    )
+
+
+def test_a_concurrent_same_values_restatement_is_restated_over(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A statement already stale when both calls start, restated to the same spec values by two
+    rationale-bearing calls racing each other: the second lands over the first rather than
+    abandoning, since neither call moves the spec's authored values away from the other's."""
+    _confirmed_leaf(tmp_path)
+    directory = traits.trait_specs_dir(str(tmp_path))
+    spec_key = traits.trait_spec_key(directory, "leaf")
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    statement_key = traits.trait_spec_statement_key(scope, "leaf")
+    stored = ts.read_versioned(spec_key)
+    ts.replace(spec_key, {**stored.value, "holdout_match_quality_floor": 0.9}, expect=stored.version)
+
+    def side_effect() -> None:
+        traits.revise_trait_spec_fields(
+            "leaf", {}, project_root=tmp_path,
+            rationale="a first restatement of the spec as it now stands",
+        )
+
+    _once_before_the_statement_write(monkeypatch, statement_key, side_effect)
+
+    revision = traits.revise_trait_spec_fields(
+        "leaf", {}, project_root=tmp_path,
+        rationale="a second restatement of the same spec, landing after the first",
+    )
+
+    assert revision.statement is not None
+    assert "abandoned" not in revision.statement_note
+    reloaded = ts.read_versioned(statement_key).value
+    assert reloaded["rationale"] == "a second restatement of the same spec, landing after the first"
+
+
+def test_a_concurrent_carried_forward_write_does_not_abandon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _confirmed_leaf(tmp_path)
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    statement_key = traits.trait_spec_statement_key(scope, "leaf")
+
+    def side_effect() -> None:
+        traits.write_trait_spec_fields(
+            "leaf", {"localization": traits.CENTER_MATCH}, project_root=tmp_path,
+        )
+
+    _once_before_the_statement_write(monkeypatch, statement_key, side_effect)
+
+    revision = traits.revise_trait_spec_fields(
+        "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
+        rationale="the breeder raised the minimum acceptable held-out match quality",
+    )
+
+    assert revision.statement is not None
+    assert "abandoned" not in revision.statement_note
+    reloaded = traits.get_trait_for("leaf", str(tmp_path))
+    assert reloaded.localization == traits.CENTER_MATCH
+    assert reloaded.holdout_match_quality_floor == 0.6
+
+
+def test_a_no_rationale_race_leaves_a_stale_statement_every_surface_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two writes never conflict, since each reads the statement key absent: this call's own
+    create lands after a no-rationale authored write already moved the spec on top of what this
+    call itself wrote, so the statement it just created is already stale. Not abandoned, not
+    refused, and not atomic with the spec write: the read-time predicate, the doctor and the
+    fields={} door each catch it on their own."""
+    from tcip_mcp import operationalization as op
+
+    directory = traits.trait_specs_dir(str(tmp_path))
+    spec_key = traits.trait_spec_key(directory, "leaf_race")
+    ts.replace(
+        spec_key,
+        {"name": "leaf_race", "delivers": ["leaf_length"], "holdout_match_quality_floor": 0.4},
+        expect=ts.Version.ABSENT,
+    )
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    statement_key = traits.trait_spec_statement_key(scope, "leaf_race")
+
+    def side_effect() -> None:
+        # the statement key is still absent here, so this needs no rationale to succeed
+        traits.write_trait_spec_fields(
+            "leaf_race", {"notes": "a later, unrelated edit"}, project_root=tmp_path,
+        )
+
+    _once_before_the_statement_write(monkeypatch, statement_key, side_effect)
+
+    revision = traits.revise_trait_spec_fields(
+        "leaf_race", {"notes": "the first breeder answer"}, project_root=tmp_path,
+        rationale="the breeder's first account of this trait's measurement",
+    )
+
+    assert revision.statement is not None
+    live_spec = traits.get_trait_for("leaf_race", str(tmp_path))
+    live_statement = ts.read_versioned(statement_key).value
+    assert live_spec.notes == "a later, unrelated edit"
+    assert traits.trait_spec_statement_stale(live_spec, live_statement)
+
+    with pytest.raises(traits.TraitSpecUnconfirmed, match="no longer matches"):
+        op.state_operationalization(
+            str(tmp_path), "leaf_race", op.PER_IMAGE_COUNT,
+            statement="s", mechanism="m", measured_subject="leaf",
+        )
+
+    from tcip_mcp.cli.doctor import check_trait_spec_statements
+    findings: list = []
+    check_trait_spec_statements(tmp_path, findings)
+    assert any(
+        "leaf_race" in msg and "no longer matches" in msg for _level, msg in findings
+    )
+
+    repaired = traits.revise_trait_spec_fields(
+        "leaf_race", {}, project_root=tmp_path,
+        rationale="restating the spec as it now stands, to repair the stale pair",
+    )
+    assert repaired.statement is not None
+    assert not traits.trait_spec_statement_stale(
+        traits.get_trait_for("leaf_race", str(tmp_path)), repaired.statement
+    )
+
+
+def test_a_statement_deleted_meanwhile_is_created_fresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _confirmed_leaf(tmp_path)
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    statement_key = traits.trait_spec_statement_key(scope, "leaf")
+
+    def side_effect() -> None:
+        current = ts.read_versioned(statement_key)
+        ts.delete(statement_key, expect=current.version)
+
+    _once_before_the_statement_write(monkeypatch, statement_key, side_effect)
+
+    revision = traits.revise_trait_spec_fields(
+        "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
+        rationale="the breeder raised the minimum acceptable held-out match quality",
+    )
+
+    assert revision.statement is not None
+    assert revision.statement["confirmed_by"] is None
+    reloaded = ts.read_versioned(statement_key).value
+    assert reloaded == revision.statement
