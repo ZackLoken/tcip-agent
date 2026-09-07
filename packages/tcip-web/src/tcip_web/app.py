@@ -51,7 +51,7 @@ async def _lifespan(_app: FastAPI):
     'interrupted' (a record, not a resumable job; see ``jobstore``).
     """
     log_exposure_opt_in()
-    bind_startup_root()
+    await asyncio.to_thread(_bind_startup_root_serialized)
     # The canvas-open binding record outlives this process's restart; read it once now so the
     # first connect-time replay answers from the durable record rather than a fresh None.
     await asyncio.to_thread(_gui_store.refresh_binding_generation_from_record)
@@ -194,6 +194,19 @@ def bind_startup_root() -> None:
     a pytest run or has loaded an in-process test client with no ``TCIP_WORKSPACE`` bound; the
     scope-carried signals of that rail live in :class:`_BindStartupRootMiddleware`, which alone
     sees the request scope.
+
+    After the early return's check, and before the marker pin: ``tcip_mcp.project_removal.
+    complete_pending_removals`` walks the workspace and moves every project carrying a
+    pending-removal marker, once per process, on the first bind. Both callers of this function
+    reach it through :func:`_bind_startup_root_serialized` under the module lock, off the event
+    loop, so the walk (which opens each project's own database on this thread to read its
+    marker, and may wait the rename budget) never runs on a request-serving thread and no
+    request is served before it completes; a non-request thread touching the seam during a
+    test's first bind is the one residual. A failure inside the walk other than its own
+    per-project folds (a workspace that cannot even be listed) is logged and swallowed, since
+    the process must start regardless, the same rule the marker read below already holds. The
+    MCP server never calls this: it is not the breeder's surface, and it may itself be the
+    process holding a target's database.
     """
     raise_if_workspace_unset_under_test()
 
@@ -201,6 +214,15 @@ def bind_startup_root() -> None:
 
     if root_binding() is not None:
         return
+
+    from tcip_mcp import project_removal
+    from tcip_mcp.workspace import workspace_root
+
+    try:
+        project_removal.complete_pending_removals(workspace_root(create=False))
+    except Exception:
+        logger.exception("complete_pending_removals failed at startup")
+
     pin_platform_root(from_marker=True)
 
 

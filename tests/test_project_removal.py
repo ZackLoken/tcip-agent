@@ -17,8 +17,8 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import tcip_store as ts
-from tcip_mcp import workspace
-from tcip_mcp.tools.project_tools import initialize_project
+from tcip_mcp import project_removal, workspace
+from tcip_mcp.tools.project_tools import archive_project, import_project, initialize_project
 from tcip_web.app import app
 
 
@@ -441,3 +441,218 @@ def test_an_unwritten_route_line_answers_409_naming_the_marker_already_written(
     assert pending is not None
     target_lines = _audit_lines(target)
     assert target_lines[-1]["tool"] == "project_removal_requested"
+
+
+# ── the completion ────────────────────────────────────────────────────────────
+
+
+def test_completion_moves_the_tree_and_deletes_the_marker(client, tmp_path):
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 200
+    holding_dir = Path(resp.json()["holding_dir"])
+
+    outcomes = project_removal.complete_pending_removals(ws)
+    assert outcomes == [{"name": "sample_plot_target", "moved_to": str(holding_dir),
+                          "archive_path": resp.json()["archive_path"]}]
+    assert not target.exists()
+    assert holding_dir.is_dir()
+    assert workspace.pending_removal_record(holding_dir) is None
+
+    moved_lines = _audit_lines(holding_dir)
+    assert moved_lines[-1]["tool"] == "project_removal_completed"
+
+    listing = client.get("/api/projects").json()
+    assert listing["removal_startup_outcomes"] == outcomes
+    assert "sample_plot_target" not in {p["name"] for p in listing["projects"]}
+    assert listing["pending_removal"] == []
+
+
+def test_the_archive_round_trips_through_import_project(client, tmp_path):
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    archive_path = resp.json()["archive_path"]
+
+    project_removal.complete_pending_removals(ws)
+
+    dest = ws / "sample_plot_restored"
+    imported = import_project(str(archive_path), str(dest))
+    assert "error" not in imported, imported
+    assert (dest / "images" / "2026-03-04" / "img.jpg").is_file()
+
+
+def test_a_tree_moved_back_by_hand_is_listed_and_adoptable(client, tmp_path):
+    import os
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    holding_dir = Path(resp.json()["holding_dir"])
+    project_removal.complete_pending_removals(ws)
+
+    os.rename(str(holding_dir), str(target))
+
+    assert workspace.adoptable_project_root("sample_plot_target") == target
+    listing = client.get("/api/projects").json()
+    assert "sample_plot_target" in {p["name"] for p in listing["projects"]}
+
+
+def test_denied_completion_reports_blocked_by_and_admits_once_released(tmp_path):
+    import os
+    import sqlite3
+
+    if os.environ.get("TCIP_STORE_BACKEND", "sqlite") != "sqlite":
+        pytest.skip("the denied branch needs an open database handle, which only the sqlite "
+                     "backend can hold: no handle to hold on the file backend")
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        resp = client.post(
+            "/api/projects/remove",
+            json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+        )
+        assert resp.status_code == 200
+
+        from tcip_store.sqlite_backend import database_path
+
+        held = sqlite3.connect(str(database_path(str(target))), isolation_level=None)
+        try:
+            held.execute("select 1")
+            outcomes = project_removal.complete_pending_removals(ws)
+            assert outcomes[0]["name"] == "sample_plot_target"
+            assert "blocked_by" in outcomes[0]
+            assert target.is_dir()
+        finally:
+            held.close()
+
+        outcomes2 = project_removal.complete_pending_removals(ws)
+        assert outcomes2[0].get("moved_to") is not None
+        assert not target.exists()
+
+
+def test_the_per_project_fold_never_stops_the_walk(tmp_path):
+    """A sibling whose state is still loose files (never adopted) is skipped by name, and a
+    pending project elsewhere in the workspace still moves in the same walk.
+
+    Bound to the sqlite backend on purpose: the fold is the seam's own refusal to read a loose
+    layout through a database-bound process, which needs this process on that backend and only
+    the spawned import under the file backend, the one producer of that mismatch."""
+    import subprocess
+    import sys
+
+    if os.environ.get("TCIP_STORE_BACKEND", "sqlite") != "sqlite":
+        pytest.skip("the fold is a database-bound process meeting a loose sibling layout; both "
+                     "sides are the same layout on the file backend, so nothing to fold")
+
+    from tcip_store import Version, replace
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    resp_target = archive_project(
+        project_path=str(target), output_path=str(ws / "seed.zip"), include_models=False,
+    )
+    assert "error" not in resp_target
+
+    holding_dir = ws / ".removed" / "sample_plot_target-20260304T120000Z"
+    replace(workspace.pending_removal_key(target), {
+        "requested_at": "20260304T120000Z", "requested_by": "user:tester",
+        "archive_path": str(ws / "seed.zip"), "holding_dir": str(holding_dir),
+        "external_roots": [], "dependent_projects": [],
+    }, expect=Version.ABSENT)
+
+    sibling = ws / "sample_plot_sibling"
+    env = dict(os.environ)
+    env["TCIP_STORE_BACKEND"] = "file"
+    proc = subprocess.run(
+        [sys.executable, "-m", "tcip_web.cli", "import-project", str(ws / "seed.zip"), str(sibling)],
+        env=env, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    outcomes = project_removal.complete_pending_removals(ws)
+    by_name = {o["name"]: o for o in outcomes}
+    assert by_name["sample_plot_target"].get("moved_to") is not None
+    assert by_name["sample_plot_sibling"].get("skipped") is not None
+    assert "adopt-store" in by_name["sample_plot_sibling"]["skipped"]
+
+
+def test_the_complete_removals_command_moves_a_pending_project(client, tmp_path):
+    import subprocess
+    import sys
+
+    from tcip_store import Version, replace
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    resp = archive_project(
+        project_path=str(target), output_path=str(ws / ".removed" / "seed.zip"),
+        include_models=False,
+    )
+    assert "error" not in resp
+    holding_dir = ws / ".removed" / "sample_plot_target-20260304T120000Z"
+    replace(workspace.pending_removal_key(target), {
+        "requested_at": "20260304T120000Z", "requested_by": "user:tester",
+        "archive_path": resp["output_path"], "holding_dir": str(holding_dir),
+        "external_roots": [], "dependent_projects": [],
+    }, expect=Version.ABSENT)
+
+    ts.close_connections()  # this process's own cached handle would otherwise deny the rename
+    proc = subprocess.run(
+        [sys.executable, "-m", "tcip_web.cli", "complete-removals", "--workspace", str(ws)],
+        env=dict(os.environ), capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "sample_plot_target" in proc.stdout
+    assert not target.exists()
+    assert holding_dir.is_dir()
+
+
+def test_bind_startup_root_moves_a_pending_project_before_serving_a_request(tmp_path):
+    """``bind_startup_root`` runs phase two, once, before the marker pin: entering the served
+    app's lifespan on a workspace with one pending project moves it before the first response.
+    """
+    from tcip_mcp import project_paths
+    from tcip_store import Version, replace
+
+    ws = tmp_path.parent
+    _init(ws, "sample_plot_open")
+    target = _init(ws, "sample_plot_target")
+    workspace.activate_project("sample_plot_open")
+    removed_dir = ws / ".removed"
+    removed_dir.mkdir()
+    resp = archive_project(
+        project_path=str(target), output_path=str(removed_dir / "seed.zip"), include_models=False,
+    )
+    assert "error" not in resp
+    holding_dir = removed_dir / "sample_plot_target-20260304T120000Z"
+    replace(workspace.pending_removal_key(target), {
+        "requested_at": "20260304T120000Z", "requested_by": "user:tester",
+        "archive_path": resp["output_path"], "holding_dir": str(holding_dir),
+        "external_roots": [], "dependent_projects": [],
+    }, expect=Version.ABSENT)
+
+    # Simulate a fresh process's first bind: no root pinned yet, no connection held.
+    project_paths.restore_binding(None)
+    ts.close_connections()
+
+    with TestClient(app, base_url="http://127.0.0.1") as fresh_client:
+        health = fresh_client.get("/health")
+        assert health.status_code == 200
+        assert not target.exists()
+        assert holding_dir.is_dir()
+        listing = fresh_client.get("/api/projects").json()
+        outcome = next(o for o in listing["removal_startup_outcomes"] if o["name"] == "sample_plot_target")
+        assert outcome["moved_to"] == str(holding_dir)
