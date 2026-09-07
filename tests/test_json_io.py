@@ -221,6 +221,7 @@ PROV = {
     "created_at": "2026-07-15T10:00:00Z",
     "accepted_by": "user:breeder",
     "accepted_at": "2026-07-15T11:00:00Z",
+    "accepted_by_rule": "exp-1:0123456789abcdef",
 }
 
 
@@ -264,7 +265,7 @@ def test_unset_provenance_omitted_from_json_not_null(tmp_path: Path) -> None:
     write_annotations(spath, [Annotation(subject="bud", geometry=Polygon([TRIANGLE]))], 100, 100)
     for path in (dpath, spath):
         obj = _raw(path)["annotations"][0]
-        for k in ("created_by", "created_at", "accepted_by", "accepted_at"):
+        for k in ("created_by", "created_at", "accepted_by", "accepted_at", "accepted_by_rule"):
             assert k not in obj  # omitted entirely, never written as null
 
 
@@ -273,11 +274,12 @@ def test_partial_provenance_writes_only_set_fields(tmp_path: Path) -> None:
     write_annotations(path, [Annotation(subject="bud", geometry=BBox(1.0, 2.0, 3.0, 4.0), created_by="claude")], 100, 100)
     obj = _raw(path)["annotations"][0]
     assert obj["created_by"] == "claude"
-    for k in ("created_at", "accepted_by", "accepted_at"):
+    for k in ("created_at", "accepted_by", "accepted_at", "accepted_by_rule"):
         assert k not in obj
     (box,) = read_annotations(path)
     assert box.created_by == "claude"
     assert box.created_at is None and box.accepted_by is None and box.accepted_at is None
+    assert box.accepted_by_rule is None
 
 
 def test_provenance_set_by_mutation_survives_write(tmp_path: Path) -> None:

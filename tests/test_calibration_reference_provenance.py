@@ -205,6 +205,49 @@ def test_one_agent_authored_record_refuses_the_whole_reference(tmp_path):
         _calibrate(labels_dir, images_dir)
 
 
+# --- the rail's third arm: a rule-admitted record with no person's sign-off, hand-written
+# (coverage) since only a hand-edited or round-tripped document could ever reach it -------------
+
+def test_the_rail_refuses_a_person_created_record_carrying_the_rule_with_no_sign_off(tmp_path):
+    _images, labels_dir = _reference(
+        tmp_path / "ds", ["a"],
+        lambda s: [_hand_annotation(created_by="user:breeder",
+                                    accepted_by_rule="exp-1:0123456789abcdef")])
+
+    with pytest.raises(ValueError) as exc:
+        json_io.require_reference_ground_truth(labels_dir)
+
+    message = str(exc.value)
+    assert "accepted_by_rule with no person's accepted_by" in message
+    assert "[0]" in message
+
+
+def test_the_rail_refuses_a_tool_created_record_with_a_non_person_sign_off_and_the_rule(tmp_path):
+    """is_unadjudicated_agent_authorship reads any truthy accepted_by as adjudication and does not
+    catch this shape; the marker arm is the only guard on it."""
+    _images, labels_dir = _reference(
+        tmp_path / "ds", ["a"],
+        lambda s: [_hand_annotation(created_by=PRODUCER, accepted_by="model:other",
+                                    accepted_by_rule="exp-1:0123456789abcdef")])
+
+    with pytest.raises(ValueError, match="accepted_by_rule with no person's accepted_by"):
+        json_io.require_reference_ground_truth(labels_dir)
+
+
+def test_provenance_facts_reports_rule_admitted_unsigned_indices():
+    from tcip_annotation.json_io import provenance_facts
+
+    records = [
+        _hand_annotation(created_by="user:breeder", accepted_by_rule="exp-1:0123456789abcdef"),
+        _hand_annotation(created_by="user:breeder", accepted_by="user:breeder",
+                         accepted_by_rule="exp-1:0123456789abcdef"),
+        _hand_annotation(created_by="user:breeder", accepted_by_rule=""),  # empty string included
+        _hand_annotation(created_by="user:breeder"),  # no marker at all: never counted
+    ]
+    facts = provenance_facts(records)
+    assert facts.rule_admitted_unsigned == [0, 2]
+
+
 # --- the rail admits the references that were always legitimate -------------------------------
 
 def test_hand_annotated_ground_truth_still_calibrates(tmp_path):
@@ -240,6 +283,20 @@ def test_a_prediction_a_reviewer_accepted_still_calibrates(tmp_path):
         lambda s: [_hand_annotation(created_by=PRODUCER, created_at="2026-01-01T00:00:00+00:00",
                                     accepted_by="user:breeder",
                                     accepted_at="2026-01-02T00:00:00+00:00")])
+
+    bundle, _dataset_hash, _n_excluded, _evidence = _calibrate(labels_dir, images_dir)
+
+    assert bundle.get("conf") is not None
+
+
+def test_a_rule_admitted_record_with_a_persons_sign_off_still_calibrates(tmp_path):
+    """The directory the button produced: a signed, marked record is admitted."""
+    stems = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
+    images_dir, labels_dir = _reference(
+        tmp_path / "ds", stems,
+        lambda s: [_hand_annotation(created_by=PRODUCER, accepted_by="user:breeder",
+                                    accepted_at="2026-01-02T00:00:00+00:00",
+                                    accepted_by_rule="exp-1:0123456789abcdef")])
 
     bundle, _dataset_hash, _n_excluded, _evidence = _calibrate(labels_dir, images_dir)
 
