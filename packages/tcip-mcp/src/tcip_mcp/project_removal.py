@@ -280,8 +280,8 @@ def _preview(name: str, job_conflict: JobConflict) -> tuple[dict, Optional[_Refu
     try:
         project = workspace.workspace_project_root(name)
     except ValueError:
-        result = {"external_roots": [], "dependent_projects": [],
-                  "refusal": refusal.message if refusal else None}
+        result: dict = {"external_roots": [], "dependent_projects": [],
+                        "refusal": refusal.message if refusal else None}
         return result, refusal
 
     roots_by_path: dict[str, list[str]] = {}
