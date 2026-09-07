@@ -26,8 +26,8 @@ def _metrics_key(project_root: str, experiment_id: str) -> "Key":
     """The metrics log of the experiment named ``experiment_id``, under ``project_root``.
 
     An id no record could ever carry (a path separator, an empty or dot name) raises ``BadKey``;
-    an id that merely names no record yet (a record still stamped before the run starts, D2/D4)
-    still resolves a key, since nothing here needs the record to already exist.
+    an id that merely names no record yet (a record still stamped before the run starts) still
+    resolves a key, since nothing here needs the record to already exist.
     """
     from tcip_mcp.experiments import metrics_key
 
@@ -303,7 +303,7 @@ async def _stream_metrics(
 
     The cursor is the log's own resume token, so each tick reads only what was appended
     since the last one and an entry still being written is replayed once it is complete. The
-    record already exists and is stamped before the run starts (D2/D4), so the key is resolved
+    record already exists and is stamped before the run starts, so the key is resolved
     once, not re-resolved per tick. Both reads run off the event loop: a file-backend read can
     wait on a training subprocess's own append, and that wait must stall this socket's own
     coroutine rather than every request and socket the backend serves.
