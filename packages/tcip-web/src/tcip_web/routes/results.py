@@ -393,14 +393,19 @@ class _PhenologyMeasurement:
     """One trait's per-plant phenology measurement plus the on-disk evidence that qualifies it."""
 
     def __init__(
-        self, spec, plants: dict, validity: dict, gate, positive_class_id, project_root: Path,
-        basis, bindings: dict, predictions_by_date: dict[str, str], flags: dict[str, str | None],
-        plant_mapping_disclosure: dict,
+        self, spec, plants: dict, recon: dict, classifier_recon: dict,
+        classifier_state: str | None, binding_note: str, tile_recon: dict, gate,
+        positive_class_id, project_root: Path, basis, predictions_by_date: dict[str, str],
+        flags: dict[str, str | None], plant_mapping_disclosure: dict,
     ) -> None:
-        self.spec, self.plants, self.validity, self.gate = spec, plants, validity, gate
+        self.spec, self.plants, self.gate = spec, plants, gate
+        # The reconciliations this measurement was computed from, kept as the door itself ran
+        # them rather than pre-flattened: bindings and validity are both derived from these.
+        self.recon, self.classifier_recon = recon, classifier_recon
+        self.classifier_state, self.binding_note = classifier_state, binding_note
+        self.tile_recon = tile_recon
         self.positive_class_id = positive_class_id
-        # What the count reconciliation verified per bucket, by their resolved paths.
-        self.bindings, self.predictions_by_date = bindings, predictions_by_date
+        self.predictions_by_date = predictions_by_date
         self.pred_dirs = list(predictions_by_date.values())
         # The guarded, resolved root every later write and audit entry resolves from.
         self.project_root = project_root
@@ -411,6 +416,41 @@ class _PhenologyMeasurement:
         self.flags = flags
         # The mapping this delivery attributed detections through, threaded to the event and CSV.
         self.plant_mapping_disclosure = plant_mapping_disclosure
+
+    @property
+    def bindings(self) -> dict:
+        """What the count reconciliation verified per bucket, by their resolved paths."""
+        return self.recon["bindings"]
+
+    @property
+    def validity(self) -> dict:
+        return {
+            "operating_point": self.recon["validated"],
+            "classifier": self.classifier_state,
+            "operating_point_conf": self.recon["conf"],
+            "operating_point_confs": self.recon["confs"],
+            "missing_operating_point_sidecars": self.recon["missing_sidecars"],
+            "unvalidated_buckets": self.recon["unvalidated_buckets"],
+            "binding_notes": self.recon["binding_notes"],
+            "missing_classifier_sidecars": self.classifier_recon["missing_sidecars"],
+            "classifier_binding_note": self.binding_note,
+            "tile_size": self.tile_recon["validated"],
+            "unvalidated_tile_size_buckets": self.tile_recon["unvalidated_buckets"],
+        }
+
+    @property
+    def document_reconciliations(self) -> dict:
+        return {
+            "operating_point": self.recon,
+            "classifier_operating_point": {
+                **self.classifier_recon, "bound_validated": self.classifier_state,
+                "delivery_note": self.binding_note,
+            },
+        }
+
+    @property
+    def dimension_reconciliations(self) -> dict:
+        return {"tile_size": self.tile_recon}
 
     @property
     def positive_class_assessed(self) -> bool:
@@ -537,19 +577,6 @@ def _measure_phenology(
     # The tile scale is the other gating dimension: a tile edge with no real basis at all is as
     # untrustworthy here as an uncalibrated conf, operative only for tiled buckets.
     tile_recon = reconcile_tile_size_validity(pred_dirs)
-    validity = {
-        "operating_point": recon["validated"],
-        "classifier": classifier_state,
-        "operating_point_conf": recon["conf"],
-        "operating_point_confs": recon["confs"],
-        "missing_operating_point_sidecars": recon["missing_sidecars"],
-        "unvalidated_buckets": recon["unvalidated_buckets"],
-        "binding_notes": recon["binding_notes"],
-        "missing_classifier_sidecars": classifier_recon["missing_sidecars"],
-        "classifier_binding_note": binding_note,
-        "tile_size": tile_recon["validated"],
-        "unvalidated_tile_size_buckets": tile_recon["unvalidated_buckets"],
-    }
     flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
     gate = check_delivery_gate(flags, acknowledgement=acknowledgement)
     from tcip_annotation.json_io import ClassifiedRecordRefused, UnreadableLabelDocument
@@ -566,8 +593,8 @@ def _measure_phenology(
         raise HTTPException(400, str(exc)) from exc
     positive_class_id, _msg = phenology.resolve_positive_class_id(spec, predictions_by_date)
     return _PhenologyMeasurement(
-        spec, plants, validity, gate, positive_class_id, root, stated.basis,
-        recon["bindings"], predictions_by_date, flags,
+        spec, plants, recon, classifier_recon, classifier_state, binding_note, tile_recon,
+        gate, positive_class_id, root, stated.basis, predictions_by_date, flags,
         mapping_build.delivery_disclosure(verified, list(predictions_by_date)))
 
 
@@ -821,8 +848,9 @@ def export_csv(payload: ExportCsvPayload) -> Response:
         cells = write_csv(
             "results.export_csv", rows, saved_path, measurement.spec,
             flags=measurement.flags, acknowledgement=acknowledgement, basis=measurement.basis,
-            operating_point_confs=measurement.validity["operating_point_confs"], producer=producer,
-            bindings=measurement.bindings, predictions_by_date=measurement.predictions_by_date,
+            document_reconciliations=measurement.document_reconciliations, producer=producer,
+            dimension_reconciliations=measurement.dimension_reconciliations,
+            predictions_by_date=measurement.predictions_by_date,
             project_root=measurement.project_root,
             plant_mapping=measurement.plant_mapping_disclosure)
     except AuditEntryNotWritten as exc:
