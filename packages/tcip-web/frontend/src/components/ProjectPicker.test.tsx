@@ -1059,7 +1059,7 @@ describe("ProjectPicker removal", () => {
           },
         ],
       },
-      { ...PROJECTS[1], dependency_problem: "not json" },
+      { ...PROJECTS[1], dependency_problem: "its dataset registry could not be read: not json" },
     ];
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
@@ -1079,7 +1079,61 @@ describe("ProjectPicker removal", () => {
     );
     expect(screen.queryByText(/dataset ds1/)).not.toBeInTheDocument();
     expect(screen.queryByText(/dataset ds2/)).not.toBeInTheDocument();
-    await screen.findByText(/its dataset registry cannot be used as it stands \(not json\)/);
+    await screen.findByText("its dataset registry could not be read: not json");
+  });
+
+  it("renders the card's no-id registry problem verbatim, with no card-side wrapping", async () => {
+    const withProblem: ProjectSummary[] = [
+      {
+        ...PROJECTS[0],
+        dependency_problem:
+          "its dataset registry has an entry with a path and no id: /ws/target/x",
+      },
+      PROJECTS[1],
+    ];
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: withProblem,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+    });
+    render(<ProjectPicker />);
+
+    await screen.findByText(
+      "its dataset registry has an entry with a path and no id: /ws/target/x",
+    );
+  });
+
+  it("renders the dialog's no-id dependent line verbatim after the project's name", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.removalPreview).mockResolvedValue({
+      external_roots: [],
+      dependent_projects: [
+        {
+          project: "other_project",
+          unreadable: "its dataset registry has an entry with a path and no id: /ws/target/x",
+        },
+      ],
+      refusal: null,
+      releasable: false,
+    });
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Remove…" }));
+
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText(
+      "other_project: its dataset registry has an entry with a path and no id: /ws/target/x",
+    );
   });
 
   it("groups a dependent's own multiple datasets under one target into one card sentence", async () => {

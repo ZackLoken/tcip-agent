@@ -277,7 +277,7 @@ def _workspace_child_of(path: Path, workspace_root: Path) -> Optional[Path]:
 def dependency_warnings(project_root: Path) -> tuple[list[dict], Optional[str]]:
     """Every warning ``project_root``'s own registry earns from a dataset it registered under
     another workspace project that is now pending removal or gone, plus the registry's own
-    problem when it will not read at all or carries an entry the platform cannot name.
+    problem when it will not read at all or carries an entry with a path and no id.
 
     Reads through :func:`~tcip_mcp.tools.project_tools.read_datasets_raw`; a registry that will
     not read (``StoreError``, ``DecodeError``, ``SchemaVersionRefused``, or a fingerprint
@@ -318,7 +318,7 @@ def dependency_warnings(project_root: Path) -> tuple[list[dict], Optional[str]]:
         entries = read_datasets_raw(project_root)
     except (tcip_store.StoreError, tcip_store.DecodeError,
             tcip_store.SchemaVersionRefused, ValueError) as exc:
-        return [], str(exc)
+        return [], f"its dataset registry could not be read: {exc}"
 
     warnings: list[dict] = []
     problem: Optional[str] = None
@@ -335,10 +335,7 @@ def dependency_warnings(project_root: Path) -> tuple[list[dict], Optional[str]]:
         dataset_id = entry.get("id")
         if not dataset_id:
             if problem is None:
-                problem = (
-                    "its dataset registry has an entry the platform cannot name: registry "
-                    f"entry {entry_path} carries no id"
-                )
+                problem = f"its dataset registry has an entry with a path and no id: {entry_path}"
             continue
         if not child.exists():
             warnings.append({"dataset_id": dataset_id, "dataset_path": str(entry_path),
@@ -545,7 +542,10 @@ def _preview(
         try:
             entries = read_datasets_raw(child)
         except Exception as exc:  # noqa: BLE001 - reported per project, never aborts the scan
-            dependent_projects.append({"project": child.name, "unreadable": str(exc)})
+            dependent_projects.append({
+                "project": child.name,
+                "unreadable": f"its dataset registry could not be read: {exc}",
+            })
             continue
         for entry in entries:
             if not entry.get("path"):
@@ -561,7 +561,8 @@ def _preview(
             if not dataset_id:
                 dependent_projects.append({
                     "project": child.name,
-                    "unreadable": f"registry entry {entry_path} carries no id",
+                    "unreadable": f"its dataset registry has an entry with a path and no id: "
+                                   f"{entry_path}",
                 })
                 continue
             dependent_projects.append({
