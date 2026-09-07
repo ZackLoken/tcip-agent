@@ -234,6 +234,167 @@ def test_tune_search_refuses_split_draws_without_the_axis_in_param_space(tmp_pat
         )
 
 
+# -- a caller-supplied seed axis at one draw ----------------------------------------
+
+
+@pytest.mark.parametrize("case", [
+    pytest.param(
+        {"param_space": {"data.split.seed": {"type": "categorical", "choices": [1, 2]}}},
+        id="sampled-under-random",
+    ),
+    pytest.param(
+        {"search_alg": "grid", "param_space": {
+            "data.split.seed": {"type": "categorical", "choices": [1, 2]},
+            "lr": {"type": "categorical", "choices": [0.1, 0.2]},
+        }},
+        id="gridded-beside-a-discrete-axis",
+    ),
+    pytest.param(
+        {"param_space": {"data.split.seed": {"type": "uniform", "low": 1, "high": 100}}},
+        id="a-float-range",
+    ),
+])
+def test_run_hyperparameter_search_refuses_a_caller_split_seed_axis_at_one_draw(
+    tmp_path, real_hpo_base_config, monkeypatch, case,
+):
+    """A caller-supplied data.split.seed axis with split_draws at 1 (unset) refuses whatever
+    the sampler and however the axis is typed, reversing the position an older test pinned;
+    tune_search must never be reached, and the error dict carries the remedy."""
+    import tcip_mcp.tools.training_tools as tt
+
+    ran = []
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
+
+    result = tt.run_hyperparameter_search(
+        base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+        scheduler="none", **case,
+    )
+
+    assert "error" in result and "cannot be replayed as recorded" in result["error"]
+    assert "drop data.split.seed from param_space" in result["error"]
+    assert not ran
+
+
+def test_run_hyperparameter_search_refuses_repeated_split_draw_seeds(
+    tmp_path, real_hpo_base_config, monkeypatch,
+):
+    """split_draw_seeds naming the same seed twice is not a spread over distinct partitions,
+    and could read complete and eligible on one seed twice against group_split_draws's own
+    rule; refused by the repeated value's own name."""
+    import tcip_mcp.tools.training_tools as tt
+
+    ran = []
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
+
+    result = tt.run_hyperparameter_search(
+        base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+        scheduler="none", split_draws=2, split_draw_seeds=[7, 7],
+    )
+
+    assert "error" in result and "[7]" in result["error"]
+    assert not ran
+
+
+def test_run_hyperparameter_search_admits_distinct_split_draw_seeds_beside_the_repeated_case(
+    tmp_path, real_hpo_base_config, monkeypatch,
+):
+    """The same call with distinct seeds is admitted, in the same module as the repeated-seed
+    refusal above, so the refusal is proven to reject only the repeat, not the pair."""
+    import tcip_mcp.tools.training_tools as tt
+
+    def fake_search(**kw):
+        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
+                "study_name": kw["study_name"], "all_trials": []}
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+
+    result = tt.run_hyperparameter_search(
+        base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+        scheduler="none", split_draws=2, split_draw_seeds=[7, 8],
+    )
+
+    assert "error" not in result, result
+
+
+def test_run_hyperparameter_search_admits_the_paired_path_with_a_param_space_beside_distinct_seeds(
+    tmp_path, real_hpo_base_config, monkeypatch,
+):
+    """split_draws=2 with distinct split_draw_seeds admits a param_space too (the producer's
+    own get_default_space(), which names no data.* axis), beside the existing case that omits
+    param_space entirely."""
+    import tcip_mcp.tools.training_tools as tt
+    from tcip_mcp.pipelines.training.hpo import get_default_space
+
+    captured: dict = {}
+
+    def fake_search(**kw):
+        captured.update(kw)
+        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
+                "study_name": kw["study_name"], "all_trials": []}
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+
+    result = tt.run_hyperparameter_search(
+        base_config=real_hpo_base_config, param_space=get_default_space(),
+        n_trials=1, output_dir=str(tmp_path),
+        scheduler="none", split_draws=2, split_draw_seeds=[7, 8],
+    )
+
+    assert "error" not in result, result
+    assert captured["param_space"]["data.split.seed"]["choices"] == [7, 8]
+
+
+def test_run_hyperparameter_search_admits_the_default_space_at_one_draw(
+    tmp_path, real_hpo_base_config, monkeypatch,
+):
+    """The platform's own get_default_space() names no data.split.seed axis, so it is admitted
+    at split_draws=1 (unset), tune_search is reached, and the space passes through unaltered."""
+    import tcip_mcp.tools.training_tools as tt
+    from tcip_mcp.pipelines.training.hpo import get_default_space
+
+    captured: dict = {}
+
+    def fake_search(**kw):
+        captured.update(kw)
+        return {"study_name": kw["study_name"]}
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+
+    space = get_default_space()
+    result = tt.run_hyperparameter_search(
+        base_config=real_hpo_base_config, param_space=space,
+        n_trials=1, output_dir=str(tmp_path),
+    )
+
+    assert "error" not in result, result
+    assert captured["param_space"] == space
+
+
+def test_run_hyperparameter_search_reports_the_seed_axis_refusal_over_a_preflight_failure(
+    tmp_path, real_hpo_base_config, monkeypatch,
+):
+    """A call that trips both this refusal and preflight (an unimportable builder here) answers
+    this refusal: caller_split_seed_refusal is checked before preflight runs, and every branch
+    ahead of that call is total, so the insertion point is always reached first."""
+    import tcip_mcp.tools.training_tools as tt
+
+    ran = []
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
+
+    cfg = dict(real_hpo_base_config)
+    cfg["model_source"] = {**cfg["model_source"], "builder": "tests.no_such_module:no_such_builder"}
+
+    result = tt.run_hyperparameter_search(
+        base_config=cfg,
+        param_space={"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
+        n_trials=1, output_dir=str(tmp_path), scheduler="none",
+    )
+
+    assert "error" in result and "cannot be replayed as recorded" in result["error"]
+    assert "preflight" not in result["error"]
+    assert not ran
+
+
 # -- admits valid work -------------------------------------------------------------
 
 
@@ -488,27 +649,6 @@ def test_run_hyperparameter_search_admits_a_bare_seed_axis_beside_split_draws(
     assert "error" not in result
     assert "seed" in captured["param_space"]
     assert "data.split.seed" in captured["param_space"]
-
-
-def test_run_hyperparameter_search_admits_a_sampled_split_seed_axis_when_split_draws_is_1(
-    tmp_path, real_hpo_base_config, monkeypatch,
-):
-    """With split_draws at 1 (the default), a caller-sampled data.split.seed axis is untouched,
-    exactly as it is today: the refusal only fires above 1."""
-    import tcip_mcp.tools.training_tools as tt
-
-    captured: dict = {}
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search",
-                        lambda **kw: (captured.update(kw), {"study_name": kw["study_name"]})[1])
-
-    result = tt.run_hyperparameter_search(
-        base_config=real_hpo_base_config,
-        param_space={"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
-        n_trials=1, output_dir=str(tmp_path),
-    )
-
-    assert "error" not in result
-    assert captured["param_space"] == {"data.split.seed": {"type": "categorical", "choices": [1, 2]}}
 
 
 # -- grouping and the best-by-mean -------------------------------------------------

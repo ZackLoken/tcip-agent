@@ -917,6 +917,107 @@ describe("TuningTab heading", () => {
   });
 });
 
+describe("TuningTab split draws spread", () => {
+  it("labels a never-answered draw row as such, without a point to name", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-draws-null-point", status: "completed" })],
+    });
+    vi.spyOn(tuningApi, "getSweep").mockResolvedValue(
+      sweepDetail({
+        sweep_id: "hpo-draws-null-point",
+        status: "completed",
+        result: {
+          split_draws: 2,
+          best_value_spread: { mean: 1.5, std: 0.1, min: 1.4, max: 1.6, seeds_complete: [1, 2] },
+          split_sensitivity: [
+            {
+              point: null,
+              block: {
+                n: 1,
+                n_complete: 0,
+                seeds: [],
+                seeds_complete: [],
+                values: [],
+                mean: null,
+                std: null,
+                min: null,
+                max: null,
+              },
+              eligible: false,
+            },
+          ],
+        },
+      }),
+    );
+    vi.spyOn(tuningApi, "listTrials").mockResolvedValue({
+      sweep_id: "hpo-draws-null-point",
+      trials: [],
+    });
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
+    vi.spyOn(tuningApi, "launchSweepTensorboard").mockResolvedValue({ error: "no cluster" });
+
+    render(<TuningTab />);
+    fireEvent.click(await screen.findByText("hpo-draws-null-point"));
+
+    expect(await screen.findByText("never answered")).toBeInTheDocument();
+  });
+
+  it("renders the best-state text alone when no point is eligible for best", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-draws-no-best", status: "completed" })],
+    });
+    vi.spyOn(tuningApi, "getSweep").mockResolvedValue(
+      sweepDetail({
+        sweep_id: "hpo-draws-no-best",
+        status: "completed",
+        result: {
+          split_draws: 2,
+          best_value_spread: null,
+          best_value_state:
+            "no eligible point: every drawn point had an errored or never-answered draw",
+          split_sensitivity: [],
+        },
+      }),
+    );
+    vi.spyOn(tuningApi, "listTrials").mockResolvedValue({
+      sweep_id: "hpo-draws-no-best",
+      trials: [],
+    });
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
+    vi.spyOn(tuningApi, "launchSweepTensorboard").mockResolvedValue({ error: "no cluster" });
+
+    render(<TuningTab />);
+    fireEvent.click(await screen.findByText("hpo-draws-no-best"));
+
+    expect(
+      await screen.findByText(
+        "no eligible point: every drawn point had an errored or never-answered draw",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("carries the seed-axis reason alone on the row caption, never the remedy", async () => {
+    const reason =
+      "this sweep varied the split seed itself, so it cannot be replayed as recorded; " +
+      "ask the agent to run it again";
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [
+        sweep({
+          sweep_id: "hpo-seed-axis",
+          status: "completed",
+          relaunchable: false,
+          reason,
+        }),
+      ],
+    });
+
+    render(<TuningTab />);
+    expect(await screen.findByText("hpo-seed-axis")).toBeInTheDocument();
+    expect(screen.getByText(reason)).toBeInTheDocument();
+    expect(screen.queryByText(/drop data\.split\.seed from param_space/)).not.toBeInTheDocument();
+  });
+});
+
 describe("TuningTab list order", () => {
   it("states how the sweep list is ordered", async () => {
     vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({

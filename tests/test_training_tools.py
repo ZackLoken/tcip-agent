@@ -827,6 +827,17 @@ def test_apply_hpo_params_dotted_key_reaches_nested_field():
     assert out["model_source"]["task"] == "detection"  # the rest of the mapping survives
 
 
+def test_apply_hpo_params_dotted_seed_key_reaches_the_split_config():
+    """split_draws's own paired grid axis (data.split.seed) reaches the nested field
+    run_hyperparameter_search's drawn path reads, the same dotted-key mechanism a swept
+    builder uses above."""
+    from tcip_mcp.tools.training_tools import _apply_hpo_params
+
+    base = {"model_source": {"builder": "x:y", "task": "detection"}}
+    out = _apply_hpo_params(base, {"data.split.seed": 7})
+    assert out["data"]["split"]["seed"] == 7
+
+
 def test_apply_hpo_params_refuses_a_dotted_key_through_a_non_mapping_intermediate():
     """A dotted key whose path walks through a value that is not a mapping is refused by name,
     naming the key and what was found there, rather than raising an opaque AttributeError."""
@@ -889,6 +900,7 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
     def fake_auto_train_val(task, data_cfg, transforms):
         if captured is not None:
             captured["transforms"] = transforms
+            captured["data_cfg"] = data_cfg
         return ds, ds, None
 
     monkeypatch.setattr(sc, "auto_train_val", fake_auto_train_val)
@@ -1053,6 +1065,28 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
     _run_hpo_trial({"lr": 3e-4}, [].append, base, str(tmp_path / "trial_0"))
     assert captured["transforms"] is not None       # augmentation was built + passed
     assert captured["model_source"]["builder"].endswith(":build_bespoke_classifier")
+
+
+def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_train_val(
+    monkeypatch, tmp_path,
+):
+    """The split_draws grid axis (data.split.seed) resolves onto the config before the trial's
+    data section is built, so auto_train_val (and the drawn split behind it) actually reads the
+    draw's own seed rather than the base config's unswept one."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import _run_hpo_trial
+
+    captured: dict = {}
+
+    def fake_train(run, train_loader, val_loader, task="detection",
+                   epoch_callback=None, resume_from=""):
+        run.best_metric = 1.0
+        run.status = "completed"
+        return run
+
+    _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=captured)
+    _run_hpo_trial({"data.split.seed": 7}, [].append, _detection_base(), str(tmp_path / "trial_0"))
+    assert captured["data_cfg"]["split"]["seed"] == 7
 
 
 def test_run_hpo_trial_writes_resolved_config_with_unconsumed_params(monkeypatch, tmp_path):

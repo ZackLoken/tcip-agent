@@ -372,6 +372,44 @@ def test_get_sweep_serves_the_manifest_alone_when_the_study_result_is_absent(
     assert "all_trials" not in body["result"]
 
 
+def test_get_sweep_serves_a_group_split_draws_result_with_every_block_key_and_the_null_point(
+    client, hpo_root,
+) -> None:
+    """A completed manifest's result built the way run_hyperparameter_search actually builds
+    it (group_split_draws over rows shaped as tune_search emits them, the never-answered row
+    included) reads back through get_sweep's disk branch with every block key and the null
+    point intact."""
+    from tcip_mcp.tools.training_tools import group_split_draws
+
+    all_trials = [
+        {"params": {"lr": 0.1, "data.split.seed": 42}, "value": 0.5, "iterations": 1,
+         "state": "COMPLETE"},
+        {"params": {"lr": 0.1, "data.split.seed": 43}, "value": 0.7, "iterations": 1,
+         "state": "COMPLETE"},
+        {"params": None, "value": None, "iterations": None, "state": "ERROR",
+         "error": "the trial never answered Ray: its actor died during start or never "
+                  "received one, so it has no params, value or iteration count of its own"},
+    ]
+    groups = group_split_draws(all_trials, [42, 43])
+    result = {
+        "best_params": {"lr": 0.1}, "best_value": 0.6, "n_trials": 3,
+        "split_sensitivity": groups, "n_points": 1, "split_draws": 2,
+        "best_value_spread": groups[0]["block"],
+    }
+    _write_sweep(hpo_root, "hpo_producer001", status="completed", result=result)
+
+    body = client.get("/api/tuning/sweeps/hpo_producer001").json()
+    served = body["result"]
+    assert served["split_draws"] == 2
+    completed_block = next(
+        g["block"] for g in served["split_sensitivity"] if g["point"] is not None)
+    assert set(completed_block) == {
+        "seeds", "values", "mean", "std", "min", "max", "n", "n_complete", "seeds_complete",
+    }
+    never_answered = next(g for g in served["split_sensitivity"] if g["point"] is None)
+    assert never_answered["eligible"] is False
+
+
 def test_get_sweep_serves_the_manifest_result_for_a_rehydrated_completed_sweep(
     client, hpo_root
 ) -> None:
@@ -771,6 +809,70 @@ def test_relaunch_route_409s_naming_a_field_missing_from_the_manifest_rather_tha
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_partial001"})
     assert resp.status_code == 409
     assert "scheduler" in resp.json()["detail"]
+
+
+def test_relaunch_route_409s_for_a_manifest_naming_a_caller_split_seed_axis_at_one_draw(
+    client: TestClient, hpo_root, monkeypatch,
+) -> None:
+    """A manifest whose param_space names data.split.seed with no split_draws key (read as 1)
+    refuses the same way a fresh launch would have; the 409 carries the reason and the remedy,
+    and the refused relaunch never reaches run_hyperparameter_search."""
+    captured: dict = {}
+
+    def fake_run_hyperparameter_search(**kwargs):
+        captured.update(kwargs)
+        return {"study_name": kwargs["study_name"]}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    _write_sweep(hpo_root, "hpo_seedaxis409", base_config=base_config,
+                 param_space={"data.split.seed": {"type": "categorical", "choices": [1, 2]}})
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_seedaxis409"})
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert "cannot be replayed as recorded" in detail
+    assert "drop data.split.seed from param_space" in detail
+    assert not captured
+
+
+def test_manifest_with_a_seed_axis_and_no_split_draws_is_not_relaunchable_on_both_row_sources(
+    client: TestClient, hpo_root, monkeypatch,
+) -> None:
+    """A manifest naming data.split.seed as its own param_space axis with no split_draws key
+    (read as 1) lists as not relaunchable, with the seed-axis reason, on a freshly-minted live
+    row and a disk-only row of the identical shape alike."""
+    from tcip_web.routes import tuning
+
+    seed_space = {"data.split.seed": {"type": "categorical", "choices": [1, 2]}}
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+
+    def fake_run_hyperparameter_search(*, study_name, **kwargs):
+        import tcip_store
+        from tcip_mcp.tools.training_tools import sweep_manifest_key
+
+        tcip_store.replace(
+            sweep_manifest_key(study_name),
+            {"study_name": study_name, "status": "completed", "n_trials": 1,
+             **_RELAUNCH_FIELD_DEFAULTS, "param_space": seed_space, "base_config": base_config},
+        )
+        return {"study_name": study_name}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
+    _write_sweep(hpo_root, "hpo_seedaxis_src", base_config=base_config)
+    _write_sweep(hpo_root, "hpo_seedaxis_disk", base_config=base_config, param_space=seed_space)
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_seedaxis_src"})
+    assert resp.status_code == 200
+    live_id = resp.json()["sweep_id"]
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+
+    listing = client.get("/api/tuning/sweeps").json()["sweeps"]
+    by_id = {s["sweep_id"]: s for s in listing}
+    live_row, disk_row = by_id[live_id], by_id["hpo_seedaxis_disk"]
+    for row in (live_row, disk_row):
+        assert row["relaunchable"] is False
+        assert "cannot be replayed as recorded" in row["reason"]
 
 
 def test_relaunch_reads_the_source_manifest_under_the_sweeps_own_launch_root(
@@ -1244,13 +1346,42 @@ def test_manifest_fields_agree_between_a_live_and_a_disk_row(
 def test_manifest_fields_of_an_absent_manifest_is_not_relaunchable_with_no_reason() -> None:
     """A caller with no manifest at all (the pre-manifest window, or a refused relaunch that
     never minted one) reads as not relaunchable but with no reason: the reason is reserved for
-    a manifest that actually exists and actually lacks base_config."""
+    a manifest that actually exists, and actually lacks base config plus no caller-supplied
+    seed axis at one draw."""
     from tcip_web.routes.tuning import _manifest_fields
 
     fields = _manifest_fields({})
     assert fields["relaunchable"] is False
     assert fields["reason"] is None
     assert fields["cancel_requested"] is False
+
+
+def test_manifest_fields_tolerates_an_unreadable_split_draws_value() -> None:
+    """A split_draws value int() cannot read is not a draw count and refuses nothing: the
+    listing still renders rather than raising on a malformed manifest."""
+    from tcip_web.routes.tuning import _manifest_fields
+
+    manifest = {
+        "base_config": {}, "split_draws": "not-a-number",
+        "param_space": {"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
+    }
+    fields = _manifest_fields(manifest)
+    assert fields["relaunchable"] is True
+    assert fields["reason"] is None
+
+
+def test_manifest_fields_narrows_a_truthy_non_mapping_param_space_rather_than_crashing() -> None:
+    """A truthy non-mapping param_space (a hand-edited or otherwise malformed manifest) crashed
+    the listing before this change (.keys() on a string); _manifest_fields now narrows it to an
+    empty mapping before both the key projection and the seed-axis helper call, so the listing
+    still renders with an empty axis list and no seed refusal raised."""
+    from tcip_web.routes.tuning import _manifest_fields
+
+    manifest = {"base_config": {}, "param_space": "not-a-mapping"}
+    fields = _manifest_fields(manifest)
+    assert fields["param_space_keys"] == []
+    assert fields["relaunchable"] is True
+    assert fields["reason"] is None
 
 
 def test_persisted_summary_carries_no_manifest_field(
