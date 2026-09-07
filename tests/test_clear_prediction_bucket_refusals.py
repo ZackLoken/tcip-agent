@@ -343,3 +343,41 @@ def test_bracket_names_the_door_for_a_terminal_experiments_recorded_bucket(tmp_p
     assert "error" in second
     assert "clear_prediction_bucket" in second["error"]
     assert repr(str(source)) in second["error"]
+
+
+def test_bracket_names_no_remedy_when_the_recorded_pointer_is_a_bucket_the_door_itself_refuses(
+        tmp_path, monkeypatch):
+    """When the terminal experiment's own recorded pointer is a bucket clear_prediction_bucket
+    itself would refuse (here, a bespoke path outside any dataset's predictions/ layout), the
+    bracket's message does not promise a remedy that does not apply."""
+    from tcip_mcp.dataset_layout import prediction_dir
+    from tcip_mcp.experiments import create_experiment, update_lineage, update_status
+    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._clear_prediction_bucket_fixtures import (
+        stub_checkpoint_verification, stub_predictor, write_image,
+    )
+
+    stub_predictor(monkeypatch)
+    stub_checkpoint_verification(monkeypatch)
+    exp_id = "expBracketBespokePointer"
+    create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
+    update_status(exp_id, "running")
+    bespoke = tmp_path / "bespoke_predictions"
+    bespoke.mkdir()
+    relink = update_lineage(exp_id, predictions=str(bespoke))
+    assert "error" not in relink, relink
+    update_status(exp_id, "completed")
+
+    images_dir = tmp_path / "images"
+    write_image(images_dir / "img.png")
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+
+    dataset_root = tmp_path / "ds"
+    out = prediction_dir(dataset_root, "m", "2026-03-02")
+    result = run_inference(
+        str(ckpt), str(images_dir), output_dir=str(out), tile=False, experiment_id=exp_id)
+    assert "error" in result
+    assert "clear_prediction_bucket refuses that bucket too" in result["error"]
+    assert "not a canonical bucket under a dataset root" in result["error"]
+    assert "clear_prediction_bucket(predictions_dir=" not in result["error"]

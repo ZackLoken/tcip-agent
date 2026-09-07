@@ -1319,6 +1319,27 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
     return written, dropped, _seal_and_stamp(out, op_stamp, draft)
 
 
+def _clear_door_refusal_reason(recorded_path: str) -> str | None:
+    """Why ``clear_prediction_bucket`` would itself refuse ``recorded_path``, or ``None`` when the
+    door would reach it: named so the bracket's own refusal never promises the door as a remedy
+    where it would refuse the exact same bucket."""
+    from tcip_mcp.dataset_layout import canonical_prediction_bucket
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, stamp_names_raster
+    from tcip_mcp.prediction_buckets import bucket_key_of, review_state_count, review_state_dir_of
+
+    canonical = canonical_prediction_bucket(recorded_path)
+    if canonical is None:
+        return "it is not a canonical bucket under a dataset root"
+    dataset_root = canonical[0]
+    stamp = read_operating_point_sidecar(Path(recorded_path))
+    if stamp is not None and stamp_names_raster(stamp):
+        return "its stamp names a whole-raster pass, out of that door's scope"
+    count = review_state_count(review_state_dir_of(dataset_root), bucket_key_of(Path(recorded_path)))
+    if count:
+        return "it carries review state"
+    return None
+
+
 def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, trait: str | None,
                            images_dir: str | None, dataset_root: Path | None,
                            allow_unvalidated_staging: bool) -> dict:
@@ -1367,11 +1388,19 @@ def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, tr
             # pointer_frozen refuses exactly when terminal and the recorded pointer differs:
             # that recorded path already holds the experiment's own published documents.
             recorded_path = (read_member(lineage_key(exp_id), {}) or {}).get("predictions")
-            frozen = (
-                f"{frozen} {recorded_path!r} holds the experiment's own published documents; "
-                f"clear_prediction_bucket(predictions_dir={recorded_path!r}, reason=...) "
-                "clears it for re-publication into that recorded path."
-            )
+            door_reason = _clear_door_refusal_reason(recorded_path) if recorded_path else None
+            if door_reason is None:
+                frozen = (
+                    f"{frozen} {recorded_path!r} holds the experiment's own published documents; "
+                    f"clear_prediction_bucket(predictions_dir={recorded_path!r}, reason=...) "
+                    "clears it for re-publication into that recorded path."
+                )
+            else:
+                frozen = (
+                    f"{frozen} {recorded_path!r} holds the experiment's own published documents, "
+                    f"and clear_prediction_bucket refuses that bucket too, since {door_reason}; "
+                    "it stays as published."
+                )
             return {"refusal": {"error": frozen}, "written": [], "dropped_boxes": 0,
                     "op_stamp": {}, "tile_size_validated": tile_size_validated,
                     "lineage_linked": None}
