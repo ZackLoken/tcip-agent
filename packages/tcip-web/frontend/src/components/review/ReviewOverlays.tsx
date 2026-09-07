@@ -1,4 +1,5 @@
 import { Fragment, memo, type ReactNode } from "react";
+import { Rect } from "react-konva";
 
 import { HaloLabel } from "@/components/HaloLabel";
 import { ReviewLine } from "@/components/review/ReviewLine";
@@ -23,6 +24,31 @@ interface OverlayProps {
   /** While editing, the picked-up shape is hidden here; it renders live in the edit overlay. */
   suppressFocusedGt?: boolean;
   suppressFocusedPred?: boolean;
+  /** The bucket's own validated count operating point (admission_rule_of), or null: a detection
+   *  at or above it draws a corner mark on its prediction's geometry. Null under a classified
+   *  scope or an unvalidated bucket, so no mark is ever drawn there. */
+  admissionConf?: number | null;
+}
+
+/** A prediction's top-left corner (a box's own, or a polygon's first ring's first vertex) and its
+ *  shorter side, for sizing the corner mark; null for a point (never marked) or an empty ring. */
+function markAnchor(geom: ReviewGeom): { x: number; y: number; shortSide: number } | null {
+  if (geom.kind === "box") {
+    const [x1, y1, x2, y2] = geom.box;
+    return { x: x1, y: y1, shortSide: Math.min(x2 - x1, y2 - y1) };
+  }
+  if (geom.kind === "polygon") {
+    const ring = geom.rings[0];
+    if (!ring || !ring.length) return null;
+    const xs = ring.map(([x]) => x);
+    const ys = ring.map(([, y]) => y);
+    return {
+      x: ring[0][0],
+      y: ring[0][1],
+      shortSide: Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)),
+    };
+  }
+  return null;
 }
 
 /** Memoized, and scale is read from the store internally (not a prop) so pan/zoom re-renders
@@ -36,10 +62,24 @@ export const ReviewOverlays = memo(function ReviewOverlays({
   colors,
   suppressFocusedGt,
   suppressFocusedPred,
+  admissionConf,
 }: OverlayProps) {
   const scale = useStore((s) => s.gui.view.scale);
   const lw = 1 / (scale || 1);
   const ACTIVE_COLOR = colors.active;
+
+  /** A filled square at the prediction's own top-left corner, in the detection's outcome colour
+   *  (never the active colour, so the mark keeps its meaning on the focused detection): the
+   *  channel that names a rule pre-admitted this box, distinct from colour, dash and fill. */
+  const drawAdmittedMark = (geom: ReviewGeom | null, outcome: string): ReactNode => {
+    const anchor = geom ? markAnchor(geom) : null;
+    if (!anchor) return null;
+    const side = Math.min(6 * lw, anchor.shortSide / 3);
+    if (side <= 0) return null;
+    return (
+      <Rect key="admitted" x={anchor.x} y={anchor.y} width={side} height={side} fill={outcome} />
+    );
+  };
 
   /** Every detection renders by its own annotation's geometry: a box stays a box, a polygon stays
    *  a polygon, a point stays a point, and no kind is hidden (hiding one is an unreviewed
@@ -154,13 +194,30 @@ export const ReviewOverlays = memo(function ReviewOverlays({
           }
         }
 
+        // Admitted: scored at or above the bucket's own validated count operating point, under a
+        // detector scope, drawn only under showPred since it is the prediction's own mark.
+        const admitted =
+          showPred &&
+          !matches.attribute &&
+          admissionConf != null &&
+          d.det_type !== "fn" &&
+          d.conf != null &&
+          d.conf >= admissionConf &&
+          !(active && suppressFocusedPred);
+        if (admitted) {
+          nodes.push(drawAdmittedMark(annotationGeometry(detPredAnnotation(d, matches)), outcome));
+        }
+
         if (active) {
           nodes.push(
             <HaloLabel
               key="lbl"
               x={d.bbox[0]}
               y={d.bbox[1]}
-              text={`${d.class_name}${d.conf !== null ? ` ${d.conf.toFixed(2)}` : ""}`}
+              text={
+                `${d.class_name}${d.conf !== null ? ` ${d.conf.toFixed(2)}` : ""}` +
+                (admitted ? `, admitted at or above ${admissionConf!.toFixed(2)}` : "")
+              }
               fill={ACTIVE_COLOR}
               size={11 * lw}
             />,

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type Konva from "konva";
 
 import { api } from "@/api/client";
-import { classesApi, subjectColor } from "@/api/classes";
+import { classesApi, subjectColor, type ImageStatus } from "@/api/classes";
 import { committedOf, isAuditEntryNotWritten } from "@/api/http";
 import { resultsApi, type RegisteredModel } from "@/api/inference";
 import type { ActionPayload } from "@/api/types.generated";
@@ -210,25 +210,38 @@ export function ReviewTab() {
   // The bucket's own generation confidence, fetched once per prediction dir (read-only, no
   // gate run) so the "Conf ≥" filter can warn live (see the filter shelf below).
   const [generationConf, setGenerationConf] = useState<number | null>(null);
+  // The bucket's own validated count operating point (admission_rule_of): null with the reason
+  // naming why (no stamp, unvalidated, floored binding, no readable conf).
+  const [admissionRule, setAdmissionRule] = useState<{
+    conf: number;
+    experiment_id: string;
+    record_digest: string;
+  } | null>(null);
+  const [admissionReason, setAdmissionReason] = useState("");
   useEffect(() => {
     setGenerationConf(null);
+    setAdmissionRule(null);
+    setAdmissionReason("");
     if (!dataset.predictions_dir) return;
     let cancelled = false;
     void api.review.generationConf(dataset.predictions_dir).then(
       (res) => {
-        if (!cancelled) setGenerationConf(res.generation_conf);
+        if (cancelled) return;
+        setGenerationConf(res.generation_conf);
+        setAdmissionRule(res.admission_rule);
+        setAdmissionReason(res.admission_reason);
       },
       () => {
-        // Fetch failed: stay null. A missing generation_conf reads the same as a missing sidecar
-        // (a foreign checkpoint, a not-yet-staged bucket), and the backend's own _conf_censored
-        // treats a None staged_conf_floor as always censored, not as nothing to check, so this
-        // warns too, rather than going quiet.
+        // Fetch failed: stay null. A missing generation_conf reads as a missing sidecar, and
+        // _conf_censored treats a None staged_conf_floor as always censored, so this warns too.
       },
     );
     return () => {
       cancelled = true;
     };
   }, [dataset.predictions_dir]);
+  // A detector scope only (Q52): a classified review judges values, never a count the gate floors.
+  const admissionConf = matches && !matches.attribute && admissionRule ? admissionRule.conf : null;
   // Raising this filter above the predictions' own generation confidence hides low-confidence
   // detections from review; any verdict then recorded under it raises review_conf_threshold past
   // generation_conf, which validate_reference's identical gate reads as conf_censored, the same
@@ -428,10 +441,13 @@ export function ReviewTab() {
         active: reviewColors.active,
       },
       counts: { tp: matches.n_tp, fp: matches.n_fp, fn: matches.n_fn },
-      shapes: buildReviewShapes(matches, reviewColors, detectionIdx, {
-        showGT,
-        showPred,
-      }),
+      shapes: buildReviewShapes(
+        matches,
+        reviewColors,
+        detectionIdx,
+        { showGT, showPred },
+        admissionConf,
+      ),
     };
   };
   const canvasPusherRef = useRef(createCanvasPusher((b) => api.canvas.pushState(b)));
@@ -439,7 +455,7 @@ export function ReviewTab() {
   // Verdicts / detection focus / visibility change the drawn shapes → full push; pan/zoom → heartbeat.
   useEffect(() => {
     canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), true);
-  }, [matches, reviewColors, detectionIdx, showGT, showPred, imgPath]);
+  }, [matches, reviewColors, detectionIdx, showGT, showPred, imgPath, admissionConf]);
   useEffect(() => {
     canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), false);
   }, [view, subjectSwatches]);
@@ -469,6 +485,14 @@ export function ReviewTab() {
   const actionPending = useRef(false);
   // Label-dir sets whose .original/ baseline is already captured this session (see ensureBackup).
   const backedUpKeys = useRef<Set<string>>(new Set());
+  // The confirm-admitted run's own state (React state, not a ref: every control that must
+  // disable during the run reads it on render). Non-null for the whole run's span.
+  const [confirmRun, setConfirmRun] = useState<{ confirmed: number; total: number } | null>(null);
+  const runBlocked = confirmRun !== null;
+  // A ref mirror so an in-flight async continuation (reloadMatches) reads the run's current
+  // state rather than the render closure it started under.
+  const runBlockedRef = useRef(false);
+  runBlockedRef.current = runBlocked;
 
   // Install a matches payload (from /matches or a verdict's /action response) onto the canvas: set
   // state, then land on the hinted detection (else the first unreviewed) and zoom to it. A pending
@@ -519,6 +543,7 @@ export function ReviewTab() {
       // response would put another image's matches under the current image.
       const now = useStore.getState().gui.dataset;
       if ((now.image_list[now.current_image_index] ?? null) !== imgName) return;
+      if (runBlockedRef.current) return; // a run installs its own final response, not a reload
       applyMatches(res, indexHint);
     } catch (e) {
       // A superseded (aborted) request is expected during slider drags; ignore it.
@@ -701,6 +726,47 @@ export function ReviewTab() {
     }
     return Array.from(names).sort();
   }, [matches]);
+
+  // N: the admitted, unreviewed detections the confirm button would confirm at the review
+  // confidence filter, tp and fp alike; M: matchable predictions the confidence filter hides.
+  const admittedUnreviewedCount = useMemo(() => {
+    if (!matches || admissionConf == null) return 0;
+    return matches.detections.filter(
+      (d) => d.det_type !== "fn" && d.conf != null && d.conf >= admissionConf && !d.reviewed,
+    ).length;
+  }, [matches, admissionConf]);
+  const belowFilterAdmittedCount = useMemo(() => {
+    if (!matches || admissionConf == null) return 0;
+    return matches.preds.filter((p) => {
+      if (p.score == null || p.score < admissionConf || p.score >= filters.conf_threshold) {
+        return false;
+      }
+      return !!p.bbox || !!(p.rings && p.rings.length);
+    }).length;
+  }, [matches, admissionConf, filters.conf_threshold]);
+  const confirmAdmittedDisabledReason = (() => {
+    if (runBlocked) return "A confirm-admitted run is already in progress.";
+    if (filters.filter_type !== "all" || filters.filter_class !== "all") {
+      return "Set both the type and class filters to All to confirm the image's whole admitted set.";
+    }
+    if (classifiedScope) {
+      return "The count operating point admits detections; a classified review judges values.";
+    }
+    if (admissionConf == null) {
+      return admissionReason || "This bucket has no validated count operating point.";
+    }
+    if (admittedUnreviewedCount === 0)
+      return "No admitted detections remain unreviewed on this image.";
+    if (!showPred) return "Predictions are hidden, so the admitted marks are hidden too.";
+    if (reviewLocked) return "This image is reviewed; uncheck Reviewed to edit.";
+    if (edit) return "Finish or cancel the current edit first.";
+    if (drawingMiss) return "Finish or cancel drawing the missed object first.";
+    if (!canReview) return "No dataset root, so review verdicts have nowhere to be recorded.";
+    if (matchesImageRef.current !== imgName || useStore.getState().review.loading) {
+      return "The installed matches are still loading for this image.";
+    }
+    return "";
+  })();
 
   async function recordAction(
     action: Exclude<ActionPayload["action"], "swept">,
@@ -918,6 +984,97 @@ export function ReviewTab() {
       return false;
     } finally {
       actionPending.current = false;
+    }
+  }
+
+  /** Every admitted, unreviewed detection in ``m`` (tp and fp alike, never fn): scored at or
+   *  above the bucket's own validated count operating point, under the detector scope
+   *  ``admissionConf`` already resolves to null outside of. */
+  function admittedUnreviewed(m: MatchesResponse) {
+    const conf = admissionConf;
+    if (conf == null) return [];
+    return m.detections.filter(
+      (d) => d.det_type !== "fn" && d.conf != null && d.conf >= conf && !d.reviewed,
+    );
+  }
+
+  /** Confirm every admitted, unreviewed detection on this image in sequence through the existing
+   *  accept route, each one carrying ``rule_admitted: true``: one button, one accept
+   *  implementation. Holds ``actionPending`` for the whole run (defence in depth against a
+   *  slipped-through verdict) and ``confirmRun`` (React state) so every other verdict, stamp and
+   *  navigation control disables through ``runBlocked`` while it runs. */
+  async function confirmAdmitted() {
+    if (runBlocked || actionPending.current) return;
+    if (reviewLocked || !canReview || !matches || admissionConf == null) return;
+    const total = admittedUnreviewed(matches).length;
+    if (total === 0) return;
+    actionPending.current = true;
+    setConfirmRun({ confirmed: 0, total });
+    let freshest = matches;
+    let confirmed = 0;
+    let addedToGt = 0;
+    let lastAnnotationStatus: ImageStatus | null = null;
+    try {
+      if (!(await ensureBackup())) return;
+      while (true) {
+        const next = admittedUnreviewed(freshest)[0];
+        if (!next) break;
+        try {
+          const res = await api.review.action({
+            dataset_root: dataset.dataset_root!,
+            image_name: imgName!,
+            image_path: imgPath!,
+            gt_path: paths.gt,
+            pred_path: paths.pred,
+            det_type: next.det_type,
+            class_name: next.class_name,
+            conf: next.conf,
+            iou: next.iou,
+            gt_idx: next.gt_idx,
+            pred_idx: next.pred_idx,
+            bbox: next.bbox,
+            action: "accepted",
+            edited_box: null,
+            edited_points: null,
+            iou_threshold: filters.iou_threshold,
+            conf_threshold: filters.conf_threshold,
+            filter_type: filters.filter_type,
+            filter_class: filters.filter_class,
+            user: useStore.getState().user,
+            rule_admitted: true,
+          });
+          freshest = res.matches;
+          lastAnnotationStatus = res.annotation_status;
+          confirmed += 1;
+          if (res.annotation_status) addedToGt += 1;
+          setConfirmRun({ confirmed, total });
+        } catch (e) {
+          const committed = committedOf<Awaited<ReturnType<typeof api.review.action>>>(e);
+          if (committed) {
+            freshest = committed.matches;
+            lastAnnotationStatus = committed.annotation_status;
+            confirmed += 1;
+            if (committed.annotation_status) addedToGt += 1;
+            setConfirmRun({ confirmed, total });
+          }
+          break;
+        }
+      }
+    } finally {
+      if (imgName && matchesImageRef.current === imgName) {
+        applyMatches(freshest, useStore.getState().gui.review.detection_idx);
+        setImageStatus(freshest.image_status);
+        setReviewImageStatus(imgName, freshest.image_status);
+        if (lastAnnotationStatus) setStoreImageStatus(imgName, lastAnnotationStatus);
+      }
+      useStore
+        .getState()
+        .pushToast(
+          `Confirmed ${confirmed} admitted as ${useStore.getState().user || "you"}: ${addedToGt} ` +
+            `added to ground truth, ${confirmed - addedToGt} already matched and left as they were`,
+        );
+      actionPending.current = false;
+      setConfirmRun(null);
     }
   }
 
@@ -1198,7 +1355,7 @@ export function ReviewTab() {
       action: (e) => {
         if (!e.repeat) void recordAction("accepted");
       },
-      when: () => !!current && !edit && !reviewLocked && canReview,
+      when: () => !!current && !edit && !reviewLocked && canReview && !runBlocked,
     },
     {
       keys: "r",
@@ -1208,7 +1365,11 @@ export function ReviewTab() {
       // Same guard the Reject button is disabled on, so a classified tp/fn raises no dialog.
       when: () => !!current && !edit && !rejectDisabled,
     },
-    { keys: "e", action: () => startEdit(), when: () => !!current && !edit && canReview },
+    {
+      keys: "e",
+      action: () => startEdit(),
+      when: () => !!current && !edit && canReview && !runBlocked,
+    },
     {
       keys: "enter",
       action: (e) => {
@@ -1218,22 +1379,22 @@ export function ReviewTab() {
       when: () => !!edit,
     },
     { keys: "escape", action: () => cancelEdit(), when: () => !!edit },
-    { keys: "arrowleft", action: () => stepDetection(-1), when: () => !edit },
-    { keys: "arrowright", action: () => stepDetection(1), when: () => !edit },
+    { keys: "arrowleft", action: () => stepDetection(-1), when: () => !edit && !runBlocked },
+    { keys: "arrowright", action: () => stepDetection(1), when: () => !edit && !runBlocked },
     // Image flips ignore held-key auto-repeat; each one costs a full image render.
     {
       keys: "arrowup",
       action: (e) => {
         if (!e.repeat) stepImage(-1);
       },
-      when: () => !edit,
+      when: () => !edit && !runBlocked,
     },
     {
       keys: "arrowdown",
       action: (e) => {
         if (!e.repeat) stepImage(1);
       },
-      when: () => !edit,
+      when: () => !edit && !runBlocked,
     },
   ]);
 
@@ -1265,7 +1426,7 @@ export function ReviewTab() {
       ? "Discard this prediction; ground truth unchanged (R)"
       : "Delete this ground-truth object (R)";
   const rejectDisabled =
-    reviewLocked || !canReview || (classifiedScope && current?.det_type !== "fp");
+    reviewLocked || !canReview || runBlocked || (classifiedScope && current?.det_type !== "fp");
 
   return (
     <div className="flex-1 flex flex-col relative min-h-0">
@@ -1372,7 +1533,7 @@ export function ReviewTab() {
           <button
             className="tcip-btn"
             onClick={() => void promoteReviewToValidationReference()}
-            disabled={validating || !!edit || !trait || !canReview}
+            disabled={validating || !!edit || !trait || !canReview || runBlocked}
             title={
               traitError ??
               "Check whether this review confirms the model's counts well enough to trust them for results. Runs the platform's own validation check; it will tell you if it isn't enough yet. A staged bucket is reviewed through the accept path and is never promoted to a validation reference."
@@ -1420,7 +1581,8 @@ export function ReviewTab() {
               !!edit ||
               !dataset.subject ||
               !canReview ||
-              classifiedScope
+              classifiedScope ||
+              runBlocked
             }
             title={
               classifiedScope
@@ -1439,11 +1601,38 @@ export function ReviewTab() {
           <button
             className="tcip-btn"
             onClick={() => void recordSweepAttested()}
-            disabled={!imgName || reviewLocked || !!edit || drawingMiss || !canReview}
+            disabled={!imgName || reviewLocked || !!edit || drawingMiss || !canReview || runBlocked}
             title="Record that you checked this image for missed objects and found none"
           >
             ✓ Confirm: nothing missed
           </button>
+
+          {/* One button, in sequence through the existing accept route: confirms every admitted,
+              unreviewed detection at the review confidence filter, the breeder's own knob. */}
+          <button
+            className="tcip-btn"
+            onClick={() => void confirmAdmitted()}
+            disabled={!!confirmAdmittedDisabledReason}
+            title={
+              confirmAdmittedDisabledReason ||
+              `Confirm every admitted detection on this image (at or above conf ${admissionConf?.toFixed(2)})`
+            }
+          >
+            {runBlocked
+              ? `Confirming ${confirmRun.confirmed} of ${confirmRun.total}…`
+              : `✓ Confirm ${admittedUnreviewedCount} admitted`}
+          </button>
+          {admissionConf != null && (
+            <span className="text-tcip-muted max-w-[360px]">
+              Pre-admitted by count, not by box: a confident false positive above{" "}
+              {admissionConf.toFixed(2)} is admitted too, so look before confirming
+            </span>
+          )}
+          {belowFilterAdmittedCount > 0 && (
+            <span className="text-tcip-muted">
+              {belowFilterAdmittedCount} more admitted predictions are below the Conf filter
+            </span>
+          )}
 
           <span className="flex-1" />
 
@@ -1477,7 +1666,7 @@ export function ReviewTab() {
             <button
               className="tcip-btn"
               onClick={() => stepImage(-1)}
-              disabled={!nav.canPrev || !!edit}
+              disabled={!nav.canPrev || !!edit || runBlocked}
               aria-label="Previous image"
             >
               ◀
@@ -1486,6 +1675,7 @@ export function ReviewTab() {
               ref={counterRef}
               className="tcip-input w-10 text-center font-mono"
               value={counterDraft ?? (nav.position > 0 ? String(nav.position) : "")}
+              disabled={runBlocked}
               onChange={(e) => setCounterDraft(e.target.value.replace(/[^0-9]/g, ""))}
               onFocus={() => setCounterDraft(String(nav.position || 1))}
               onBlur={() => setCounterDraft(null)}
@@ -1505,7 +1695,7 @@ export function ReviewTab() {
             <button
               className="tcip-btn"
               onClick={() => stepImage(1)}
-              disabled={!nav.canNext || !!edit}
+              disabled={!nav.canNext || !!edit || runBlocked}
               aria-label="Next image"
             >
               ▶
@@ -1518,7 +1708,7 @@ export function ReviewTab() {
               type="checkbox"
               checked={imageStatus === "completed"}
               onChange={(e) => void markImageComplete(e.target.checked)}
-              disabled={!imgName || !!edit || !dataset.subject || !canReview}
+              disabled={!imgName || !!edit || !dataset.subject || !canReview || runBlocked}
             />
             Reviewed
           </label>
@@ -1534,7 +1724,7 @@ export function ReviewTab() {
               max={100}
               step={5}
               value={filters.iou_threshold * 100}
-              disabled={!!edit}
+              disabled={!!edit || runBlocked}
               onChange={(e) =>
                 patchGui({
                   review: { ...filters, iou_threshold: Number(e.target.value) / 100 },
@@ -1550,7 +1740,7 @@ export function ReviewTab() {
               max={100}
               step={5}
               value={filters.conf_threshold * 100}
-              disabled={!!edit}
+              disabled={!!edit || runBlocked}
               onChange={(e) =>
                 patchGui({
                   review: { ...filters, conf_threshold: Number(e.target.value) / 100 },
@@ -1563,7 +1753,7 @@ export function ReviewTab() {
             <select
               className="tcip-select"
               value={filters.filter_type}
-              disabled={!!edit}
+              disabled={!!edit || runBlocked}
               onChange={(e) =>
                 patchGui({ review: { ...filters, filter_type: e.target.value as never } })
               }
@@ -1577,7 +1767,7 @@ export function ReviewTab() {
               className="tcip-select"
               aria-label="Class filter"
               value={filters.filter_class}
-              disabled={!!edit}
+              disabled={!!edit || runBlocked}
               title="Show only detections of one class, or all classes"
               onChange={(e) => patchGui({ review: { ...filters, filter_class: e.target.value } })}
             >
@@ -1591,7 +1781,7 @@ export function ReviewTab() {
             <select
               className="tcip-select"
               value={reviewStatus.activeFilter}
-              disabled={!!edit}
+              disabled={!!edit || runBlocked}
               title="Show all images, or only those whose review is complete / incomplete"
               onChange={(e) => setReviewStatusFilter(e.target.value as ReviewStatusFilter)}
             >
@@ -1713,6 +1903,7 @@ export function ReviewTab() {
               colors={reviewColors}
               suppressFocusedGt={!!edit && current?.det_type !== "fp"}
               suppressFocusedPred={!!edit && current?.det_type === "fp"}
+              admissionConf={admissionConf}
             />
           )}
         </CanvasStage>
@@ -1734,7 +1925,22 @@ export function ReviewTab() {
           </span>
         )}
 
-        <ReviewLegend colors={reviewColors} items={COLOR_LABELS} onEdit={setColorEditKey} />
+        <ReviewLegend
+          colors={reviewColors}
+          items={COLOR_LABELS}
+          onEdit={setColorEditKey}
+          note={
+            admissionConf != null
+              ? {
+                  text:
+                    "Corner mark at a prediction's top-left corner, in its outcome colour: " +
+                    "pre-admitted by this bucket's validated count operating point (conf at or " +
+                    `above ${admissionConf.toFixed(2)}, the same number the Conf chip reads as ` +
+                    "the bucket's generation confidence). Unmarked boxes take their own verdict.",
+                }
+              : null
+          }
+        />
       </div>
 
       {/* Empty-state card: tells the reviewer why there is nothing to step through,
@@ -1762,7 +1968,9 @@ export function ReviewTab() {
         <button
           className="tcip-btn"
           onClick={() => stepDetection(-1)}
-          disabled={!matches || matches.detections.length === 0 || detectionIdx <= 0 || !!edit}
+          disabled={
+            !matches || matches.detections.length === 0 || detectionIdx <= 0 || !!edit || runBlocked
+          }
           title="Previous detection (←)"
         >
           ◀
@@ -1779,7 +1987,8 @@ export function ReviewTab() {
             !matches ||
             matches.detections.length === 0 ||
             detectionIdx >= matches.detections.length - 1 ||
-            !!edit
+            !!edit ||
+            runBlocked
           }
           title="Next detection (→)"
         >
@@ -1811,7 +2020,7 @@ export function ReviewTab() {
             <button
               className="tcip-btn-primary"
               onClick={() => void recordAction("accepted")}
-              disabled={reviewLocked || !canReview}
+              disabled={reviewLocked || !canReview || runBlocked}
               title={acceptTitle}
             >
               ✓&nbsp;&nbsp;{acceptLabel}
@@ -1819,7 +2028,7 @@ export function ReviewTab() {
             <button
               className="tcip-btn"
               onClick={startEdit}
-              disabled={reviewLocked || !canReview}
+              disabled={reviewLocked || !canReview || runBlocked}
               title="Adjust this shape on the canvas (E)"
             >
               ✎&nbsp;&nbsp;Edit

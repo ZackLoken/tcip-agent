@@ -10,6 +10,7 @@ export function ReviewLegend({
   colors,
   items,
   onEdit,
+  note,
 }: {
   colors: ReviewColors;
   /** The rows to list, in order: ReviewTab's own COLOR_LABELS (plain-language label + outcome
@@ -17,6 +18,9 @@ export function ReviewLegend({
    *  that constant is tab-specific. */
   items: { key: keyof ReviewColors; label: string; dashed?: boolean }[];
   onEdit: (key: keyof ReviewColors) => void;
+  /** One static row under the colour rows, shown only while the confirm-admitted button is
+   *  offered: never advertises a channel the canvas is not currently drawing. */
+  note?: { text: string } | null;
 }) {
   const [pinned, setPinned] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -48,6 +52,21 @@ export function ReviewLegend({
             />
           ))}
         </ul>
+        {note && (
+          <div className="mt-2 flex max-w-[16rem] items-start gap-1.5 whitespace-normal border-t border-tcip-border pt-1.5">
+            <svg
+              width="8"
+              height="8"
+              viewBox="0 0 8 8"
+              fill="currentColor"
+              aria-hidden="true"
+              className="mt-0.5 shrink-0 text-tcip-muted"
+            >
+              <rect width="8" height="8" />
+            </svg>
+            <p className="text-[10px] text-tcip-muted">{note.text}</p>
+          </div>
+        )}
         <p className="mt-2 border-t border-tcip-border pt-1.5 text-[10px] text-tcip-muted">
           Click a swatch to recolour
         </p>
