@@ -2281,8 +2281,8 @@ def run_hyperparameter_search(
             native one (``random``/``grid``/``variant_generator``: only the native generator
             pairs a grid axis), ``scheduler`` is not ``none`` (a pruned draw is not comparable
             with a completed one), ``split_draw_seeds`` is given at a length other than
-            ``split_draws`` and distinct (a repeated seed is not a spread over distinct
-            partitions), ``warm_start``'s ``baseline_params`` names ``data.split.seed``
+            ``split_draws``, or names the same seed twice (a repeated seed is not a spread over
+            distinct partitions), ``warm_start``'s ``baseline_params`` names ``data.split.seed``
             (Ray's preset-variant pinning would pin every draw to one seed instead of pairing
             the grid), ``param_space`` already sweeps ``data.split.seed`` itself, or
             ``param_space`` sweeps any other ``data.*`` axis (a second data axis would change
