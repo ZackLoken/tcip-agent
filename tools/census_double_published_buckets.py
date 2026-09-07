@@ -1,10 +1,13 @@
 #!/usr/bin/env python
 """Census of prediction buckets published more than once before the live-bucket refusal.
 
-Read-only. For each project root given, every prediction bucket the project's own records
+Read-only. For each project root given, every live prediction bucket the project's own records
 name (``store_catalogue.project_roots``, the same enumeration ``tcip adopt-store`` and ``tcip
 export-store`` walk: the buckets under each registered dataset's ``predictions/`` tree and
-each experiment's lineage bucket) is checked two ways. A stamp whose ``image_filenames``
+each experiment's lineage bucket) is checked two ways; a bucket already moved into the cleared
+archive (``predictions/.cleared/``, populated only by ``clear_prediction_bucket``) is skipped,
+since a cleared bucket holds one run's own documents and stamp, never a later run's overwrite.
+A stamp whose ``image_filenames``
 names fewer stems than the bucket holds documents for is a bucket a later run published over
 an earlier one, leaving documents the stamp does not vouch for. A validation record whose
 ``covered_buckets`` names such a bucket is a claim sealed over a mixed-run digest; for an
@@ -128,6 +131,8 @@ def census_project(project_root: Path) -> ProjectCensus:
             continue
         bucket = Path(path)
         if not bucket.is_dir():
+            continue
+        if dataset_layout.is_cleared_bucket(bucket):
             continue
         entry = census_bucket(bucket)
         if entry.stamp_read_error is not None:
