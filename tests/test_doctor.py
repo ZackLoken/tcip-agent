@@ -14,7 +14,6 @@ from PIL import Image
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import traits
-from tests._operationalization_fixtures import confirm_spec_statement
 from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
 from tcip_mcp.dataset_layout import (
     annotation_dir,
@@ -26,6 +25,7 @@ from tcip_mcp.dataset_layout import (
     status_records,
 )
 from tcip_mcp.model_registry import ModelRegistry
+from tests._operationalization_fixtures import confirm_spec_statement
 
 PY_EXE = sys.executable
 
@@ -584,6 +584,92 @@ def test_trait_specs_are_read_from_the_registrys_own_directory(tmp_path):
     assert "burr_size.json" in spec_lines[0]
     assert "measured_with" in spec_lines[0]
     assert "bloom_length.json" not in res.stdout
+
+
+def _leaf_spec_project(tmp_path: Path) -> Path:
+    import tcip_store as ts
+
+    root = _layout_project(tmp_path, "2026-03-04")
+    directory = root / traits._TRAIT_SPECS_RELPATH
+    ts.replace(traits.trait_spec_key(directory, "leaf"),
+               {"name": "leaf", "delivers": ["leaf_length"]}, expect=ts.Version.ABSENT)
+    return root
+
+
+def test_doctor_is_silent_on_a_confirmed_current_trait_spec_statement(tmp_path: Path):
+    root = _leaf_spec_project(tmp_path)
+    confirm_spec_statement(root, "leaf")
+
+    res = _run(root)
+
+    assert "trait spec" not in res.stdout, res.stdout
+
+
+def test_doctor_reports_a_stale_trait_spec_statement(tmp_path: Path):
+    import tcip_store as ts
+
+    root = _leaf_spec_project(tmp_path)
+    confirm_spec_statement(root, "leaf")
+    directory = root / traits._TRAIT_SPECS_RELPATH
+    key = traits.trait_spec_key(directory, "leaf")
+    stored = ts.read_versioned(key)
+    ts.replace(key, {**stored.value, "notes": "a note added after confirmation"},
+               expect=stored.version)
+
+    res = _run(root)
+
+    assert res.returncode == 1, res.stdout
+    lines = _lines(res.stdout, "trait spec")
+    assert len(lines) == 1 and "no longer matches" in lines[0]
+
+
+def test_doctor_reports_a_current_unconfirmed_trait_spec_statement(tmp_path: Path):
+    root = _leaf_spec_project(tmp_path)
+    traits.write_trait_spec_fields(
+        "leaf", {}, project_root=root, rationale="an initial account of the leaf trait",
+    )
+
+    res = _run(root)
+
+    assert res.returncode == 1, res.stdout
+    lines = _lines(res.stdout, "trait spec")
+    assert len(lines) == 1 and "has not confirmed" in lines[0]
+
+
+def test_doctor_reports_an_undecodable_trait_spec_statement_without_aborting(tmp_path: Path):
+    from tests._record_damage_fixtures import damage_record
+
+    root = _leaf_spec_project(tmp_path)
+    confirm_spec_statement(root, "leaf")
+    scope = traits.trait_spec_statements_scope(root)
+    key = traits.trait_spec_statement_key(scope, "leaf")
+    damage_record(key, b"{not valid json")
+
+    res = _run(root)
+
+    assert res.returncode == 2, res.stdout
+    lines = _lines(res.stdout, "trait spec")
+    assert len(lines) == 1 and "will not read" in lines[0]
+
+
+def test_doctor_reports_a_version_refused_trait_spec_statement_without_aborting(tmp_path: Path):
+    import json
+
+    from tests._record_damage_fixtures import damage_record
+
+    root = _leaf_spec_project(tmp_path)
+    confirmed = confirm_spec_statement(root, "leaf")
+    scope = traits.trait_spec_statements_scope(root)
+    key = traits.trait_spec_statement_key(scope, "leaf")
+    # A version this store's own writer refuses to produce, so the record's own bytes are
+    # damaged in place rather than written through the seam.
+    damage_record(key, json.dumps({**confirmed, "schema_version": 99}).encode("utf-8"))
+
+    res = _run(root)
+
+    assert res.returncode == 1, res.stdout
+    lines = _lines(res.stdout, "trait spec")
+    assert len(lines) == 1
 
 
 def test_doctor_warns_on_a_project_with_no_record(tmp_path):
