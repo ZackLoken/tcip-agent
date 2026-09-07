@@ -1038,6 +1038,54 @@ def test_relaunch_passes_through_a_manifests_own_split_draws(
     assert captured["split_draw_seeds"] == [1, 2, 3]
 
 
+def test_relaunch_coerces_a_manifests_numeric_string_split_draws(
+    client: TestClient, hpo_root, monkeypatch
+) -> None:
+    """A manifest recording split_draws as a numeric string (an older or hand-written one)
+    once crashed the worker with a TypeError comparing it to an int; the relaunch route now
+    reads it through the same int() coercion caller_split_seed_refusal applies, so it relaunches
+    with the draw count it names rather than the string itself."""
+    from tcip_web.routes import tuning
+
+    captured: dict = {}
+
+    def fake_run_hyperparameter_search(**kwargs):
+        captured.update(kwargs)
+        return {"study_name": kwargs["study_name"]}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    _write_sweep(hpo_root, "hpo_drawsstr01", base_config=base_config, split_draws="2")
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_drawsstr01"})
+    assert resp.status_code == 200
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+
+    assert captured["split_draws"] == 2
+
+
+def test_relaunch_route_409s_for_a_manifest_whose_split_draws_is_not_a_draw_count(
+    client: TestClient, hpo_root, monkeypatch
+) -> None:
+    """A manifest whose split_draws value int() cannot read at all is not a draw count; the
+    relaunch route refuses it by name before the worker starts, rather than replaying it into
+    the same TypeError a numeric string used to cause."""
+    captured: dict = {}
+
+    def fake_run_hyperparameter_search(**kwargs):
+        captured.update(kwargs)
+        return {"study_name": kwargs["study_name"]}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    _write_sweep(hpo_root, "hpo_drawsbad01", base_config=base_config, split_draws="not-a-number")
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_drawsbad01"})
+    assert resp.status_code == 409
+    assert "split_draws" in resp.json()["detail"]
+    assert not captured
+
+
 def test_relaunch_records_the_source_study_as_relaunched_from_on_the_new_manifest(
     client: TestClient, hpo_root, real_hpo_base_config, monkeypatch
 ) -> None:
@@ -1363,6 +1411,22 @@ def test_manifest_fields_tolerates_an_unreadable_split_draws_value() -> None:
 
     manifest = {
         "base_config": {}, "split_draws": "not-a-number",
+        "param_space": {"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
+    }
+    fields = _manifest_fields(manifest)
+    assert fields["relaunchable"] is True
+    assert fields["reason"] is None
+
+
+def test_manifest_fields_tolerates_an_infinite_split_draws_value() -> None:
+    """A JSON Infinity literal decodes to float("inf") through the store's plain json.loads
+    even though its own encode refuses to write one, so a manifest of unknown provenance under
+    hpo_root() can carry it; int() cannot read it as a draw count either, and the listing
+    renders rather than raising OverflowError."""
+    from tcip_web.routes.tuning import _manifest_fields
+
+    manifest = {
+        "base_config": {}, "split_draws": float("inf"),
         "param_space": {"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
     }
     fields = _manifest_fields(manifest)
