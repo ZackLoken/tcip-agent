@@ -2339,17 +2339,20 @@ def _render_reconciled_document(entry: Mapping) -> dict:
     """One ``_reconcile_validity``-shaped mapping rendered to plain JSON values, run before
     ``model_validate`` and the store write: ``_reconcile_validity`` admits any number for ``conf``
     and ``confs`` (a hand-authored ``NaN`` a reader can decode but the canonical codec refuses),
-    so both pass through :func:`~tcip_store.finite_or_none` here rather than reach the codec."""
+    so both pass through :func:`~tcip_store.finite_or_none` here rather than reach the codec.
+    Every key the reconciler always returns is read as required, so an entry that dropped one
+    raises ``KeyError`` here rather than recording an empty value that reads as a reconciliation
+    of nothing; only the classifier entry's two delivery-level keys are optional."""
     rendered = {
         "validated": entry["validated"],
         "on_disk_validated": entry["on_disk_validated"],
-        "missing_sidecars": list(entry.get("missing_sidecars", [])),
-        "unvalidated_buckets": list(entry.get("unvalidated_buckets", [])),
-        "binding_notes": dict(entry.get("binding_notes", {})),
-        "bindings": _render_bindings(entry.get("bindings", {})),
-        "conf": finite_or_none(entry.get("conf")),
-        "confs": {bucket: finite_or_none(v) for bucket, v in entry.get("confs", {}).items()},
-        "per_bucket": dict(entry.get("per_bucket", {})),
+        "missing_sidecars": list(entry["missing_sidecars"]),
+        "unvalidated_buckets": list(entry["unvalidated_buckets"]),
+        "binding_notes": dict(entry["binding_notes"]),
+        "bindings": _render_bindings(entry["bindings"]),
+        "conf": finite_or_none(entry["conf"]),
+        "confs": {bucket: finite_or_none(v) for bucket, v in entry["confs"].items()},
+        "per_bucket": dict(entry["per_bucket"]),
     }
     if "bound_validated" in entry:
         rendered["bound_validated"] = entry["bound_validated"]
@@ -2360,13 +2363,14 @@ def _render_reconciled_document(entry: Mapping) -> dict:
 
 def _render_reconciled_dimension(entry: Mapping) -> dict:
     """One ``reconcile_tile_size_validity``/``reconcile_claim_scope_validity``/
-    ``reconcile_scale_validity``-shaped mapping rendered to plain JSON values."""
+    ``reconcile_scale_validity``-shaped mapping rendered to plain JSON values, every key read as
+    required for the same reason as :func:`_render_reconciled_document`'s."""
     return {
         "operative": entry["operative"],
-        "validated": entry.get("validated"),
-        "per_bucket": dict(entry.get("per_bucket", {})),
-        "unvalidated_buckets": list(entry.get("unvalidated_buckets", [])),
-        "binding_notes": dict(entry.get("binding_notes", {})),
+        "validated": entry["validated"],
+        "per_bucket": dict(entry["per_bucket"]),
+        "unvalidated_buckets": list(entry["unvalidated_buckets"]),
+        "binding_notes": dict(entry["binding_notes"]),
     }
 
 
