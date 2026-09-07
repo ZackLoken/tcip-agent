@@ -80,16 +80,25 @@ def _run(parent_pid: int, term_grace: float, argv: list[str]) -> int:
 
 def _parse_args(argv: list[str]) -> tuple[int, float, list[str]]:
     """``--parent`` and ``--term-grace`` may come in either order, both before ``--``; either
-    missing, or no argv left after it, is a usage error."""
+    missing, no argv left after it, a non-integer parent, or a non-numeric or negative
+    term-grace is a usage error rather than a traceback."""
     parent_pid: int | None = None
     term_grace: float | None = None
     i = 0
     while i < len(argv):
         if argv[i] == "--parent" and i + 1 < len(argv):
-            parent_pid = int(argv[i + 1])
+            try:
+                parent_pid = int(argv[i + 1])
+            except ValueError:
+                raise SystemExit(_USAGE) from None
             i += 2
         elif argv[i] == "--term-grace" and i + 1 < len(argv):
-            term_grace = float(argv[i + 1])
+            try:
+                term_grace = float(argv[i + 1])
+            except ValueError:
+                raise SystemExit(_USAGE) from None
+            if term_grace < 0:
+                raise SystemExit(_USAGE)
             i += 2
         elif argv[i] == "--":
             i += 1
