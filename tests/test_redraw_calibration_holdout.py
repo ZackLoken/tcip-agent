@@ -80,8 +80,8 @@ def test_force_redraw_raises_and_stays_committed_when_its_audit_line_fails(
     """The lock is already redrawn by the time the audit line is attempted, so a failed append
     must not be swallowed: the body's own ``record_event_or_raise`` call raises
     AuditEntryNotWritten before ``@audited`` ever reaches its own post-body append, and the new
-    lock stands. Before item 43c that call was best-effort (``record_event``), so the body
-    returned and ``@audited``'s own append, also refused, was the one that failed first there,
+    lock stands. Before the emitter raised, that call was best-effort (``record_event``), so the
+    body returned and ``@audited``'s own append, also refused, was the one that failed first there,
     raising MutationCommittedWithoutAuditLine instead; a fail-before proof against that baseline
     hits that exception, not this one."""
     import tcip_mcp.audit as audit_module

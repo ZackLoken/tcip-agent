@@ -474,9 +474,11 @@ def test_route_answers_409_with_the_committed_response_on_a_lost_sealed_record_l
 
 def test_route_requires_dataset_root(client, tmp_path: Path) -> None:
     """No read or write happens before the refusal: the field is named rather than left to a
-    stamp-scope or bucket-confinement error further in. In this test environment the process cwd
-    does not resolve under an allowed root, so the pre-refusal baseline answered the path guard's
-    403, not the 200 a resolvable cwd would reach."""
+    stamp-scope or bucket-confinement error further in. Without this check, the request's real
+    ``pred_dir`` passes the path guard, so the pre-refusal baseline answered the different 400
+    ``_dataset_root_of_all`` raises for a bucket whose own dataset root disagrees with the one
+    the request states ("the predictions at ... belong to dataset ... not to ..."), never the
+    path guard's 403."""
     proj, pred_dir = _make_dense_reviewed_project(tmp_path)
     resp = client.post("/api/review/validate_reference", json={
         "dataset_root": "", "trait": "bud_opening", "pred_dir": pred_dir, "subject": "bud"})
