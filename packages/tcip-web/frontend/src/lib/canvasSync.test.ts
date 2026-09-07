@@ -548,6 +548,26 @@ describe("buildReviewShapes", () => {
     expect(pred).toMatchObject({ color: COLORS.active, dashed: true });
   });
 
+  it("marks an admitted detection's own prediction shape, never its ground truth or an fn", () => {
+    // fp scored 0.7 (its own prediction shape carries tag "fp"); tp scored 0.9, whose focused
+    // overlay is the "pred"-tagged shape, never the "tp"-tagged ground truth.
+    const shapes = buildReviewShapes(matches, COLORS, 0, {}, 0.8);
+    expect(shapes.find((s) => s.tag === "tp")?.admitted).toBeUndefined();
+    expect(shapes.find((s) => s.tag === "pred")?.admitted).toBe(true);
+    expect(shapes.find((s) => s.tag === "fn")?.admitted).toBeUndefined();
+
+    const belowRule = buildReviewShapes(matches, COLORS, -1, {}, 0.8);
+    expect(belowRule.find((s) => s.tag === "fp")?.admitted).toBe(false);
+
+    const bothAdmitted = buildReviewShapes(matches, COLORS, -1, {}, 0.5);
+    expect(bothAdmitted.find((s) => s.tag === "fp")?.admitted).toBe(true);
+  });
+
+  it("marks nothing when no admission conf is given", () => {
+    const shapes = buildReviewShapes(matches, COLORS, 0);
+    expect(shapes.every((s) => !s.admitted)).toBe(true);
+  });
+
   it("honors the GT / Pred visibility toggles", () => {
     expect(
       buildReviewShapes(matches, COLORS, 1, { showPred: false }).some(
