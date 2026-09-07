@@ -398,17 +398,24 @@ def _missing_relaunch_fields(manifest: dict) -> list[str]:
     return sorted(f for f in _RELAUNCH_FIELDS if f not in manifest)
 
 
-def _invalid_split_draws_field(manifest: dict) -> Optional[str]:
-    """``"split_draws"`` when the manifest carries the key but its value is not a draw count
-    (:func:`training_tools.coerce_split_draws`), else ``None``. A manifest of unknown
-    provenance (hand-written, or written by an older build) can carry a value the worker's own
-    comparison cannot order against an int; caught here, before the worker starts, rather than
-    inside it."""
+_INVALID_SPLIT_DRAWS_REASON = "this sweep's record's split_draws is not a draw count"
+"""The one text naming :func:`_invalid_split_draws_field`'s refusal, composed by both the
+relaunchable marker (:func:`_manifest_fields`) and the relaunch route's 409
+(:func:`relaunch_sweep`), so the two surfaces refuse a manifest with this field the same words."""
+
+
+def _invalid_split_draws_field(manifest: dict) -> bool:
+    """Whether the manifest carries a ``"split_draws"`` key whose value is not a draw count
+    (:func:`training_tools.coerce_split_draws`). A manifest of unknown provenance (hand-written,
+    or written by an older build) can carry a value the worker's own comparison cannot order
+    against an int; caught here, before the worker starts, rather than inside it. A manifest
+    without the key at all is not invalid by this check (see :func:`_relaunch_spec`, which reads
+    the field with ``run_hyperparameter_search``'s own default)."""
     from tcip_mcp.tools.training_tools import coerce_split_draws
 
     if "split_draws" not in manifest:
-        return None
-    return None if coerce_split_draws(manifest["split_draws"]) is not None else "split_draws"
+        return False
+    return coerce_split_draws(manifest["split_draws"]) is None
 
 
 def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
@@ -422,10 +429,15 @@ def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
     :func:`training_tools.coerce_split_draws`, the same coercion :func:`caller_split_seed_refusal`
     applies, so a manifest recording it as a numeric string still relaunches as the int it names
     rather than crashing the worker's own comparison; a caller checks
-    :func:`_invalid_split_draws_field` first, so the coercion here never reads ``None``."""
+    :func:`_invalid_split_draws_field` first, so the coercion here is asserted to never read
+    ``None`` -- that obligation is the caller's, never a value this function substitutes."""
     from tcip_mcp.tools.training_tools import coerce_split_draws
 
     draws = coerce_split_draws(manifest.get("split_draws"))
+    assert draws is not None, (
+        "the caller must refuse an invalid split_draws via _invalid_split_draws_field before "
+        "calling _relaunch_spec"
+    )
     return _RelaunchSpec(
         base_config=manifest["base_config"],
         param_space=manifest["param_space"],
@@ -438,7 +450,7 @@ def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
         warm_start=bool(manifest["warm_start"]),
         baseline_params=manifest["baseline_params"],
         resources_per_trial=manifest["resources_per_trial"],
-        split_draws=draws if draws is not None else 1,
+        split_draws=draws,
         split_draw_seeds=manifest.get("split_draw_seeds"),
     )
 
@@ -527,10 +539,8 @@ def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
     missing = _missing_relaunch_fields(manifest)
     if missing:
         raise HTTPException(409, f"this sweep's record is missing {missing}: cannot relaunch")
-    invalid_field = _invalid_split_draws_field(manifest)
-    if invalid_field is not None:
-        raise HTTPException(
-            409, f"this sweep's record's {invalid_field} is not a draw count: cannot relaunch")
+    if _invalid_split_draws_field(manifest):
+        raise HTTPException(409, _INVALID_SPLIT_DRAWS_REASON)
     seed_axis_refusal = caller_split_seed_refusal(manifest.get("param_space"), manifest.get("split_draws"))
     if seed_axis_refusal is not None:
         raise HTTPException(409, f"{seed_axis_refusal.reason} {seed_axis_refusal.remedy}")
