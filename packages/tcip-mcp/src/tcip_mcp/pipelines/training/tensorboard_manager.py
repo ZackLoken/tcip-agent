@@ -363,10 +363,13 @@ def stop_tensorboard(key: str | None = None, logdir: str | None = None) -> dict:
     the child once this function returns depends on ``entry.lifetime_tie``: with ``"job"``,
     ``entry.proc`` is TensorBoard itself and the Windows job object stays assigned regardless of
     this function's own outcome, so a parent-process death later still ends it; with
-    ``"guardian"``, ``entry.proc`` is the guardian, not TensorBoard, and this function's own
-    terminate/kill is what ends the guardian, so nothing is left watching TensorBoard once this
-    function returns, whatever its answer; with ``"none: ..."``, ``entry.proc`` is TensorBoard
-    itself and nothing was ever tied to this process's life beyond this function's own wait. A
+    ``"guardian"``, ``entry.proc`` is the guardian, not TensorBoard, and nothing is left watching
+    TensorBoard once this function returns, whatever its answer: either this function's own
+    terminate/kill ends the guardian, or the guardian's ``poll()`` was already set (the kernel
+    ended it outright) and this function's own signals never reach it at all; with
+    ``"none: ..."``, ``entry.proc`` is TensorBoard itself, watched by nothing beyond this
+    function's own wait apart from the atexit sweep, which holds every tracked entry regardless
+    of its tie. A
     kill this cannot confirm reaped within that second wait is logged (the key and pid) and
     answered ``{"status": "kill_unconfirmed", "pid": ...}`` rather than left to raise a
     ``TimeoutExpired`` out of this function. On a guardian tie, reaching the second wait means
