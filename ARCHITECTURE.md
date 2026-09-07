@@ -773,8 +773,8 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `redraw_calibration_holdout` | `calibration_tools.py:25` | yes | Deliberately redraw a locked calibration/holdout split. |
-| `calibrate_scalar_operating_point` | `calibration_tools.py:260` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
-| `calibrate_count_operating_point` | `calibration_tools.py:462` | yes | Calibrate and validate the count operating point against held-out GT, earning a claim |
+| `calibrate_scalar_operating_point` | `calibration_tools.py:261` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
+| `calibrate_count_operating_point` | `calibration_tools.py:463` | yes | Calibrate and validate the count operating point against held-out GT, earning a claim |
 
 ### ingest_tools.py (1 tool)
 
@@ -1487,8 +1487,8 @@ log are one file at one key. That path is what the file backend places the log a
 `tcip export-store` writes back out; on the default database backend the rows live in that
 root's `.tcip/store.db` until they are exported.
 
-Writers: three write paths, `packages/tcip-mcp/src/tcip_mcp/audit.py:278` (`audited`),
-`audit.py:208` (`record_event`) and `audit.py:227` (`record_event_or_raise`), all resolving a
+Writers: three write paths, `packages/tcip-mcp/src/tcip_mcp/audit.py:281` (`audited`),
+`audit.py:211` (`record_event`) and `audit.py:230` (`record_event_or_raise`), all resolving a
 caller's scope through one shared helper, `audit.py:138` (`_stamp_scope`), so the root a line's
 `scope` field names and the root its Key addresses are always the one resolution, never two
 independently taken. It stamps `entry["scope"]` with the resolved root only when the caller passed
@@ -1498,7 +1498,7 @@ store.
 
 `audited` covers the platform's doors (every MCP tool in `tools/`, plus the script-invoked doors
 demoted from them): bare, a platform event; `@audited(scope_arg=...)` names the argument carrying
-a dataset or project location, resolved via `dataset_scope_of` (`audit.py:251`) (through the tool's own
+a dataset or project location, resolved via `dataset_scope_of` (`audit.py:254`) (through the tool's own
 canonicalizer when the declaration passes one as `scope_via`). Ten doors declare one: eight
 dataset-scoped (`save_annotations`, `tools/annotation_tools.py:146`; `write_class_map`,
 `tools/annotation_tools.py:512`; `redraw_calibration_holdout`, `tools/calibration_tools.py:25`;
@@ -1531,7 +1531,7 @@ when its guard resolves one and platform-scoped otherwise (a label path confined
 root but outside any dataset tree), `resolution.py`'s `record_delivery_binding_event`
 (`resolution.py:2322`, dataset-scoped when a
 delivery's buckets share one dataset root, platform-scoped otherwise), and
-`calibration_tools.py`'s redraw event (`redraw_calibration_holdout_result`, `tools/calibration_tools.py:216`).
+`calibration_tools.py`'s redraw event (`redraw_calibration_holdout_result`, `tools/calibration_tools.py:217`).
 Project-scoped: `routes/results.py`'s `_audit` (`routes/results.py:164`, its delivery and confirmation routes) and
 `pipelines/postprocessing/plant_mapping.py`'s `persist_mapping` (`pipelines/postprocessing/plant_mapping.py:1211`), whose two callers file
 its receipt under two different categories: the MCP tool `build_plant_mapping` passes the
@@ -1559,9 +1559,9 @@ path-sanitized, by the same standing choice.
 Readers: two production parsers, both reading through the storage seam's `read_log` rather than
 decoding lines by hand, and both refusing (never scanning past) a page reporting corruption or an
 unknown `schema_version`. `experiments._index_refused_mutations`,
-`packages/tcip-mcp/src/tcip_mcp/experiments.py:1630`, one scan of the platform audit log
+`packages/tcip-mcp/src/tcip_mcp/experiments.py:1626`, one scan of the platform audit log
 (`audit_log_key()`, no scope) indexing every `experiment_mutation_refused` entry by
-`arguments.experiment_id`, shared by `compare_experiments` (`experiments.py:1735`), across every experiment it
+`arguments.experiment_id`, shared by `compare_experiments` (`experiments.py:1731`), across every experiment it
 compares in one call; `page.corrupt`/`page.version_refused` both fail the whole call (`None`, not
 a partial index), so a caller who cannot see behind an unreadable entry never reports "no
 refusals" in its place. `plant_mapping._scan_receipts`
@@ -1599,27 +1599,27 @@ are listed here with the rest rather than taking numbers of their own.
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:93`
   (`def _patch_experiment_config_id_map(`), and `_patch_experiment_config_split`,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:116`
-  (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1555`
-  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1735`.
+  (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1551`
+  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1731`.
 - `status.json` (`status_key`, `experiments.py:144`): written by `create_experiment` (`experiments.py:420`),
   `update_status`, `experiments.py:553` (`def update_status(`), `stamp_run_identity`
   (`experiments.py:693`), `_touch_heartbeat`, `experiments.py:920` (`def _touch_heartbeat(`).
-  Read by `get_experiment` (`experiments.py:1555`), `reconstruct_run_status`, `experiments.py:867`
+  Read by `get_experiment` (`experiments.py:1551`), `reconstruct_run_status`, `experiments.py:867`
   (`def reconstruct_run_status(`), `resolve_experiment_dir_for_run` (`experiments.py:731`).
   `state` is terminal-locked once `"completed"`/`"failed"`.
 - `lineage.json` (`lineage_key`, `experiments.py:177`): written by `create_experiment` (`experiments.py:420`),
   `complete_run`,
   `experiments.py:620` (`def complete_run(`, the run's own `model_weights`/`model_weights_sha256`
   digest, sealed into the transaction that completes the run) and `update_lineage`,
-  `experiments.py:1326` (every other field; refuses `model_weights`/`model_weights_sha256` as
-  `complete_run`'s alone). Read by `get_experiment` (`experiments.py:1555`) and `get_experiment_lineage`,
-  `experiments.py:1868`.
+  `experiments.py:1322` (every other field; refuses `model_weights`/`model_weights_sha256` as
+  `complete_run`'s alone). Read by `get_experiment` (`experiments.py:1551`) and `get_experiment_lineage`,
+  `experiments.py:1864`.
 - `artifacts.json` (`artifacts_key`, `experiments.py:201`): written by `create_experiment` (`experiments.py:420`),
   `complete_run` (`experiments.py:620`, the `model_weights` entry: `path`, `sha256`, `recorded`) and
-  `record_artifact`, `experiments.py:1277`. Read by `get_experiment` (`experiments.py:1555`).
+  `record_artifact`, `experiments.py:1273`. Read by `get_experiment` (`experiments.py:1551`).
 - `metrics.jsonl` (`metrics_key`, `experiments.py:271`, append-only): written by
   `log_metrics`, `experiments.py:999`. Read by `read_metrics`, `experiments.py:939`, which
-  `get_experiment` (`experiments.py:1555`, paginated) and `reconstruct_run_status` (`experiments.py:867`, last row only) go through.
+  `get_experiment` (`experiments.py:1551`, paginated) and `reconstruct_run_status` (`experiments.py:867`, last row only) go through.
 - `env.json` (`env_key`, `experiments.py:225`): the library versions, seed and model kind a run is
   reproducible from, written once by the training envelope,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:355`. No accessor in this module
@@ -1627,7 +1627,7 @@ are listed here with the rest rather than taking numbers of their own.
 - `split.json` (`split_key`, `experiments.py:248`): written by `split_construction.persist_split_manifest`,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/data/split_construction.py:62`
   (`def persist_split_manifest(`). Read by `read_split_manifest`,
-  `experiments.py:1911`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
+  `experiments.py:1907`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
   both take the manifest from. Every run, bound to a manifest or not, records `date`, the labels
   directory's own capture date, `manifest_date_key`'s empty string for a flat tree (never `null`:
   a selection-disjointness check comparing dates must tell a flat run's own date apart from a
@@ -1668,9 +1668,9 @@ are listed here with the rest rather than taking numbers of their own.
   read a selection side from. `verify_stamp_binding` (`packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1832`) requires the five label-movement
   keys present, `null` admitted, on an applicable row it would otherwise pass: an applicable,
   checked, no-leak row missing any of them floors, the same as a leak does, so a row earned before
-  the keys existed cannot read as cleared. Read by `read_validations`, `experiments.py:1144`,
-  `find_validation`, `experiments.py:1162` (matching rows by recomputed `validation_digest`,
-  `experiments.py:1099`), and included whole by `get_experiment` (`experiments.py:1555`). The one member appendable
+  the keys existed cannot read as cleared. Read by `read_validations`, `experiments.py:1142`,
+  `find_validation`, `experiments.py:1160` (matching rows by recomputed `validation_digest`,
+  `experiments.py:1099`), and included whole by `get_experiment` (`experiments.py:1551`). The one member appendable
   after a terminal state, because a validation is a statement made about a run after it ended.
 
 Seam S07 ("Experiment record .tcip/experiments/<id>/", covering config/status/lineage/artifacts),
@@ -1746,8 +1746,8 @@ on the staging tree before accounting for it and before the rename.
 
 Readers: `read_registry_index`, `model_registry.py:145`, the read path for anything outside the
 module (`packages/tcip-mcp/src/tcip_mcp/cli/doctor.py:409`, `"metrics_source"`), and the entry-by-entry accessors built on
-it: `ModelRegistry.list_models`, `model_registry.py:881`; `get_model`, `model_registry.py:892`;
-`best_model`, `model_registry.py:899`; `verify_model`, `model_registry.py:855`. `best_model` takes `metric_key` and `higher_is_better` as required
+it: `ModelRegistry.list_models`, `model_registry.py:884`; `get_model`, `model_registry.py:895`;
+`best_model`, `model_registry.py:902`; `verify_model`, `model_registry.py:858`. `best_model` takes `metric_key` and `higher_is_better` as required
 keywords, no default and no name heuristic, and by default ranks only entries whose
 `metrics_source` is `"trainer"` (`include_unverified=True` also ranks the rest). The
 `rank_registered_models` tool (`tools/model_tools.py:123`) resolves `higher_is_better` from
@@ -2248,9 +2248,9 @@ Must agree: mutations from any process land in the log the scope names, the plat
 default, a dataset's own for a record travelling with the data, a project's own for a record
 that is the project's, all with the same entry shape; and the project's own receipt gate
 (`plant_mapping.load_mapping`) trusts only what that project's own log actually recorded.
-Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:278` (`def audited(`, taking a declared
+Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:281` (`def audited(`, taking a declared
 `scope_arg` naming which tool argument carries the dataset or project a scoped tool mutates a
-record of) and `record_event` (`audit.py:208`)/`record_event_or_raise` (`audit.py:227`), the two emitters for code
+record of) and `record_event` (`audit.py:211`)/`record_event_or_raise` (`audit.py:230`), the two emitters for code
 that is neither an MCP tool nor a script-invoked door demoted from one; all three resolve a
 caller's scope through the one shared `_stamp_scope`, `audit.py:138`, and differ only in what a failed
 append means: `record_event` warns through `_write_entry`, `audit.py:190`; `record_event_or_raise`
@@ -2432,7 +2432,7 @@ Phase 3 verdict: single.
 ## S27. Trained-model registry .tcip/models/registry.json
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
-Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:145` (`def read_registry_index(`, the read path for everything outside the module; `_register_entry`, `model_registry.py:450`, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, `model_registry.py:130`, mints).
+Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:145` (`def read_registry_index(`, the read path for everything outside the module; `_register_entry`, `model_registry.py:453`, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, `model_registry.py:130`, mints).
 Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1441` (`@router.get("/models/registered")`, serving `model_tools.rank_registered_models`'s listing view) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
@@ -2458,7 +2458,7 @@ Phase 3 verdict: single.
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on, and,
 when a split manifest is in play, from the checkpoint's own selection (val) side too.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1911` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1907` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (`_train_disjointness` and `_selection_disjointness` both read through it and share `_resolve_group_stem_disjointness`, the one group/stem-overlap implementation).
 Phase 3 verdict: single.
 
