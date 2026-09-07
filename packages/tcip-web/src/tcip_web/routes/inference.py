@@ -422,8 +422,8 @@ def _worker(job: InferenceJob) -> None:
                 except AuditEntryNotWritten as exc:
                     job.audit_warning = str(exc)
         finally:
-            # In its own inner finally so the status and the persisted summary both land
-            # whatever the audit attempt above raises, rather than leaving the job "running" forever.
+            # In its own inner finally so the status always lands; a raise from _persist() itself replaces
+            # the audit exception above (kept as __context__), leaving the persisted summary unwritten.
             job.status = terminal_status
             _persist()
 
