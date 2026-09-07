@@ -42,6 +42,9 @@ function summary(name: string): ProjectSummary {
     site_problem: null,
     label_problem: null,
     removal_refusal: null,
+    removal_releasable: false,
+    dependency_warnings: [],
+    dependency_problem: null,
   };
 }
 
