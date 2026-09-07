@@ -125,7 +125,7 @@ describe("RunComparison on a change of the marked set", () => {
   it("reads as reading, never a stale absence claim, for a newly marked column", async () => {
     const compare = vi.spyOn(trainingApi, "compare").mockResolvedValue(baseResult({}));
     const { rerender } = render(<RunComparison marked={[MARKED[0]]} projectRoot={null} />);
-    await screen.findByText("exp-a");
+    await waitFor(() => expect(screen.getAllByText("exp-a").length).toBeGreaterThan(0));
 
     compare.mockImplementation(() => new Promise(() => {})); // never resolves for the new set
     rerender(<RunComparison marked={MARKED} projectRoot={null} />);
