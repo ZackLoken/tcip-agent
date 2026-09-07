@@ -1238,6 +1238,8 @@ describe("ProjectPicker removal", () => {
   });
 
   it("on success, toasts at the success level, forgets the recent entry, refetches, and lists the project under pending removal", async () => {
+    let resolveSecondList: (value: Awaited<ReturnType<typeof api.projects.list>>) => void =
+      () => {};
     vi.mocked(api.projects.list)
       .mockResolvedValueOnce({
         workspace: "/ws",
@@ -1247,21 +1249,11 @@ describe("ProjectPicker removal", () => {
         pending_removal: [],
         removal_startup_outcomes: [],
       })
-      .mockResolvedValueOnce({
-        workspace: "/ws",
-        active: null,
-        active_path: null,
-        projects: [PROJECTS[1]],
-        pending_removal: [
-          {
-            name: PROJECTS[0].name,
-            requested_at: "20260304T120000Z",
-            archive_path: "/ws/.removed/x.zip",
-            holding_dir: "/ws/.removed/x",
-          },
-        ],
-        removal_startup_outcomes: [],
-      });
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveSecondList = resolve;
+        }),
+      );
     vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
     vi.mocked(api.projects.remove).mockResolvedValue({
       name: PROJECTS[0].name,
@@ -1284,7 +1276,9 @@ describe("ProjectPicker removal", () => {
 
     render(<ProjectPicker />);
     await selectFirstCard();
-    fireEvent.click(screen.getByRole("button", { name: "Remove…" }));
+    const removeButton = screen.getByRole("button", { name: "Remove…" });
+    removeButton.focus();
+    fireEvent.click(removeButton);
     const dialog = await screen.findByRole("dialog");
     const nameField = await within(dialog).findByLabelText(/type the project name to confirm/i);
     fireEvent.change(nameField, { target: { value: PROJECTS[0].name } });
@@ -1300,9 +1294,29 @@ describe("ProjectPicker removal", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(pushToast).toHaveBeenCalledWith(expect.stringContaining("x.zip"), "success");
     expect(JSON.parse(localStorage.getItem("tcip.recent_projects") ?? "[]")).toEqual([]);
+    // The dialog is closed and the listing has not refreshed yet: the removed card's own
+    // "Remove..." button still exists and has reclaimed focus from the dialog's own unmount.
+    expect(document.activeElement).not.toBe(document.body);
+
+    resolveSecondList({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: [PROJECTS[1]],
+      pending_removal: [
+        {
+          name: PROJECTS[0].name,
+          requested_at: "20260304T120000Z",
+          archive_path: "/ws/.removed/x.zip",
+          holding_dir: "/ws/.removed/x",
+        },
+      ],
+      removal_startup_outcomes: [],
+    });
+
     await screen.findByText(new RegExp(`Pending removal: ${PROJECTS[0].name}`));
-    // The card and its own "Remove..." button (the dialog's recorded opener) are both gone from
-    // this refetched listing: focus must land on the annotator field, not the body.
+    // The card and its own "Remove..." button are both gone from this refetched listing:
+    // focus lands on the annotator field, not the body.
     await waitFor(() => expect(screen.getByLabelText("Annotator")).toHaveFocus());
   });
 
