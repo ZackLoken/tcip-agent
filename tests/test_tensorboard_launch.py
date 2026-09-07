@@ -51,3 +51,36 @@ def test_launch_returns_a_url_for_a_process_that_stays_up(monkeypatch, tmp_path)
     finally:
         tb.stop_tensorboard(run_id="live-run")
     assert all(entry["key"] != "live-run" for entry in tb.list_tensorboard())
+
+
+def test_launch_reports_the_platform_lifetime_tie(monkeypatch, tmp_path):
+    """lifetime_tie names the mechanism a normal launch actually got, through the argv seam
+    with a sleeping stand-in rather than a real TensorBoard install."""
+    from tcip_mcp.pipelines.training import tensorboard_manager as tb
+
+    monkeypatch.setattr(
+        tb, "_tensorboard_argv",
+        lambda logdir, port: [sys.executable, "-c", "import time; time.sleep(30)"],
+    )
+
+    info = tb.launch_tensorboard(str(tmp_path), run_id="tie-run")
+    try:
+        assert info["lifetime_tie"] == ("job" if sys.platform == "win32" else "guardian")
+    finally:
+        tb.stop_tensorboard(run_id="tie-run")
+
+
+def test_launch_reports_the_tie_disabled_under_the_test_seam(monkeypatch, tmp_path):
+    from tcip_mcp.pipelines.training import tensorboard_manager as tb
+
+    monkeypatch.setattr(
+        tb, "_tensorboard_argv",
+        lambda logdir, port: [sys.executable, "-c", "import time; time.sleep(30)"],
+    )
+    monkeypatch.setattr(tb, "_DISABLE_LIFETIME_TIE", True)
+
+    info = tb.launch_tensorboard(str(tmp_path), run_id="tie-disabled-run")
+    try:
+        assert info["lifetime_tie"] == "none: disabled for test"
+    finally:
+        tb.stop_tensorboard(run_id="tie-disabled-run")
