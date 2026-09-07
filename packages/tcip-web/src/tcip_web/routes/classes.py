@@ -67,14 +67,15 @@ def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
     All three are dataset-native, not project-private (a dataset can be opened by more than one
     project, see ``dataset_layout.image_status_path`` and ``dataset_layout.dataset_root_of``), so
     there is no single project's audit log a write here unambiguously belongs to. Colocating the
-    trail with the state it describes, rather than guessing a project, is deliberate. Best-effort:
-    it never fails the request that triggered the write.
+    trail with the state it describes, rather than guessing a project, is deliberate. A failed
+    append raises ``AuditEntryNotWritten``: the mutation has already committed by the time this
+    runs, so the caller answers the gap rather than have it pass as silently recorded.
     """
     if not dataset_root:
         return
-    from tcip_mcp.audit import record_event
+    from tcip_web.routes.audit_gap import record_committed
 
-    record_event(tool, arguments, source="gui", scope=dataset_root)
+    record_committed(tool, arguments, scope=dataset_root)
 
 
 def _subjects_in_dir(d: Path) -> tuple[set[str], list[str]]:
@@ -205,14 +206,21 @@ def save_classes(payload: SaveClassesPayload) -> dict:
     sweep = result["schema_change_sweep"]
     if sweep["warning"]:
         logger.warning("%s", sweep["warning"])
-    _audit_dataset_write(
-        root, "gui_save_classes",
-        {"classes_path": str(path), "n_subjects": len(registry.subjects),
-         "confirmations_stamped_with_outgoing_schema": sweep["newly_stamped"],
-         "confirmations_predating_vocabulary": sweep["predating_vocabulary"]},
-    )
-    return {"status": "ok", "n_subjects": len(registry.subjects), "classes_path": str(path),
-            "version": result["version"].token, "schema_change_sweep": sweep}
+    committed = {"status": "ok", "n_subjects": len(registry.subjects), "classes_path": str(path),
+                 "version": result["version"].token, "schema_change_sweep": sweep}
+    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_web.routes.audit_gap import audit_gap_409
+
+    try:
+        _audit_dataset_write(
+            root, "gui_save_classes",
+            {"classes_path": str(path), "n_subjects": len(registry.subjects),
+             "confirmations_stamped_with_outgoing_schema": sweep["newly_stamped"],
+             "confirmations_predating_vocabulary": sweep["predating_vocabulary"]},
+        )
+    except AuditEntryNotWritten as exc:
+        raise audit_gap_409(exc, committed) from exc
+    return committed
 
 
 # ── Per-image status (used by Complete checkbox + status filter) ─────────
@@ -335,13 +343,20 @@ def set_image_status(payload: ImageStatusPayload) -> dict:
     # attempt that actually raised reads back as unstamped.
     stamped = _stamp_digest(root, bucket, payload.subject, [payload.image_name])
     digest_stamped = stamped is not False
-    _audit_dataset_write(
-        root,
-        "gui_set_image_status",
-        {"image_name": payload.image_name, "status": payload.status,
-         "subject": payload.subject, "date": payload.date},
-    )
-    return {"status": "ok", "digest_stamped": digest_stamped}
+    committed = {"status": "ok", "digest_stamped": digest_stamped}
+    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_web.routes.audit_gap import audit_gap_409
+
+    try:
+        _audit_dataset_write(
+            root,
+            "gui_set_image_status",
+            {"image_name": payload.image_name, "status": payload.status,
+             "subject": payload.subject, "date": payload.date},
+        )
+    except AuditEntryNotWritten as exc:
+        raise audit_gap_409(exc, committed) from exc
+    return committed
 
 
 class ImageStatusBulkPayload(BaseModel):
@@ -369,15 +384,22 @@ def set_image_status_bulk(payload: ImageStatusBulkPayload) -> dict:
     # Nothing to stamp (None) is not a failed write; only an actual write failure (False) names
     # the applied statuses as unstamped.
     not_stamped = sorted(applied) if stamped is False else []
+    committed = {"status": "ok", "n": len(payload.statuses), "digest_unstamped": not_stamped}
     # Record what was actually written, not the raw payload: an entry whose status was skipped
     # would overstate the change, and a no-op write logged as a mutation is noise.
     if applied:
-        _audit_dataset_write(
-            root,
-            "gui_set_image_status_bulk",
-            {"statuses": applied, "subject": payload.subject, "date": payload.date},
-        )
-    return {"status": "ok", "n": len(payload.statuses), "digest_unstamped": not_stamped}
+        from tcip_mcp.audit import AuditEntryNotWritten
+        from tcip_web.routes.audit_gap import audit_gap_409
+
+        try:
+            _audit_dataset_write(
+                root,
+                "gui_set_image_status_bulk",
+                {"statuses": applied, "subject": payload.subject, "date": payload.date},
+            )
+        except AuditEntryNotWritten as exc:
+            raise audit_gap_409(exc, committed) from exc
+    return committed
 
 
 class DerivePayload(BaseModel):

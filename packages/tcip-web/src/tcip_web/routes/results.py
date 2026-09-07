@@ -166,13 +166,14 @@ def _audit(project_root: str, tool: str, arguments: dict) -> None:
 
     A delivery and the plant mapping behind it are project state, not dataset state: the
     dataset can be read by more than one project, but the export is this project's own
-    outward action. Never fails the request.
+    outward action. A failed append raises ``AuditEntryNotWritten``: the mutation has already
+    committed by the time this runs, so the caller answers the gap.
     """
     if not project_root:
         return
-    from tcip_mcp.audit import record_event
+    from tcip_web.routes.audit_gap import record_committed
 
-    record_event(tool, arguments, source="gui", scope=project_root)
+    record_committed(tool, arguments, scope=project_root)
 
 
 # ── Plant mapping ──────────────────────────────────────────────────────
@@ -214,6 +215,7 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
 
     from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_mcp.dataset_layout import dataset_root_of, image_root, require_dataset_identity
+    from tcip_web.routes.audit_gap import audit_gap_409
     from tcip_mcp.pipelines.data.splits import same_directory
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
 
@@ -265,32 +267,51 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
     except plant_mapping.UngeoreferencedCaptureRefusal as exc:
         raise HTTPException(exc.status, str(exc)) from exc
 
+    def _committed() -> dict:
+        return {
+            "mapping": build.rows(),
+            "summary": build.summary(),
+            "unreadable": build.unreadable,
+            "nn_tolerance_m": build.nn_tolerance_m,
+            "max_match_distance_m": plant_mapping.match_gates(
+                build.nn_tolerance_m["value"])["max_match_distance_m"],
+        }
+
     try:
         plant_mapping.persist_mapping(build, root, payload.name, supersede=payload.supersede)
     except AuditEntryNotWritten as exc:
-        raise HTTPException(409, str(exc)) from exc
+        # Tell the two raising appends apart by reading the record straight back, never through
+        # load_mapping (whose own receipt check can never pass for the entry that just failed).
+        import tcip_store
+
+        raw = tcip_store.read(plant_mapping.plant_mapping_key(root, payload.name), default=None)
+        if isinstance(raw, dict) and raw.get("built_at") == build.built_at:
+            raise audit_gap_409(exc, _committed()) from exc
+        gap = AuditEntryNotWritten(exc.tool, exc)
+        gap.args = (
+            f"{exc} The new record was never persisted under this name (on a supersede "
+            "rebuild, only the archived copy of the old one is, on disk and unrecorded). "
+            "Rebuild with supersede=True once the audit log's destination is repaired.",
+        )
+        raise audit_gap_409(gap, None) from exc
     except plant_mapping.MappingRebuildRefusal as exc:
         raise HTTPException(exc.status, str(exc)) from exc
 
-    _audit(
-        str(root),
-        "gui_build_plant_mapping",
-        {
-            "name": payload.name,
-            "images_root": str(images_root),
-            "dataset_root": str(candidate),
-            "n_dates": len(build.dates),
-        },
-    )
+    try:
+        _audit(
+            str(root),
+            "gui_build_plant_mapping",
+            {
+                "name": payload.name,
+                "images_root": str(images_root),
+                "dataset_root": str(candidate),
+                "n_dates": len(build.dates),
+            },
+        )
+    except AuditEntryNotWritten as exc:
+        raise audit_gap_409(exc, _committed()) from exc
 
-    return {
-        "mapping": build.rows(),
-        "summary": build.summary(),
-        "unreadable": build.unreadable,
-        "nn_tolerance_m": build.nn_tolerance_m,
-        "max_match_distance_m": plant_mapping.match_gates(
-            build.nn_tolerance_m["value"])["max_match_distance_m"],
-    }
+    return _committed()
 
 
 class LoadMappingPayload(BaseModel):
@@ -651,10 +672,16 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
     if not measurement.gate.ok and not payload.show_unvalidated:
         raise HTTPException(400, _refusal(measurement))
     _still_stated(measurement, payload.trait)
-    _audit(str(measurement.project_root), "results.phenology_measurement", {
-        "trait": payload.trait, "mapping_name": payload.mapping_name,
-        "has_unvalidated_dimensions": bool(measurement.gate.unvalidated),
-    })
+    # Looking at a number on screen mutates nothing, so this line stays best-effort
+    # (record_event), never the raising _audit other Results doors answer a gap for.
+    from tcip_mcp.audit import record_event
+
+    record_event(
+        "results.phenology_measurement",
+        {"trait": payload.trait, "mapping_name": payload.mapping_name,
+         "has_unvalidated_dimensions": bool(measurement.gate.unvalidated)},
+        source="gui", scope=str(measurement.project_root),
+    )
     return {
         "curves": {
             "rows": measurement.curve_rows(),
@@ -787,6 +814,7 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     # belongs to the project, so the same bytes are written to <project>/results_export/, audited.
     saved_path = measurement.project_root / "results_export" / Path(filename).name
     from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_web.routes.audit_gap import audit_gap_409
 
     try:
         cells = write_csv(
@@ -797,13 +825,19 @@ def export_csv(payload: ExportCsvPayload) -> Response:
             project_root=measurement.project_root,
             plant_mapping=measurement.plant_mapping_disclosure)
     except AuditEntryNotWritten as exc:
-        raise HTTPException(
-            409, {"message": str(exc), "saved_path": str(saved_path)}) from exc
+        # write_csv's own append (record_delivery_binding_event) lands before the delivery_events
+        # write, so on this raise the event did not land: false, not unknown.
+        raise audit_gap_409(
+            exc, {"saved_path": str(saved_path), "delivery_event_recorded": False}) from exc
     body = saved_path.read_bytes()
-    _audit(str(measurement.project_root), "results.export_csv", {
-        "trait": payload.trait, "payload": payload.payload, "saved_path": str(saved_path),
-        "rows": len(rows),
-    })
+    committed = {"saved_path": str(saved_path), "delivery_event_recorded": cells["delivery_event_recorded"]}
+    try:
+        _audit(str(measurement.project_root), "results.export_csv", {
+            "trait": payload.trait, "payload": payload.payload, "saved_path": str(saved_path),
+            "rows": len(rows),
+        })
+    except AuditEntryNotWritten as exc:
+        raise audit_gap_409(exc, committed) from exc
     headers["X-TCIP-Saved-To"] = str(saved_path)
     # The file above is already on disk either way; this tells the breeder's client whether the
     # best-effort delivery_events write behind it actually landed.
@@ -902,6 +936,7 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
     from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_mcp.operationalization import OperationalizationRefused
     from tcip_mcp.pipelines.resolution import CountDeliveryRefused, DeliveryRefused
+    from tcip_web.routes.audit_gap import audit_gap_409
 
     root = _open_project_root(payload.project_root)
     acknowledgement = _acknowledgement_from(payload)
@@ -926,8 +961,8 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
             raise HTTPException(400, {"kind": "count_delivery", "message": str(exc),
                                       **exc.facts}) from exc
         except AuditEntryNotWritten as exc:
-            raise HTTPException(
-                409, {"message": str(exc), "saved_path": str(saved_path)}) from exc
+            raise audit_gap_409(
+                exc, {"saved_path": str(saved_path), "delivery_event_recorded": False}) from exc
     else:
         predictions_dir, raster_path = _belonging(
             root, payload.delivery.predictions_dir, payload.delivery.raster_path)
@@ -959,13 +994,22 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
             raise HTTPException(400, {"kind": "count_delivery", "message": str(exc),
                                       **exc.facts}) from exc
         except AuditEntryNotWritten as exc:
-            raise HTTPException(
-                409, {"message": str(exc), "saved_path": str(saved_path)}) from exc
+            raise audit_gap_409(
+                exc, {"saved_path": str(saved_path), "delivery_event_recorded": False}) from exc
 
     body = saved_path.read_bytes()
-    _audit(str(root), "results.export_count_csv", {
-        "kind": payload.delivery.kind, "saved_path": str(saved_path),
-    })
+    committed = {
+        "saved_path": str(saved_path),
+        "delivery_event_recorded": result["delivery_event_recorded"],
+        "unvalidated_dimensions": result.get("unvalidated_dimensions"),
+        "acknowledged_by": result.get("acknowledged_by"),
+    }
+    try:
+        _audit(str(root), "results.export_count_csv", {
+            "kind": payload.delivery.kind, "saved_path": str(saved_path),
+        })
+    except AuditEntryNotWritten as exc:
+        raise audit_gap_409(exc, committed) from exc
     headers = {"Content-Disposition": f'attachment; filename="{Path(payload.filename).name}"'}
     headers["X-TCIP-Saved-To"] = str(saved_path)
     headers["X-TCIP-Delivery-Event-Recorded"] = str(result["delivery_event_recorded"]).lower()
