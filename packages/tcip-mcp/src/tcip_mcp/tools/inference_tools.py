@@ -1103,9 +1103,9 @@ def _resolve_writable_bucket_for(output_dir: str, *, overwrite: bool):
 
     try:
         if canonical is not None:
-            _, model, _ = canonical
+            canonical_root, model, canonical_date = canonical
             out, resolution = resolve_prediction_bucket(
-                canonical_dataset_root, model, canonical_date,
+                canonical_root, model, canonical_date,
                 review_state_dir=review_state_dir, overwrite=overwrite, refuse_documents=True)
         else:
             resolution = resolve_writable_bucket(
@@ -1704,6 +1704,7 @@ def clear_prediction_bucket(
                          "record names it; this is not a published bucket."}
 
     if resuming:
+        assert cleared_bucket is not None  # resuming is exactly cleared_bucket is not None
         destination = resolve_output_path(cleared_bucket)
         resolved = cleared_bucket_of(destination)
         if resolved is None or not _cleared_artifact_matches(str(destination), dataset_root, model, date):
