@@ -93,38 +93,40 @@ describe("ConfirmDialog", () => {
     expect(screen.getByRole("dialog")).toHaveAttribute("aria-busy", "true");
   });
 
-  it("marks the application root's other children inert while open, restored on close", () => {
+  it("marks the application root inert while open, restored on close, with the dialog rendered outside it", () => {
     const appRoot = document.createElement("div");
     appRoot.id = "root";
-    const sibling = document.createElement("div");
-    sibling.textContent = "sibling content";
-    appRoot.appendChild(sibling);
-    const dialogHost = document.createElement("div");
-    appRoot.appendChild(dialogHost);
+    const picker = document.createElement("div");
+    picker.textContent = "picker content";
+    appRoot.appendChild(picker);
     document.body.appendChild(appRoot);
 
+    // The app renders its whole tree, dialog included, as #root's one child; mount the same
+    // way so the dialog starts out inside #root and the portal is what carries it out.
     const { unmount } = render(
       <ConfirmDialog heading="Remove x" onClose={vi.fn()}>
         <input aria-label="name" />
       </ConfirmDialog>,
-      { container: dialogHost },
+      { container: picker },
     );
 
-    expect(sibling).toHaveAttribute("inert");
-    expect(dialogHost).not.toHaveAttribute("inert");
+    const dialog = screen.getByRole("dialog");
+    expect(appRoot.contains(dialog)).toBe(false);
+    expect(document.body.contains(dialog)).toBe(true);
+    expect(appRoot).toHaveAttribute("inert");
     unmount();
-    expect(sibling).not.toHaveAttribute("inert");
+    expect(appRoot).not.toHaveAttribute("inert");
     appRoot.remove();
   });
 
   it("does not close on a backdrop click", () => {
     const onClose = vi.fn();
-    const { container } = render(
+    render(
       <ConfirmDialog heading="Remove x" onClose={onClose}>
         <input aria-label="name" />
       </ConfirmDialog>,
     );
-    const backdrop = container.firstElementChild as HTMLElement;
+    const backdrop = screen.getByRole("dialog").parentElement as HTMLElement;
     fireEvent.click(backdrop);
     expect(onClose).not.toHaveBeenCalled();
   });

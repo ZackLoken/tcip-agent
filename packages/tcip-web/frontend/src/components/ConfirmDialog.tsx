@@ -6,13 +6,32 @@
  * dependency: the trap and the restore are implemented here rather than pulled in from a
  * library. Callers supply the body (a refusal, a warning, a name field, the confirm control)
  * as children; this component owns only the dialog's own accessibility contract.
+ *
+ * Rendered through a portal into a container that is a sibling of the application root under
+ * `document.body`, created on demand: the app mounts its whole tree as the one child of
+ * `#root`, so a dialog rendered inside that tree could never mark anything around itself
+ * inert. Marking `#root` itself inert while the dialog is open (restored on close and on
+ * unmount) keeps a screen reader or a stray Tab out of the content behind the modal, since
+ * the dialog itself now lives outside it.
  */
 
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 const FOCUSABLE =
   "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), " +
   'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+const DIALOG_HOST_ID = "tcip-dialog-host";
+
+function dialogHost(): HTMLElement {
+  const existing = document.getElementById(DIALOG_HOST_ID);
+  if (existing) return existing;
+  const host = document.createElement("div");
+  host.id = DIALOG_HOST_ID;
+  document.body.appendChild(host);
+  return host;
+}
 
 interface Props {
   heading: string;
@@ -27,23 +46,13 @@ export function ConfirmDialog({ heading, onClose, children, busy }: Props) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const headingId = useId();
   const openerRef = useRef<HTMLElement | null>(null);
+  const [host] = useState(dialogHost);
 
-  // The application root's other children go inert while this dialog is open, restored on
-  // close: a screen reader or a stray Tab must not reach content behind the modal.
   useEffect(() => {
-    const node = dialogRef.current;
     const appRoot = document.getElementById("root");
-    const marked: HTMLElement[] = [];
-    if (appRoot && node) {
-      for (const child of Array.from(appRoot.children)) {
-        if (child instanceof HTMLElement && !child.contains(node)) {
-          child.setAttribute("inert", "");
-          marked.push(child);
-        }
-      }
-    }
+    appRoot?.setAttribute("inert", "");
     return () => {
-      for (const el of marked) el.removeAttribute("inert");
+      appRoot?.removeAttribute("inert");
     };
   }, []);
 
@@ -79,7 +88,7 @@ export function ConfirmDialog({ heading, onClose, children, busy }: Props) {
     };
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center">
       <div
         ref={dialogRef}
@@ -94,6 +103,7 @@ export function ConfirmDialog({ heading, onClose, children, busy }: Props) {
         </h2>
         {children}
       </div>
-    </div>
+    </div>,
+    host,
   );
 }
