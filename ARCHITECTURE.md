@@ -37,9 +37,9 @@ HEAD 32e53cba has 427 modules across the six scanned roots (136975 total lines):
 |---|---|---|
 | tcip-mcp | 135 | 61005 |
 | tcip-annotation | 12 | 4299 |
-| tcip-web | 39 | 13371 |
+| tcip-web | 40 | 13562 |
 | tcip-store | 13 | 5244 |
-| tcip-web-frontend | 211 | 48123 |
+| tcip-web-frontend | 212 | 48539 |
 | tools | 17 | 4933 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
@@ -65,7 +65,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/__init__.py | TCIP MCP Server: domain tools for the phenotyping platform. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/__main__.py | Entry point: ``python -m tcip_mcp``. | 1 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/agent_identity.py | Which agent harness this MCP server process serves, declared at the handshake, and the session it minted; projected onto every audit line, statement record and HTTP push. | 0 | 8 |
-| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools, the log each event's scope routes it to, and the refusal a call raises when its own entry cannot be appended. | 5 | 36 |
+| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools, the log each event's scope routes it to, and the refusal a call raises when its own entry cannot be appended. | 5 | 39 |
 | packages/tcip-mcp/src/tcip_mcp/class_registry.py | The dataset's class registry, subjects, their attributes, and the deterministic name→id assignment a training run uses (and records, so predictions stay decodable). | 3 | 14 |
 | packages/tcip-mcp/src/tcip_mcp/cli/__init__.py | Operator command sub-package: each module is one ``tcip`` subcommand's implementation. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/adopt_store.py | Move a root's existing record and log files into a store database. | 6 | 0 |
@@ -258,23 +258,24 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/routes/_body_common.py | The empty JSON body a route with only path parameters declares, forcing a browser onto a preflighted request instead of a simple one. | 0 | 3 |
 | packages/tcip-web/src/tcip_web/routes/_coverage_models.py | The view-coverage record's viewing context, declared once so `routes/coverage.py` and `routes/images.py` agree on its shape, and so `tools/generate_frontend_types.py` can render it for the browser instead of the browser hand-transcribing it. | 1 | 3 |
 | packages/tcip-web/src/tcip_web/routes/_metrics_common.py | The shape the tuning trial-metrics route serves, from the log the caller resolved. | 0 | 1 |
-| packages/tcip-web/src/tcip_web/routes/annotate.py | Annotation label CRUD routes for the Annotate tab. | 9 | 1 |
+| packages/tcip-web/src/tcip_web/routes/annotate.py | Annotation label CRUD routes for the Annotate tab. | 10 | 1 |
+| packages/tcip-web/src/tcip_web/routes/audit_gap.py | The shared shape a GUI route answers with when a mutation it already committed could not be recorded to the audit log. | 1 | 7 |
 | packages/tcip-web/src/tcip_web/routes/canvas.py | Live canvas-state bridge: the GUI pushes what it is rendering; the agent reads it back. | 3 | 2 |
-| packages/tcip-web/src/tcip_web/routes/classes.py | Class registry routes. | 9 | 3 |
-| packages/tcip-web/src/tcip_web/routes/coverage.py | View-coverage routes: the reference grid over a raster and the per-image record of two per-cell facts: which cells were served to the browser at native resolution (a delivery fact) and which cells were swept in the viewport at or above the breeder's own working scale (a sweep fact). | 13 | 2 |
+| packages/tcip-web/src/tcip_web/routes/classes.py | Class registry routes. | 10 | 3 |
+| packages/tcip-web/src/tcip_web/routes/coverage.py | View-coverage routes: the reference grid over a raster and the per-image record of two per-cell facts: which cells were served to the browser at native resolution (a delivery fact) and which cells were swept in the viewport at or above the breeder's own working scale (a sweep fact). | 14 | 2 |
 | packages/tcip-web/src/tcip_web/routes/dataset.py | Dataset discovery + selection routes. | 9 | 2 |
 | packages/tcip-web/src/tcip_web/routes/fs.py | Local-filesystem directory browsing for the frontend's folder picker. | 2 | 1 |
 | packages/tcip-web/src/tcip_web/routes/images.py | Image serving: the one path pixels reach the browser through. | 11 | 3 |
-| packages/tcip-web/src/tcip_web/routes/inference.py | Inference routes: async tiled runs + live progress WebSocket. | 14 | 2 |
+| packages/tcip-web/src/tcip_web/routes/inference.py | Inference routes: async tiled runs + live progress WebSocket. | 15 | 2 |
 | packages/tcip-web/src/tcip_web/routes/meta.py | Meta-loop routes: surface Claude's friction reports and retrospectives. | 2 | 1 |
 | packages/tcip-web/src/tcip_web/routes/projects.py | Workspace project discovery + the active-project marker. | 6 | 1 |
-| packages/tcip-web/src/tcip_web/routes/results.py | Results routes: plant-mapping, per-plant phenology curves, CSV export (phenology and count), the operationalization record surface, the trait-spec statement surface, and the read-only delivery-event list. | 22 | 1 |
-| packages/tcip-web/src/tcip_web/routes/review.py | Review routes: verdict/GT recording plus the image-status group and the priority queue; validate_reference moved to routes/validation.py. | 17 | 4 |
+| packages/tcip-web/src/tcip_web/routes/results.py | Results routes: plant-mapping, per-plant phenology curves, CSV export (phenology and count), the operationalization record surface, the trait-spec statement surface, and the read-only delivery-event list. | 23 | 1 |
+| packages/tcip-web/src/tcip_web/routes/review.py | Review routes: verdict/GT recording plus the image-status group and the priority queue; validate_reference moved to routes/validation.py. | 18 | 4 |
 | packages/tcip-web/src/tcip_web/routes/sessions.py | Session-tracking routes: annotation_stats.json equivalent. | 4 | 2 |
-| packages/tcip-web/src/tcip_web/routes/terminal.py | Agent terminal routes: the HTTP/WS surface over :mod:`tcip_web.terminal`. | 2 | 5 |
+| packages/tcip-web/src/tcip_web/routes/terminal.py | Agent terminal routes: the HTTP/WS surface over :mod:`tcip_web.terminal`. | 3 | 5 |
 | packages/tcip-web/src/tcip_web/routes/training.py | Training routes: launchable configs, launch/relaunch, list runs, live metrics stream. | 14 | 2 |
 | packages/tcip-web/src/tcip_web/routes/tuning.py | HPO / Tuning routes: relaunch + cancel + list + per-trial visibility. | 11 | 2 |
-| packages/tcip-web/src/tcip_web/routes/validation.py | Validation routes: promote a completed review into a validation reference. | 7 | 1 |
+| packages/tcip-web/src/tcip_web/routes/validation.py | Validation routes: promote a completed review into a validation reference. | 9 | 1 |
 | packages/tcip-web/src/tcip_web/state.py | In-memory GUI state + debounced persistence to ``.tcip/state/gui.json``. | 2 | 6 |
 | packages/tcip-web/src/tcip_web/terminal.py | Embedded agent terminal: run the real Claude Code CLI in a PTY. | 3 | 3 |
 | packages/tcip-web/src/tcip_web/trust_boundary.py | The network trust boundary: which connections the backend serves and which names it answers to. | 0 | 2 |
@@ -286,12 +287,12 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/App.test.tsx | (none found) | 5 | 0 |
 | packages/tcip-web/frontend/src/App.tsx | (none found) | 30 | 2 |
 | packages/tcip-web/frontend/src/api/classes.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/api/classes.ts | Dataset class-registry + per-image-status API helpers. | 3 | 21 |
+| packages/tcip-web/frontend/src/api/classes.ts | Dataset class-registry + per-image-status API helpers. | 3 | 22 |
 | packages/tcip-web/frontend/src/api/client.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/api/client.ts | Typed REST client for the tcip-web backend. | 10 | 41 |
 | packages/tcip-web/frontend/src/api/devProxy.generated.ts | Dev-server proxy prefixes, generated by tools/generate_frontend_routes.py from the routes the FastAPI app registers. | 0 | 0 |
 | packages/tcip-web/frontend/src/api/http.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/api/http.ts | Shared fetch helpers. | 0 | 25 |
+| packages/tcip-web/frontend/src/api/http.ts | Shared fetch helpers. | 0 | 32 |
 | packages/tcip-web/frontend/src/api/inference.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/api/inference.ts | Inference + Results API helpers for the Inference and Results tabs. | 4 | 9 |
 | packages/tcip-web/frontend/src/api/meta.ts | Meta-loop API helpers: Claude's friction reports and retrospectives. | 2 | 1 |
@@ -305,8 +306,8 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/api/types.generated.ts | Types generated by tools/generate_frontend_types.py from the pydantic models that declare them (routes/_coverage_models.py, routes/coverage.py, routes/review.py, tcip_web.state.GuiVocabulary, tcip_mcp.web_client, tcip_web.jobstore). | 0 | 23 |
 | packages/tcip-web/frontend/src/api/ws.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/api/ws.ts | WebSocket client that subscribes to GuiState snapshots + panel events. | 5 | 4 |
-| packages/tcip-web/frontend/src/components/AnnotateToolbar.test.tsx | (none found) | 8 | 0 |
-| packages/tcip-web/frontend/src/components/AnnotateToolbar.tsx | Annotate-tab context toolbar. | 15 | 2 |
+| packages/tcip-web/frontend/src/components/AnnotateToolbar.test.tsx | (none found) | 9 | 0 |
+| packages/tcip-web/frontend/src/components/AnnotateToolbar.tsx | Annotate-tab context toolbar. | 16 | 2 |
 | packages/tcip-web/frontend/src/components/BandPicker.test.tsx | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/components/BandPicker.tsx | (none found) | 2 | 3 |
 | packages/tcip-web/frontend/src/components/Canvas/CanvasStage.test.tsx | (none found) | 3 | 0 |
@@ -354,7 +355,8 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/components/annotate/AnnotationShapes.tsx | Memoized content layer of committed boxes, read-only derived polygon boxes, polygons and points, filtered by drawing mode and the active subject; does not re-render on cursor movement alone. | 9 | 1 |
 | packages/tcip-web/frontend/src/components/annotate/AttributeEditors.test.tsx | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/components/annotate/AttributeEditors.tsx | One select per attribute declared for a subject, resolving an empty selection back to no value. | 2 | 2 |
-| packages/tcip-web/frontend/src/components/annotate/AttributePanel.tsx | Floating panel for editing the selected shape's attributes plus geometry-less image-level ratings. | 5 | 1 |
+| packages/tcip-web/frontend/src/components/annotate/AttributePanel.test.tsx | (none found) | 4 | 0 |
+| packages/tcip-web/frontend/src/components/annotate/AttributePanel.tsx | Floating panel for editing the selected shape's attributes plus geometry-less image-level ratings. | 6 | 2 |
 | packages/tcip-web/frontend/src/components/annotate/BoxOverlay.tsx | Memoized single-box render with corner drag handles and an optional dashed read-only style, labeled through HaloLabel. | 3 | 1 |
 | packages/tcip-web/frontend/src/components/annotate/InProgressPolygon.tsx | The polygon being drawn: its committed vertices plus a dashed rubber-band segment to the cursor. | 0 | 1 |
 | packages/tcip-web/frontend/src/components/annotate/PointOverlay.tsx | A placed point rendered as four ticks converging on a filled core in the subject's colour, distinct from a small box or a bare polygon vertex handle. | 3 | 1 |
@@ -386,7 +388,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/hooks/useImageNav.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/hooks/useImageNav.ts | Single source of truth for image navigation. | 2 | 5 |
 | packages/tcip-web/frontend/src/hooks/useImageStatusHydrate.test.ts | (none found) | 3 | 0 |
-| packages/tcip-web/frontend/src/hooks/useImageStatusHydrate.ts | (none found) | 3 | 2 |
+| packages/tcip-web/frontend/src/hooks/useImageStatusHydrate.ts | (none found) | 4 | 2 |
 | packages/tcip-web/frontend/src/hooks/useKeyboardShortcuts.test.tsx | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/hooks/useKeyboardShortcuts.ts | (none found) | 0 | 3 |
 | packages/tcip-web/frontend/src/hooks/useOverviewBuild.test.ts | (none found) | 3 | 0 |
@@ -455,7 +457,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/store/appState.ts | The composed store state type: one slice interface per labelled group, combined into the type every slice's StateCreator is checked against. | 11 | 12 |
 | packages/tcip-web/frontend/src/store/exportSurface.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/store/guiStateShape.test.ts | (none found) | 2 | 0 |
-| packages/tcip-web/frontend/src/store/index.ts | (none found) | 13 | 65 |
+| packages/tcip-web/frontend/src/store/index.ts | (none found) | 13 | 66 |
 | packages/tcip-web/frontend/src/store/mergeSnapshot.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/store/slices/agentActivity.ts | Holds the last panel event and the actor it declared, from the /ws/panel subscription, sequenced so an effect can react to each new one. | 1 | 2 |
 | packages/tcip-web/frontend/src/store/slices/bandSelection.ts | Holds the breeder's chosen band composite per band-set signature, one entry per distinct band set seen this session. | 2 | 2 |
@@ -473,7 +475,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/store/terminalOpenPolicy.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/store/types.ts | Types mirroring the Python backend's GuiState and the name-based label schema. | 1 | 44 |
 | packages/tcip-web/frontend/src/tabs/AnnotateTab.test.tsx | (none found) | 9 | 0 |
-| packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx | (none found) | 37 | 2 |
+| packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx | (none found) | 38 | 2 |
 | packages/tcip-web/frontend/src/tabs/InferenceTab.test.tsx | (none found) | 5 | 0 |
 | packages/tcip-web/frontend/src/tabs/InferenceTab.tsx | (none found) | 4 | 2 |
 | packages/tcip-web/frontend/src/tabs/MetaTab.test.tsx | (none found) | 1 | 0 |
@@ -481,7 +483,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/tabs/ResultsTab.test.tsx | (none found) | 5 | 0 |
 | packages/tcip-web/frontend/src/tabs/ResultsTab.tsx | (none found) | 10 | 2 |
 | packages/tcip-web/frontend/src/tabs/ReviewTab.test.tsx | (none found) | 9 | 0 |
-| packages/tcip-web/frontend/src/tabs/ReviewTab.tsx | (none found) | 33 | 2 |
+| packages/tcip-web/frontend/src/tabs/ReviewTab.tsx | (none found) | 34 | 2 |
 | packages/tcip-web/frontend/src/tabs/RunMonitorLayout.tsx | The shell the Training and Tuning tabs share: a fixed-width scrolling sidebar of runs beside a detail region. | 0 | 2 |
 | packages/tcip-web/frontend/src/tabs/TrainingTab.test.tsx | (none found) | 6 | 0 |
 | packages/tcip-web/frontend/src/tabs/TrainingTab.tsx | (none found) | 17 | 2 |
@@ -540,7 +542,7 @@ Non-zero cross-package edge counts at HEAD:
 
 `packages/tcip-web/frontend/src` (`tcip-web-frontend`) has zero in-repo import edges to any Python module in any of the five Python roots: `build_module_inventory.py` resolves a TypeScript specifier only against a relative path or the `@/` alias into `packages/tcip-web/frontend/src` itself (`tools/build_module_inventory.py:307-327`), so no specifier in the frontend source tree can resolve to a file outside that tree.
 
-## Modules with zero importers (146)
+## Modules with zero importers (147)
 
 A module counts as zero-importer when no other module in its own scanned tree resolves an in-repo import to it (`imported_by_count == 0` in the regenerated inventory). This includes package entry points (`__init__.py`, `__main__.py`), CLI scripts under `tools/` invoked as processes, package `cli/` command modules invoked by name through the `tcip` dispatcher rather than imported, and every TypeScript `*.test.ts`/`*.test.tsx` file, none of which are expected to have an in-repo importer.
 
@@ -620,6 +622,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/Toasts.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/TopBar.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/annotate/AttributeEditors.test.tsx |
+| tcip-web-frontend | packages/tcip-web/frontend/src/components/annotate/AttributePanel.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useActiveTabSync.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useBandSelection.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useCoverageGrid.test.ts |
@@ -1509,10 +1512,12 @@ carry a `scope` equal to the platform root, the presence-never-means-non-platfor
 `routes/terminal.py`'s one line per agent-terminal launch (`agent_terminal_started`, `routes/terminal.py:82`). The `@audited(scope_arg=...)`
 doors span every category by whatever root their declared argument resolves; this paragraph
 names the explicit-emitter files, not a closed census of the decorator's doors.
-Dataset-scoped: three GUI route writers passing the dataset root their own guard resolved
-(`routes/annotate.py`'s `_audit_gui_write`, `routes/annotate.py:159`; `routes/classes.py`'s `_audit_dataset_write`,
-`routes/classes.py:63`, which `routes/inference.py`'s own prediction writer calls too (`_audit_dataset_write`, `routes/inference.py:391`);
-`routes/review.py`'s `_audit`, `routes/review.py:95`), `resolution.py`'s `record_delivery_binding_event`
+Dataset-scoped: two GUI route writers passing the dataset root their own guard resolved
+(`routes/classes.py`'s `_audit_dataset_write`, `routes/classes.py:63`, which `routes/inference.py`'s own prediction
+writer calls too (`_audit_dataset_write`, `routes/inference.py:405`); `routes/review.py`'s `_audit`,
+`routes/review.py:95`), plus `routes/annotate.py`'s `_audit_gui_write` (`routes/annotate.py:156`), dataset-scoped
+when its guard resolves one and platform-scoped otherwise (a label path confined to an allowed
+root but outside any dataset tree), `resolution.py`'s `record_delivery_binding_event`
 (`resolution.py:2322`, dataset-scoped when a
 delivery's buckets share one dataset root, platform-scoped otherwise), and
 `calibration_tools.py`'s redraw event (`redraw_calibration_holdout_result`, `tools/calibration_tools.py:216`).
