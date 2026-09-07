@@ -87,6 +87,30 @@ def test_scan_dataset_reports_a_reserved_stem_image_with_no_label(tmp_path: Path
     assert scan_result["unlabelled_images"] == 2
 
 
+def test_scan_dataset_drops_a_cleared_bucket_from_the_prediction_count(tmp_path: Path):
+    """A document ``clear_prediction_bucket`` has moved into the cleared archive is never counted
+    as a live prediction: the census walks ``predictions/`` with a raw ``rglob``, which would
+    otherwise see it exactly like a live bucket's own document."""
+    from tcip_mcp.dataset_layout import cleared_prediction_dir, prediction_dir
+
+    root = tmp_path / "ds"
+    live = prediction_dir(root, "modelA", "2-11-26")
+    live.mkdir(parents=True)
+    json_io.write_annotations(
+        live / "imgA.json", [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 32, 32,
+    )
+
+    cleared = cleared_prediction_dir(root, "modelB", "2-11-26", "20260906T120000Z")
+    cleared.mkdir(parents=True)
+    json_io.write_annotations(
+        cleared / "imgB.json", [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 32, 32,
+    )
+
+    scan_result = scan_dataset(str(root))
+
+    assert scan_result["predictions_count"] == 1
+
+
 def _add_extra_bud_groups(data_dir: Path, count: int) -> None:
     """Adds ``count`` more single-tile foreground groups under ``data_dir``'s own date, for its
     own subject, without touching the shared ``data_dir`` fixture other tests depend on: a
