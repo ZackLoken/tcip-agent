@@ -14,7 +14,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from tcip_mcp import class_registry as cr
 from tcip_mcp import operationalization as op
+from tcip_mcp import traits
 from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingBuild
 from tcip_mcp.traits import TraitUnknownError
 from tcip_web.app import app
@@ -318,6 +320,85 @@ def test_confirming_one_kind_leaves_another_kinds_record_alone(project: Path):
     assert confirmed.value["confirmed_by"] == "user:grüne"
     assert untouched.value["confirmed_by"] is None
     assert untouched.value["stated_at"] == ordinal["stated_at"]
+
+
+# ── the trait-spec statement precondition: three doors over four states ─────
+
+
+def _unconfirmed_project(tmp_path: Path) -> Path:
+    """A project whose crossing trait carries a spec on record but no confirmed trait-spec
+    statement: write_spec bypasses both authoring doors and the statement they carry."""
+    root = tmp_path / "unconfirmed"
+    fx.write_spec(root, fx.CROSSING_SPEC)
+    fx.seed_positive_class(root, "flower", fx.CROSSING_SPEC.positive_class_name)
+    return root
+
+
+def _crossing_call(root: Path):
+    return op.state_operationalization(
+        root, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES,
+        statement="s", mechanism="m", measured_subject="flower",
+        delivered_phenotypes=list(fx.CROSSING_SPEC.delivers),
+        registry=cr.registry_for_dataset_root(root),
+    )
+
+
+def test_state_operationalization_refuses_with_no_trait_spec_statement(tmp_path: Path):
+    root = _unconfirmed_project(tmp_path)
+
+    with pytest.raises(traits.TraitSpecUnconfirmed, match="no trait-spec statement on record"):
+        _crossing_call(root)
+
+
+def test_state_operationalization_refuses_with_a_stale_confirmed_trait_spec_statement(
+    tmp_path: Path,
+):
+    root = _unconfirmed_project(tmp_path)
+    fx.confirm_spec_statement(root, fx.CROSSING_TRAIT)
+    fx.write_spec(root, dataclasses.replace(fx.CROSSING_SPEC, notes="moved after confirmation"))
+
+    with pytest.raises(traits.TraitSpecUnconfirmed, match="no longer matches"):
+        _crossing_call(root)
+
+
+def test_state_operationalization_refuses_with_a_stale_unconfirmed_trait_spec_statement(
+    tmp_path: Path,
+):
+    root = _unconfirmed_project(tmp_path)
+    traits.write_trait_spec_fields(
+        fx.CROSSING_TRAIT, {}, project_root=root,
+        rationale="an initial account of the crossing trait's measurement",
+    )
+    fx.write_spec(root, dataclasses.replace(fx.CROSSING_SPEC, notes="moved after the statement"))
+
+    with pytest.raises(traits.TraitSpecUnconfirmed, match="no longer matches"):
+        _crossing_call(root)
+
+
+def test_state_operationalization_refuses_with_a_current_unconfirmed_trait_spec_statement(
+    tmp_path: Path,
+):
+    root = _unconfirmed_project(tmp_path)
+    traits.write_trait_spec_fields(
+        fx.CROSSING_TRAIT, {}, project_root=root,
+        rationale="an initial account of the crossing trait's measurement",
+    )
+
+    with pytest.raises(traits.TraitSpecUnconfirmed, match="not confirmed"):
+        _crossing_call(root)
+
+
+def test_state_operationalization_succeeds_once_the_trait_spec_statement_is_confirmed(
+    tmp_path: Path,
+):
+    """Admits valid work: the same call that refuses on every state above proceeds once the
+    trait's own trait-spec statement is confirmed and current."""
+    root = _unconfirmed_project(tmp_path)
+    fx.confirm_spec_statement(root, fx.CROSSING_TRAIT)
+
+    record = _crossing_call(root)
+
+    assert record["trait"] == fx.CROSSING_TRAIT
 
 
 # ── the resolver's own refusals ──────────────────────────────────────────────
