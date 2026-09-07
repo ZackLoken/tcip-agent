@@ -52,6 +52,10 @@ DEFAULT_CLI = "claude"
 DEFAULT_ROWS = 30
 DEFAULT_COLS = 100
 
+# Seconds terminate() waits for the spawned process to actually exit: the Windows path polls
+# isalive() after taskkill returns; the POSIX path bounds its wait() calls with it.
+TERMINATE_WAIT_S = 5
+
 # The committed permission fence for the in-app (breeder-lane) agent. Passed via --settings, which merges its allow/deny lists
 # (union) with the repo's and the user's own settings; a `claude` session with none (this one) is unaffected by the fence file.
 _FENCE_SETTINGS = Path(__file__).resolve().parent / "agent_terminal.settings.json"
@@ -310,7 +314,7 @@ class _WinPty:
         )
         # taskkill returning is not the process exiting: bounded-poll isalive() (the POSIX
         # path's own wait discipline), so a caller reading it right after sees the real state.
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + TERMINATE_WAIT_S
         while self._p.isalive() and time.monotonic() < deadline:
             time.sleep(0.1)
 
@@ -390,14 +394,14 @@ class _PosixPty:
         except (ProcessLookupError, PermissionError):
             pass
         try:
-            self._proc.wait(timeout=5)
+            self._proc.wait(timeout=TERMINATE_WAIT_S)
         except subprocess.TimeoutExpired:
             try:
                 os.killpg(os.getpgid(self.pid), signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
                 pass
             try:
-                self._proc.wait(timeout=5)  # reap: a permanent zombie pins the pid
+                self._proc.wait(timeout=TERMINATE_WAIT_S)  # reap: a permanent zombie pins the pid
             except subprocess.TimeoutExpired:  # pragma: no cover
                 pass
         # The master fd is closed by the reader thread (see close()) after it drains to
