@@ -25,19 +25,19 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 7a46cd77.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD b97d4213.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 7a46cd77 has 433 modules across the six scanned roots (140080 total lines):
+HEAD b97d4213 has 433 modules across the six scanned roots (140099 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 137 | 62538 |
+| tcip-mcp | 137 | 62541 |
 | tcip-annotation | 12 | 4299 |
-| tcip-web | 40 | 13641 |
+| tcip-web | 40 | 13657 |
 | tcip-store | 13 | 5282 |
 | tcip-web-frontend | 214 | 49381 |
 | tools | 17 | 4939 |
