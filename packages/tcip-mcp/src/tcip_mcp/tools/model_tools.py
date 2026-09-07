@@ -54,7 +54,8 @@ def register_model(
         project_path: Project root directory. Empty defaults to the platform state root.
         metrics: Evaluation metrics (explicit mode; refused when ``experiment_id`` is set).
         tags: Tags for filtering (explicit mode; refused when ``experiment_id`` is set).
-        experiment_id: Register from this experiment instead of an explicit config.
+        experiment_id: Register from this run's record (one run's immutable record,
+            ``tcip_mcp.experiments``) instead of an explicit config.
     """
     if experiment_id:
         if config or metrics or tags:

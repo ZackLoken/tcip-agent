@@ -615,9 +615,10 @@ def calibrate_classifier_operating_point(
             root carries (``_classification_items``'s own refusal, naming both directories and the
             remedy), so the two ground-truth directories cannot be loose unless their buckets
             already carry a vocabulary.
-        experiment_id: The classifier checkpoint's training-run id, if known, gates train-
-            disjointness the same way the detector calibration path does. ``None`` (a foreign/
-            unregistered checkpoint) skips that check rather than failing closed.
+        experiment_id: The classifier checkpoint's training run's record id (one run's immutable
+            record, ``tcip_mcp.experiments``), if known, gates train-disjointness the same way the
+            detector calibration path does. ``None`` (a foreign/unregistered checkpoint) skips
+            that check rather than failing closed.
     """
     from tcip_mcp.dataset_layout import annotation_date
     from tcip_mcp.pipelines.data.splits import manifest_date_key

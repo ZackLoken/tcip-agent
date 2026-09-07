@@ -461,7 +461,8 @@ def run_inference(
             ``n_excluded_unassigned_stems``, the present stems the manifest's universe left out
             (its train side, its val side, and stems the draw never assigned), beside
             ``n_excluded_incomplete_attribute``.
-        experiment_id: The run that produced the checkpoint, for provenance. Best-effort resolved
+        experiment_id: The run that produced the checkpoint, by its record id (one run's immutable
+            record, ``tcip_mcp.experiments``), for provenance. Best-effort resolved
             (checkpoint's own stamp, then the registry) when omitted; a raw/foreign checkpoint
             legitimately has none. Also gates calibration's train-disjointness check: a
             *known* run whose training split can't be read/reconstructed fails that check closed.
@@ -2706,9 +2707,9 @@ def deliver_per_image_counts(
             ``calibration`` side of a split manifest (forwarded to ``run_inference``; see its own
             doc), so a manifest-restricted calibration's evidence can earn a validation record
             through this door.
-        experiment_id: Live regime only. The run that produced the checkpoint, for provenance
-            (forwarded to ``run_inference``; see its own doc for the best-effort resolution when
-            omitted).
+        experiment_id: Live regime only. The run that produced the checkpoint, by its record id
+            (one run's immutable record, ``tcip_mcp.experiments``), for provenance (forwarded to
+            ``run_inference``; see its own doc for the best-effort resolution when omitted).
         allow_unvalidated_staging: Live regime with ``predictions_dir`` only. Persist the bucket
             even when tile_size has no real basis, stamping ``tile_size_validated=false``; the
             staging escape a raw bucket write shares with ``run_inference``, never a route to

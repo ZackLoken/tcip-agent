@@ -21,7 +21,8 @@ def create_experiment(
     descriptive, e.g. 'exp-001-<crop>-<trait>-det'.
 
     Args:
-        experiment_id: Unique experiment name (e.g. 'exp-001-<crop>-<trait>-det').
+        experiment_id: The record's own id, one run's immutable record
+            (``tcip_mcp.experiments``); e.g. 'exp-001-<crop>-<trait>-det'.
         config: Full training configuration to snapshot.
         parent_experiment: Optional parent experiment ID for transfer learning lineage.
         data_source: Optional description of the data source.
@@ -60,7 +61,7 @@ def get_experiment(
     a non-default value under ``view='lineage'``, which has no metrics rows to page.
 
     Args:
-        experiment_id: Experiment to retrieve.
+        experiment_id: The record to read, one run's immutable record (``tcip_mcp.experiments``).
         view: 'full' for the complete record, 'lineage' for the traced chain only.
         metrics_limit: Maximum metrics rows to return, view='full' only. None returns all.
         metrics_offset: Row offset into the metrics log to start from, view='full' only.

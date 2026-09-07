@@ -324,8 +324,9 @@ def calibrate_scalar_operating_point(
             images directory's own layout places it under a different root; a loose directory the
             layout cannot place refuses nothing, since a CSV over a bespoke image set with a stated
             root is legitimate.
-        experiment_id: The checkpoint's own training-run id, if known, gates train-disjointness the
-            same way the detector/classifier calibration paths do. ``None`` (a foreign/unregistered
+        experiment_id: The checkpoint's own training run's record id (one run's immutable record,
+            ``tcip_mcp.experiments``), if known, gates train-disjointness the same way the
+            detector/classifier calibration paths do. ``None`` (a foreign/unregistered
             checkpoint) skips that check rather than failing closed.
         group_by / group_key_map / seed / holdout_ratio: The locked cal/holdout split's grouping
             policy, same semantics as ``run_inference``'s own calibration arguments; only the first
@@ -544,8 +545,9 @@ def calibrate_count_operating_point(
             the bucket's own recorded scope and a stated pair must equal it, refusing by name
             otherwise, since evidence earned under one scope is never merged into a bucket
             stamped for another.
-        experiment_id: The checkpoint's own training-run id, if known, gates train-disjointness;
-            ``None`` (a foreign/unregistered checkpoint) skips that check.
+        experiment_id: The checkpoint's own training run's record id (one run's immutable record,
+            ``tcip_mcp.experiments``), if known, gates train-disjointness; ``None`` (a
+            foreign/unregistered checkpoint) skips that check.
         group_by / group_key_map: The locked cal/holdout split's grouping policy; only the first
             call for this labels_dir's identity draws the split.
         split_manifest_dir: Restrict the calibration universe to one capture date's calibration

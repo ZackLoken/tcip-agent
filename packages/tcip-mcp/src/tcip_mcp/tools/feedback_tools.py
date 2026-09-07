@@ -201,7 +201,8 @@ def materialize_review_dataset(
         source_images_dir: Directory of the reviewed source images.
         output_dir: Destination for the curated dataset (distinct from the source). A relative
             path resolves against the platform state root, never the server process's cwd.
-        experiment_id: Optional experiment to record the review-session lineage on.
+        experiment_id: Optional run record (one run's immutable record, ``tcip_mcp.experiments``)
+            to record the review-session lineage on.
         include_hard_negatives: Emit rejected-only images as empty-label backgrounds.
         only_completed: Restrict to fully-reviewed (``img_status=='completed'``) images.
         copy_files: Copy images (True) or symlink (False).
