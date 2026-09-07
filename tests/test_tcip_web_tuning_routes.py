@@ -877,7 +877,7 @@ def test_manifest_with_a_seed_axis_and_no_split_draws_is_not_relaunchable_on_bot
     for row in (live_row, disk_row):
         assert row["relaunchable"] is False
         assert row["reason"] == seed_axis_refusal.reason
-        assert seed_axis_refusal.remedy not in row["reason"]
+        assert "drop data.split.seed from param_space" not in row["reason"]
 
 
 def test_relaunch_reads_the_source_manifest_under_the_sweeps_own_launch_root(
@@ -1541,8 +1541,8 @@ def test_list_sweeps_on_the_sqlite_backend_never_sees_a_loose_manifest_beside_th
     client: TestClient, hpo_root,
 ) -> None:
     """Coverage: records the sqlite backend's own standing behavior with a loose manifest file.
-    Bound to the sqlite backend on purpose: a
-    manifest.json hand-written straight to the file-backend path, the way the test above
+    Bound to the sqlite backend on purpose: a manifest.json hand-written straight to the
+    file-backend path, the way the test above
     produces one, is a loose record beside store.db rather than a row inside it, and store.read
     (what _read_manifest calls) never sees it, so the sweep it names never reaches the listing
     while a sweep written through _write_sweep (which goes through tcip_store, landing in the
