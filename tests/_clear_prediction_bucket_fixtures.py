@@ -29,9 +29,16 @@ def assert_source_stamps_absent(bucket: Path) -> None:
 
 def stub_predictor(monkeypatch, *, boxes: tuple[tuple[float, float, float, float], ...] = (
     (10.0, 10.0, 30.0, 30.0),
-)) -> None:
+), scores: tuple[float, ...] | None = None) -> None:
     """A ``GenericPredictor`` stand-in that predicts a fixed set of boxes per image, the same
-    shape ``tests/test_run_inference_bucket_handling.py``'s own fake predictor uses."""
+    shape ``tests/test_run_inference_bucket_handling.py``'s own fake predictor uses.
+
+    ``scores`` names each box's own confidence, one per entry of ``boxes``; omitted, every box
+    scores 0.9. Lets a caller pin a prediction's score against an earned admission rule's own
+    conf, above or below it, rather than trust an unstated default to land on either side.
+    """
+    box_scores = list(scores) if scores is not None else [0.9] * len(boxes)
+    assert len(box_scores) == len(boxes), "scores must name one confidence per box"
 
     class FakePredictor:
         def __init__(self, checkpoint_path=None, **kwargs):
@@ -39,7 +46,7 @@ def stub_predictor(monkeypatch, *, boxes: tuple[tuple[float, float, float, float
 
         def predict_batch(self, paths, **kw):
             return [{"image": p, "width": 100, "height": 100,
-                     "boxes": [list(b) for b in boxes], "scores": [0.9] * len(boxes),
+                     "boxes": [list(b) for b in boxes], "scores": list(box_scores),
                      "labels": [1] * len(boxes), "count": len(boxes)}
                     for p in paths]
 
@@ -79,18 +86,21 @@ def build_published_bucket(
     date: str | None = "2026-03-02",
     stems: tuple[str, ...] = ("img",),
     state: str = "completed",
+    boxes: tuple[tuple[float, float, float, float], ...] = ((10.0, 10.0, 30.0, 30.0),),
+    scores: tuple[float, ...] | None = None,
 ) -> dict[str, Any]:
     """Publish a canonical bucket through ``run_inference`` with a fake predictor, carry
     ``experiment_id`` through ``create_experiment``/``update_status`` to ``state`` (``None``
     leaves it ``running``), and return the pieces a ``clear_prediction_bucket`` test needs:
     ``dataset_root``, ``bucket``, ``images_dir``, ``checkpoint``, ``experiment_id``, ``result``
-    (``run_inference``'s own response).
+    (``run_inference``'s own response). ``boxes``/``scores`` thread through to
+    :func:`stub_predictor`, so a caller can pin a prediction's score against an earned rule.
     """
     from tcip_mcp.dataset_layout import prediction_dir
     from tcip_mcp.experiments import create_experiment, update_status
     from tcip_mcp.tools.inference_tools import run_inference
 
-    stub_predictor(monkeypatch)
+    stub_predictor(monkeypatch, boxes=boxes, scores=scores)
     stub_checkpoint_verification(monkeypatch)
 
     root = dataset_root if dataset_root is not None else (tmp_path / "ds")
@@ -133,6 +143,64 @@ def record_review_verdict(bucket: Path, review_state_dir: Path, img_name: str) -
     det = ReviewDetection(det_type="fp", class_name="bud", conf=0.9, iou=None, gt_idx=None,
                           pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
     engine.record_detection_action(bucket_key_of(bucket), det, ctx, action="accepted")
+
+
+def earn_validated_stamp(bucket: Path, dataset_root: Path, *, trait: str) -> dict:
+    """Replace ``bucket``'s published stamp's ``operating_point`` with one earned through the
+    same two-phase gate a producer runs (``open_validation``, then ``seal_validation``), keeping
+    the run's own ``experiment_id``, ``checkpoint_sha256``, ``subject`` and ``attribute`` so the
+    door's other checks stay meaningful; returns the stamp as stored after the merge.
+    """
+    from tests._dense_op_fixtures import dense_records
+
+    from tcip_mcp.pipelines.resolution import (
+        open_validation, operating_point_stamp, read_operating_point_sidecar, seal_validation,
+        update_sidecar,
+    )
+
+    stored = read_operating_point_sidecar(bucket)
+    assert stored is not None
+
+    common = dict(n_images=20, objects_per_image=80, miss_pattern=[0] * 20,
+                  fp_pattern=[1] * 20, score=0.9, fp_score=0.05)
+    cal = dense_records(id_prefix="c", **common)
+    hold = dense_records(id_prefix="h", shift=5.0, **common)
+    labels_dir = dataset_root / "annotations" / "2026-03-04"
+    labels_dir.mkdir(parents=True, exist_ok=True)
+
+    draft = open_validation(
+        document="operating_point",
+        evidence={"resolver": "resolve_operating_point",
+                  "inputs": {"dataset_hash": "h1", "calibration_records": cal,
+                             "holdout_records": hold, "staged_conf_floor": 0.01,
+                             "tiled": False}},
+        trait=trait, checkpoint_sha256=stored.get("checkpoint_sha256"),
+        producing_experiment_id=None,
+        reference_inputs={"dataset_root": str(dataset_root),
+                          "label_dirs": {"calibration": labels_dir},
+                          "stated_values": {"split_identity": "clear-bucket-admitting"}},
+    )
+    earned_body = operating_point_stamp(
+        draft.result.to_provenance()["operating_point"], validated=True, validated_by=None,
+        tile_size_validated=None, shippable_issues=draft.result.shippable_issues(), id_map=None,
+        subject=stored.get("subject"), attribute=stored.get("attribute"), trait=trait,
+        dataset_hash="h1", checkpoint=stored.get("checkpoint"),
+        checkpoint_sha256=stored.get("checkpoint_sha256"), experiment_id=stored.get("experiment_id"),
+        images_dir=stored.get("images_dir"), raster_path=stored.get("raster_path"),
+        produced_at=stored.get("produced_at"),
+    )
+    _digest, stamped = seal_validation(
+        draft, dataset_root=dataset_root, bucket_dirs=[bucket], stamp_body=earned_body)
+
+    def _merge(current: dict) -> dict:
+        return {**current, "validated": True, "validated_by": stamped["validated_by"],
+                "operating_point": earned_body["operating_point"], "trait": trait}
+
+    assert update_sidecar(bucket, _merge) is True
+    updated = read_operating_point_sidecar(bucket)
+    assert updated is not None
+    assert updated.get("validated_by") is not None
+    return updated
 
 
 def mark_bulk_accepted(bucket: Path, review_state_dir: Path, img_name: str) -> None:

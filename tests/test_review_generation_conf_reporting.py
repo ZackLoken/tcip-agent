@@ -67,3 +67,43 @@ def test_generation_conf_is_absent_when_the_bucket_recorded_none(
     resp = client.get("/api/review/generation_conf", params={"pred_dir": str(unusable)})
     assert resp.status_code == 200
     assert resp.json()["generation_conf"] is None
+
+
+_SENTINEL = "no-such-key-was-here"
+
+
+def test_generation_conf_answers_a_null_admission_rule_with_a_naming_reason(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """admission_rule is null with a reason naming why, for every stamp shape that answers no
+    rule; the key's own presence (against a sentinel default) is asserted separately from its
+    value, since the key is absent entirely at the baseline (GUARDS on the row-gone case).
+    The non-numeric-conf case (a successfully bound claim whose stamp still carries an unreadable
+    value) is exercised as a unit test of admission_rule_of itself
+    (test_admission_rule_of.py), since reaching it through a real bound claim needs a
+    validation row and a bucket-content digest to agree with a value the row's own claim never
+    recorded, a shape no producer and no hand-written store row can construct honestly."""
+    unvalidated = _bucket(tmp_path, "unvalidated", {
+        "checkpoint_sha256": "x", "validated": False,
+        "operating_point": {"conf": {"value": 0.4}},
+    })
+    no_stamp = _bucket(tmp_path, "no_stamp", None)
+    row_gone = _bucket(tmp_path, "row_gone", {
+        "checkpoint_sha256": "x", "validated": True,
+        "validated_by": {"experiment_id": "exp-does-not-exist", "record_digest": "0" * 16},
+        "operating_point": {
+            "conf": {"value": 0.4, "validated_against": "held_out_annotations"},
+        },
+    })
+
+    for bucket, reason_fragment in (
+        (unvalidated, "does not claim validated"),
+        (no_stamp, "does not claim validated"),
+        (row_gone, "exp-does-not-exist"),
+    ):
+        resp = client.get("/api/review/generation_conf", params={"pred_dir": str(bucket)})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body.get("admission_rule", _SENTINEL) is None  # GUARDS: key absent at baseline
+        assert body["admission_rule"] is None
+        assert reason_fragment in body["admission_reason"]
