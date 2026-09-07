@@ -1099,8 +1099,8 @@ def canonical_prediction_bucket(
     The one recognizer :func:`~tcip_mcp.tools.inference_tools._resolve_writable_bucket_for` and
     :func:`clear_prediction_bucket` both apply, so a bucket one calls canonical is a bucket the
     other does too. Answers ``None`` for both cleared shapes without a special case for either:
-    the dated cleared shape (``predictions/.cleared/<model>@<stamp>/<date>``) fails the round trip
-    (a third segment past the model slot is never a canonical bucket's own shape), and the
+    the dated cleared shape (``predictions/.cleared/<model>@<stamp>/<date>``) is rejected by the
+    arity guard (a third segment past the model slot is never a canonical bucket's own shape), and the
     undated one (``predictions/.cleared/<model>@<stamp>``) fails on its model slot, since
     ``is_bucket_name(".cleared")`` is ``False``.
     """
