@@ -15,15 +15,17 @@ export interface Sweep {
   search_alg?: string | null;
   scheduler?: string | null;
   param_space_keys?: string[];
-  /** Whether the manifest carries a base_config and names no caller-supplied data.split.seed
-   * axis at one draw: the relaunchable marker. */
+  /** Whether the manifest passes every one of the backend's own relaunch conditions
+   * (tcip_web.routes.tuning._relaunch_refusal): the relaunchable marker. */
   relaunchable?: boolean;
   /** Why this sweep cannot be relaunched, in the platform's own words; null when it can be. */
   reason?: string | null;
   cancel_requested?: boolean;
   /** The sweep this one was relaunched from, or null when it was not a relaunch. */
   relaunched_from?: string | null;
-  /** Draws per sampled point (run_hyperparameter_search's own data.split.seed grid axis); null/1 for no draws. */
+  /** Draws per sampled point (run_hyperparameter_search's own data.split.seed grid axis); null
+   * for a manifest predating the field (read as 1, no draws, by run_hyperparameter_search's own
+   * default) or for a recorded value that is not a draw count. */
   split_draws?: number | null;
   /** Whether the recorded base_config redraws train/val inside a bound split manifest's own
    * members, rather than sweeping seeds over a drawn split. */
