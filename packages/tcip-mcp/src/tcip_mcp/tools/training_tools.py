@@ -780,9 +780,7 @@ def launch_training(
     handshake is in force, else ``"process"`` for a caller with neither (a bare backend call, a
     script, a test). A future backend caller of this function outside the wrapped route is
     stamped ``"process"`` too; telling a browser apart from another client is a later
-    authentication concern, not this field's. Recorded only when experiment tracking below
-    succeeds: a run whose tracking failed has no status record to carry the stamp at all, and
-    reads as no launcher recorded, same as a record with none.
+    authentication concern, not this field's.
 
     Args:
         config: Full training configuration dict with model_source, data, training sections. An
@@ -878,9 +876,11 @@ def launch_training(
 
     requested = config.get("experiment_id") or mint_experiment_id()
 
-    # The id becomes the run's own artifact directory name: checked by the same rule _trial_name
-    # applies to an HTTP path segment; the store seam's own key rule stays as it is.
-    if PureWindowsPath(requested).name != requested or requested in ("", ".", ".."):
+    # The id becomes the run's own artifact directory name: _trial_name applies the identical
+    # directory-name rule to an HTTP path segment.
+    try:
+        _trial_name(requested)
+    except BadKey:
         return {"error": f"launch_training: experiment_id {requested!r} is not a legal directory "
                          "name (a path separator, a drive, an empty name or '.'/'..'), and the id "
                          "becomes the run's own artifact directory."}
@@ -1173,7 +1173,11 @@ def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
     experiment's status record directly, since no other status read exists for it. Either way the
     value is the record's own, so a row never states a launcher the record itself does not hold; a
     run whose stamp failed reads ``None`` here exactly as it does on disk, never the caller's
-    in-memory intent.
+    in-memory intent. A ``pid``-less row's own id can name no record at all (a path separator, an
+    empty or dot name, reachable only through ``create_run`` called directly, never through
+    ``launch_training``'s own directory-name refusal): ``BadKey`` folds to ``launched_by: None``
+    here the same way it does everywhere else this module resolves a status key, rather than
+    raising out of the whole listing.
     Rows: this process's own, in registry order, then the disk-only rows, sorted by experiment id.
     """
     from tcip_mcp.experiments import read_member, status_key
@@ -1202,7 +1206,12 @@ def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
                 row["best_metric_name"] = overlay["best_metric_name"]
             row["launched_by"] = overlay["launched_by"]
         else:
-            row["launched_by"] = read_member(status_key(experiment_id), {}).get("launched_by")
+            try:
+                key = status_key(experiment_id)
+            except BadKey:
+                row["launched_by"] = None
+            else:
+                row["launched_by"] = read_member(key, {}).get("launched_by")
         merged.append(row)
 
     live_ids = {r["id"] for r in live}
@@ -3122,37 +3131,34 @@ def _ensure_experiment(
     lineage) so the prior run's status, metrics, lineage, and registry entry stay intact.
 
     Every branch stamps this experiment through :func:`~tcip_mcp.experiments.stamp_run_identity`,
-    one compare-and-set transaction that moves the record to ``running`` in the same write; a
-    stamp whose precondition fails on the pristine-reuse branch (another launch won the record
-    between the pristine check and this one) falls to the fork branch below, rather than two
-    processes ever training under one id. ``launched_by`` is resolved once by ``launch_training``,
-    before this call, so every branch stamps the identical declaration.
+    one compare-and-set transaction that moves the record to ``running`` in the same write; the
+    pristine-reuse branch gives it the config to write in that same transaction, so the record
+    that ends up running is never left carrying one launch's config under another's identity. A
+    stamp whose precondition fails means another launch's stamp beat this one to the same record
+    (the fresh-creation branch loses only when a concurrent pristine-reuse claimed the id this
+    call just created, between that creation and this call's own stamp; the pristine-reuse branch
+    loses to any other launch racing for the same pristine record), and both branches fall to the
+    fork below rather than returning an error, since losing that race is not a failure this call
+    should report. ``launched_by`` is resolved once by ``launch_training``, before this call, so
+    every branch stamps the identical declaration.
     """
-    from tcip_mcp.experiments import (
-        StampPreconditionFailed, create_experiment, is_pristine, metrics_logged_of,
-        overwrite_config_if_pristine, read_member, stamp_run_identity, status_key,
-    )
+    from tcip_mcp.experiments import StampPreconditionFailed, create_experiment, stamp_run_identity
 
     output_dir = str(Path(output_base) / experiment_id)
     created = create_experiment(experiment_id, config, data_source=data_source,
                                 dataset_id=dataset_id, dataset_fingerprint=dataset_fingerprint)
     if "error" not in created:
-        stamp_run_identity(experiment_id, output_dir, launched_by=launched_by)
-        return experiment_id, output_dir
-
-    # is_pristine is the one implementation of the predicate: only attempt the overwrite when it
-    # says pristine, so a non-pristine id mints its fresh id below with no refusal audited.
-    status = read_member(status_key(experiment_id), {})
-    state = status.get("state") if isinstance(status, dict) else None
-    metrics_logged = metrics_logged_of(status)
-    if is_pristine(state, metrics_logged):
-        overwritten = overwrite_config_if_pristine(experiment_id, config)
-        if "error" not in overwritten:
-            try:
-                stamp_run_identity(experiment_id, output_dir, launched_by=launched_by)
-                return experiment_id, output_dir
-            except StampPreconditionFailed:
-                pass  # lost the race for this record between the pristine check and the stamp
+        try:
+            stamp_run_identity(experiment_id, output_dir, launched_by=launched_by)
+            return experiment_id, output_dir
+        except StampPreconditionFailed:
+            pass  # a concurrent pristine-reuse claimed this record before this call's own stamp
+    else:
+        try:
+            stamp_run_identity(experiment_id, output_dir, launched_by=launched_by, config=config)
+            return experiment_id, output_dir
+        except StampPreconditionFailed:
+            pass  # lost the race for this record between the pristine check and the stamp
 
     from tcip_mcp.experiments import mint_experiment_id
 
@@ -3164,8 +3170,12 @@ def _ensure_experiment(
     # The snapshot must name itself, not whatever id the caller's own config carried in (its
     # parent, for a relaunch that set config["experiment_id"] to the picked id before this call).
     forked_config = {**config, "experiment_id": fresh_id}
-    create_experiment(fresh_id, forked_config, parent_experiment=experiment_id, data_source=data_source,
-                      dataset_id=dataset_id, dataset_fingerprint=dataset_fingerprint)
+    forked = create_experiment(fresh_id, forked_config, parent_experiment=experiment_id,
+                               data_source=data_source, dataset_id=dataset_id,
+                               dataset_fingerprint=dataset_fingerprint)
+    if "error" in forked:
+        raise RuntimeError(
+            f"_ensure_experiment: could not create the fork {fresh_id!r}: {forked['error']}")
     fresh_output_dir = str(Path(output_base) / fresh_id)
     stamp_run_identity(fresh_id, fresh_output_dir, launched_by=launched_by)
     return fresh_id, fresh_output_dir
