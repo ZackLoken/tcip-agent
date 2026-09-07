@@ -16,10 +16,17 @@ completion line have landed.
 
 A successful archive re-exports every database under the target back out as loose files inside
 its own ``.tcip`` before the marker is written, so the moved tree carries them rather than a
-database file a plain archive would leave unreadable outside this process. A completed request
-leaves three lines: the archive door's own line, then the route's own line about the request,
-both in the open project's own log, and the removed project's own last line, naming the marker
-just written, in the target's own log; a refused or failed archive leaves the target's own
+database file a plain archive would leave unreadable outside this process. "Open" carries two
+senses that a request tells apart: the workspace's active-project marker names a default that
+need not be this process's own, while a *bound* project is this process's own platform-state
+root (:func:`tcip_mcp.project_paths.root_binding`); the marker, the bound root and the GUI's
+canvas-open binding are the three spellings :func:`identity_conflict` refuses a request naming.
+A completed request leaves the removed project's own last line, naming the marker just written,
+in the target's own log; the route's own line about the request lands in the bound project's
+own log when one is bound, and in the target's own log otherwise, so a workspace with nothing
+bound still records the whole request. The archive door's own line is not part of that choice:
+it is a bare ``@audited`` door, so it lands wherever ``$TCIP_STATE_ROOT`` names at write time,
+unmoved by which project (if any) is bound. A refused or failed archive leaves the target's own
 state, and its own log, untouched, since the marker is written before any log line. A crash
 between the marker being written and the target's own request line landing leaves a marker with
 no request line on the target, and the next start then moves a tree whose log ends with the
@@ -174,9 +181,11 @@ def read_open_project_state() -> OpenProjectState:
 def _open_project_conflict(target: Path, state: OpenProjectState) -> Optional[str]:
     """The target compared, by filesystem identity, against the three spellings of "the open
     project" carried on ``state``: the workspace's active-project marker, this process's own
-    platform root, and the GUI's canvas-open binding. Each is its own message naming the
-    spelling and its remedy in terms the breeder can act on, the same strings
-    :func:`identity_conflict` answers the listing's own per-project reason with."""
+    platform root, and the GUI's canvas-open binding (a released binding never matches: it names
+    what the GUI last had open, not what it has open now). Each is its own message naming the
+    spelling, that a breeder-triggered release clears it, and the remedy otherwise, the same
+    strings :func:`identity_conflict` answers the listing's own per-project reason with.
+    """
     if state.marker_name:
         try:
             marker_root = workspace.project_path(state.marker_name, create=False)
@@ -184,36 +193,37 @@ def _open_project_conflict(target: Path, state: OpenProjectState) -> Optional[st
             marker_root = None
         if marker_root is not None and _same_path(target, marker_root):
             return (f"{state.marker_name} is the project this workspace opens by default; "
-                    "choose a different default first")
+                    "choose a different default first, or release it as the default")
 
     if state.binding_root is not None and _same_path(target, state.binding_root):
         name = workspace.workspace_project_name(target) or target.name
-        return f"{name} is the project this backend started on; restart on a different project first"
+        return (f"{name} is the project this backend started on; restart the backend first, "
+                "started without TCIP_STATE_ROOT naming it")
 
     if state.canvas_problem is not None:
         return f"the GUI's open-project binding could not be read: {state.canvas_problem}"
-    if state.canvas and (state.canvas.get("project_name") or state.canvas.get("root")):
+    if state.canvas and not state.canvas.get("released") and (
+        state.canvas.get("project_name") or state.canvas.get("root")
+    ):
         root = state.canvas.get("root")
         if root and _same_path(target, root):
             label = state.canvas.get("project_name") or root
-            return f"{label} is the project the GUI has open; open a different project first"
+            return (f"{label} is the project the GUI has open; open a different project first, "
+                    "or release it as the open project")
     return None
 
 
 def identity_conflict(target: Path, state: OpenProjectState) -> Optional[str]:
-    """The no-project-open case and the three spellings of "the open project"
-    (:func:`_open_project_conflict`): the cheap identity checks in :func:`_ordered_refusal`'s own
-    chain, none of them the live-run or job-registry scans that open a database connection.
-    Shared verbatim by the door's own refusal chain and by the workspace listing's own
-    per-project ``removal_refusal``, so the two answer with the same string rather than each
-    composing its own. ``state`` is the marker/binding/canvas triple every caller reads once
-    (:func:`read_open_project_state`) and passes in, per project when checking several, so no
-    call pays the reads on its own."""
-    open_name = (
-        workspace.workspace_project_name(state.binding_root) if state.binding_root is not None else None
-    )
-    if open_name is None:
-        return "no project is open in this backend; open one first so the request is recorded in its log"
+    """The three spellings of "the open project" (:func:`_open_project_conflict`): the cheap
+    identity checks in :func:`_ordered_refusal`'s own chain, none of them the live-run or
+    job-registry scans that open a database connection. With no project bound and the marker
+    and the canvas binding both silent, every project answers ``None`` here: the request still
+    proceeds, its own line landing in the target's own log rather than a bound project's
+    (:func:`request_project_removal`). Shared verbatim by the door's own refusal chain and by
+    the workspace listing's own per-project ``removal_refusal``, so the two answer with the same
+    string rather than each composing its own. ``state`` is the marker/binding/canvas triple
+    every caller reads once (:func:`read_open_project_state`) and passes in, per project when
+    checking several, so no call pays the reads on its own."""
     return _open_project_conflict(target, state)
 
 
@@ -298,14 +308,19 @@ def _ordered_refusal(
     return None
 
 
-def _preview(name: str, job_conflict: JobConflict) -> tuple[dict, Optional[_Refusal]]:
+def _preview(
+    name: str, job_conflict: JobConflict, state: OpenProjectState,
+) -> tuple[dict, Optional[_Refusal]]:
     """The shared implementation behind :func:`removal_preview` and :func:`request_project_removal`:
     runs :func:`_ordered_refusal` exactly once, returning the dialog's own dict beside the full
     refusal (status and text), so the door answers with the status the chain actually found
     rather than re-deriving it, and the chain never runs a second time for the same request. A
     refusal returns at once, with empty ``external_roots``/``dependent_projects``, before the
     external-root/dependent scan below ever walks the sibling registries: a refused request has
-    nothing for the dialog to act on from that scan, so it never runs one.
+    nothing for the dialog to act on from that scan, so it never runs one. ``state`` is the
+    caller's own single :func:`read_open_project_state` read (:func:`removal_preview` takes its
+    own; :func:`request_project_removal` reuses the read it needs for the route's own line), so
+    this function never reads the marker, the binding or the canvas record a second time.
 
     ``external_roots`` is every path ``tcip_mcp.store_catalogue.project_roots`` names for this
     project that is not under it, listed once per path with the layouts it serves and whether the
@@ -324,7 +339,6 @@ def _preview(name: str, job_conflict: JobConflict) -> tuple[dict, Optional[_Refu
     from tcip_mcp.store_catalogue import project_roots
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets_raw
 
-    state = read_open_project_state()
     refusal = _ordered_refusal(name, job_conflict, state)
     if refusal is not None:
         return {"external_roots": [], "dependent_projects": [], "refusal": refusal.message}, refusal
@@ -389,8 +403,22 @@ def removal_preview(name: str, *, job_conflict: JobConflict) -> dict:
     """Every fact the removal dialog needs before a name is even typed (see :func:`_preview`).
     ``job_conflict`` is the caller's own function of the target root answering a non-terminal
     job's refusal text, or ``None``."""
-    result, _ = _preview(name, job_conflict)
+    result, _ = _preview(name, job_conflict, read_open_project_state())
     return result
+
+
+def _bound_project_root(state: OpenProjectState) -> Optional[Path]:
+    """The bound-root spelling of "the open project", or ``None`` when this process is bound to
+    no workspace project at all: :func:`workspace.workspace_project_name` on ``state``'s own
+    binding, which also answers ``None`` for a bound root outside the workspace (a registered
+    dataset root, a ``TCIP_IMAGE_ROOTS`` entry). The one place :func:`request_project_removal`
+    decides where its own line goes, so a caller reading the same ``state`` twice never derives
+    two different answers to "is a project bound"."""
+    if state.binding_root is None:
+        return None
+    if workspace.workspace_project_name(state.binding_root) is None:
+        return None
+    return state.binding_root
 
 
 def request_project_removal(
@@ -404,14 +432,21 @@ def request_project_removal(
     whatever ``confirm_name`` carries. Once both pass, one preview (:func:`_preview`) computes
     the rest of the ordered refusal chain and the external-root/dependent scan exactly once, and
     this door answers with its ``refusal`` rather than running the chain a second time. On
-    success: the archive is under the workspace's holding directory,
-    the marker is on the project, and this response carries ``{name, archive_path, holding_dir,
-    external_roots, dependent_projects, completes, audit_scope}``. Three audit lines land: the
-    archive door's own line, then this door's own line about the request, both in the open
-    project's own log; the removed project's own last line, naming the marker just written, in
-    the target's own log. Nothing is deleted. ``requested_by`` is the caller's own resolved
-    identity string (``tcip_web.identity.user_id(tcip_web.identity.resolve_user(...))``, the
-    caller's own edge into that package, not this module's).
+    success: the archive is under the workspace's holding directory, the marker is on the
+    project, and this response carries ``{name, archive_path, holding_dir, external_roots,
+    dependent_projects, completes, audit_scope, recorded_in_open_project, audit_note}``.
+
+    The removed project's own last line, naming the marker just written, lands in the target's
+    own log first. The route's own line about the request lands in the bound project's own log
+    when this process is bound to one (``recorded_in_open_project`` true); with none bound, it
+    lands in the target's own log instead, right after the target's own line, so a workspace
+    with nothing bound still records the whole request against the project it names.
+    ``audit_scope`` is that root either way; ``audit_note`` names, in one sentence, where the
+    request's two lines and the archive door's own line went (the archive door's own line is a
+    bare ``@audited`` door, unmoved by this decision: it always lands wherever
+    ``$TCIP_STATE_ROOT`` names). Nothing is deleted. ``requested_by`` is the caller's own
+    resolved identity string (``tcip_web.identity.user_id(tcip_web.identity.resolve_user(...))``,
+    the caller's own edge into that package, not this module's).
     """
     with _request_lock:
         shape_refusal = _name_shape_refusal(name)
@@ -420,7 +455,8 @@ def request_project_removal(
         if confirm_name != name:
             return {"error": "the typed name does not match the project's name", "status": 400}
 
-        preview, refusal = _preview(name, job_conflict)
+        state = read_open_project_state()
+        preview, refusal = _preview(name, job_conflict, state)
         if refusal is not None:
             return {"error": refusal.message, "status": refusal.status}
 
@@ -471,9 +507,9 @@ def request_project_removal(
                               f"{exc}. The removal still completes at the next backend start.",
                     "status": 409}
 
-        from tcip_mcp.project_paths import root_binding
-
-        open_root = root_binding().root  # type: ignore[union-attr]  # non-None: checked above
+        bound_root = _bound_project_root(state)
+        recorded_in_open_project = bound_root is not None
+        open_root = bound_root if bound_root is not None else project
         try:
             audit.record_event_or_raise(
                 "gui_project_removal_requested",
@@ -487,6 +523,19 @@ def request_project_removal(
                               "at the next backend start.",
                     "status": 409}
 
+        if recorded_in_open_project:
+            bound_name = workspace.workspace_project_name(bound_root)
+            audit_note = (
+                f"{name!r}'s own line is in its own log; the route's own line and the archive "
+                f"door's own line are in {bound_name!r}'s log."
+            )
+        else:
+            audit_note = (
+                f"this backend has no project bound, so {name!r}'s own line and the route's own "
+                "line are both in its own log; the archive door's own line is under the root "
+                "$TCIP_STATE_ROOT names."
+            )
+
         return {
             "name": name,
             "archive_path": str(archive_path),
@@ -495,6 +544,8 @@ def request_project_removal(
             "dependent_projects": dependent_projects,
             "completes": "at the next backend start, or tcip complete-removals",
             "audit_scope": str(open_root),
+            "recorded_in_open_project": recorded_in_open_project,
+            "audit_note": audit_note,
         }
 
 
