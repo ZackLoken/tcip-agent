@@ -76,6 +76,43 @@ def test_run_inference_writes_json(tmp_path, monkeypatch):
     assert anns[0]["created_by"] == f"model:m@{hashlib.sha256(ckpt.read_bytes()).hexdigest()[:12]}"
 
 
+def test_resolve_writable_bucket_for_pins_both_canonical_shapes_suggestion_strings(tmp_path):
+    """Coverage: ``_resolve_writable_bucket_for`` restructured around the recognizer's own triple
+    (D3) still suggests exactly the strings it named before the restructuring, for both the dated
+    and the undated canonical shape. The undated shape is the one this restructuring is for: its
+    suggestion must never spell ``predictions/<model>@r2/<model>``, which reading ``base_name`` as
+    the date would have named."""
+    import json
+
+    from tcip_annotation.review_engine import ReviewEngine
+
+    import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.dataset_layout import prediction_dir
+    from tcip_mcp.prediction_buckets import bucket_key_of
+
+    dataset_root = tmp_path / "ds"
+    review_state_dir = dataset_root / ".tcip" / "state"
+
+    def _seed(model: str, date: "str | None"):
+        bucket = prediction_dir(dataset_root, model, date)
+        bucket.mkdir(parents=True, exist_ok=True)
+        (bucket / "img.json").write_text(json.dumps(
+            {"image": "img", "width": 10, "height": 10, "annotations": []}))
+        ReviewEngine(review_state_dir).mark_image_reviewed(bucket_key_of(bucket), "img.json")
+        return bucket
+
+    dated = _seed("dated_model", "2026-03-02")
+    undated = _seed("undated_model", None)
+
+    _, _, _, dated_refusal = itools._resolve_writable_bucket_for(str(dated), overwrite=False)
+    _, _, _, undated_refusal = itools._resolve_writable_bucket_for(str(undated), overwrite=False)
+
+    assert dated_refusal["suggested_bucket"] == str(
+        prediction_dir(dataset_root, "dated_model@r2", "2026-03-02"))
+    assert undated_refusal["suggested_bucket"] == str(
+        prediction_dir(dataset_root, "undated_model@r2", None))
+
+
 def test_run_inference_forwards_split_manifest_dir_to_the_verified_pass(tmp_path, monkeypatch):
     """A manifest-restricted calibration's evidence can only earn a validation record through
     this door if the door actually forwards split_manifest_dir to the verified pass."""
