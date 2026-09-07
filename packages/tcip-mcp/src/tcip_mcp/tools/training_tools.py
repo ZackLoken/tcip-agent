@@ -2957,21 +2957,35 @@ _SEED_AXIS_REMEDY = (
 
 
 def coerce_split_draws(split_draws: object) -> int | None:
-    """``split_draws`` read as ``int(split_draws)``, the way a manifest of unknown provenance
-    must be read: ``None`` stands for 1, the platform's own unset default; anything ``int()``
-    cannot read (a non-numeric string, a list, a value ``OverflowError`` refuses) is not a draw
-    count and reads as ``None``. Shared by :func:`caller_split_seed_refusal`, which treats an
-    unreadable value as no refusal, and by the Tuning route's relaunch surface, which refuses a
-    manifest recording one outright rather than replaying it into a crash.
+    """``split_draws`` read the way a manifest of unknown provenance must be read: ``None``
+    stands for 1, the platform's own unset default; an ``int`` that is not a ``bool`` is read
+    directly; a ``str`` or a finite ``float`` is read as a draw count only when ``int()`` of it
+    equals the value it was given, so ``2`` and ``"2"`` and ``2.0`` all read as ``2`` while
+    ``2.5`` reads as ``None`` rather than silently truncating to ``2``. A ``bool`` (``int(True)``
+    would otherwise read as 1), a non-numeric string, a non-finite float and anything else
+    ``int()`` cannot read are none of those and read as ``None``. Shared by
+    :func:`caller_split_seed_refusal`, which treats an unreadable value as no refusal, and by
+    the Tuning route's relaunch surface, which refuses a manifest recording one outright rather
+    than replaying it into a crash or a silently reinterpreted value.
     """
     if split_draws is None:
         return 1
-    if not isinstance(split_draws, (int, float, str)):
+    if isinstance(split_draws, bool):
+        return None
+    if isinstance(split_draws, int):
+        return split_draws
+    if not isinstance(split_draws, (float, str)):
         return None
     try:
-        return int(split_draws)
+        coerced = int(split_draws)
     except (TypeError, ValueError, OverflowError):
         return None
+    try:
+        if float(coerced) != float(split_draws):
+            return None
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return coerced
 
 
 def caller_split_seed_refusal(
