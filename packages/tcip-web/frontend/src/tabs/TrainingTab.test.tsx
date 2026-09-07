@@ -60,13 +60,11 @@ describe("TrainingTab run list", () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-agent-1", status: "running", external: true })],
     });
-    const cancelSpy = vi
-      .spyOn(trainingApi, "cancel")
-      .mockResolvedValue({
-        experiment_id: "train-agent-1",
-        status: "running",
-        cancel_requested: true,
-      });
+    const cancelSpy = vi.spyOn(trainingApi, "cancel").mockResolvedValue({
+      experiment_id: "train-agent-1",
+      status: "running",
+      cancel_requested: true,
+    });
 
     render(<TrainingTab />);
     expect(await screen.findByText("train-agent-1")).toBeInTheDocument();
