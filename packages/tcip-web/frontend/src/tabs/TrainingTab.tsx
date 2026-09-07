@@ -751,7 +751,9 @@ export function TrainingTab() {
                               : "Cancels a run that has not started yet."
                           }
                           aria-label={`Cancel ${r.experiment_id}`}
-                          aria-describedby={cancelError ? `cancel-error-${r.experiment_id}` : undefined}
+                          aria-describedby={
+                            cancelError ? `cancel-error-${r.experiment_id}` : undefined
+                          }
                           disabled={cancelling}
                           className="px-2 py-1 text-[10px] border-l border-tcip-border hover:bg-tcip-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
                           onClick={() => void onCancel(r.experiment_id)}

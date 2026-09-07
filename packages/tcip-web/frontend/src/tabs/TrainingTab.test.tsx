@@ -22,7 +22,9 @@ vi.mock("@/api/training", async (importOriginal) => {
 
 const initialStoreState = useStore.getState();
 
-function run(overrides: Partial<TrainingRunSummary> & { experiment_id: string }): TrainingRunSummary {
+function run(
+  overrides: Partial<TrainingRunSummary> & { experiment_id: string },
+): TrainingRunSummary {
   return {
     status: "running",
     ...overrides,
@@ -60,7 +62,11 @@ describe("TrainingTab run list", () => {
     });
     const cancelSpy = vi
       .spyOn(trainingApi, "cancel")
-      .mockResolvedValue({ experiment_id: "train-agent-1", status: "running", cancel_requested: true });
+      .mockResolvedValue({
+        experiment_id: "train-agent-1",
+        status: "running",
+        cancel_requested: true,
+      });
 
     render(<TrainingTab />);
     expect(await screen.findByText("train-agent-1")).toBeInTheDocument();
@@ -230,7 +236,11 @@ describe("TrainingTab run list", () => {
     expect(await screen.findByText("Cancelling…")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel train-cancel-flight" })).toBeDisabled();
 
-    resolveCancel({ experiment_id: "train-cancel-flight", status: "running", cancel_requested: true });
+    resolveCancel({
+      experiment_id: "train-cancel-flight",
+      status: "running",
+      cancel_requested: true,
+    });
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Cancel train-cancel-flight" })).not.toBeDisabled(),
     );
@@ -783,7 +793,11 @@ describe("TrainingTab chart default series", () => {
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "metric", experiment_id: runId, row: { epoch: 1, val_map50: 0.7, lr: 0.001 } });
+      onMessage({
+        type: "metric",
+        experiment_id: runId,
+        row: { epoch: 1, val_map50: 0.7, lr: 0.001 },
+      });
       return () => {};
     });
 
@@ -808,7 +822,12 @@ describe("TrainingTab status toast", () => {
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "status", experiment_id: runId, status: { status: "completed" }, error: null });
+      onMessage({
+        type: "status",
+        experiment_id: runId,
+        status: { status: "completed" },
+        error: null,
+      });
       return () => {};
     });
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
@@ -829,7 +848,12 @@ describe("TrainingTab status toast", () => {
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
-      onMessage({ type: "status", experiment_id: runId, status: { status: "completed" }, error: null });
+      onMessage({
+        type: "status",
+        experiment_id: runId,
+        status: { status: "completed" },
+        error: null,
+      });
       return () => {};
     });
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
