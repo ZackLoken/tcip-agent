@@ -160,6 +160,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/optimizer_factory.py | Optimizer factory with differential learning rate support. | 0 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/run_registry.py | In-process registry of live training runs: ``TrainRun``, its cancel-sentinel protocol, and the create/attach/get/list/cancel operations over the process-global ``_RUNS`` map. | 1 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py | The subprocess entry point ``launch_training`` spawns to run one bespoke training run's actual body, dataset/loader construction, the audited envelope, ``run_training_envelope()``, in an isolated OS process, so a leak/OOM/hang in one run can't take down the launching process or any other concurrent run's process. | 15 | 0 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/training/tensorboard_guardian.py | The subprocess entry point ``tensorboard_manager`` spawns on Linux and macOS to keep one TensorBoard child tied to the life of the process that launched it. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/tensorboard_manager.py | TensorBoard process management for training and HPO runs. | 0 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py | Prediction-bucket immutability: never silently overwrite predictions a human reviewed. | 7 | 11 |
 | packages/tcip-mcp/src/tcip_mcp/project_paths.py | Stable resolution of the platform state root, independent of a process's cwd. | 1 | 38 |
