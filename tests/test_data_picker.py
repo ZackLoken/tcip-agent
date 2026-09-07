@@ -798,7 +798,7 @@ def test_relaunch_route_leaves_the_snapshots_data_unchanged_when_no_partition_is
 
     def fake_launch_training(config, *a, **k):
         captured["data"] = config.get("data")
-        return {"run_id": "r1", "experiment_id": config.get("experiment_id"), "status": "launched"}
+        return {"experiment_id": config.get("experiment_id"), "status": "launched"}
 
     monkeypatch.setattr(training_tools_module, "launch_training", fake_launch_training)
 
