@@ -1359,18 +1359,18 @@ def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, tr
     if exp_id:
         # Checked before the publisher writes the bucket, ahead of this door's own @audited entry
         # (appended only after the caller's body returns), so nothing on disk needs unwinding.
-        from tcip_mcp.experiments import (
-            _TERMINAL_STATES, lineage_key, pointer_frozen, read_member, status_key,
-        )
+        from tcip_mcp.experiments import lineage_key, pointer_frozen, read_member
 
         frozen = pointer_frozen(exp_id, "lineage", "predictions", str(out))
         if frozen is not None:
-            # Names the door only for a terminal experiment whose recorded pointer is this exact
-            # path; a non-terminal experiment's own @r<n> variant is its remedy instead.
-            state = (read_member(status_key(exp_id), {}) or {}).get("state")
-            lineage = read_member(lineage_key(exp_id), {}) or {}
-            if state in _TERMINAL_STATES and lineage.get("predictions") == str(out):
-                frozen = f"{frozen} clear_prediction_bucket clears it for re-publication."
+            # pointer_frozen refuses exactly when terminal and the recorded pointer differs:
+            # that recorded path already holds the experiment's own published documents.
+            recorded_path = (read_member(lineage_key(exp_id), {}) or {}).get("predictions")
+            frozen = (
+                f"{frozen} {recorded_path!r} holds the experiment's own published documents; "
+                f"clear_prediction_bucket(predictions_dir={recorded_path!r}, reason=...) "
+                "clears it for re-publication into that recorded path."
+            )
             return {"refusal": {"error": frozen}, "written": [], "dropped_boxes": 0,
                     "op_stamp": {}, "tile_size_validated": tile_size_validated,
                     "lineage_linked": None}

@@ -319,35 +319,27 @@ def test_cleared_bucket_naming_a_nonexistent_path_no_artifact_names_refuses(tmp_
     assert "no cleared: artifact" in result["error"]
 
 
-def test_a_matching_pointer_never_reaches_the_brackets_own_refusal(tmp_path, monkeypatch):
-    """The boundary D7's own naming condition sits on: a terminal experiment whose recorded
-    pointer equals the resolved out is the pointer's own same-value admission (pointer_frozen
-    never refuses an equal write), never the bracket's refusal at all. A second run in place
-    reaches this admitted branch, not the refusal the door's name would otherwise be attached to.
-    See the implementer's report for why the "names the door" branch could not be reached by any
-    composition of shipped callers."""
+def test_bracket_names_the_door_for_a_terminal_experiments_recorded_bucket(tmp_path, monkeypatch):
+    """The refusal a caller meets for a terminal experiment's own published bucket is the
+    document refusal at resolution, naming the suggested @r<n> variant; a run into that variant
+    is then refused by pointer_frozen, since the recorded pointer names the original bucket, not
+    the variant. That is exactly when the bracket's own refusal fires (terminal, populated,
+    differs), so it names the door and quotes the recorded path as the one to pass it."""
     from tcip_mcp.tools.inference_tools import run_inference
 
-    built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expBracketAdmitted",
-                                   stems=())
-    second = run_inference(
-        str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(built["bucket"]),
-        tile=False, experiment_id="expBracketAdmitted")
-    assert "error" not in second, second
+    built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expBracketNamesDoor")
+    source = built["bucket"]
 
-
-def test_bracket_names_no_route_when_the_pointer_names_another_path(tmp_path, monkeypatch):
-    """A terminal experiment whose recorded pointer is a *different* path than the one this call
-    resolved to (redirected around review verdicts on the original) refuses without naming the
-    door: the door would refuse it too, since its own pointer check names only the recorded path."""
-    from tcip_mcp.prediction_buckets import review_state_dir_of
-    from tcip_mcp.tools.inference_tools import run_inference
-
-    built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expBracketNoRoute")
-    record_review_verdict(built["bucket"], review_state_dir_of(built["dataset_root"]), "img.png")
+    first_retry = run_inference(
+        str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(source), tile=False,
+        experiment_id="expBracketNamesDoor")
+    assert "error" in first_retry
+    suggested = first_retry["suggested_bucket"]
+    assert suggested is not None
 
     second = run_inference(
-        str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(built["bucket"]),
-        tile=False, experiment_id="expBracketNoRoute")
+        str(built["checkpoint"]), str(built["images_dir"]), output_dir=suggested, tile=False,
+        experiment_id="expBracketNamesDoor")
     assert "error" in second
-    assert "clear_prediction_bucket" not in second["error"]
+    assert "clear_prediction_bucket" in second["error"]
+    assert repr(str(source)) in second["error"]
