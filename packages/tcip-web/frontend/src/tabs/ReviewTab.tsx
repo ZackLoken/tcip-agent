@@ -1399,9 +1399,7 @@ export function ReviewTab() {
                   {validationResult.reason}
                 </span>
               )}
-              {/* Discloses what was actually stamped, on both the 200 path and a 409 whose
-                  sealed record landed with no bucket promoted, so "Validated" never implies
-                  more than the stamp itself claims. */}
+              {/* What was actually stamped, so "Validated" never implies more than the stamp claims. */}
               <span className="text-[11px] text-tcip-muted">
                 {validationResult.bucketsStamped.length > 0
                   ? `Stamped ${validationResult.bucketsStamped.length} bucket(s).`
