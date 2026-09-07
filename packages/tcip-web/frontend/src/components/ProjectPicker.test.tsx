@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
-import { ProjectPicker } from "@/components/ProjectPicker";
+import { ProjectPicker, localTime } from "@/components/ProjectPicker";
 import { useStore } from "@/store";
 
 vi.mock("@/api/client", () => {
@@ -76,7 +76,6 @@ beforeEach(() => {
   vi.mocked(api.projects.remove).mockReset();
 });
 
-const NO_OPEN_PROJECT = { marker: null, platform_root: null, canvas_binding: null };
 const NO_REFUSAL_PREVIEW = { external_roots: [], dependent_projects: [], refusal: null };
 
 describe("ProjectPicker", () => {
@@ -87,7 +86,6 @@ describe("ProjectPicker", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -104,7 +102,6 @@ describe("ProjectPicker", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -125,7 +122,6 @@ describe("ProjectPicker", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -140,7 +136,6 @@ describe("ProjectPicker", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -168,7 +163,6 @@ describe("ProjectPicker", () => {
       active_path: null,
       projects: withLabelProblem,
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -187,7 +181,6 @@ describe("ProjectPicker", () => {
       active_path: null,
       projects: [],
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -201,7 +194,6 @@ describe("ProjectPicker", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     vi.mocked(api.dataset.select).mockResolvedValue({
@@ -245,7 +237,6 @@ describe("ProjectPicker", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     vi.mocked(api.dataset.select).mockResolvedValue({
@@ -283,7 +274,6 @@ describe("ProjectPicker", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -309,7 +299,6 @@ describe("ProjectPicker", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -350,7 +339,6 @@ describe("ProjectPicker", () => {
       active_path: PROJECTS[0].path,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     vi.mocked(freshApi.dataset.select).mockResolvedValue({
@@ -392,7 +380,6 @@ describe("ProjectPicker", () => {
       active_path: PROJECTS[0].path,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     vi.mocked(freshApi.dataset.select).mockResolvedValue({
@@ -425,7 +412,6 @@ describe("ProjectPicker", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -445,7 +431,6 @@ describe("ProjectPicker", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -467,7 +452,6 @@ describe("ProjectPicker", () => {
       active_path: null,
       projects: [spaced, PROJECTS[1]],
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -484,7 +468,6 @@ describe("ProjectPicker", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -500,7 +483,6 @@ describe("ProjectPicker", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -523,7 +505,6 @@ describe("ProjectPicker", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: { marker: null, platform_root: null, canvas_binding: null },
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -549,7 +530,6 @@ describe("ProjectPicker removal", () => {
       active_path: null,
       projects: projectsWithReason,
       pending_removal: [],
-      open_project_names: NO_OPEN_PROJECT,
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -572,7 +552,6 @@ describe("ProjectPicker removal", () => {
       active_path: null,
       projects: projectsWithReason,
       pending_removal: [],
-      open_project_names: NO_OPEN_PROJECT,
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -588,7 +567,6 @@ describe("ProjectPicker removal", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: NO_OPEN_PROJECT,
       removal_startup_outcomes: [],
     });
     render(<ProjectPicker />);
@@ -604,7 +582,6 @@ describe("ProjectPicker removal", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: NO_OPEN_PROJECT,
       removal_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview).mockResolvedValue({
@@ -631,7 +608,61 @@ describe("ProjectPicker removal", () => {
     expect(
       external.compareDocumentPosition(nameField) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(nameField).toBeDisabled();
+    expect(nameField).not.toBeDisabled();
+  });
+
+  it("keeps the name field enabled and focused with a refusal present, and keeps confirm disabled", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.removalPreview).mockResolvedValue({
+      external_roots: [],
+      dependent_projects: [],
+      refusal: "a live run is in progress",
+    });
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    const removeButton = screen.getByRole("button", { name: "Remove…" });
+    removeButton.focus();
+    fireEvent.click(removeButton);
+
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText(/a live run is in progress/);
+    const nameField = within(dialog).getByLabelText(/type the project name to confirm/i);
+    expect(nameField).not.toBeDisabled();
+    expect(nameField).toHaveFocus();
+    expect(within(dialog).getByRole("button", { name: /^Remove$/ })).toBeDisabled();
+  });
+
+  it("renders a failed preview as a warning outside the refusal slot, and keeps confirm disabled", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.removalPreview).mockRejectedValue(new Error("backend unreachable"));
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Remove…" }));
+
+    const dialog = await screen.findByRole("dialog");
+    const warning = await within(dialog).findByText(
+      /dependents and refusals could not be checked: backend unreachable\. Close and try again\./,
+    );
+    expect(within(dialog).queryByText(/^backend unreachable$/)).not.toBeInTheDocument();
+    const nameField = within(dialog).getByLabelText(/type the project name to confirm/i);
+    expect(nameField).not.toBeDisabled();
+    fireEvent.change(nameField, { target: { value: PROJECTS[0].name } });
+    expect(within(dialog).getByRole("button", { name: /^Remove$/ })).toBeDisabled();
+    expect(warning).toBeInTheDocument();
   });
 
   it("keeps the confirm control disabled until the typed name matches exactly", async () => {
@@ -641,7 +672,6 @@ describe("ProjectPicker removal", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: NO_OPEN_PROJECT,
       removal_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
@@ -668,7 +698,6 @@ describe("ProjectPicker removal", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: NO_OPEN_PROJECT,
       removal_startup_outcomes: [],
     });
     let resolvePreview: (value: typeof NO_REFUSAL_PREVIEW) => void = () => {};
@@ -693,6 +722,34 @@ describe("ProjectPicker removal", () => {
     expect(dialog).not.toHaveAttribute("aria-busy");
   });
 
+  it("scopes the live region to the preview block, not the name field or the buttons", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.removalPreview).mockResolvedValue({
+      external_roots: [{ path: "/data/external", layouts: ["root"], present: true }],
+      dependent_projects: [{ project: "other_project", dataset_id: "ds1" }],
+      refusal: null,
+    });
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Remove…" }));
+
+    const dialog = await screen.findByRole("dialog");
+    const dependents = await within(dialog).findByText(/other_project/);
+    const liveRegion = dialog.querySelector('[aria-live="polite"]') as HTMLElement;
+    expect(liveRegion).toContainElement(dependents);
+    const nameField = within(dialog).getByLabelText(/type the project name to confirm/i);
+    expect(liveRegion.contains(nameField)).toBe(false);
+    const confirm = within(dialog).getByRole("button", { name: /^Remove$/ });
+    expect(liveRegion.contains(confirm)).toBe(false);
+  });
+
   it("closes on Escape without sending a request", async () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
@@ -700,7 +757,6 @@ describe("ProjectPicker removal", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: NO_OPEN_PROJECT,
       removal_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
@@ -727,7 +783,6 @@ describe("ProjectPicker removal", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: NO_OPEN_PROJECT,
       removal_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
@@ -754,7 +809,6 @@ describe("ProjectPicker removal", () => {
         active_path: null,
         projects: PROJECTS,
         pending_removal: [],
-        open_project_names: NO_OPEN_PROJECT,
         removal_startup_outcomes: [],
       })
       .mockResolvedValueOnce({
@@ -770,7 +824,6 @@ describe("ProjectPicker removal", () => {
             holding_dir: "/ws/.removed/x",
           },
         ],
-        open_project_names: NO_OPEN_PROJECT,
         removal_startup_outcomes: [],
       });
     vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
@@ -817,7 +870,6 @@ describe("ProjectPicker removal", () => {
       active_path: null,
       projects: PROJECTS,
       pending_removal: [],
-      open_project_names: NO_OPEN_PROJECT,
       removal_startup_outcomes: [
         { name: "moved_one", moved_to: "/ws/.removed/moved_one-x", archive_path: "/ws/a.zip" },
         { name: "blocked_one", blocked_by: "a held database", archive_path: "/ws/b.zip" },
@@ -844,7 +896,6 @@ describe("ProjectPicker removal", () => {
           holding_dir: "/ws/.removed/held_one-x",
         },
       ],
-      open_project_names: NO_OPEN_PROJECT,
       removal_startup_outcomes: [
         { name: "held_one", blocked_by: "in use", blocked_errno: 13, archive_path: "/ws/a.zip" },
         {
@@ -862,5 +913,21 @@ describe("ProjectPicker removal", () => {
     expect(screen.getByText(/xdev_one.*cannot move across filesystems/)).toBeInTheDocument();
     // held_one has a blocked outcome from this start: the plain pending line is not shown too.
     expect(screen.queryByText(/^Pending removal: held_one/)).not.toBeInTheDocument();
+  });
+});
+
+describe("localTime", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("renders a compact UTC stamp in the timezone the test fixes", () => {
+    vi.stubEnv("TZ", "UTC");
+    const expected = new Date(Date.UTC(2026, 2, 4, 12, 0, 0)).toLocaleString();
+    expect(localTime("20260304T120000Z")).toBe(expected);
+  });
+
+  it("falls back to the raw stamp when it does not parse", () => {
+    expect(localTime("not-a-compact-utc-stamp")).toBe("not-a-compact-utc-stamp");
   });
 });

@@ -32,6 +32,7 @@ let autoOpenAttempted = false;
 const subjectsForDate = (p: ProjectSummary, d: string): string[] => p.subjects_by_date[d] ?? [];
 const modelsForDate = (p: ProjectSummary, d: string): string[] => p.models_by_date[d] ?? [];
 
+// The C library's errno values, the ones Python's errno module reports and the backend emits.
 const EPERM = 1;
 const EACCES = 13;
 const EXDEV = 18;
@@ -52,8 +53,6 @@ function RemovalDialog({
   const [confirmText, setConfirmText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const nameFieldRef = useRef<HTMLInputElement | null>(null);
-  const cancelRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,17 +69,11 @@ function RemovalDialog({
     };
   }, [name]);
 
-  const previewSettled = preview !== null || previewError !== null;
-  const refusal = submitError ?? preview?.refusal ?? previewError ?? null;
+  // previewSettled means the preview itself answered; a failed preview never settles it.
+  // The name field is never disabled: a refusal only ever blocks the confirm control.
+  const previewSettled = preview !== null;
+  const refusal = submitError ?? preview?.refusal ?? null;
   const canConfirm = previewSettled && !refusal && confirmText === name && !submitting;
-
-  // Once the preview lands a refusal that disables the name field, move focus off it (a
-  // disabled field cannot hold focus, which would drop it outside the dialog's own Tab trap).
-  useEffect(() => {
-    if (refusal && document.activeElement === nameFieldRef.current) {
-      cancelRef.current?.focus();
-    }
-  }, [refusal]);
 
   async function confirmRemoval() {
     setSubmitting(true);
@@ -120,39 +113,47 @@ function RemovalDialog({
 
   return (
     <ConfirmDialog heading={`Remove ${name}`} onClose={onClose} busy={!previewSettled}>
-      <div className="flex flex-col gap-3 text-[12px]" aria-live="polite">
-        {!previewSettled && (
-          <p className="text-tcip-muted">Checking this project&apos;s dependents and refusals…</p>
-        )}
-        {refusal && <p className="text-tcip-fp">{refusal}</p>}
-        {preview?.external_roots_unreadable && (
-          <p className="text-tcip-fp">
-            External roots could not be read: {preview.external_roots_unreadable}
-          </p>
-        )}
-        {preview && preview.dependent_projects.length > 0 && (
-          <div className="text-tcip-fp">
-            <p className="font-medium">
-              Other projects depend on this one; their training fails on a missing image once the
-              move completes:
+      <div className="flex flex-col gap-3 text-[12px]">
+        <div className="flex flex-col gap-3" aria-live="polite">
+          {!previewSettled && !previewError && (
+            <p className="text-tcip-muted">Checking this project&apos;s dependents and refusals…</p>
+          )}
+          {previewError && (
+            <p className="text-tcip-warn">
+              This project&apos;s dependents and refusals could not be checked: {previewError}.
+              Close and try again.
             </p>
-            <ul className="list-disc pl-4">
-              {preview.dependent_projects.map((d, i) => (
-                <li key={i}>{dependentLine(d)}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {preview && preview.external_roots.length > 0 && (
-          <div className="text-tcip-muted">
-            <p className="font-medium">External roots:</p>
-            <ul className="list-disc pl-4">
-              {preview.external_roots.map((r, i) => (
-                <li key={i}>{externalLine(r)}</li>
-              ))}
-            </ul>
-          </div>
-        )}
+          )}
+          {refusal && <p className="text-tcip-fp">{refusal}</p>}
+          {preview?.external_roots_unreadable && (
+            <p className="text-tcip-fp">
+              External roots could not be read: {preview.external_roots_unreadable}
+            </p>
+          )}
+          {preview && preview.dependent_projects.length > 0 && (
+            <div className="text-tcip-fp">
+              <p className="font-medium">
+                Other projects depend on this one; their training fails on a missing image once the
+                move completes:
+              </p>
+              <ul className="list-disc pl-4">
+                {preview.dependent_projects.map((d, i) => (
+                  <li key={i}>{dependentLine(d)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {preview && preview.external_roots.length > 0 && (
+            <div className="text-tcip-muted">
+              <p className="font-medium">External roots:</p>
+              <ul className="list-disc pl-4">
+                {preview.external_roots.map((r, i) => (
+                  <li key={i}>{externalLine(r)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
         <p className="text-tcip-muted">
           {name} is archived now to the workspace&apos;s holding directory and moved there at the
           next backend start. Nothing is deleted; the archive imports back through{" "}
@@ -164,11 +165,9 @@ function RemovalDialog({
           <span className="tcip-label">Type the project name to confirm</span>
           <input
             id={nameFieldId}
-            ref={nameFieldRef}
             className="tcip-input"
             value={confirmText}
             onChange={(e) => setConfirmText(e.target.value)}
-            disabled={!!refusal}
             autoComplete="off"
             spellCheck={false}
           />
@@ -181,7 +180,7 @@ function RemovalDialog({
           >
             {submitting ? "Removing…" : "Remove"}
           </button>
-          <button ref={cancelRef} className="tcip-btn flex-1" onClick={onClose}>
+          <button className="tcip-btn flex-1" onClick={onClose}>
             Cancel
           </button>
         </div>
@@ -203,7 +202,7 @@ function relativeTime(epochSeconds: number): string {
 
 // requested_at is the compact UTC form (YYYYMMDDTHHMMSSZ); render it in the viewer's own
 // timezone, falling back to the raw stamp when it doesn't parse.
-function localTime(compactUtc: string): string {
+export function localTime(compactUtc: string): string {
   const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(compactUtc);
   if (!m) return compactUtc;
   const [, y, mo, d, h, mi, s] = m.map(Number);
