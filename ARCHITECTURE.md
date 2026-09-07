@@ -2266,7 +2266,8 @@ with the dataset root its own guard resolved, so a failed append raises `AuditEn
 rather than only warning; `routes/annotate.py:165` (`record_committed(`) does the same for its own
 dataset, under a root that may be `None` (a label path outside any dataset tree, recorded to the
 platform log instead); `routes/classes.py:79` (`record_committed(`) likewise, the one
-`routes/inference.py:401` imports and calls rather than defining its own; `routes/results.py:176`
+`routes/inference.py:399` (`from tcip_web.routes.classes import _audit_dataset_write`) imports
+and calls rather than defining its own; `routes/results.py:176`
 (`record_committed(`) does the same for a project root instead. Reader:
 `pipelines/postprocessing/plant_mapping.py:1429` (`_require_receipt`)
 trusts only a `plant_mapping_built` entry it finds in the log under the root its caller holds
