@@ -248,7 +248,8 @@ def freeze_split_manifest(experiment_id: str, output_path: str | None = None) ->
     saying so instead of quietly minting a manifest that looks whole but cannot calibrate.
 
     Args:
-        experiment_id: The finished run to freeze the drawn partition of.
+        experiment_id: The finished run to freeze the drawn partition of, by its record id (one
+            run's immutable record, ``tcip_mcp.experiments``).
         output_path: Where to write the manifest. Defaults to
             ``<dataset_root>/splits/frozen-<experiment_id>``, resolved from ``data.images_dir``
             through ``dataset_root_of``; refused when that does not resolve (an images directory

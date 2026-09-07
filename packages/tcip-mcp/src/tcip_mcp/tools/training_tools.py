@@ -784,8 +784,9 @@ def launch_training(
 
     Args:
         config: Full training configuration dict with model_source, data, training sections. An
-            ``experiment_id`` names the record to launch under (created if absent, reused while
-            pristine, forked if it already has history); absent, a fresh id is minted.
+            ``experiment_id`` names the record to launch under (one run's immutable record,
+            ``tcip_mcp.experiments``; created if absent, reused while pristine, forked if it
+            already has history); absent, a fresh id is minted.
         output_dir: Base directory for checkpoints and logs. Empty defaults to the experiment
             store (``<project>/.tcip/experiments``, the same base the experiment records use); a
             relative path resolves against the platform state root, never the server process's
@@ -1041,8 +1042,8 @@ def monitor_training(experiment_id: str | None = None, sweep_id: str | None = No
     manifest exists or ``sweep_id`` would address a record outside the HPO store.
 
     Args:
-        experiment_id: Experiment id (from launch_training). Exactly one of
-            ``experiment_id``/``sweep_id`` is required.
+        experiment_id: The run's record id (one run's immutable record, ``tcip_mcp.experiments``),
+            from launch_training. Exactly one of ``experiment_id``/``sweep_id`` is required.
         sweep_id: Hyperparameter sweep identifier. Exactly one of ``experiment_id``/``sweep_id``.
     """
     if sweep_id is not None:
@@ -1463,7 +1464,8 @@ def cancel_training(experiment_id: str) -> dict:
     at the same boundary) ends 'failed' instead, with no ``model_final.pt``.
 
     Args:
-        experiment_id: Experiment id (from launch_training).
+        experiment_id: The run's record id (one run's immutable record, ``tcip_mcp.experiments``),
+            from launch_training.
     """
     from tcip_mcp.pipelines.training.run_registry import cancel_run, get_run
     if not cancel_run(experiment_id):

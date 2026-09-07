@@ -3,7 +3,9 @@
 An experiment is one run's immutable record: named by the caller before the run or minted at
 launch, and nothing groups runs into anything larger. A relaunch of a record that already has
 history forks a new record instead of reopening it, its ``parent_experiment`` naming the one it
-forked from.
+forked from. ``experiment_id`` is that record's id wherever a store key, a tool parameter, a
+route path or a delivered column carries the term; this paragraph is the term's one definition,
+and every parameter docstring that takes one points here rather than restating it.
 
 Stores experiment state in .tcip/experiments/<experiment_id>/:
   config.json, full training config snapshot
