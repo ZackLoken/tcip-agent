@@ -273,6 +273,7 @@ def _ann_dict(a: Annotation) -> dict:
     out["created_at"] = a.created_at
     out["accepted_by"] = a.accepted_by
     out["accepted_at"] = a.accepted_at
+    out["accepted_by_rule"] = a.accepted_by_rule
     return out
 
 
@@ -554,6 +555,15 @@ class ActionPayload(BaseModel):
     # classified trait rather than plain detection.
     subject: Optional[str] = None
     attribute: Optional[str] = None
+    # A claim, not a fact: the route verifies it (admission_rule_of) and refuses by name rather
+    # than trusting it; the identity it writes is the binding's own, never one this payload names.
+    rule_admitted: bool = False
+
+
+def _names_prediction(payload: "ActionPayload", ctx: ReviewContext) -> bool:
+    """Whether ``payload.pred_idx`` names a prediction of this image's loaded document: the one
+    test the accept branch and a rule-admitted claim's own verification share."""
+    return payload.pred_idx is not None and 0 <= payload.pred_idx < len(ctx.preds)
 
 
 def _is_reviewer_drawn_new_shape(payload: "ActionPayload") -> bool:
@@ -587,7 +597,7 @@ def _check_target_subject(existing: Annotation, scope) -> None:
 
 def _apply_gt_mutation(
     ctx: ReviewContext, payload: "ActionPayload", reviewer: str, now_iso: str, *, scope,
-    vocabulary: set,
+    vocabulary: set, accepted_by_rule: Optional[str] = None,
 ) -> tuple[bool, Optional[int]]:
     """Author GT from a verdict; return ``(gt_changed, index the written annotation landed at in
     ctx.gt)``: the index is set only for edited/accepted writes. ``action="swept"`` (an explicit
@@ -607,9 +617,11 @@ def _apply_gt_mutation(
     record, keeping their geometry and authorship; an unpaired one appends a fresh GT record from
     the prediction, its origin traveling with it. Under a detector review, accept always appends
     with empty ``attributes``: ``reviewed`` is exactly the attribute values this review adjudicated,
-    none under a detector review, which adjudicated presence and nothing about state. Reject on a
-    false positive leaves ground truth untouched under either regime. Reject on a true positive or
-    false negative under a classified scope refuses: removing the object is a detector-scope act.
+    none under a detector review, which adjudicated presence and nothing about state. ``accepted_by_rule``
+    is written only there, the one arm a verified rule-admitted claim can reach (a classified scope
+    refuses one); every other branch writes ``None`` explicitly. Reject on a false positive leaves
+    ground truth untouched under either regime. Reject on a true positive or false negative under a
+    classified scope refuses: removing the object is a detector-scope act.
 
     Edit authors the edited geometry onto the record it edits (a true positive/false negative, or a
     paired false positive) with the reviewer as author, keeping the record's other attribute values
@@ -656,7 +668,7 @@ def _apply_gt_mutation(
                 attrs[scope.attribute] = payload.class_name
             ctx.gt[payload.gt_idx] = replace(
                 existing, geometry=geom, attributes=attrs, created_by=reviewer,
-                created_at=now_iso, accepted_by=None, accepted_at=None)
+                created_at=now_iso, accepted_by=None, accepted_at=None, accepted_by_rule=None)
             return True, payload.gt_idx
         # An unpaired false positive edited into ground truth: a fresh record.
         if classifying:
@@ -664,7 +676,7 @@ def _apply_gt_mutation(
         reviewed = {scope.attribute: payload.class_name} if classifying else {}
         new_subject = scope.subject if classifying else payload.class_name
         ctx.gt.append(Annotation(subject=new_subject, geometry=geom, attributes=reviewed,
-                                 created_by=reviewer, created_at=now_iso))
+                                 created_by=reviewer, created_at=now_iso, accepted_by_rule=None))
         return True, len(ctx.gt) - 1
 
     if act == "rejected" and dt in ("tp", "fn"):
@@ -680,14 +692,14 @@ def _apply_gt_mutation(
             return True, None
         return False, None
 
-    if act == "accepted" and dt == "fp" and payload.pred_idx is not None \
-            and 0 <= payload.pred_idx < len(ctx.preds):
+    if act == "accepted" and dt == "fp" and _names_prediction(payload, ctx):
+        assert payload.pred_idx is not None  # _names_prediction's own guard
         pred = ctx.preds[payload.pred_idx]
         if isinstance(pred.geometry, BBox):
             check_box_extent(pred.geometry, where=f"accepting {payload.class_name!r}")
         if classifying and payload.gt_idx is not None and 0 <= payload.gt_idx < len(ctx.gt):
-            # A paired false positive: the person's object, a wrong value confirmed. Keep their
-            # geometry and authorship; replace only the confirmed value.
+            # A paired false positive: the person's object, a wrong value confirmed. Keep
+            # their geometry and authorship; replace only the confirmed value.
             existing = ctx.gt[payload.gt_idx]
             _check_target_subject(existing, scope)
             _check_classified_value(payload.class_name, vocabulary)
@@ -699,19 +711,83 @@ def _apply_gt_mutation(
         if classifying:
             _check_classified_value(payload.class_name, vocabulary)
             accepted = replace(pred, score=None, attributes={scope.attribute: payload.class_name},
-                               accepted_by=reviewer, accepted_at=now_iso)
+                               accepted_by=reviewer, accepted_at=now_iso, accepted_by_rule=None)
         else:
+            # The one arm a verified rule-admitted claim can reach (D4 refuses a classified scope).
             accepted = replace(pred, score=None, attributes={},
-                               accepted_by=reviewer, accepted_at=now_iso)
+                               accepted_by=reviewer, accepted_at=now_iso,
+                               accepted_by_rule=accepted_by_rule)
         ctx.gt.append(accepted)
         return True, len(ctx.gt) - 1
 
     return False, None  # accept TP/FN and reject FP leave GT untouched
 
 
+def _verify_rule_admitted_claim(
+    payload: "ActionPayload", ctx: ReviewContext, pred_path: Optional[str], scope, vocabulary: set,
+) -> str:
+    """Verify a client's ``rule_admitted`` claim and answer the validation record's identity it
+    names (``<experiment_id>:<record_digest>``), or refuse by name.
+
+    Refuses 400 for a condition the claim itself fails (wrong action or det_type, no named
+    prediction, a classified scope, a scoreless or below-conf prediction, no admission rule), and
+    409 when a fresh recompute over the pristine, unmutated ``ctx`` no longer holds the submitted
+    detection. The claim is the client's; the identity is the binding's own, never one the client
+    supplied.
+    """
+    from tcip_annotation.json_io import ClassifiedRecordRefused
+    from tcip_mcp.pipelines.resolution import admission_rule_of, read_operating_point_sidecar
+
+    if payload.action != "accepted":
+        raise HTTPException(
+            400, f"rule_admitted refuses action {payload.action!r}: only an accept can be rule-admitted")
+    if payload.det_type not in ("tp", "fp"):
+        raise HTTPException(
+            400, f"rule_admitted refuses det_type {payload.det_type!r}: only tp or fp can be rule-admitted")
+    if not _names_prediction(payload, ctx):
+        raise HTTPException(
+            400, "rule_admitted needs pred_idx naming a prediction of this image's loaded document")
+    if scope.attribute is not None:
+        raise HTTPException(
+            400, "rule_admitted refuses a classified scope: the count operating point admits "
+                 "detections of the object class, and a classified review judges values")
+    assert payload.pred_idx is not None  # _names_prediction's own guard
+    pred = ctx.preds[payload.pred_idx]
+    if pred.score is None:
+        raise HTTPException(
+            400, "rule_admitted refuses a scoreless prediction: the rule is about a score the "
+                 "model reported")
+    if not pred_path:
+        raise HTTPException(400, "rule_admitted needs a prediction bucket to read the rule from")
+    bucket_dir = str(Path(pred_path).parent)
+    stamp = read_operating_point_sidecar(bucket_dir, strict=True)
+    resolution = admission_rule_of(stamp, bucket_dir)
+    if resolution.rule is None:
+        raise HTTPException(400, resolution.reason)
+    if pred.score < resolution.rule.conf:
+        raise HTTPException(
+            400, f"rule_admitted refuses a prediction scored {pred.score}, below the rule's own "
+                 f"conf {resolution.rule.conf}")
+    try:
+        pristine_matches = _compute_matches(
+            ctx.gt, ctx.preds, iou_threshold=payload.iou_threshold, conf_threshold=payload.conf_threshold,
+            subject=scope.subject, attribute=scope.attribute, vocabulary=vocabulary,
+        )
+    except ClassifiedRecordRefused as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not any(d.get("pred_idx") == payload.pred_idx for d in pristine_matches[payload.det_type]):
+        raise HTTPException(
+            409, "this image's matches changed since they were loaded; reload before confirming")
+    return f"{resolution.rule.experiment_id}:{resolution.rule.record_digest}"
+
+
 @router.post("/action")
 def record_action(payload: ActionPayload) -> dict:
-    """Record a user's accept/reject/edit decision; auto-complete the image when done."""
+    """Record a user's accept/reject/edit decision; auto-complete the image when done.
+
+    A true ``rule_admitted`` claim is verified (:func:`_verify_rule_admitted_claim`) before
+    anything is mutated; a false one never reaches ground truth.
+    """
     if not payload.dataset_root:
         raise HTTPException(
             400,
@@ -742,12 +818,18 @@ def record_action(payload: ActionPayload) -> dict:
         bbox=payload.bbox,
     )
 
+    # A verified claim before any mutation: a false one never reaches _apply_gt_mutation.
+    accepted_by_rule: Optional[str] = None
+    if payload.rule_admitted:
+        accepted_by_rule = _verify_rule_admitted_claim(payload, ctx, pred_path, scope, vocabulary)
+
     # Author GT on a copy so the guard can 400 before anything is recorded, and so the verdict
     # entry is recorded against the pristine ctx (its bbox lookups read gt_idx).
     work = replace(ctx, gt=list(ctx.gt))
     try:
         changed, landed_idx = _apply_gt_mutation(
-            work, payload, reviewer, now_iso, scope=scope, vocabulary=vocabulary)
+            work, payload, reviewer, now_iso, scope=scope, vocabulary=vocabulary,
+            accepted_by_rule=accepted_by_rule)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if changed and not gt_path:
@@ -820,6 +902,8 @@ def record_action(payload: ActionPayload) -> dict:
             "class_name": payload.class_name,
             "action": payload.action,
             "gt_changed": changed,
+            "rule_admitted": payload.rule_admitted,
+            "accepted_by_rule": accepted_by_rule,
         })
     except AuditEntryNotWritten as exc:
         raise audit_gap_409(exc, _committed()) from exc
@@ -1035,30 +1119,53 @@ def image_statuses(
     )
 
 
+class AdmissionRuleBody(BaseModel):
+    conf: float
+    experiment_id: str
+    record_digest: str
+
+
 class GenerationConfResponse(BaseModel):
     # The bucket's own recorded generation confidence (the Conf floor predictions were exported
-    # at), or None when the bucket has no sidecar / no recorded value. Read-only: this is the
-    # same fact validate_reference reads to derive staged_conf_floor, exposed here without the
-    # gate run or the sidecar stamp validate_reference performs, so the Review tab can warn as
-    # soon as the breeder raises the filter instead of only after a review is complete.
+    # at), or None with no sidecar / no recorded value; read-only, for the filter-warning check.
     generation_conf: Optional[float]
+    # The bucket's own validated count operating point (admission_rule_of): null unless the
+    # stamp's claim verifies and its conf is a finite number; admission_reason names why not.
+    admission_rule: Optional[AdmissionRuleBody]
+    admission_reason: str
 
 
 @router.get("/generation_conf")
 def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
-    """The prediction bucket's own generation confidence, for the Conf >= filter warning.
+    """The prediction bucket's own generation confidence and admission rule.
 
-    Raising the review's own "Conf >=" filter above this value hides low-confidence detections
-    from review; any verdict then recorded raises review_conf_threshold above it, which
-    validate_reference's identical gate reads as conf_censored. This endpoint exposes the one
-    fact needed to warn about that live, in the filter shelf, before a review is even complete.
+    Raising the review's own "Conf >=" filter above the generation confidence hides low-confidence
+    detections from review; any verdict then recorded raises review_conf_threshold above it, which
+    validate_reference's identical gate reads as conf_censored, exposed here so the breeder can
+    see it live. Also answers the bucket's own validated count operating point through
+    admission_rule_of, the one reader /action verifies a rule_admitted claim against, and the
+    binding's own diagnosis when no rule applies (admission_reason).
     """
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+    from tcip_mcp.pipelines.resolution import admission_rule_of, read_operating_point_sidecar
 
-    sidecar = read_operating_point_sidecar(_guarded(pred_dir)) or {}
+    guarded_dir = _guarded(pred_dir)
+    sidecar = read_operating_point_sidecar(guarded_dir) or {}
     conf = ((sidecar.get("operating_point") or {}).get("conf") or {}).get("value")
+    resolution = admission_rule_of(sidecar, guarded_dir)
+    rule_body = (
+        AdmissionRuleBody(
+            conf=resolution.rule.conf,
+            experiment_id=resolution.rule.experiment_id,
+            record_digest=resolution.rule.record_digest,
+        )
+        if resolution.rule is not None
+        else None
+    )
     return GenerationConfResponse(
-        generation_conf=float(conf) if isinstance(conf, (int, float)) else None)
+        generation_conf=float(conf) if isinstance(conf, (int, float)) else None,
+        admission_rule=rule_body,
+        admission_reason=resolution.reason,
+    )
 
 
 # ── Active-learning priority queue for review ───────────────────────────────

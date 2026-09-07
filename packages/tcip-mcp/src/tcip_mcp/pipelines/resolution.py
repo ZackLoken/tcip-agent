@@ -23,6 +23,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import logging
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -750,6 +751,30 @@ def well_formed_validated_by(stamp: dict | None) -> dict | None:
     if not isinstance(record_digest, str) or not record_digest:
         return None
     return pointer
+
+
+def parse_validation_reference(value: str) -> tuple[str, str] | None:
+    """The ``(experiment_id, record_digest)`` a validation reference marker names, or ``None``
+    when ``value`` does not hold one.
+
+    A marker is spelled ``<experiment_id>:<record_digest>``, the same spelling the delivery
+    disclosures already use (``resolution.py``'s own ``validation_record`` column). Split at the
+    *last* colon: an experiment id refuses a path separator but never a colon
+    (``experiments.py``'s ``_member_key``), while a record digest is always exactly sixteen
+    lowercase hex characters (``experiments.py``'s ``_content_digest``) and never carries one, so
+    the last colon is the only split that can never mis-cut an id that happens to carry one of its
+    own. Answers ``None`` for a value with no colon, an empty half either side of the split, or a
+    digest half that is not sixteen lowercase hex characters: any of these names no record a
+    reader could resolve.
+    """
+    if ":" not in value:
+        return None
+    experiment_id, _, digest = value.rpartition(":")
+    if not experiment_id or not digest:
+        return None
+    if len(digest) != 16 or any(c not in "0123456789abcdef" for c in digest):
+        return None
+    return experiment_id, digest
 
 
 def scope_consistent_with_map(
@@ -1998,6 +2023,68 @@ def verify_stamp_binding(
                 **known)
 
     return StampBinding(ok=True, claimed=True, **known)
+
+
+@dataclass(frozen=True)
+class AdmissionRule:
+    """A validated count operating point that pre-admits a prediction: any prediction of this
+    bucket scored at or above ``conf`` is admitted, under the validation record named by
+    ``experiment_id`` and ``record_digest`` (the identity a marker names, see
+    :func:`parse_validation_reference`)."""
+
+    conf: float
+    experiment_id: str
+    record_digest: str
+
+
+@dataclass(frozen=True)
+class AdmissionResolution:
+    """The rule a bucket's stamp admits, or the reason none does. ``rule`` and ``reason`` are
+    never both set: a resolved rule needs no reason, and a floored one names no rule."""
+
+    rule: AdmissionRule | None
+    reason: str
+
+
+def admission_rule_of(stamp: dict | None, pred_dir: str | Path) -> AdmissionResolution:
+    """The bucket's own validated count operating point, as the rule it admits a prediction score
+    under, or the reason none applies.
+
+    The one reading of "this bucket's validated count operating point admits a score": answers a
+    rule only when :func:`verify_stamp_binding` answers a claim this stamp's own validation record
+    backs (``claimed`` and ``ok``) and the bound ``operating_point.conf.value`` is a finite,
+    non-boolean number, the field every count-operating-point producer stamps
+    (``calibration_tools.py``, ``inference_tools.py``, ``validation.py``, the same field
+    ``/generation_conf`` already reads). The rule's identity is the binding's own
+    ``experiment_id`` and ``record_digest``, never a value this function invents; a caller that
+    admits a prediction under the rule names that identity, never a fresh one of its own.
+
+    Otherwise ``rule`` is ``None`` and ``reason`` is one sentence naming which of no stamp, a
+    stamp claiming nothing, the binding's own floor reason, or no readable conf answers for it.
+    """
+    binding = verify_stamp_binding(stamp, pred_dir, document="operating_point")
+    if not binding.claimed:
+        return AdmissionResolution(
+            rule=None,
+            reason=f"operating_point.json at {str(pred_dir)!r} does not claim validated, so no "
+                   "rule admits any prediction here.",
+        )
+    if not binding.ok:
+        return AdmissionResolution(rule=None, reason=binding.note)
+    conf = (((stamp or {}).get("operating_point") or {}).get("conf") or {}).get("value")
+    if not isinstance(conf, (int, float)) or isinstance(conf, bool) or not math.isfinite(conf):
+        return AdmissionResolution(
+            rule=None,
+            reason=f"operating_point.json at {str(pred_dir)!r} claims validated but carries no "
+                   "readable conf value, so no rule admits any prediction here.",
+        )
+    assert binding.experiment_id is not None and binding.record_digest is not None
+    return AdmissionResolution(
+        rule=AdmissionRule(
+            conf=float(conf), experiment_id=binding.experiment_id, record_digest=binding.record_digest,
+        ),
+        reason="",
+    )
 
 
 def _dataset_root_of(path: Path) -> Path | None:
