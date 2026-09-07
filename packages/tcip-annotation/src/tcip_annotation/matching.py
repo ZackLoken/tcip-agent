@@ -291,6 +291,7 @@ def _project_for_classification(
                 subject=value, geometry=a.geometry, attributes=a.attributes, score=a.score,
                 created_by=a.created_by, created_at=a.created_at,
                 accepted_by=a.accepted_by, accepted_at=a.accepted_at,
+                accepted_by_rule=a.accepted_by_rule,
             ))
     return projected
 
@@ -343,6 +344,7 @@ def compute_classified_trait_matches(
             subject=value, geometry=p.geometry, attributes=p.attributes, score=p.score,
             created_by=p.created_by, created_at=p.created_at,
             accepted_by=p.accepted_by, accepted_at=p.accepted_at,
+            accepted_by_rule=p.accepted_by_rule,
         ))
     matches = compute_matches(projected_gt, projected_preds, iou_threshold, conf_threshold)
 

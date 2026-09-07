@@ -3,8 +3,8 @@
 One JSON file per image, holding every subject's annotations by name. Each annotation carries its
 ``subject``, an optional geometry (``bbox`` xywh, ``segmentation`` polygon, ``point`` [x,y], or none
 for an image/plant-level label), its attribute values by name, an optional ``score`` (predictions),
-and provenance (``created_by/at``, ``accepted_by/at``), so a prediction's origin travels with it into
-ground truth on accept, with no sidecar.
+and provenance (``created_by/at``, ``accepted_by/at``, ``accepted_by_rule``), so a prediction's
+origin travels with it into ground truth on accept, with no sidecar.
 
 Schema::
 
@@ -17,7 +17,8 @@ Schema::
           "attributes": {"<attribute>": "<value>"},   # attr name -> value name
           "score": 0.91,                        # predictions only
           "created_by": "sam", "created_at": "...",
-          "accepted_by": "user:breeder", "accepted_at": "..." } ] }
+          "accepted_by": "user:breeder", "accepted_at": "...",
+          "accepted_by_rule": "<experiment_id>:<record_digest>" } ] }
 
 Integer class ids never appear on disk; a name→id assignment is a per-training-run artifact
 (:mod:`tcip_mcp.class_registry`). :func:`to_coco_dataset` takes that run's ``id_map`` (a plain dict,
@@ -64,7 +65,7 @@ from tcip_store.file_backend import RootedFileLocator
 from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
 
 ANNOTATIONS_KEY = "annotations"  # the one top-level list key; format_io.detect_format shares it
-_PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at")
+_PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at", "accepted_by_rule")
 
 
 # ── the store (tcip-annotation must not depend on tcip-mcp) ───────────────────
@@ -425,10 +426,11 @@ def annotation_from_payload(payload: Mapping, *, author: str | None, now: str) -
 
     Provenance: a payload carrying ``created_by`` is a shape round-tripping back through the
     client, so it keeps its own ``created_at`` and its review sign-off
-    (``accepted_by``/``accepted_at``) verbatim, and the creator stays the creator through edits.
-    One that does not is new: it is stamped to ``author`` at ``now`` and claims no sign-off, since
-    a new shape minting acceptance would record a review that never happened. With no ``author``
-    resolved either, a new shape carries no provenance rather than a time with nobody attached.
+    (``accepted_by``/``accepted_at``/``accepted_by_rule``) verbatim, and the creator stays the
+    creator through edits. One that does not is new: it is stamped to ``author`` at ``now`` and
+    claims no sign-off, since a new shape minting acceptance would record a review that never
+    happened. With no ``author`` resolved either, a new shape carries no provenance rather than a
+    time with nobody attached.
     """
     geometry: BBox | Polygon | Point | None = None
     if payload.get("rings"):
@@ -450,6 +452,7 @@ def annotation_from_payload(payload: Mapping, *, author: str | None, now: str) -
         created_at=payload.get("created_at") if round_tripped else (now if created_by else None),
         accepted_by=payload.get("accepted_by") if round_tripped else None,
         accepted_at=payload.get("accepted_at") if round_tripped else None,
+        accepted_by_rule=payload.get("accepted_by_rule") if round_tripped else None,
     )
 
 
@@ -574,6 +577,12 @@ def read_annotations_versioned(target: Key | str | Path) -> tuple[list[Annotatio
 PERSON_IDENTITY_PREFIX = "user:"  # spelled here, not imported: this package depends only on tcip-store
 
 
+def is_person_signoff(a: Annotation) -> bool:
+    """True when ``a`` carries a person's own sign-off: ``accepted_by`` is set and opens with
+    :data:`PERSON_IDENTITY_PREFIX`."""
+    return a.accepted_by is not None and a.accepted_by.startswith(PERSON_IDENTITY_PREFIX)
+
+
 def is_unadjudicated_prediction(a: Annotation) -> bool:
     """True when ``a`` is a model's own output that no human has taken responsibility for.
 
@@ -646,6 +655,10 @@ class ProvenanceFacts:
     ``accepted_by``'s identity rather than merely its presence the way
     :func:`is_unadjudicated_agent_authorship` does. Never includes a record already counted under
     ``no_created_by``: that record's ``created_by`` names nobody to test as a person or not."""
+    rule_admitted_unsigned: list[int]
+    """Index of every record whose ``accepted_by_rule`` is not ``None`` (an empty string counts:
+    never a truthiness test) and which carries no person's sign-off
+    (:func:`is_person_signoff`): the reference rail's own third arm."""
 
 
 def provenance_facts(annotations: list[Annotation]) -> ProvenanceFacts:
@@ -655,6 +668,7 @@ def provenance_facts(annotations: list[Annotation]) -> ProvenanceFacts:
     machine_authored: list[str] = []
     no_created_by: list[int] = []
     not_positively_a_persons: list[int] = []
+    rule_admitted_unsigned: list[int] = []
     for i, a in enumerate(annotations):
         if is_unadjudicated_prediction(a):
             scored += 1
@@ -663,11 +677,14 @@ def provenance_facts(annotations: list[Annotation]) -> ProvenanceFacts:
         if not a.created_by:
             no_created_by.append(i)
         elif not a.created_by.startswith(PERSON_IDENTITY_PREFIX):
-            if not (a.accepted_by and a.accepted_by.startswith(PERSON_IDENTITY_PREFIX)):
+            if not is_person_signoff(a):
                 not_positively_a_persons.append(i)
+        if a.accepted_by_rule is not None and not is_person_signoff(a):
+            rule_admitted_unsigned.append(i)
     return ProvenanceFacts(
         total=len(annotations), scored=scored, machine_authored=machine_authored,
         no_created_by=no_created_by, not_positively_a_persons=not_positively_a_persons,
+        rule_admitted_unsigned=rule_admitted_unsigned,
     )
 
 
@@ -680,6 +697,12 @@ def require_reference_ground_truth(directory: str | Path) -> None:
     authored as ground truth, with no reviewer's ``accepted_by``, is the same output with the score
     dropped. Either clears every numeric gate a calibration applies, since the model agrees with
     itself, so the gates cannot catch it and the provenance has to.
+
+    A third shape fails it too: a record carrying ``accepted_by_rule`` (a rule-based admission
+    was verified for it) with no person's sign-off. No platform producer writes such a record (the
+    Review accept stamps the person in the same write that stamps the rule), so this arm is
+    defence in depth against a hand-edited or round-tripped document, never a shape a normal
+    accept can reach.
 
     Refuses on the whole directory, never by dropping the offending records: a mixed directory
     silently narrowed to its admissible subset would validate against a reference nobody chose.
@@ -713,6 +736,15 @@ def require_reference_ground_truth(directory: str | Path) -> None:
             "human has adjudicated is not a calibration or holdout reference. The lighter path "
             "is the review-confirmation loop: have a reviewer confirm these records so each one "
             "carries their accepted_by, rather than hand-annotating the whole reference."
+        )
+    if facts.rule_admitted_unsigned:
+        indices = facts.rule_admitted_unsigned
+        raise ValueError(
+            f"{len(indices)} of {total} annotations in {directory} (indices {indices}) carry "
+            "accepted_by_rule with no person's accepted_by: a rule-based admission was verified "
+            "for these records, but nobody has signed off on them, so no person stands behind "
+            "them yet. Confirm each one through Review so it carries the person's sign-off, or "
+            "delete it."
         )
 
 

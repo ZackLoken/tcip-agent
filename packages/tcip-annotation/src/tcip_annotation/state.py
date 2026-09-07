@@ -65,7 +65,9 @@ class Annotation:
     does: a classified prediction's ``subject`` is still the object class, with the classifier's
     decoded call sitting under ``attributes``, never the value alone in ``subject``. Provenance
     travels with the annotation: who authored it and, once a prediction is accepted into ground
-    truth, who accepted it.
+    truth, who accepted it. ``accepted_by_rule`` names the validation record a rule-based
+    admission was verified against (``<experiment_id>:<record_digest>``), set only by the
+    producer that verified the claim; it is never a substitute for ``accepted_by``.
     """
 
     subject: str
@@ -76,6 +78,7 @@ class Annotation:
     created_at: str | None = None
     accepted_by: str | None = None
     accepted_at: str | None = None
+    accepted_by_rule: str | None = None
 
 
 def bbox_of(geometry: BBox | Polygon) -> BBox:

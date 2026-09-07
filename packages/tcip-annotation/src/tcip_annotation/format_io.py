@@ -30,7 +30,9 @@ from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation.json_io import (
     ANNOTATIONS_KEY,
+    _PROV_KEYS,
     UnreadableLabelDocument,
+    _prov_kwargs,
     geometry_extent_ok,
     read_annotations,
     write_annotations,
@@ -38,8 +40,6 @@ from tcip_annotation.json_io import (
 from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
 
 AnnotFormat = Literal["coco", "json"]
-
-_PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at")
 
 COCO_DOCUMENTS_STORE = "coco_documents"
 _COCO_DOCUMENT_LOCATOR = RootedFileLocator(suffix=".json")
@@ -221,8 +221,13 @@ def _coco_image_annotations(
 
 
 def _coco_prov(ann: dict) -> dict:
-    """Provenance (and, for a prediction, ``score``) extension keys of a COCO annotation record."""
-    out = {k: ann[k] for k in _PROV_KEYS if ann.get(k)}
+    """Provenance (and, for a prediction, ``score``) extension keys of a COCO annotation record.
+
+    Shares its presence test with the per-image reader (:func:`~tcip_annotation.json_io._prov_kwargs`,
+    ``obj.get(k) is not None``), so the two readers can never disagree about a provenance value
+    that is present but falsy (an empty ``accepted_by_rule``, say).
+    """
+    out = _prov_kwargs(ann)
     s = ann.get("score")
     if isinstance(s, (int, float)) and not isinstance(s, bool):
         out["score"] = float(s)
