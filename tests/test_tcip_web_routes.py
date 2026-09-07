@@ -1531,7 +1531,9 @@ def test_review_action_requires_dataset_root(
     client: TestClient, dataset_root: Path, tmp_path: Path,
 ) -> None:
     """No read or write happens before the refusal: an empty ``dataset_root`` is named rather
-    than resolving to the process cwd."""
+    than resolving to the process cwd. In this test environment the process cwd does not
+    resolve under an allowed root, so the pre-refusal baseline answered the path guard's 403,
+    not the 200 a resolvable cwd would reach."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     pred = tmp_path / "pred.json"
     _write_pred(pred, [(40, 32, 60, 48, 0.9)])
@@ -1550,6 +1552,15 @@ def test_review_action_requires_dataset_root(
     )
     assert resp.status_code == 400
     assert "dataset root" in resp.json()["detail"]
+
+    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
+
+    written = [
+        k for k in tcip_store.keys(REVIEW_VERDICTS_STORE, str(dataset_root / ".tcip" / "state"))
+        if k.parts[1] == "IMG_0000.JPG"
+    ]
+    assert written == []
+    assert _audit_entries(dataset_root) == []
 
 
 def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> None:
@@ -1599,15 +1610,27 @@ def test_review_mark_complete_answers_409_with_the_committed_body_on_a_lost_audi
     assert status.json()["statuses"]["IMG_9.JPG"] == "completed"
 
 
-def test_review_mark_complete_requires_dataset_root(client: TestClient) -> None:
+def test_review_mark_complete_requires_dataset_root(
+    client: TestClient, tmp_path: Path,
+) -> None:
     """No read or write happens before the refusal: an empty ``dataset_root`` is named rather
-    than resolving to the process cwd."""
+    than resolving to the process cwd. In this test environment the process cwd does not
+    resolve under an allowed root, so the pre-refusal baseline answered the path guard's 403,
+    not the 200 a resolvable cwd would reach."""
+    dataset_root = tmp_path / "data"
     resp = client.post(
         "/api/review/mark_complete",
         json={"dataset_root": "", "image_name": "IMG_9.JPG"},
     )
     assert resp.status_code == 400
     assert "dataset root" in resp.json()["detail"]
+
+    status = client.get(
+        "/api/review/image_statuses",
+        params={"dataset_root": str(dataset_root)},
+    )
+    assert "IMG_9.JPG" not in status.json()["statuses"]
+    assert _audit_entries(dataset_root) == []
 
 
 def test_review_mark_complete_refuses_an_unreadable_gt(
