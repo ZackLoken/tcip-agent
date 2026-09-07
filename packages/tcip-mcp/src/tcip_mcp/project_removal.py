@@ -377,7 +377,7 @@ def _preview(name: str, job_conflict: JobConflict) -> tuple[dict, Optional[_Refu
                     "dataset_path": str(entry_path), "pending": pending is not None,
                 })
 
-    result = {
+    result: dict = {
         "external_roots": external_roots,
         "dependent_projects": dependent_projects,
         "refusal": None,
