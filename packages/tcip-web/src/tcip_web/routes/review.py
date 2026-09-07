@@ -98,13 +98,15 @@ def _audit(scope: str, tool: str, arguments: dict) -> None:
     Every mutation these routes make changes a record that travels with the dataset: the verdict
     store, the ground-truth labels and a prediction bucket's provenance stamp all live under the
     dataset root, so the dataset root the request states is the scope for all of them. The scope
-    is confined before the append, so no audit line lands outside the allowed roots.
+    is confined before the append, so no audit line lands outside the allowed roots. A failed
+    append raises ``AuditEntryNotWritten``: the mutation has already committed by the time this
+    runs, so the caller answers the gap rather than have it pass as silently recorded.
     """
     if not scope:
         return
-    from tcip_mcp.audit import record_event
+    from tcip_web.routes.audit_gap import record_committed
 
-    record_event(tool, arguments, source="gui", scope=str(_guarded(scope)))
+    record_committed(tool, arguments, scope=str(_guarded(scope)))
 
 
 def _prediction_digest(pred_dir: Optional[str], image_name: str) -> Optional[str]:
@@ -786,25 +788,35 @@ def record_action(payload: ActionPayload) -> dict:
     # Promote to 'completed' once every detection at these thresholds is reviewed, the only path
     # by which a GUI review reaches 'completed'.
     engine.check_image_review_complete(bucket, work, matches)
-    _audit(payload.dataset_root, "gui_review_action", {
-        "image_name": payload.image_name,
-        "det_type": payload.det_type,
-        "class_name": payload.class_name,
-        "action": payload.action,
-        "gt_changed": changed,
-    })
-    # Return the fresh matches this verdict just recomputed (gt_idx/pred_idx rebuilt against the
-    # written GT), so the client installs them without a second /matches round-trip.
-    fresh = _matches_response(
-        work, matches, engine, payload.image_name, bucket=bucket,
-        filter_type=payload.filter_type, filter_class=payload.filter_class, scope=scope,
-    )
-    return {
-        "status": "ok",
-        "image_status": engine.get_image_review_status(bucket, payload.image_name),
-        "annotation_status": annotation_status,
-        "matches": fresh,
-    }
+
+    def _committed() -> dict:
+        # The fresh matches this verdict just recomputed (gt_idx/pred_idx rebuilt against the
+        # written GT), so the client installs them without a second /matches round-trip.
+        fresh = _matches_response(
+            work, matches, engine, payload.image_name, bucket=bucket,
+            filter_type=payload.filter_type, filter_class=payload.filter_class, scope=scope,
+        )
+        return {
+            "status": "ok",
+            "image_status": engine.get_image_review_status(bucket, payload.image_name),
+            "annotation_status": annotation_status,
+            "matches": fresh,
+        }
+
+    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_web.routes.audit_gap import audit_gap_409
+
+    try:
+        _audit(payload.dataset_root, "gui_review_action", {
+            "image_name": payload.image_name,
+            "det_type": payload.det_type,
+            "class_name": payload.class_name,
+            "action": payload.action,
+            "gt_changed": changed,
+        })
+    except AuditEntryNotWritten as exc:
+        raise audit_gap_409(exc, _committed()) from exc
+    return _committed()
 
 
 class MarkCompletePayload(BaseModel):
@@ -910,17 +922,24 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     if payload.subject:
         has_content = annotations_hold_subject(annotations, payload.subject)
         annotation_status = derive_status(completed=payload.completed, has_content=has_content)
-    _audit(payload.dataset_root, "gui_review_mark_complete", {
-        "image_name": payload.image_name,
-        "completed": payload.completed,
-        "subject": payload.subject,
-        "annotation_status": annotation_status,
-    })
-    return {
+    committed = {
         "status": "ok",
         "image_status": engine.get_image_review_status(bucket, payload.image_name),
         "annotation_status": annotation_status,
     }
+    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_web.routes.audit_gap import audit_gap_409
+
+    try:
+        _audit(payload.dataset_root, "gui_review_mark_complete", {
+            "image_name": payload.image_name,
+            "completed": payload.completed,
+            "subject": payload.subject,
+            "annotation_status": annotation_status,
+        })
+    except AuditEntryNotWritten as exc:
+        raise audit_gap_409(exc, committed) from exc
+    return committed
 
 
 class BackupPayload(BaseModel):

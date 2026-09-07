@@ -475,16 +475,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     except (ValueError, SchemaVersionRefused, DecodeError) as exc:
         raise HTTPException(400, str(exc)) from None
 
-    # The sidecar this stamps sits in the prediction bucket, which travels with the dataset.
-    _audit(req.dataset_root, "gui_review_validate_reference", {
-        "trait": req.trait,
-        "validated": result["validated"],
-        "reference": result["reference"],
-        "reviewed_image_count": n,
-        "buckets_stamped": stamped,
-        "record_digests": record_digests,
-    })
-    return ValidateReferenceResponse(
+    committed = ValidateReferenceResponse(
         validated=bool(result["validated"]),
         reference=result["reference"],
         reviewed_image_count=n,
@@ -492,3 +483,19 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         reason=result["reason"],
         buckets_stamped=stamped,
     )
+    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_web.routes.audit_gap import audit_gap_409
+
+    # The sidecar this stamps sits in the prediction bucket, which travels with the dataset.
+    try:
+        _audit(req.dataset_root, "gui_review_validate_reference", {
+            "trait": req.trait,
+            "validated": result["validated"],
+            "reference": result["reference"],
+            "reviewed_image_count": n,
+            "buckets_stamped": stamped,
+            "record_digests": record_digests,
+        })
+    except AuditEntryNotWritten as exc:
+        raise audit_gap_409(exc, committed) from exc
+    return committed

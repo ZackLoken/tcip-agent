@@ -7,7 +7,6 @@ so the backend doesn't have to guess a dataset layout.
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -29,8 +28,6 @@ from tcip_mcp.pipelines.image_utils import (
 from tcip_store import Version, VersionConflict
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.paths import assert_path_allowed
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/annotate", tags=["annotate"])
 
@@ -111,15 +108,15 @@ def _guarded_audit_root(label_path: Optional[str]) -> Optional[str]:
     """The dataset root a label write is audited under, confined before anything is written.
 
     Labels travel with their dataset, so their trail belongs beside them rather than in whichever
-    project happened to open the dataset. A label path outside a dataset tree names no such log,
-    so the write proceeds unaudited and says so; a dataset root the allow-set does not admit
+    project happened to open the dataset. A label path outside a dataset tree names no such root,
+    so the write is recorded in the platform's own log instead (``_audit_gui_write``'s ``root``
+    widens to accept ``None`` for exactly this); a dataset root the allow-set does not admit
     refuses the write before it happens.
     """
     from tcip_mcp.dataset_layout import dataset_root_of
 
     root = dataset_root_of(label_path) if label_path else None
     if root is None:
-        logger.warning("no dataset root for %s; label write not audited", label_path)
         return None
     try:
         return str(assert_path_allowed(root))
@@ -156,21 +153,22 @@ def _ann_dict(a: Annotation) -> dict:
     return out
 
 
-def _audit_gui_write(payload: "SavePayload", label_path: str, root: str) -> None:
-    """Record a GUI label-write in that dataset's own audit log.
+def _audit_gui_write(payload: "SavePayload", label_path: str, root: Optional[str]) -> None:
+    """Record a GUI label-write in that dataset's own audit log, or the platform's own when
+    ``root`` is ``None`` (a label path outside any dataset tree, still under an allowed root).
 
-    ``root`` is the dataset root :func:`_guarded_audit_root` admitted before the write.
+    ``root`` is what :func:`_guarded_audit_root` admitted before the write. A failed append
+    raises ``AuditEntryNotWritten``: the write has already committed by the time this runs.
     """
-    from tcip_mcp.audit import record_event
+    from tcip_web.routes.audit_gap import record_committed
 
-    record_event(
+    record_committed(
         "gui_save_labels",
         {
             "image_path": payload.image_path,
             "label_path": label_path,
             "n_annotations": len(payload.annotations),
         },
-        source="gui",
         scope=root,
     )
 
@@ -207,6 +205,13 @@ def save_labels(payload: SavePayload) -> dict:
     deleted, so clearing all annotations keeps the record instead of erasing it. That record is not a
     negative on its own: it trains as one only once the breeder marks the image Complete
     (``image_status.json``); until then it reads as unannotated (CLAUDE.md's negative invariant).
+
+    A save under a dataset root records to that dataset's own audit log; a save under no dataset
+    root (a label path confined to an allowed workspace, project or image root but outside any
+    dataset tree) records to the platform's own log instead, so it now depends on the platform
+    state root being writable. Either way, a write that commits and cannot be recorded answers 409
+    with the marker and the response the write would have returned, rather than the 200 it
+    answered before.
     """
     w, h = _image_dims(payload.image_path)
     label_path = _guard_label_path(payload.label_path)
@@ -235,13 +240,19 @@ def save_labels(payload: SavePayload) -> dict:
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     token = version.token if version is not None else None
-    if audit_root is not None:
-        _audit_gui_write(payload, label_path, audit_root)
-
-    return {
+    committed = {
         "status": "ok",
         "image_path": payload.image_path,
         "n_annotations": len(annotations),
         # New version token so the client can save again without a reload.
         "base_mtime": token,
     }
+    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_web.routes.audit_gap import audit_gap_409
+
+    try:
+        _audit_gui_write(payload, label_path, audit_root)
+    except AuditEntryNotWritten as exc:
+        raise audit_gap_409(exc, committed) from exc
+
+    return committed
