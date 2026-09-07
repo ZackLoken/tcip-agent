@@ -72,6 +72,7 @@ def test_request_archives_marks_and_hides_the_project(client, tmp_path):
     # coverage: the baseline carries neither field.
     assert body["recorded_in_open_project"] is True
     assert "sample_plot_open" in body["audit_note"]
+    assert "''s" not in body["audit_note"]
 
     pending = workspace.pending_removal_record(target)
     assert pending is not None
@@ -130,6 +131,70 @@ def test_listing_carries_removal_refusal_matching_the_doors_own_answer(client, t
     listing2 = client.get("/api/projects").json()
     by_name2 = {p["name"]: p for p in listing2["projects"]}
     assert by_name2["sample_plot_open"]["removal_refusal"] == door.json()["detail"]
+
+
+def test_listing_carries_no_reason_naming_no_project_open_with_nothing_bound(
+    client, tmp_path, tmp_path_factory, monkeypatch,
+):
+    """coverage of the landing's own behavior (the baseline already answers so): with nothing
+    bound and no marker set, every card's removal_refusal is null and removal_releasable is
+    false, the home of the fact the deleted no-project-open vitest once pinned."""
+    ws = tmp_path.parent
+    ws.mkdir(exist_ok=True)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path_factory.mktemp("unrelated_root")))
+    _init(ws, "sample_plot_a")
+    _init(ws, "sample_plot_b")
+
+    listing = client.get("/api/projects").json()
+    assert listing["projects"]
+    for project in listing["projects"]:
+        assert project["removal_refusal"] is None
+        assert project["removal_releasable"] is False
+
+
+def test_listing_carries_dependency_warnings_and_problem_through_the_route(client, tmp_path):
+    """coverage: dependency_warnings/dependency_problem, converted through DependencyWarning,
+    have no assertion through GET /api/projects at the baseline: the pending, moved and damaged
+    cases."""
+    from tests._record_damage_fixtures import damage_record
+    from tcip_mcp.tools.project_tools import dataset_registry_key, register_dataset
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    dependent = _init(ws, "sample_plot_route-pending")
+    reg = register_dataset(str(target), crop="black locust", project_root=str(dependent))
+    assert "error" not in reg, reg
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    listing = client.get("/api/projects").json()
+    by_name = {p["name"]: p for p in listing["projects"]}
+    warning = by_name["sample_plot_route-pending"]["dependency_warnings"][0]
+    assert warning["present"] is True
+    assert warning["target"] == "sample_plot_target"
+    assert warning["archive_path"] == resp.json()["archive_path"]
+
+    project_removal.complete_pending_removals(ws)
+    listing2 = client.get("/api/projects").json()
+    by_name2 = {p["name"]: p for p in listing2["projects"]}
+    warning2 = by_name2["sample_plot_route-pending"]["dependency_warnings"][0]
+    assert warning2["present"] is False
+    assert warning2["archive_path"] is None
+
+    damaged = _init(ws, "sample_plot_route-damaged")
+    reg2 = register_dataset(str(damaged), crop="black locust", project_root=str(damaged))
+    assert "error" not in reg2, reg2
+    damage_record(dataset_registry_key(damaged), b"not json")
+
+    listing3 = client.get("/api/projects").json()
+    by_name3 = {p["name"]: p for p in listing3["projects"]}
+    damaged_entry = by_name3["sample_plot_route-damaged"]
+    assert damaged_entry["dependency_warnings"] == []
+    assert damaged_entry["dependency_problem"] is not None
 
 
 # ── refusals, each with its admitting case ───────────────────────────────────
@@ -230,7 +295,8 @@ def test_admits_the_request_with_no_project_bound_and_records_both_lines_under_t
     own) would otherwise leave a ``.tcip`` there that reads as an accidental project; pin the
     root somewhere outside the workspace instead so nothing is genuinely bound. Admitted rather
     than refused: the target's own log carries both of the request's own lines, and the archive
-    door's own line (unmoved, Q49) stays under the platform root the pinned variable names."""
+    door's own line stays under the platform root the pinned variable names, unmoved by which
+    project (if any) is bound."""
     from tcip_mcp import audit
 
     ws = tmp_path.parent
@@ -248,15 +314,16 @@ def test_admits_the_request_with_no_project_bound_and_records_both_lines_under_t
     body = resp.json()
     assert body["recorded_in_open_project"] is False
     assert body["audit_scope"] == str(target)
-    assert "$TCIP_STATE_ROOT" in body["audit_note"]
+    assert "no project open" in body["audit_note"]
+    assert platform_root.name in body["audit_note"]
 
     target_lines = _audit_lines(target)
     assert [line["tool"] for line in target_lines] == [
         "project_removal_requested", "gui_project_removal_requested",
     ]
 
-    # coverage: the archive door's own line is unmoved by this decision (Q49), and no request
-    # line rides behind it under the root the pinned variable names.
+    # coverage: the archive door's own line stays under the root the pinned variable names, and
+    # no request line rides behind it there.
     platform_tools = [line["tool"] for line in ts.read_log(audit.audit_log_key()).records]
     assert platform_tools[-1] == "archive_project"
     assert "project_removal_requested" not in platform_tools
@@ -364,7 +431,8 @@ def test_refuses_a_platform_root_bound_to_a_project_the_marker_does_not_name(cli
         )
         assert resp.status_code == 409
         assert "restart the backend first" in resp.json()["detail"]
-        assert "TCIP_STATE_ROOT" in resp.json()["detail"]
+        assert "state root naming this project" in resp.json()["detail"]
+        assert "TCIP_STATE_ROOT" not in resp.json()["detail"]
     finally:
         project_paths.restore_binding(before)
 
@@ -577,6 +645,8 @@ def test_a_pending_dependent_still_gets_its_own_line(client, tmp_path):
 
 
 def test_an_unreadable_dependent_gets_no_dependency_line(client, tmp_path):
+    """coverage: the request line and the dependent's own naming both pass at the baseline too;
+    this only pins that a registry the door cannot read never gets a dependency line either."""
     from tests._record_damage_fixtures import damage_record
 
     from tcip_mcp.tools.project_tools import dataset_registry_key, register_dataset
@@ -698,6 +768,7 @@ def test_the_routes_own_line_and_a_dependents_both_refused_answer_one_409(
     detail = resp.json()["detail"]
     assert "sample_plot_dep-both" in detail
     assert "route" in detail
+    assert "''s" not in detail
 
 
 def test_a_refused_preview_skips_the_dependent_and_external_root_scan(client, tmp_path):
@@ -857,6 +928,33 @@ def test_dependency_problem_named_for_a_damaged_registry(tmp_path):
     assert problem is not None
 
 
+def test_dependency_warnings_names_a_no_id_entry_as_a_problem_not_a_null_id_warning(
+    client, tmp_path,
+):
+    """GUARDS: the baseline carries the no-id entry as a warning with a null dataset_id and no
+    problem; the preview's own scan already lists such an entry as unreadable, and the listing
+    now applies the same rule."""
+    from tcip_mcp.project_removal import dependency_warnings
+    from tcip_mcp.tools.project_tools import registry_path_for, upsert_dataset
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    dependent = _init(ws, "sample_plot_no-id")
+    upsert_dataset(
+        dependent, {"path": registry_path_for(target, dependent), "crop": "black locust"},
+    )
+
+    warnings, problem = dependency_warnings(dependent)
+    assert warnings == []
+    assert problem is not None
+    assert "no id" in problem
+
+    listing = client.get("/api/projects").json()
+    entry = next(p for p in listing["projects"] if p["name"] == "sample_plot_no-id")
+    assert entry["dependency_warnings"] == []
+    assert entry["dependency_problem"] == problem
+
+
 def test_a_canvas_binding_with_no_project_name_is_read_as_no_binding(client, tmp_path):
     """A canvas binding carrying neither ``project_name`` nor ``root`` reads as no binding,
     rather than raising, in both the preview and the door."""
@@ -1006,6 +1104,66 @@ def test_release_canvas_failure_after_the_marker_cleared_names_both_in_the_line_
     line = next(l for l in lines if l["tool"] == "project_binding_released")
     assert line["arguments"]["marker_cleared"] is True
     assert line["arguments"]["canvas_binding_released"] is False
+
+
+def test_release_canvas_record_decode_error_after_the_marker_cleared_still_records_the_line(
+    client, tmp_path,
+):
+    """GUARDS: the baseline's narrower except clause lets a DecodeError from the canvas record's
+    read escape the route uncaught (an unhandled 500), the marker already cleared with no line
+    naming it."""
+    from tests._record_damage_fixtures import damage_record
+    from tcip_mcp.web_client import canvas_open_binding_key
+
+    ws = tmp_path.parent
+    _seed(ws)
+    target = _init(ws, "sample_plot_canvas-decode")
+    workspace.activate_project("sample_plot_canvas-decode")
+    sel = client.post(
+        "/api/dataset/select", json={"project_root": str(target), "dataset_root": str(target)},
+    )
+    assert sel.status_code == 200
+
+    damage_record(canvas_open_binding_key(), b"not json")
+
+    resp = client.post(
+        "/api/projects/sample_plot_canvas-decode/release-binding", json={"user": "t"},
+    )
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert "sample_plot_canvas-decode" in detail
+    assert "marker_cleared=True" in detail
+
+    lines = _audit_lines(target)
+    line = next(l for l in lines if l["tool"] == "project_binding_released")
+    assert line["arguments"]["marker_cleared"] is True
+    assert line["arguments"]["canvas_binding_released"] is False
+
+
+def test_release_with_an_unreadable_marker_clears_nothing_for_it_and_does_not_500(
+    client, tmp_path,
+):
+    """GUARDS: the baseline reads the marker with no fold, so a damaged marker raises out of the
+    route as an unhandled 500 rather than folding to "no marker" the way its sibling reader
+    does."""
+    from tests._record_damage_fixtures import damage_record
+
+    ws = tmp_path.parent
+    _seed(ws)
+    target = _init(ws, "sample_plot_marker-damaged")
+    sel = client.post(
+        "/api/dataset/select", json={"project_root": str(target), "dataset_root": str(target)},
+    )
+    assert sel.status_code == 200
+    damage_record(workspace.active_project_key(), b"not utf-8 or a name at all \xff\xfe")
+
+    resp = client.post(
+        "/api/projects/sample_plot_marker-damaged/release-binding", json={"user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["marker_cleared"] is False
+    assert body["canvas_binding_released"] is True
 
 
 def test_release_then_a_select_bumps_the_generation_again(client, tmp_path):

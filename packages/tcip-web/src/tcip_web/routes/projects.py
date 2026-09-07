@@ -55,6 +55,10 @@ class DependencyWarning(BaseModel):
     target: str
     # False once the dependency's own directory no longer exists at the location named.
     present: bool
+    # From the target's own pending-removal marker while present is true; null once it is false,
+    # since the target's own marker is gone by then.
+    archive_path: str | None = None
+    holding_dir: str | None = None
 
 
 class ProjectSummary(BaseModel):
@@ -77,7 +81,8 @@ class ProjectSummary(BaseModel):
     # The first date's labels that would not read, naming the file; the project still lists, and
     # its subjects_by_date reports that date empty rather than aborting the scan.
     label_problem: str | None
-    # project_removal.identity_conflict's own text, or null.
+    # project_removal.identity_conflict's own text, or null; the control is disabled only for a
+    # refusal removal_releasable cannot clear.
     removal_refusal: str | None
     # Whether the control stays enabled beside removal_refusal: a release would clear it.
     removal_releasable: bool
@@ -234,8 +239,8 @@ class DependentProject(BaseModel):
     dataset_id: str | None = None
     dataset_path: str | None = None
     pending: bool | None = None
-    # Set instead of the three fields above when this project's own registry will not read;
-    # the removal still proceeds, and the dialog renders this as a warning, not a drop.
+    # Set instead of the three fields above when the registry will not read, or the matching
+    # entry carries no id (naming it); the removal proceeds, and the dialog renders a warning.
     unreadable: str | None = None
 
 
@@ -288,8 +293,8 @@ class ReleaseResponse(BaseModel):
     name: str
     marker_cleared: bool
     canvas_binding_released: bool
-    # A fresh identity_conflict/binding_release_available read after the release, so the dialog
-    # can render the next refusal (or none) without a second round trip.
+    # A fresh identity_conflict/binding_release_available read after the release, for a caller
+    # that does not itself re-fetch the preview (the agent); the dialog re-fetches instead.
     refusal: str | None
     releasable: bool
 
