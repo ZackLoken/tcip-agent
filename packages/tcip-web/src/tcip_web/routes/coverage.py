@@ -54,6 +54,7 @@ import tcip_store
 
 from tcip_web.paths import assert_path_allowed
 from tcip_web.routes._coverage_models import CoverageRecord, CoverageViewing, GridGeometry
+from tcip_web.routes.audit_gap import AUDIT_ENTRY_NOT_WRITTEN
 from tcip_web.routes.classes import _guard_dataset_root
 from tcip_web.routes.images import _checked
 
@@ -102,10 +103,6 @@ def _refuse_old_working_scale_key(image_name: str, record: dict) -> None:
                 400,
                 f"{image_name}'s stored region-completeness record's cell {cell!r} still "
                 f"carries {_OLD_WORKING_SCALE_KEY!r}; {_WORKING_SCALE_CONFORM_HINT}")
-
-# The stable marker post_coverage's 500 body carries for AuditEntryNotWritten (api/http.ts's
-# decodeRefusal parses detail as an object; coverageTracker.ts's outbox reads it as terminal).
-AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written"
 
 # The stable marker post_coverage's 409 body carries for a grid mismatch with no replace flag;
 # coverageTracker.ts reads it to set the tracker's replace hold, never to retry or drop the push.
