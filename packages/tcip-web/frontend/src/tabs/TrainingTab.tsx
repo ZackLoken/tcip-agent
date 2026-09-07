@@ -196,7 +196,7 @@ export function TrainingTab() {
   // recorded status.error, null when the run produced no logs but recorded no reason either.
   const [tbNoLogs, setTbNoLogs] = useState<{ error: string | null } | null>(null);
   const [tbAttempt, setTbAttempt] = useState(0);
-  const [markedRunIds, setMarkedRunIds] = useState<Set<string>>(new Set());
+  const [markedExperimentIds, setMarkedExperimentIds] = useState<Set<string>>(new Set());
   // Cancel in flight, by run id: disables that row's own Cancel button with a pending label,
   // and a failure lands in cancelErrors rather than only a toast.
   const [pendingCancel, setPendingCancel] = useState<ReadonlySet<string>>(new Set());
@@ -208,12 +208,12 @@ export function TrainingTab() {
   const chartTableId = useId();
 
   const marked: MarkedRun[] = runs
-    .filter((r) => markedRunIds.has(r.experiment_id))
+    .filter((r) => markedExperimentIds.has(r.experiment_id))
     .map((r) => ({ experimentId: r.experiment_id }));
   const comparing = marked.length >= 2;
 
   function toggleMarked(run: TrainingRunSummary) {
-    setMarkedRunIds((prev) => {
+    setMarkedExperimentIds((prev) => {
       const next = new Set(prev);
       if (next.has(run.experiment_id)) {
         next.delete(run.experiment_id);
@@ -232,10 +232,10 @@ export function TrainingTab() {
 
   // A run's own marked state, never "No run selected" left over: once the marked set settles
   // at exactly one, that run becomes the one the detail region shows.
-  const soleMarkedRunId = marked.length === 1 ? marked[0].experimentId : null;
+  const soleMarkedExperimentId = marked.length === 1 ? marked[0].experimentId : null;
   useEffect(() => {
-    if (soleMarkedRunId) setSelectedRun(soleMarkedRunId);
-  }, [soleMarkedRunId]);
+    if (soleMarkedExperimentId) setSelectedRun(soleMarkedExperimentId);
+  }, [soleMarkedExperimentId]);
 
   const refreshRuns = useCallback(async () => {
     try {
@@ -244,9 +244,9 @@ export function TrainingTab() {
       setRuns(nextRuns);
       setRunsError(null);
       // A run that leaves the list must also leave the marked set, or the cap (which counts
-      // markedRunIds itself) can read full while the header (runs still present) shows fewer.
+      // markedExperimentIds itself) can read full while the header (runs still present) shows fewer.
       const stillPresent = new Set(nextRuns.map((run) => run.experiment_id));
-      setMarkedRunIds((prev) => {
+      setMarkedExperimentIds((prev) => {
         const pruned = new Set(Array.from(prev).filter((id) => stillPresent.has(id)));
         return pruned.size === prev.size ? prev : pruned;
       });
@@ -367,10 +367,10 @@ export function TrainingTab() {
   // the run is live: useEmbeddedToolRetry, the loop the Tuning tab's own panel shares.
   const tbStep = useCallback(async (): Promise<EmbeddedToolStepResult> => {
     if (!selectedRun) return { url: null, error: null, done: true };
-    const runId = selectedRun;
+    const experimentId = selectedRun;
     let detail;
     try {
-      detail = await trainingApi.getRun(runId);
+      detail = await trainingApi.getRun(experimentId);
     } catch (e) {
       return { url: null, error: messageOf(e), done: true };
     }
@@ -380,7 +380,7 @@ export function TrainingTab() {
     let noLogs = false;
     if (!url) {
       try {
-        const launched = await trainingApi.launchTensorboard(runId);
+        const launched = await trainingApi.launchTensorboard(experimentId);
         url = launched.url ?? null;
         if (launched.error) {
           failure = launched.output ? `${launched.error}: ${launched.output}` : launched.error;
@@ -414,23 +414,23 @@ export function TrainingTab() {
     tbStep,
   );
 
-  async function onCancel(runId: string) {
-    setPendingCancel((prev) => new Set(prev).add(runId));
+  async function onCancel(experimentId: string) {
+    setPendingCancel((prev) => new Set(prev).add(experimentId));
     setCancelErrors((prev) => {
-      const { [runId]: _drop, ...rest } = prev;
+      const { [experimentId]: _drop, ...rest } = prev;
       return rest;
     });
     try {
-      await trainingApi.cancel(runId);
+      await trainingApi.cancel(experimentId);
       void refreshRuns();
     } catch (e) {
       const message = `Cancel failed: ${messageOf(e)}`;
       useStore.getState().pushToast(message);
-      setCancelErrors((prev) => ({ ...prev, [runId]: message }));
+      setCancelErrors((prev) => ({ ...prev, [experimentId]: message }));
     } finally {
       setPendingCancel((prev) => {
         const next = new Set(prev);
-        next.delete(runId);
+        next.delete(experimentId);
         return next;
       });
     }
@@ -683,7 +683,7 @@ export function TrainingTab() {
         )}
         <ul className="space-y-1">
           {runs.map((r) => {
-            const isMarked = markedRunIds.has(r.experiment_id);
+            const isMarked = markedExperimentIds.has(r.experiment_id);
             const cancelling = pendingCancel.has(r.experiment_id);
             const cancelError = cancelErrors[r.experiment_id];
             const heartbeatText = r.status === "running" ? heartbeatAge(r.heartbeat) : null;

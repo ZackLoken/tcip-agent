@@ -425,7 +425,7 @@ describe("RunComparison overlay", () => {
 
   it("names both metric choosers accessibly", async () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
-    vi.mocked(openTrainingStream).mockImplementation((_root, _runId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((_root, _experimentId, onMessage) => {
       onMessage({ type: "metric", row: { epoch: 1, loss: 0.3 } } as never);
       return () => {};
     });
@@ -537,7 +537,7 @@ describe("RunComparison overlay x axis", () => {
     HTMLElement.prototype.getBoundingClientRect = () => rect;
     try {
       vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
-      vi.mocked(openTrainingStream).mockImplementation((_root, _runId, onMessage) => {
+      vi.mocked(openTrainingStream).mockImplementation((_root, _experimentId, onMessage) => {
         onMessage({ type: "metric", row: { epoch: 1, loss: 0.3 } } as never);
         return () => {};
       });
