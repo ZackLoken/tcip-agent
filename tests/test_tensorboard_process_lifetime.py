@@ -15,6 +15,7 @@ from a background thread that has already exited by the time the parent is kille
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
@@ -152,11 +153,11 @@ def test_child_is_gone_within_ten_seconds_of_a_normal_exit(tmp_path):
     parent = _spawn_parent(tmp_path, "exit", "--no-tie")
     returned = standin = None
     try:
+        # --no-tie means no guardian sits in front of the stand-in: returned and standin name
+        # the same process here, so one death check covers both.
         returned, standin = _read_pids(parent)
         parent.wait(timeout=_DEATH_TIMEOUT)
         assert _wait_until_dead(*standin)
-        if sys.platform != "win32":
-            assert _wait_until_dead(*returned)
     finally:
         if standin is not None:
             _force_kill_and_wait(*standin)
@@ -183,8 +184,8 @@ def _wait_for_guardian_child(guardian_pid: int, timeout: float = 5.0) -> psutil.
 
 @pytest.mark.skipif(sys.platform == "win32", reason="no guardian there")
 def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypatch, tmp_path):
-    """A regression guard for the guardian's grace against the manager's wait: the pre-fix
-    baseline orphaned this stand-in in four of five runs, a race rather than a deterministic
+    """A regression guard for the guardian's grace staying under the manager's wait: without
+    it, a stand-in that ignores SIGTERM can be orphaned by a race rather than a deterministic
     failure.
     """
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
@@ -197,12 +198,28 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypa
         ],
     )
 
-    info = tb.launch_tensorboard(str(tmp_path), run_id="stubborn-run")
-    standin = _wait_for_guardian_child(info["pid"])
-    standin_pid, standin_create_time = standin.pid, standin.create_time()
+    standin_pid = standin_create_time = None
     try:
+        info = tb.launch_tensorboard(str(tmp_path), run_id="stubborn-run")
+        standin = _wait_for_guardian_child(info["pid"])
+        standin_pid, standin_create_time = standin.pid, standin.create_time()
         result = tb.stop_tensorboard(run_id="stubborn-run")
         assert result["status"] == "stopped"
         assert not _child_alive(standin_pid, standin_create_time)
     finally:
-        _force_kill_and_wait(standin_pid, standin_create_time)
+        if standin_pid is not None:
+            _force_kill_and_wait(standin_pid, standin_create_time)
+
+
+def test_guardian_usage_error_for_a_missing_term_grace():
+    """The guardian's own argument parsing refuses a missing --term-grace with the usage
+    message rather than a traceback, run as the real subprocess entry point."""
+    from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
+
+    result = subprocess.run(
+        [sys.executable, "-m", "tcip_mcp.pipelines.training.tensorboard_guardian",
+         "--parent", str(os.getpid()), "--", sys.executable, "-c", "pass"],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 1
+    assert guardian._USAGE in result.stderr
