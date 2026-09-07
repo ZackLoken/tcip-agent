@@ -645,6 +645,30 @@ describe("AnnotateToolbar Complete toggle, subject-scoped", () => {
     );
     expect(useStore.getState().imageStatus.staleMarks).toEqual([]);
   });
+
+  it("marks stale and toasts the stamp-gap sentence when a finished status's audit line is lost", async () => {
+    seedImageDataset({ subject: "subject_a" });
+    setCanvasBoxSubjects(["subject_a"]);
+    const committed = { status: "ok", digest_stamped: false };
+    const message = "gui_set_image_status completed and its audit entry could not be written";
+    vi.spyOn(classesApi, "setImageStatus").mockRejectedValue(
+      new StructuredRefusalError(
+        { error: "audit_entry_not_written", message, committed },
+        409,
+        message,
+      ),
+    );
+    renderToolbar();
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Complete"));
+    });
+
+    expect(useStore.getState().imageStatus.staleMarks).toEqual(["img1.jpg"]);
+    const messages = useStore.getState().toasts.map((t) => t.message);
+    expect(messages).toContainEqual(expect.stringContaining("its schema stamp did not land"));
+    expect(messages).toContainEqual(message);
+  });
 });
 
 describe("AnnotateToolbar current image identity", () => {

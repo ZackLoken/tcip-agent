@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 
 import { classesApi } from "@/api/classes";
+import { StructuredRefusalError } from "@/api/http";
 import { useImageStatusHydrate } from "@/hooks/useImageStatusHydrate";
 import { useStore } from "@/store";
 
@@ -148,5 +149,52 @@ describe("useImageStatusHydrate", () => {
     useStore.setState((s) => ({ imageStatus: { ...s.imageStatus, staleMarks: ["img1.jpg"] } }));
     renderHook(() => useImageStatusHydrate({ ...PARAMS, subject: null }));
     expect(useStore.getState().imageStatus.staleMarks).toEqual([]);
+  });
+
+  it("continues with its own writes and toasts the message when the bulk write's audit line is lost", async () => {
+    vi.spyOn(classesApi, "loadImageStatus").mockResolvedValue({
+      statuses: { "img1.jpg": "unannotated" },
+      stale_definition: [],
+    });
+    vi.spyOn(classesApi, "deriveImageStatus").mockResolvedValue({
+      statuses: { "img1.jpg": "partial" },
+      unreadable: [],
+    });
+    const message = "gui_set_image_status_bulk completed and its audit entry could not be written";
+    vi.spyOn(classesApi, "setImageStatusBulk").mockRejectedValue(
+      new StructuredRefusalError(
+        { error: "audit_entry_not_written", message, committed: { status: "ok", n: 1 } },
+        409,
+        message,
+      ),
+    );
+
+    renderHook(() => useImageStatusHydrate(PARAMS));
+
+    await waitFor(() =>
+      expect(useStore.getState().imageStatus.byImage["img1.jpg"]).toBe("partial"),
+    );
+    expect(useStore.getState().toasts.map((t) => t.message)).toContainEqual(message);
+  });
+
+  it("skips its own writes on any other bulk-write failure", async () => {
+    vi.spyOn(classesApi, "loadImageStatus").mockResolvedValue({
+      statuses: { "img1.jpg": "unannotated" },
+      stale_definition: [],
+    });
+    vi.spyOn(classesApi, "deriveImageStatus").mockResolvedValue({
+      statuses: { "img1.jpg": "partial" },
+      unreadable: [],
+    });
+    vi.spyOn(classesApi, "setImageStatusBulk").mockRejectedValue(new Error("network down"));
+
+    renderHook(() => useImageStatusHydrate(PARAMS));
+
+    await waitFor(() =>
+      expect(useStore.getState().toasts.at(-1)?.message).toBe(
+        "Could not load the image status for this project.",
+      ),
+    );
+    expect(useStore.getState().imageStatus.byImage["img1.jpg"]).toBeUndefined();
   });
 });

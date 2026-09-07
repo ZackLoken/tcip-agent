@@ -353,6 +353,40 @@ describe("ResultsTab evidence gate", () => {
     expect(screen.getByText("valid")).toBeInTheDocument();
   });
 
+  it("toasts the second-delivery sentence naming the saved path when the CSV export's audit line is lost", async () => {
+    mockTree();
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
+      curves: { rows: [CURVE_ROW], n_plants: 1, positive_class_id: 1 },
+      milestones: { rows: [ONSET_ROW] },
+      ...VALIDATED,
+    });
+    const message = "results.export_csv completed and its audit entry could not be written";
+    vi.spyOn(resultsApi, "downloadCsv").mockRejectedValue(
+      new StructuredRefusalError(
+        {
+          error: "audit_entry_not_written",
+          message,
+          committed: { saved_path: "C:/proj/results_export/x.csv", delivery_event_recorded: false },
+        },
+        409,
+        message,
+      ),
+    );
+
+    await renderAndCompute();
+    await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /curves csv/i }));
+
+    await waitFor(() => {
+      const toast = useStore.getState().toasts.at(-1)?.message ?? "";
+      expect(toast).toContain("C:/proj/results_export/x.csv");
+      expect(toast).toContain("already written");
+      expect(toast).toContain("second delivery");
+      expect(toast).toContain("supersede_delivery");
+      expect(toast).toContain(message);
+    });
+  });
+
   it("states which delivery kinds the export controls actually cover", async () => {
     mockTree();
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
@@ -1572,6 +1606,70 @@ describe("ResultsTab plant-mapping build: match-tolerance phrase", () => {
     expect(await screen.findByText(/cited by delivery event\(s\)/)).toBeInTheDocument();
   });
 
+  it("adopts the committed mapping and appends the gap message when the route's own line is lost", async () => {
+    mockTreeAndMappings();
+    const gapMessage = "gui_build_plant_mapping completed and its audit entry could not be written";
+    const committed = {
+      mapping: {},
+      unreadable: {},
+      summary: {
+        per_date: {
+          "2026-01-01": { n_images: 3, n_mapped: 2, n_unattributed: 1, avg_distance_m: 1.4 },
+        },
+        totals: { n_dates: 1, n_images: 3, n_mapped: 2, n_unattributed: 1 },
+      },
+      nn_tolerance_m: { value: 0.75, source: "grid_pitch" },
+      max_match_distance_m: 2.25,
+    };
+    vi.spyOn(resultsApi, "buildPlantMapping").mockRejectedValue(
+      new StructuredRefusalError(
+        { error: "audit_entry_not_written", message: gapMessage, committed },
+        409,
+        gapMessage,
+      ),
+    );
+
+    render(<ResultsTab />);
+    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
+    fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
+      target: { value: "valley-2026" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("valley-plants"), {
+      target: { value: "valley-plants" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
+
+    expect(await screen.findByText(/0\.75 m/)).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(gapMessage))).toBeInTheDocument();
+  });
+
+  it("adopts nothing and shows the panel message when the archive receipt failed (committed: null)", async () => {
+    mockTreeAndMappings();
+    const gapMessage =
+      "gui_build_plant_mapping completed and its audit entry could not be written. The new " +
+      "record was never persisted under this name. Rebuild with supersede=True once the " +
+      "audit log's destination is repaired.";
+    vi.spyOn(resultsApi, "buildPlantMapping").mockRejectedValue(
+      new StructuredRefusalError(
+        { error: "audit_entry_not_written", message: gapMessage, committed: null },
+        409,
+        gapMessage,
+      ),
+    );
+
+    render(<ResultsTab />);
+    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
+    fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
+      target: { value: "valley-2026" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("valley-plants"), {
+      target: { value: "valley-plants" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
+
+    expect(await screen.findByText(new RegExp(gapMessage.slice(0, 40)))).toBeInTheDocument();
+  });
+
   function buildMappingWith(
     perDate: Record<
       string,
@@ -1854,6 +1952,36 @@ describe("ResultsTab count export", () => {
       },
       filename: "plant_counts.csv",
     });
+  });
+
+  it("shows the second-delivery sentence naming the saved path when the count export's audit line is lost", async () => {
+    const panel = await renderCountPanel();
+    const message = "results.export_count_csv completed and its audit entry could not be written";
+    vi.spyOn(resultsApi, "downloadCountCsv").mockRejectedValue(
+      new StructuredRefusalError(
+        {
+          error: "audit_entry_not_written",
+          message,
+          committed: {
+            saved_path: "C:/proj/results_export/counts.csv",
+            delivery_event_recorded: false,
+          },
+        },
+        409,
+        message,
+      ),
+    );
+
+    chooseBucket(panel);
+    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: "subject_a" } });
+    fireEvent.change(controlFollowing(panel, "Filename"), { target: { value: "counts.csv" } });
+    fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
+
+    const errorText = await within(panel).findByText(/C:\/proj\/results_export\/counts\.csv/);
+    expect(errorText.textContent).toContain("already written");
+    expect(errorText.textContent).toContain("second delivery");
+    expect(errorText.textContent).toContain("supersede_delivery");
+    expect(errorText.textContent).toContain(message);
   });
 
   it("decodes a delivery_gate refusal and offers the acknowledgement controls", async () => {

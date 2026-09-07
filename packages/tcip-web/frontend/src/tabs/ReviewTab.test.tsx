@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { api } from "@/api/client";
-import { subjectColor } from "@/api/classes";
+import { classesApi, subjectColor } from "@/api/classes";
+import { StructuredRefusalError } from "@/api/http";
 import { resultsApi } from "@/api/inference";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { applyReviewFocus } from "@/lib/reviewFocus";
@@ -391,6 +392,167 @@ describe("ReviewTab validation-reference affordance", () => {
     const span = container.querySelector("span.whitespace-pre-wrap");
     expect(span).not.toBeNull();
     expect(span?.textContent).toBe(joined);
+  });
+});
+
+describe("ReviewTab audit-gap handling", () => {
+  const gtAnn: Annotation = { subject: "subject_a", bbox: [10, 10, 50, 50], attributes: {} };
+  const gapMessage = "gui_review_action completed and its audit entry could not be written";
+
+  beforeEach(() => {
+    vi.spyOn(api.review, "backupLabels").mockResolvedValue({ status: "ok", files_backed_up: 0 });
+  });
+
+  it("recordAction adopts the committed body and toasts the gap message", async () => {
+    matchesSpy.mockResolvedValue(matchesRes([det()], { gt: [gtAnn] }));
+    const committed = {
+      status: "ok" as const,
+      image_status: "started",
+      annotation_status: "partial",
+      matches: matchesRes([det({ reviewed: true, reviewed_action: "accepted" })], {
+        gt: [gtAnn],
+      }),
+    };
+    vi.spyOn(api.review, "action").mockRejectedValue(
+      new StructuredRefusalError(
+        { error: "audit_entry_not_written", message: gapMessage, committed },
+        409,
+        gapMessage,
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTitle("Keep this ground-truth object (A)"));
+    await waitFor(() =>
+      expect(useStore.getState().review.matches!.detections[0].reviewed_action).toBe("accepted"),
+    );
+    expect(useStore.getState().toasts.map((t) => t.message)).toContain(gapMessage);
+  });
+
+  it("recordMissedObject adopts the committed body and toasts the gap message", async () => {
+    matchesSpy.mockResolvedValue(matchesRes([]));
+    const committed = {
+      status: "ok" as const,
+      image_status: "started",
+      annotation_status: "partial",
+      matches: matchesRes([]),
+    };
+    vi.spyOn(api.review, "action").mockRejectedValue(
+      new StructuredRefusalError(
+        { error: "audit_entry_not_written", message: gapMessage, committed },
+        409,
+        gapMessage,
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTitle(/Draw a box around an object the model missed/i));
+    const stage = screen.getByTestId("canvas-stage");
+    fireEvent.mouseDown(stage, { clientX: 10, clientY: 10, button: 0 });
+    fireEvent.mouseMove(stage, { clientX: 60, clientY: 60 });
+    fireEvent.mouseUp(stage, { clientX: 60, clientY: 60 });
+    fireEvent.click(screen.getByTitle("Save this missed object to ground truth (Enter)"));
+
+    await waitFor(() =>
+      expect(useStore.getState().toasts.map((t) => t.message)).toContain(gapMessage),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("Marking missed object")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("recordSweepAttested adopts the committed body, keeps its own toast and adds the gap message", async () => {
+    matchesSpy.mockResolvedValue(matchesRes([]));
+    const committed = {
+      status: "ok" as const,
+      image_status: "started",
+      annotation_status: null,
+      matches: matchesRes([]),
+    };
+    vi.spyOn(api.review, "action").mockRejectedValue(
+      new StructuredRefusalError(
+        { error: "audit_entry_not_written", message: gapMessage, committed },
+        409,
+        gapMessage,
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+
+    fireEvent.click(
+      screen.getByTitle("Record that you checked this image for missed objects and found none"),
+    );
+    await waitFor(() => {
+      const messages = useStore.getState().toasts.map((t) => t.message);
+      expect(messages).toContain("Recorded: no missed objects found on this image.");
+      expect(messages).toContain(gapMessage);
+    });
+  });
+
+  it("markImageComplete adopts the committed body, mirrors the status and toasts the gap message", async () => {
+    matchesSpy.mockResolvedValue(matchesRes([det()], { gt: [gtAnn] }));
+    vi.spyOn(api.review, "action").mockResolvedValue({
+      status: "ok",
+      image_status: "started",
+      annotation_status: "partial",
+      matches: matchesRes([det()], { gt: [gtAnn] }),
+    });
+    const committed = {
+      status: "ok" as const,
+      image_status: "completed",
+      annotation_status: "complete",
+    };
+    vi.spyOn(api.review, "markComplete").mockRejectedValue(
+      new StructuredRefusalError(
+        { error: "audit_entry_not_written", message: gapMessage, committed },
+        409,
+        gapMessage,
+      ),
+    );
+    const mirrorSpy = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({
+      status: "ok",
+      digest_stamped: true,
+    });
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTitle("Keep this ground-truth object (A)"));
+    await waitFor(() => expect(api.review.action).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByLabelText("Reviewed"));
+
+    await waitFor(() => expect(mirrorSpy).toHaveBeenCalledTimes(1));
+    expect(mirrorSpy.mock.calls[0][2]).toBe("complete");
+    expect(useStore.getState().toasts.map((t) => t.message)).toContain(gapMessage);
+  });
+
+  it("promoteReviewToValidationReference adopts the committed body and toasts after the reason", async () => {
+    const committed = {
+      validated: true,
+      reference: "review_confirmed",
+      reviewed_image_count: 4,
+      conf: 0.42,
+      reason: "Validated. Your review confirms this model's counts.",
+      buckets_stamped: [PRED_DIR_A],
+    };
+    vi.spyOn(api.review, "validateReference").mockRejectedValue(
+      new StructuredRefusalError(
+        { error: "audit_entry_not_written", message: gapMessage, committed },
+        409,
+        gapMessage,
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+    const refBtn = () => screen.getByRole("button", { name: /validation reference/i });
+    await waitFor(() => expect(refBtn()).not.toBeDisabled());
+
+    fireEvent.click(refBtn());
+    expect(await screen.findByText("Validated")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(useStore.getState().toasts.at(-1)?.message).toBe(`${committed.reason} ${gapMessage}`),
+    );
   });
 });
 

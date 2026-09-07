@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { api } from "@/api/client";
 import type { SaveResult } from "@/api/client";
 import { classesApi, subjectColor } from "@/api/classes";
+import { StructuredRefusalError } from "@/api/http";
 import * as CanvasStageMock from "@/components/Canvas/CanvasStage";
 import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
@@ -312,6 +313,68 @@ describe("AnnotateTab save/load race", () => {
 
     expect(classesApi.setImageStatus).not.toHaveBeenCalled();
     expect(useStore.getState().imageStatus.byImage["img1.jpg"]).toBe("negative");
+  });
+});
+
+describe("AnnotateTab audit-gap handling", () => {
+  it("treats an unrecorded save as ok (echoes the token, clears dirty) and toasts the message", async () => {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    saveSpy.mockResolvedValueOnce({
+      status: "unrecorded",
+      base_mtime: "101",
+      message: "gui_save_labels completed and its audit entry could not be written",
+    });
+    act(addBox);
+    pressSave();
+    await flush();
+
+    expect(useStore.getState().canvas.dirty).toBe(false);
+    expect(useStore.getState().toasts.at(-1)?.message).toBe(
+      "gui_save_labels completed and its audit entry could not be written",
+    );
+
+    // The echoed token from the unrecorded save is what the next save sends.
+    act(addBox);
+    pressSave();
+    await flush();
+    expect(saveSpy.mock.calls[1][0].base_mtime).toBe("101");
+  });
+
+  it("toasts the message when the healed status write's own audit line is lost", async () => {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    const message = "gui_set_image_status completed and its audit entry could not be written";
+    vi.spyOn(classesApi, "setImageStatus").mockRejectedValue(
+      new StructuredRefusalError(
+        { error: "audit_entry_not_written", message, committed: { status: "ok" } },
+        409,
+        message,
+      ),
+    );
+    act(addBox);
+    pressSave();
+    await flush();
+
+    expect(useStore.getState().toasts.at(-1)?.message).toBe(message);
+  });
+
+  it("stays silent when the healed status write fails for any other reason", async () => {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    vi.spyOn(classesApi, "setImageStatus").mockRejectedValue(new Error("network down"));
+    const before = useStore.getState().toasts.length;
+    act(addBox);
+    pressSave();
+    await flush();
+
+    expect(useStore.getState().toasts.length).toBe(before);
   });
 });
 
