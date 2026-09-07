@@ -540,21 +540,19 @@ export function ProjectPicker() {
                     className="flex flex-col gap-2 w-full text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg"
                     onClick={() => selectCard(p)}
                   >
+                    <span
+                      id={`project-name-${index}`}
+                      className="font-medium text-tcip-fg truncate"
+                      title={p.name}
+                    >
+                      {p.name}
+                    </span>
                     <div id={`project-desc-${index}`} className="contents">
-                      <div className="flex items-center justify-between gap-2">
-                        <span
-                          id={`project-name-${index}`}
-                          className="font-medium text-tcip-fg truncate"
-                          title={p.name}
-                        >
-                          {p.name}
+                      {p.is_active && (
+                        <span className="tcip-badge bg-tcip-accent/20 text-tcip-accent self-start">
+                          active
                         </span>
-                        {p.is_active && (
-                          <span className="tcip-badge bg-tcip-accent/20 text-tcip-accent">
-                            active
-                          </span>
-                        )}
-                      </div>
+                      )}
                       {p.site ? (
                         <span className="text-[11px] text-tcip-muted truncate" title={p.site}>
                           {p.site}
