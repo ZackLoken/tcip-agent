@@ -25,17 +25,17 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 14426c9e.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD b7e3202b.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 14426c9e has 426 modules across the six scanned roots (136624 total lines):
+HEAD b7e3202b has 427 modules across the six scanned roots (136724 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 134 | 60865 |
+| tcip-mcp | 135 | 60965 |
 | tcip-annotation | 12 | 4299 |
 | tcip-web | 39 | 13371 |
 | tcip-store | 13 | 5244 |
@@ -540,7 +540,7 @@ Non-zero cross-package edge counts at HEAD:
 
 `packages/tcip-web/frontend/src` (`tcip-web-frontend`) has zero in-repo import edges to any Python module in any of the five Python roots: `build_module_inventory.py` resolves a TypeScript specifier only against a relative path or the `@/` alias into `packages/tcip-web/frontend/src` itself (`tools/build_module_inventory.py:307-327`), so no specifier in the frontend source tree can resolve to a file outside that tree.
 
-## Modules with zero importers (145)
+## Modules with zero importers (146)
 
 A module counts as zero-importer when no other module in its own scanned tree resolves an in-repo import to it (`imported_by_count == 0` in the regenerated inventory). This includes package entry points (`__init__.py`, `__main__.py`), CLI scripts under `tools/` invoked as processes, package `cli/` command modules invoked by name through the `tcip` dispatcher rather than imported, and every TypeScript `*.test.ts`/`*.test.tsx` file, none of which are expected to have an in-repo importer.
 
@@ -580,6 +580,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/__init__.py |
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/pipelines/training/__init__.py |
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py |
+| tcip-mcp | packages/tcip-mcp/src/tcip_mcp/pipelines/training/tensorboard_guardian.py |
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/tools/__init__.py |
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/utils/__init__.py |
 | tcip-web | packages/tcip-web/src/tcip_web/__init__.py |
