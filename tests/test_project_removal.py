@@ -69,6 +69,9 @@ def test_request_archives_marks_and_hides_the_project(client, tmp_path):
     body = resp.json()
     assert Path(body["archive_path"]).is_file()
     assert target.is_dir()  # nothing moved yet: phase one only marks
+    # coverage: the baseline carries neither field.
+    assert body["recorded_in_open_project"] is True
+    assert "sample_plot_open" in body["audit_note"]
 
     pending = workspace.pending_removal_record(target)
     assert pending is not None
@@ -219,14 +222,21 @@ def test_refuses_a_second_request_over_an_existing_marker(client, tmp_path):
     assert "already has a pending-removal marker" in second.json()["detail"]
 
 
-def test_refuses_when_no_project_is_open_then_admits_once_one_is(client, tmp_path, tmp_path_factory, monkeypatch):
+def test_admits_the_request_with_no_project_bound_and_records_both_lines_under_the_target(
+    client, tmp_path, tmp_path_factory, monkeypatch,
+):
     """``tmp_path`` (``<workspace>/project``) is the autouse ``_pin_platform_root`` fixture's own
     inherited platform root, and any bare-``@audited`` write under it (``initialize_project``'s
     own) would otherwise leave a ``.tcip`` there that reads as an accidental project; pin the
-    root somewhere outside the workspace instead so "no project is open" is genuinely true."""
+    root somewhere outside the workspace instead so nothing is genuinely bound. Admitted rather
+    than refused: the target's own log carries both of the request's own lines, and the archive
+    door's own line (unmoved, Q49) stays under the platform root the pinned variable names."""
+    from tcip_mcp import audit
+
     ws = tmp_path.parent
     ws.mkdir(exist_ok=True)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path_factory.mktemp("unrelated_root")))
+    platform_root = tmp_path_factory.mktemp("unrelated_root")
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_root))
     target = _init(ws, "sample_plot_target")
     _add_image(target)
 
@@ -234,16 +244,72 @@ def test_refuses_when_no_project_is_open_then_admits_once_one_is(client, tmp_pat
         "/api/projects/remove",
         json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
     )
-    assert resp.status_code == 409
-    assert "no project is open" in resp.json()["detail"]
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["recorded_in_open_project"] is False
+    assert body["audit_scope"] == str(target)
+    assert "$TCIP_STATE_ROOT" in body["audit_note"]
 
-    _init(ws, "sample_plot_open")
-    workspace.activate_project("sample_plot_open")
-    resp2 = client.post(
+    target_lines = _audit_lines(target)
+    assert [line["tool"] for line in target_lines] == [
+        "project_removal_requested", "gui_project_removal_requested",
+    ]
+
+    # coverage: the archive door's own line is unmoved by this decision (Q49), and no request
+    # line rides behind it under the root the pinned variable names.
+    platform_tools = [line["tool"] for line in ts.read_log(audit.audit_log_key()).records]
+    assert platform_tools[-1] == "archive_project"
+    assert "project_removal_requested" not in platform_tools
+    assert "gui_project_removal_requested" not in platform_tools
+
+
+def test_refuses_the_markers_own_project_with_no_platform_root_bound(
+    client, tmp_path, tmp_path_factory, monkeypatch,
+):
+    """GUARDS: the baseline refuses this with the "no project is open" string, since its
+    identity_conflict never reaches the marker check once nothing is bound; the marker spelling
+    now runs whether or not a project is bound, so the answer carries the marker's own text
+    instead. The first request runs before the marker is written, so the backend's own startup
+    binding falls to the inherited (unrelated) root rather than adopting the marker's own
+    project, keeping "no platform root bound" genuinely true afterward."""
+    ws = tmp_path.parent
+    ws.mkdir(exist_ok=True)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path_factory.mktemp("unrelated_root")))
+    assert client.get("/health").status_code == 200
+    _init(ws, "sample_plot_marker")
+    ts.replace(workspace.active_project_key(), "sample_plot_marker")
+
+    resp = client.post(
         "/api/projects/remove",
-        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+        json={"name": "sample_plot_marker", "confirm_name": "sample_plot_marker", "user": "t"},
     )
-    assert resp2.status_code == 200
+    assert resp.status_code == 409
+    assert "opens by default" in resp.json()["detail"]
+
+
+def test_refuses_the_canvas_bound_project_with_no_platform_root_bound(
+    client, tmp_path, tmp_path_factory, monkeypatch,
+):
+    """GUARDS through the message alone: at the baseline, the canvas spelling is only checked
+    once a project is bound, so with none bound the baseline answers the "no project is open"
+    string for this same 409 (VACUOUS on the status alone)."""
+    ws = tmp_path.parent
+    ws.mkdir(exist_ok=True)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path_factory.mktemp("unrelated_root")))
+    target = _init(ws, "sample_plot_canvas")
+    _add_image(target)
+
+    sel = client.post(
+        "/api/dataset/select", json={"project_root": str(target), "dataset_root": str(target)},
+    )
+    assert sel.status_code == 200
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_canvas", "confirm_name": "sample_plot_canvas", "user": "t"},
+    )
+    assert resp.status_code == 409
+    assert "the GUI has open" in resp.json()["detail"]
 
 
 def test_refuses_the_markers_own_project_then_admits_a_different_one(client, tmp_path):
@@ -297,7 +363,8 @@ def test_refuses_a_platform_root_bound_to_a_project_the_marker_does_not_name(cli
             json={"name": "sample_plot_second", "confirm_name": "sample_plot_second", "user": "t"},
         )
         assert resp.status_code == 409
-        assert "restart on a different project first" in resp.json()["detail"]
+        assert "restart the backend first" in resp.json()["detail"]
+        assert "TCIP_STATE_ROOT" in resp.json()["detail"]
     finally:
         project_paths.restore_binding(before)
 

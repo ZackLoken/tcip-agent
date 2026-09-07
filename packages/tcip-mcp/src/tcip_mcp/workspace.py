@@ -380,9 +380,10 @@ def workspace_project_name(root: Path) -> Optional[str]:
     workspace holds (:func:`workspace_project_root`) names no project. Answers through that
     predicate rather than :func:`adoptable_project_root`, since naming a directory opens no
     store: a pending project still names itself here, so the canvas binding's own
-    ``project_name``, ``binding_divergence``'s advice, and the removal door's no-project-open
-    check all stay accurate whether or not a marker or a store refusal is in play. The one
-    predicate :mod:`tcip_web.routes.dataset` calls to name the ``canvas_open_binding`` record's
+    ``project_name``, ``binding_divergence``'s advice, and whether the removal door's own line
+    lands under this root (:func:`tcip_mcp.project_removal.request_project_removal`) all stay
+    accurate whether or not a marker or a store refusal is in play. The one predicate
+    :mod:`tcip_web.routes.dataset` calls to name the ``canvas_open_binding`` record's
     ``project_name``, and :mod:`tcip_mcp.tools.vision_tools` calls the same way to name a
     divergent binding's project.
     """

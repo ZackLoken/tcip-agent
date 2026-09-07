@@ -15,10 +15,12 @@ Three doors write here. ``POST /active`` writes the active-project marker only, 
 line staying wherever the MCP tool's own caller emits one (this route emits none itself).
 ``GET /{name}/removal-preview`` writes nothing (:func:`tcip_mcp.project_removal.
 removal_preview`). ``POST /remove`` (:func:`tcip_mcp.project_removal.request_project_removal`)
-is GUI-only and, on success, leaves three lines: the archive door's own line, then this
-request's own line, both in the open project's own log, and the removed project's own last
-line, naming the marker just written, in the target's own log; phase two's own completion
-line lands on the moved tree at the next backend start.
+is GUI-only and, on success, leaves the removed project's own last line, naming the marker just
+written, in the target's own log; this request's own line joins the archive door's own line in
+a bound project's own log when this process is bound to one (``recorded_in_open_project`` true
+in the response), or joins the target's own line in the target's own log otherwise, so a
+workspace with nothing bound still records the whole request. Phase two's own completion line
+lands on the moved tree at the next backend start.
 
 ``tcip_mcp.project_removal`` imports nothing from ``tcip_web``: this module resolves the
 requesting identity through :mod:`tcip_web.identity` and supplies :func:`_job_conflict`, the
@@ -246,6 +248,11 @@ class RemovalResponse(BaseModel):
     dependent_projects: list[DependentProject]
     completes: str
     audit_scope: str
+    # True when the route's own line landed in a bound project's log; false when, with none
+    # bound, it landed in the target's own log instead.
+    recorded_in_open_project: bool
+    # Names where the request's own two lines and the archive door's own line went.
+    audit_note: str
 
 
 def _job_conflict(target: Path) -> str | None:
