@@ -268,6 +268,9 @@ export function TrainingTab() {
         const pruned = new Set(Array.from(prev).filter((id) => stillPresent.has(id)));
         return pruned.size === prev.size ? prev : pruned;
       });
+      // A selected run that left the list (repinned platform root, say) must give up its
+      // stream too, or a stale selection keeps reconnecting behind a run this list never shows.
+      setSelectedRun((prev) => (prev !== null && !stillPresent.has(prev) ? null : prev));
     } catch (e) {
       setRunsError(`Could not load training runs: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -768,7 +771,11 @@ export function TrainingTab() {
                       {TRAINING_CANCELLABLE.has(r.status) && (
                         <button
                           type="button"
-                          title="Reaches a live process only; a stale running row keeps this control until its heartbeat window lapses."
+                          title={
+                            r.status === "running"
+                              ? "Reaches a live process only; a stale running row keeps this control until its heartbeat window lapses."
+                              : "Cancels a run that has not started yet."
+                          }
                           aria-label={`Cancel ${r.run_id}`}
                           aria-describedby={cancelError ? `cancel-error-${r.run_id}` : undefined}
                           disabled={cancelling}

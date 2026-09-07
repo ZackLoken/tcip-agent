@@ -79,6 +79,7 @@ describe("TrainingTab run list", () => {
           external: true,
           heartbeat: new Date(Date.now() - 3 * 60_000).toISOString(),
         }),
+        run({ run_id: "train-fresh", status: "created" }),
       ],
     });
 
@@ -90,6 +91,10 @@ describe("TrainingTab run list", () => {
     expect(screen.getByRole("button", { name: "Cancel train-stale" })).toHaveAttribute(
       "title",
       "Reaches a live process only; a stale running row keeps this control until its heartbeat window lapses.",
+    );
+    expect(screen.getByRole("button", { name: "Cancel train-fresh" })).toHaveAttribute(
+      "title",
+      "Cancels a run that has not started yet.",
     );
   });
 
@@ -888,6 +893,39 @@ describe("TrainingTab status toast", () => {
       "Training stream error: unknown run: train-just-launched",
     );
     expect(pushToast).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("TrainingTab stream lifecycle", () => {
+  it("closes the stream and clears the detail panel when the selected run leaves the next poll", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
+    }));
+    const listRuns = vi.spyOn(trainingApi, "listRuns");
+    listRuns.mockResolvedValueOnce({
+      runs: [run({ run_id: "train-vanishing", status: "running" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
+    const stop = vi.fn();
+    vi.mocked(openTrainingStream).mockImplementation(() => stop);
+
+    vi.useFakeTimers();
+    try {
+      render(<TrainingTab />);
+      await vi.waitFor(() => expect(screen.getByText("train-vanishing")).toBeInTheDocument());
+      fireEvent.click(screen.getByText("train-vanishing"));
+      await vi.waitFor(() => expect(openTrainingStream).toHaveBeenCalledTimes(1));
+
+      listRuns.mockResolvedValueOnce({ runs: [] });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RUN_REFRESH_MS);
+      });
+
+      expect(stop).toHaveBeenCalled();
+      expect(screen.getByText("No run selected.")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -224,7 +224,8 @@ export type TrainingStreamMsg = TrainingMetricFrame | TrainingStatusFrame;
  * The server replays all rows from the start on each (re)connect, so the consumer must
  * dedupe by epoch/step. A ``status`` frame carrying a report is terminal; one carrying only
  * ``error`` means the run's record does not exist yet (selected at its launch moment), and
- * the socket keeps reconnecting under backoff until a report arrives.
+ * the socket keeps reconnecting under backoff until a report arrives. That error-only frame
+ * never resets the backoff, so the reconnect delay grows to the cap while the run stays unknown.
  */
 export function openTrainingStream(
   project_root: string,
@@ -239,6 +240,7 @@ export function openTrainingStream(
     ...jsonFrameHandlers<TrainingStreamMsg>(
       onMessage,
       (frame) => frame.type === "status" && frame.status != null,
+      (frame) => frame.type === "metric" || (frame.type === "status" && frame.status != null),
     ),
   });
   socket.start();
