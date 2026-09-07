@@ -818,12 +818,15 @@ def release_project_binding(name: str, *, released_by: str) -> dict:
 
     marker_cleared = False
     marker_key = workspace.active_project_key()
+    versioned: Optional[tcip_store.Versioned] = None
     try:
         versioned = tcip_store.read_versioned(marker_key, default=None)
         marker_value = (versioned.value or "").strip()
     except (OSError, tcip_store.DecodeError):
         marker_value = ""
     if marker_value:
+        # marker_value is only truthy when the read above succeeded, so versioned is bound.
+        assert versioned is not None
         try:
             marker_root: Optional[Path] = workspace.project_path(marker_value, create=False)
         except ValueError:
