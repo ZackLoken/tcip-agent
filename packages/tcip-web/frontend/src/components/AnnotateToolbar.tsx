@@ -273,6 +273,13 @@ export function AnnotateToolbar({
       if (committed) {
         if (FINISHED_STATUSES.includes(newStatus) && !committed.digest_stamped) {
           useStore.getState().markStale(currentImage);
+          useStore
+            .getState()
+            .pushToast(
+              `${currentImage}'s status was recorded, but its schema stamp did not land; it ` +
+                "still needs re-confirmation.",
+              "info",
+            );
         }
         useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
         return;

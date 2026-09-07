@@ -287,13 +287,14 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
         raw = tcip_store.read(plant_mapping.plant_mapping_key(root, payload.name), default=None)
         if isinstance(raw, dict) and raw.get("built_at") == build.built_at:
             raise audit_gap_409(exc, _committed()) from exc
-        gap = AuditEntryNotWritten(exc.tool, exc)
-        gap.args = (
-            f"{exc} The new record was never persisted under this name (on a supersede "
-            "rebuild, only the archived copy of the old one is, on disk and unrecorded). "
-            "Rebuild with supersede=True once the audit log's destination is repaired.",
-        )
-        raise audit_gap_409(gap, None) from exc
+        raise audit_gap_409(
+            exc, None,
+            message=(
+                f"{exc} The new record was never persisted under this name (on a supersede "
+                "rebuild, only the archived copy of the old one is, on disk and unrecorded). "
+                "Rebuild with supersede=True once the audit log's destination is repaired."
+            ),
+        ) from exc
     except plant_mapping.MappingRebuildRefusal as exc:
         raise HTTPException(exc.status, str(exc)) from exc
 
