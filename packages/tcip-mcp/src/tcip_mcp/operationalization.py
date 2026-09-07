@@ -635,7 +635,7 @@ def _state_4_text(spec: TraitSpec, delivery_kind: str, field: str) -> str:
         f"{delivery_kind} delivery rests on {field}, which this trait's spec leaves empty. Nothing "
         "resolves the call the statement describes, so there is no measurement to deliver. Record "
         "the breeder's value with revise_trait_spec(project_root=..., "
-        f"trait_name={spec.name!r}, ...), then restate and re-confirm."
+        f"trait_name={spec.name!r}, fields=..., rationale=...), then restate and re-confirm."
     )
 
 
