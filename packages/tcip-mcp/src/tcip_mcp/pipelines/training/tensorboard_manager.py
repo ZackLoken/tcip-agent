@@ -5,14 +5,14 @@ it once the launcher is gone. On Windows every child is assigned to one job obje
 ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE``, so the kernel kills every assigned child the moment this
 process's last handle to the job closes, on any parent death. On Linux and macOS each child runs
 under a guardian process (``tensorboard_guardian``) that watches this process by pid and, on this
-process's death, ends the child within about three seconds (one second to detect the death, plus
-the guardian's own escalation grace for a child that ignores its terminate signal). Everywhere,
-and as a second line of defense beside the platform tie, a normal interpreter exit runs an
-``atexit`` hook that stops every tracked child, which does not run when this process is killed
-rather than exiting on its own.
+process's death, ends the child within about a second to detect the death, plus the escalation
+grace (``_GUARDIAN_TERM_GRACE_SECONDS``) for a child that ignores its terminate signal.
+Everywhere, and as a second line of defense beside the platform tie, a normal interpreter exit
+runs an ``atexit`` hook that stops every tracked child, which does not run when this process is
+killed rather than exiting on its own.
 
 ``_GUARDIAN_TERM_GRACE_SECONDS`` (passed to the guardian as ``--term-grace``, which carries no
-grace of its own) must stay at least a second under ``_STOP_WAIT_SECONDS``, the wait
+grace of its own) must stay more than a second under ``_STOP_WAIT_SECONDS``, the wait
 ``stop_tensorboard`` gives the guardian to end before force-killing it; a module-level check at
 import raises if it does not, so the two never drift apart silently. With the constraint held,
 the guardian's kill of a stubborn TensorBoard lands, and the guardian itself exits, before this
@@ -62,7 +62,7 @@ _TB_PROCESSES: dict[str, _Launched] = {}
 # caught later by the poll in ``list_tensorboard``.
 _STARTUP_GRACE_SECONDS = 0.5
 
-# The guardian's escalation grace, passed as --term-grace, must stay at least a second under
+# The guardian's escalation grace, passed as --term-grace, must stay more than a second under
 # the wait below so its kill always lands before stop_tensorboard gives up.
 _STOP_WAIT_SECONDS = 5.0
 _GUARDIAN_TERM_GRACE_SECONDS = 2.0
@@ -190,7 +190,10 @@ if sys.platform == "win32":
 def _stop_all_tracked() -> None:
     """Stop every child this process still has tracked, for the atexit hook to call.
 
-    Runs serially, one stop after another, each up to ``_STOP_WAIT_SECONDS``.
+    Runs serially, one stop after another, each up to twice ``_STOP_WAIT_SECONDS`` (the wait for
+    a clean exit, then the same wait again for the kill to be reaped). A stop that cannot confirm
+    its kill within that reports so rather than raising, so this continues past any single
+    stop's outcome instead of leaving the rest of the sweep unrun.
     """
     for key in list(_TB_PROCESSES):
         stop_tensorboard(run_id=key)
@@ -304,7 +307,7 @@ def launch_tensorboard(logdir: str, run_id: str | None = None) -> dict:
         output.close()
         if proc is not None and proc.poll() is None:
             proc.kill()
-            proc.wait(timeout=5)
+            proc.wait(timeout=_STOP_WAIT_SECONDS)
         logger.warning("Failed to launch TensorBoard: %s", e)
         return {"error": str(e), "logdir": logdir}
 
@@ -332,10 +335,13 @@ def launch_tensorboard(logdir: str, run_id: str | None = None) -> dict:
 def stop_tensorboard(run_id: str | None = None, logdir: str | None = None) -> dict:
     """Stop a running TensorBoard process.
 
-    Waits up to ``_STOP_WAIT_SECONDS`` for the process to end on its own before force-killing
-    it, then waits the kill too so a stubborn child never becomes a zombie. The one case this
-    cannot see: a guardian the kernel ended outright leaves its own child alive with nothing
-    watching it, and this still reports the guardian's pid stopped.
+    Waits up to ``_STOP_WAIT_SECONDS`` for the process to end on its own, then force-kills it
+    and waits the same bound again for the kill to be reaped, so the worst case is twice the
+    wait, never unbounded; the entry is dropped from tracking either way. A kill this cannot
+    confirm reaped within that second wait is answered ``{"status": "kill_unconfirmed", "pid":
+    ...}`` rather than left to raise a ``TimeoutExpired`` out of this function. The one case
+    this cannot see at all: a guardian the kernel ended outright leaves its own child alive with
+    nothing watching it, and this still reports the guardian's pid stopped.
     """
     key = run_id or (str(Path(logdir).resolve()) if logdir else None)
     if not key or key not in _TB_PROCESSES:
@@ -348,7 +354,11 @@ def stop_tensorboard(run_id: str | None = None, logdir: str | None = None) -> di
             entry.proc.wait(timeout=_STOP_WAIT_SECONDS)
         except subprocess.TimeoutExpired:
             entry.proc.kill()
-            entry.proc.wait(timeout=_STOP_WAIT_SECONDS)
+            try:
+                entry.proc.wait(timeout=_STOP_WAIT_SECONDS)
+            except subprocess.TimeoutExpired:
+                _release_output(entry)
+                return {"status": "kill_unconfirmed", "pid": entry.proc.pid}
     _release_output(entry)
     return {"status": "stopped", "pid": entry.proc.pid}
 
