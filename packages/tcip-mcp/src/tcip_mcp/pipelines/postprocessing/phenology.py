@@ -580,9 +580,9 @@ def _write_phenology_delivery(
     flags: dict[str, str | None],
     acknowledgement: Acknowledgement | None,
     basis: OperationalizationBasis | None,
-    operating_point_confs: Mapping[str, float | None],
+    document_reconciliations: Mapping[str, Mapping],
     producer: dict,
-    bindings: dict,
+    dimension_reconciliations: Mapping[str, Mapping],
     predictions_by_date: Mapping[str, str],
     project_root: str | Path | None,
     plant_mapping: dict,
@@ -631,9 +631,23 @@ def _write_phenology_delivery(
     ``plant_attribution`` fill theirs directly, and the whole dict travels to the delivery event
     unchanged.
 
+    ``document_reconciliations`` and ``dimension_reconciliations`` are the same two mappings
+    ``record_delivery_binding_event`` takes, threaded straight through to it; this writer derives
+    the count operating point's own ``bindings`` and ``confs`` from
+    ``document_reconciliations["operating_point"]`` rather than taking either as a separate
+    argument, so the writer carries one fact one way instead of three arguments that could
+    disagree. This writer always declares both ``operating_point`` and
+    ``classifier_operating_point`` to the event writer, so when ``predictions_by_date`` is
+    non-empty both must already have an entry in ``document_reconciliations``, checked before the
+    gate runs and before anything is written: a caller passing the count entry alone is refused
+    here, with nothing on disk, rather than by the event writer after the file. With an empty
+    ``predictions_by_date`` no entry is required.
+
     Raises:
-        ValueError: ``basis`` is not an ``OperationalizationBasis``, the gate refused, or ``flags``
-            carries no ``classifier`` dimension; nothing is written in any of these cases.
+        ValueError: ``basis`` is not an ``OperationalizationBasis``, ``predictions_by_date`` is
+            non-empty but ``document_reconciliations`` lacks an entry this writer declares, the
+            gate refused, or ``flags`` carries no ``classifier`` dimension; nothing is written in
+            any of these cases.
         AuditEntryNotWritten (``tcip_mcp.audit``): the dataset-scoped delivery-event audit line
             could not be appended, raised by ``record_delivery_binding_event`` after the CSV was
             already written to ``out_path``. Both ``write_phenology_csv`` and
@@ -646,6 +660,21 @@ def _write_phenology_delivery(
             "produce one and are the primitives to call; this writer cannot read the record itself, "
             "because it is given a trait spec rather than a project to read from."
         )
+    declared_documents = ("operating_point", "classifier_operating_point")
+    if predictions_by_date:
+        missing = [doc for doc in declared_documents if doc not in document_reconciliations]
+        if missing:
+            raise ValueError(
+                f"{door}: predictions_by_date names {len(predictions_by_date)} bucket(s) but "
+                f"document_reconciliations carries no entry for {missing}; a phenology delivery "
+                "declares both operating_point and classifier_operating_point to the event "
+                "writer, so both must be reconciled before the gate runs and before anything "
+                "is written."
+            )
+    op_recon = document_reconciliations.get("operating_point", {})
+    bindings = op_recon.get("bindings", {})
+    operating_point_confs = op_recon.get("confs", {})
+
     from tcip_mcp.operationalization import STATE_CROSSING_DATES
     from tcip_mcp.pipelines.resolution import (
         check_delivery_gate, delivered_tail, record_delivery_binding_event,
@@ -690,8 +719,10 @@ def _write_phenology_delivery(
     # Not a schema column (the CSV above is already written with extrasaction="ignore"), but a
     # caller composing its own response from these cells needs to know whether it landed.
     cells["delivery_event_recorded"] = record_delivery_binding_event(
-        door, str(out_path), list(predictions_by_date.values()), bindings,
-        measurement_documents=["operating_point", "classifier_operating_point"],
+        door, str(out_path), list(predictions_by_date.values()),
+        document_reconciliations=document_reconciliations,
+        dimension_reconciliations=dimension_reconciliations,
+        measurement_documents=list(declared_documents),
         scale_document=None, acknowledgement=gate.effective_acknowledgement(),
         trait=spec.name, delivery_kind=STATE_CROSSING_DATES,
         project_root=project_root, plant_mapping=plant_mapping,
@@ -708,9 +739,9 @@ def write_phenology_csv(
     flags: dict[str, str | None],
     acknowledgement: Acknowledgement | None,
     basis: OperationalizationBasis | None,
-    operating_point_confs: Mapping[str, float | None],
+    document_reconciliations: Mapping[str, Mapping],
     producer: dict,
-    bindings: dict,
+    dimension_reconciliations: Mapping[str, Mapping],
     predictions_by_date: Mapping[str, str],
     project_root: str | Path | None,
     plant_mapping: dict,
@@ -725,6 +756,9 @@ def write_phenology_csv(
     ``operating_point_conf`` cell is read off it through ``dates_delivered``, so it aligns with the
     ``dates_delivered`` cell beside it regardless of this mapping's own iteration order.
     ``plant_mapping`` is ``_write_phenology_delivery``'s own required disclosure dict.
+    ``document_reconciliations`` and ``dimension_reconciliations`` are the same two mappings
+    ``record_delivery_binding_event`` takes; see ``_write_phenology_delivery`` for how this writer
+    derives its own ``bindings``/``operating_point_conf`` cell from the former.
     ``acknowledgement`` is ``None`` for every MCP-tool call (``deliver_phenology_milestones`` takes
     no acknowledgement) and a real :class:`~tcip_mcp.pipelines.resolution.Acknowledgement` only from
     the web ``export_csv`` route; the web ``export_count_csv`` route builds its own for the count
@@ -734,7 +768,8 @@ def write_phenology_csv(
         door, rows, out_path, spec, phenology_csv_columns(spec),
         include_majority_marker=True, flags=flags,
         acknowledgement=acknowledgement, basis=basis,
-        operating_point_confs=operating_point_confs, producer=producer, bindings=bindings,
+        document_reconciliations=document_reconciliations, producer=producer,
+        dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=project_root,
         plant_mapping=plant_mapping)
 
@@ -748,9 +783,9 @@ def write_phenology_curve_csv(
     flags: dict[str, str | None],
     acknowledgement: Acknowledgement | None,
     basis: OperationalizationBasis | None,
-    operating_point_confs: Mapping[str, float | None],
+    document_reconciliations: Mapping[str, Mapping],
     producer: dict,
-    bindings: dict,
+    dimension_reconciliations: Mapping[str, Mapping],
     predictions_by_date: Mapping[str, str],
     project_root: str | Path | None,
     plant_mapping: dict,
@@ -762,12 +797,15 @@ def write_phenology_curve_csv(
     milestone-only majority crossing-unconfirmed marker: a curve names no crossing for one to
     qualify. ``predictions_by_date`` is the same date-to-bucket mapping ``write_phenology_csv``
     takes. ``plant_mapping`` is ``_write_phenology_delivery``'s own required disclosure dict.
-    ``acknowledgement`` is the same required, caller-resolved value ``write_phenology_csv`` takes.
+    ``document_reconciliations`` and ``dimension_reconciliations`` are the same two mappings
+    ``write_phenology_csv`` takes. ``acknowledgement`` is the same required, caller-resolved value
+    ``write_phenology_csv`` takes.
     """
     return _write_phenology_delivery(
         door, rows, out_path, spec, curve_csv_columns(),
         include_majority_marker=False, flags=flags,
         acknowledgement=acknowledgement, basis=basis,
-        operating_point_confs=operating_point_confs, producer=producer, bindings=bindings,
+        document_reconciliations=document_reconciliations, producer=producer,
+        dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=project_root,
         plant_mapping=plant_mapping)
