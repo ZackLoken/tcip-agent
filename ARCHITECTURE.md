@@ -25,22 +25,22 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD c13cb893.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD e20375c3.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD c13cb893 has 434 modules across the six scanned roots (140475 total lines):
+HEAD e20375c3 has 434 modules across the six scanned roots (140837 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 137 | 62741 |
+| tcip-mcp | 137 | 62755 |
 | tcip-annotation | 12 | 4299 |
-| tcip-web | 40 | 13660 |
+| tcip-web | 40 | 13764 |
 | tcip-store | 13 | 5282 |
-| tcip-web-frontend | 215 | 49549 |
-| tools | 17 | 4944 |
+| tcip-web-frontend | 215 | 49790 |
+| tools | 17 | 4947 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
 `packages/`; `tools` is `tools/` at the repo root (not an installed package);
@@ -166,9 +166,9 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py | Prediction-bucket immutability: never silently overwrite predictions a human reviewed. | 7 | 11 |
 | packages/tcip-mcp/src/tcip_mcp/project_paths.py | Stable resolution of the platform state root, independent of a process's cwd. | 1 | 39 |
 | packages/tcip-mcp/src/tcip_mcp/project_record.py | The project record: the one document every project carries, holding its authored site. | 2 | 6 |
-| packages/tcip-mcp/src/tcip_mcp/project_removal.py | Project removal: archive now, mark for removal, move at the next backend start; the two doors, GUI-only. | 16 | 3 |
+| packages/tcip-mcp/src/tcip_mcp/project_removal.py | Project removal: archive now, mark for removal, move at the next backend start; the two doors, GUI-only. | 11 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/project_status.py | Per-project status pointer: a small, persisted summary of recent activity. | 2 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/registry_paths.py | The containment core and grammar-aware external test the checkpoint and dataset registries share, plus the resolver every stored registry path becomes an absolute one through. | 0 | 6 |
+| packages/tcip-mcp/src/tcip_mcp/registry_paths.py | The containment core and grammar-aware external test the checkpoint and dataset registries share, plus the resolver every stored registry path becomes an absolute one through. | 0 | 7 |
 | packages/tcip-mcp/src/tcip_mcp/server.py | MCP server entry point: register all domain tools and run on stdio. | 25 | 24 |
 | packages/tcip-mcp/src/tcip_mcp/statements.py | Comparable-value and content-hash primitives shared by every statement kind. | 0 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/store_catalogue.py | The whole store catalogue in one import: every module that registers a store, package-only so account_for reaches it with no repo root on sys.path. | 30 | 7 |
@@ -192,7 +192,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py | Project management tools. | 19 | 12 |
 | packages/tcip-mcp/src/tcip_mcp/tools/proposal_tools.py | Proposal-workflow tools: turn a chosen auto-labeling engine's output into predictions for canvas review. | 19 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/scale_tools.py | Physical per-pixel scale calibration: the delivery-gating producer for ``resolve_scale.json``. | 10 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py | Training MCP tools, config validation, launch training, HPO, status. | 32 | 12 |
+| packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py | Training MCP tools, config validation, launch training, HPO, status. | 32 | 13 |
 | packages/tcip-mcp/src/tcip_mcp/tools/trait_spec_authoring_tools.py | The agent's two doors for a trait spec: `author_trait_spec` creates (or restates, when a spec exists with no statement), `revise_trait_spec` edits fields on one already on record; neither confirms. | 4 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py | Vision tools: render annotations and predictions for visual analysis. | 22 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/traits.py | Trait knowledge, the human-defined *semantics* of each measurable trait (Tier C). | 7 | 22 |
@@ -253,7 +253,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/cli/__main__.py | ``python -m tcip_web.cli``: a package's own ``__init__.py`` cannot be the ``-m`` target, so this thin entry point is what a test (and an operator with no ``tcip`` console script installed yet) actually spawns. | 1 | 0 |
 | packages/tcip-web/src/tcip_web/cli/distill_learnings.py | Distill worksheet: gather one project's learning record in one place. | 5 | 0 |
 | packages/tcip-web/src/tcip_web/identity.py | Current-user identity for provenance stamping (created_by / accepted_by). | 0 | 6 |  <!-- queued: P5-329 unwired -->
-| packages/tcip-web/src/tcip_web/jobstore.py | Persistence + memory-cap helpers for the web's async job registries, plus `JobRegistry`, the shared dict-plus-lock live registry inference.py, tuning.py, review.py's priority queue and images.py's overview builds adopt. | 2 | 9 |
+| packages/tcip-web/src/tcip_web/jobstore.py | Persistence + memory-cap helpers for the web's async job registries, plus `JobRegistry`, the shared dict-plus-lock live registry inference.py, tuning.py, review.py's priority queue and images.py's overview builds adopt. | 2 | 8 |
 | packages/tcip-web/src/tcip_web/label_annotations_cache.py | The mtime-and-size-keyed label-document parse memo shared by the classes, dataset and review routes. | 1 | 3 |
 | packages/tcip-web/src/tcip_web/paths.py | Path resolution helpers with traversal protection. | 4 | 14 |
 | packages/tcip-web/src/tcip_web/routes/__init__.py | Route modules for the tcip-web FastAPI backend. | 17 | 1 |
@@ -270,7 +270,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/routes/images.py | Image serving: the one path pixels reach the browser through. | 11 | 3 |
 | packages/tcip-web/src/tcip_web/routes/inference.py | Inference routes: async tiled runs + live progress WebSocket. | 16 | 3 |
 | packages/tcip-web/src/tcip_web/routes/meta.py | Meta-loop routes: surface Claude's friction reports and retrospectives. | 2 | 1 |
-| packages/tcip-web/src/tcip_web/routes/projects.py | Workspace project discovery + the active-project marker. | 8 | 2 |
+| packages/tcip-web/src/tcip_web/routes/projects.py | Workspace project discovery + the active-project marker. | 14 | 2 |
 | packages/tcip-web/src/tcip_web/routes/results.py | Results routes: plant-mapping, per-plant phenology curves, CSV export (phenology and count), the operationalization record surface, the trait-spec statement surface, and the read-only delivery-event list. | 23 | 1 |
 | packages/tcip-web/src/tcip_web/routes/review.py | Review routes: verdict/GT recording plus the image-status group and the priority queue; validate_reference moved to routes/validation.py. | 19 | 5 |
 | packages/tcip-web/src/tcip_web/routes/sessions.py | Session-tracking routes: annotation_stats.json equivalent. | 4 | 1 |
@@ -524,7 +524,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | tools/verify_skill_tools.py | Guardrail: hold every tool name in agent-facing prose to the registry. | 3 | 0 |
 | tools/verify_skill_traits.py | Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in crops.yml. | 1 | 0 |
 
-## Package-level dependency rules holding at HEAD 7a46cd77
+## Package-level dependency rules holding at HEAD e20375c3
 
 The following sentences are checked against every in-repo Python import edge in the regenerated module inventory (an edge is counted only when both the importing file and the imported file resolve to a file inside this repo; stdlib and third-party imports are excluded by `build_module_inventory.py`, see docstring at `tools/build_module_inventory.py:9-20`).
 
@@ -538,15 +538,14 @@ Non-zero cross-package edge counts at HEAD:
 - `tools` -> `tcip-mcp`: 20 import edges.
 - `tools` -> `tcip-web`: 18 import edges.
 - `tcip-mcp` -> `tcip-annotation`: 76 import edges.
-- `tcip-mcp` -> `tcip-web`: 5 import edges, all of them `project_removal.py`'s function-body
-  imports of `tcip_web.jobstore`, `tcip_web.routes.inference`, `tcip_web.routes.review`,
-  `tcip_web.routes.tuning` and `tcip_web.identity` (the inventory walks the whole AST, so a
-  deferred import counts); `store_catalogue.py` imports nothing from `tcip-web`, and no other
-  module under `packages/tcip-mcp` does either. The ruling is that `tcip-mcp` imports nothing
-  from `tcip-web`, so these five are a defect of the project-removal family, open in its own
-  record until its fix-up removes them.
+- `tcip-mcp` -> `tcip-web`: 0 import edges. The inventory walks the whole AST, so a
+  function-body import counts; `project_removal.py`'s doors take the job-registry walk as a
+  `job_conflict` callable and the requesting identity as a string, both supplied by
+  `tcip_web.routes.projects`, so the package holds no edge into the layer above it.
 - `tcip-web` -> `tcip-annotation`: 13 import edges.
-- `tcip-web` -> `tcip-mcp`: 118 import edges.
+- `tcip-web` -> `tcip-mcp`: 120 import edges, two of them `routes/projects.py`'s own
+  `_job_conflict` importing `tcip_mcp.registry_paths.nearest_containing_ancestor` and
+  `tcip_mcp.tools.training_tools`, the edges the job-registry walk carries.
 
 `packages/tcip-web/frontend/src` (`tcip-web-frontend`) has zero in-repo import edges to any Python module in any of the five Python roots: `build_module_inventory.py` resolves a TypeScript specifier only against a relative path or the `@/` alias into `packages/tcip-web/frontend/src` itself (`tools/build_module_inventory.py:307-327`), so no specifier in the frontend source tree can resolve to a file outside that tree.
 
@@ -975,8 +974,8 @@ registered at HEAD.
 | method | path | handler | line |
 |---|---|---|---|
 | GET | `/tree` | `get_dataset_tree` | `routes/dataset.py:152` |  <!-- queued: P5-83 unify -->
-| POST | `/select` | `select_dataset` | `routes/dataset.py:237` |
-| POST | `/nav` | `set_current_image` | `routes/dataset.py:369` |
+| POST | `/select` | `select_dataset` | `routes/dataset.py:245` |
+| POST | `/nav` | `set_current_image` | `routes/dataset.py:385` |
 
 ### routes/fs.py, prefix `/api/fs` (1 route)
 
@@ -1013,8 +1012,8 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `` (root) | `list_projects` | `routes/projects.py:132` |
-| POST | `/active` | `activate_project` | `routes/projects.py:203` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
+| GET | `` (root) | `list_projects` | `routes/projects.py:143` |
+| POST | `/active` | `activate_project` | `routes/projects.py:214` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
 
 ### routes/results.py, prefix `/api/results` (15 routes)
 
@@ -2164,8 +2163,8 @@ suffix=".json")`, the same shape `dataset_registry` and `.tcip/project.json` (fo
 Shape: `{requested_at, requested_by, archive_path, holding_dir, external_roots,
 dependent_projects}`, one document per project. Written once, `concurrency="cas"` with
 `expect=Version.ABSENT`, by `request_project_removal`
-(`packages/tcip-mcp/src/tcip_mcp/project_removal.py:342`); deleted, at the version the
-completing walk read it at, by `complete_pending_removals` (`project_removal.py:434`).
+(`packages/tcip-mcp/src/tcip_mcp/project_removal.py:344`); deleted, at the version the
+completing walk read it at, by `complete_pending_removals` (`project_removal.py:443`).
 
 Readers: `pending_removal_record`/`pending_removal_or_none` (`workspace.py:247`, `:247`), the
 predicate `adoptable_project_root`, `ingest_images` and `tcip_web.paths.allowed_roots`'s
