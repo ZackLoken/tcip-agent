@@ -81,11 +81,13 @@ def test_launch_folds_an_unconfirmed_kill_into_the_error_after_a_raising_tie_ass
 
     spawned: list[subprocess.Popen] = []
     monkeypatch.setattr(tb.subprocess, "Popen", _never_confirms_kill_popen_class(spawned))
-    # force the job-assignment branch regardless of the host platform, so the test is portable.
+    # _assign_to_win_job exists only on a Windows import of the manager; raising=False installs it
+    # on every platform so the forced win32 branch below reaches it there too.
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(
         tb, "_assign_to_win_job",
         lambda proc: (_ for _ in ()).throw(RuntimeError("tie assignment failed")),
+        raising=False,
     )
 
     try:
