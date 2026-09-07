@@ -1002,14 +1002,25 @@ def _refuse_append(*args: object, **kwargs: object) -> None:
 def test_save_classes_answers_409_with_the_committed_body_on_a_lost_audit_line(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The registry write already committed; a lost audit line answers the gap, not a 200."""
+    """The registry write already committed; a lost audit line answers the gap, not a 200. An
+    identical resave changes nothing but the version token, so the refused-append pass's
+    ``committed`` is compared field by field (version excepted) against the first pass's real
+    200 body."""
     import tcip_mcp.audit as audit_module
+
+    healthy = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"bud": {"description": "a bud"}}, "version": None},
+    )
+    assert healthy.status_code == 200, healthy.text
+    healthy_body = healthy.json()
 
     monkeypatch.setattr(audit_module, "append", _refuse_append)
     resp = client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-              "subjects": {"bud": {"description": "a bud"}}, "version": None},
+              "subjects": {"bud": {"description": "a bud"}}, "version": healthy_body["version"]},
     )
     assert resp.status_code == 409
     detail = resp.json()["detail"]
@@ -1018,6 +1029,9 @@ def test_save_classes_answers_409_with_the_committed_body_on_a_lost_audit_line(
     assert committed["status"] == "ok"
     assert committed["n_subjects"] == 1
     assert committed["classes_path"] == str(tmp_path / "classes.json")
+    assert {k: v for k, v in committed.items() if k != "version"} == {
+        k: v for k, v in healthy_body.items() if k != "version"
+    }
     on_disk = json.loads((tmp_path / "classes.json").read_text())
     assert set(on_disk) == {"bud"}
 
@@ -1025,18 +1039,23 @@ def test_save_classes_answers_409_with_the_committed_body_on_a_lost_audit_line(
 def test_set_image_status_answers_409_with_the_committed_body_on_a_lost_audit_line(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """An identical repeat write is idempotent, so the refused-append pass's ``committed`` is
+    compared field by field against the first pass's real 200 body."""
     import tcip_mcp.audit as audit_module
 
+    payload = {"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+               "image_name": "A.JPG", "status": "complete", "subject": "bud"}
+    healthy = client.post("/api/classes/image_status", json=payload)
+    assert healthy.status_code == 200, healthy.text
+    healthy_body = healthy.json()
+
     monkeypatch.setattr(audit_module, "append", _refuse_append)
-    resp = client.post(
-        "/api/classes/image_status",
-        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-              "image_name": "A.JPG", "status": "complete", "subject": "bud"},
-    )
+    resp = client.post("/api/classes/image_status", json=payload)
     assert resp.status_code == 409
     detail = resp.json()["detail"]
     assert detail["error"] == "audit_entry_not_written"
     assert detail["committed"]["status"] == "ok"
+    assert detail["committed"] == healthy_body
     loaded = client.get(
         "/api/classes/image_status",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud"},
@@ -1047,19 +1066,24 @@ def test_set_image_status_answers_409_with_the_committed_body_on_a_lost_audit_li
 def test_set_image_status_bulk_answers_409_with_the_committed_body_on_a_lost_audit_line(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The bulk payload names at least one real status, so the append actually runs."""
+    """The bulk payload names at least one real status, so the append actually runs. An
+    identical repeat write is idempotent, so the refused-append pass's ``committed`` is compared
+    field by field against the first pass's real 200 body."""
     import tcip_mcp.audit as audit_module
 
+    payload = {"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud",
+               "statuses": {"A.JPG": "complete"}}
+    healthy = client.post("/api/classes/image_status/bulk", json=payload)
+    assert healthy.status_code == 200, healthy.text
+    healthy_body = healthy.json()
+
     monkeypatch.setattr(audit_module, "append", _refuse_append)
-    resp = client.post(
-        "/api/classes/image_status/bulk",
-        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud",
-              "statuses": {"A.JPG": "complete"}},
-    )
+    resp = client.post("/api/classes/image_status/bulk", json=payload)
     assert resp.status_code == 409
     detail = resp.json()["detail"]
     assert detail["error"] == "audit_entry_not_written"
     assert detail["committed"]["n"] == 1
+    assert detail["committed"] == healthy_body
     loaded = client.get(
         "/api/classes/image_status",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud"},

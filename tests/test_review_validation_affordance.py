@@ -397,7 +397,10 @@ def test_route_answers_409_with_the_committed_response_on_a_lost_audit_line(
     client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
     """The stamp already committed; the 409 carries the same response a 200 would, with
-    ``validated`` and ``buckets_stamped`` exactly as they were written.
+    ``validated`` and ``buckets_stamped`` exactly as they were written. Compared field by field
+    against an identical, independently built project's real 200 body: the route's own
+    "already validated" short-circuit answers differently on a retry against the same bucket, so
+    the reference body cannot come from replaying this call against the bucket it just stamped.
 
     Refuses the route's own line (``audit_gap.record_event_or_raise``, the module-level name
     ``record_committed`` calls through) rather than every append: the sealed record's own line,
@@ -412,7 +415,14 @@ def test_route_answers_409_with_the_committed_response_on_a_lost_audit_line(
         raise audit_module.AuditEntryNotWritten(tool, _AppendRefused(
             "the audit log could not be appended to"))
 
-    proj, pred_dir = _make_dense_reviewed_project(tmp_path)
+    healthy_proj, healthy_pred_dir = _make_dense_reviewed_project(tmp_path / "healthy")
+    healthy = client.post("/api/review/validate_reference", json={
+        "dataset_root": healthy_proj, "trait": "bud_opening", "pred_dir": healthy_pred_dir,
+        "subject": "bud"})
+    assert healthy.status_code == 200, healthy.text
+    healthy_body = healthy.json()
+
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path / "refused")
     monkeypatch.setattr(audit_gap_module, "record_event_or_raise", _refuse_record)
     resp = client.post("/api/review/validate_reference", json={
         "dataset_root": proj, "trait": "bud_opening", "pred_dir": pred_dir, "subject": "bud"})
@@ -423,6 +433,10 @@ def test_route_answers_409_with_the_committed_response_on_a_lost_audit_line(
     assert committed["validated"] is True
     assert committed["reference"] == "reviewer_confirmed_annotations"
     assert committed["buckets_stamped"] == [pred_dir]
+    # Every field but the bucket-scoped path itself matches the healthy call's own 200 body.
+    assert {k: v for k, v in committed.items() if k != "buckets_stamped"} == {
+        k: v for k, v in healthy_body.items() if k != "buckets_stamped"
+    }
     sc = _read_sidecar(pred_dir)
     assert sc["validated"] is True
 
@@ -456,6 +470,16 @@ def test_route_answers_409_with_the_committed_response_on_a_lost_sealed_record_l
     assert committed["buckets_stamped"] == []
     sc = _read_sidecar(pred_dir)
     assert sc["validated"] is False
+
+
+def test_route_requires_dataset_root(client, tmp_path: Path) -> None:
+    """No read or write happens before the refusal: the field is named rather than left to a
+    stamp-scope or bucket-confinement error further in."""
+    _, pred_dir = _make_dense_reviewed_project(tmp_path)
+    resp = client.post("/api/review/validate_reference", json={
+        "dataset_root": "", "trait": "bud_opening", "pred_dir": pred_dir, "subject": "bud"})
+    assert resp.status_code == 400
+    assert "requires the dataset root" in resp.json()["detail"]
 
 
 def test_route_promotion_carries_an_old_vintage_member_and_stamps_no_schema_version(
