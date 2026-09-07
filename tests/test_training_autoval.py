@@ -302,9 +302,9 @@ def test_spatial_manifest_tied_test_calibration_fractions_place_by_declared_orde
 def test_spatial_manifest_distinct_fractions_layout_is_unaffected_by_the_fixed_tie_break(
     tmp_path: Path,
 ):
-    """Coverage, not a guard: with no tied shares (0.65/0.25/0.1), the fixed center-out order
-    picks exactly the layout the seed-shuffled tie-break always did too, since a seed only ever
-    broke ties. Regions pinned against this exact width/height/tile_size/overlap/fractions/seed."""
+    """Coverage, not a guard: with no tied shares (0.65/0.25/0.1), the fixed declared-order
+    tie-break never runs, so the layout comes from the fractions and tile geometry alone. Regions
+    pinned against this exact width/height/tile_size/overlap/fractions."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
@@ -407,7 +407,7 @@ def test_auto_train_val_explicit_group_key_map_not_overridden_by_retry(tmp_path:
 def test_reserve_calibration_fraction_unset_is_byte_identical(tmp_path: Path):
     """Fail-before/no-op: with reserve_calibration_fraction absent, the spatial_manifest carries
     no calibration_region and the rest of the manifest is exactly what the 3-way split has always
-    produced (same keys, same train/val/test regions for the same seed/layout)."""
+    produced (same keys, same train/val/test regions for the same layout)."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
@@ -509,7 +509,7 @@ def test_reserve_calibration_fraction_raises_on_infeasible_layout(tmp_path: Path
 def test_reserve_calibration_fraction_raises_on_empty_gt_bearing_side(tmp_path: Path):
     """Reason 3: the strip layout itself is feasible (every side gets kept tiles), but with
     tiling.skip_empty set, a side's tiles carrying no GT filter down to zero real samples. At
-    this exact width/tile_size/fractions/seed, spatial_strip_split places train at x in [1275,
+    this exact width/tile_size/fractions, spatial_strip_split places train at x in [1275,
     3175] (verified directly against spatial_strip_split for this test's own params); GT is
     placed only inside that range plus calibration's own [3264, 3991], leaving val ([510,
     1186]) and test ([0, 421]) both real, tiled, and entirely GT-free."""
