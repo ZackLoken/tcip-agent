@@ -49,10 +49,7 @@ def _standin_pid(returned_pid: int, guardian_expected: bool) -> int:
         if len(children) == 1:
             return children[0].pid
         time.sleep(0.1)
-    try:
-        status = psutil.Process(returned_pid).status()
-    except psutil.NoSuchProcess:
-        status = "gone"
+    status = psutil.Process(returned_pid).status()
     sys.exit(
         f"expected exactly one guardian child of pid {returned_pid} within 5 seconds, found "
         f"{len(children)} (guardian status: {status}); either it has not spawned its child yet "
