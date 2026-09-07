@@ -1507,7 +1507,8 @@ def test_list_sweeps_serves_a_manifest_with_an_infinite_split_draws_value_beside
 
     tcip_store.bind(FileBackend())
     _write_sweep(hpo_root, "hpo_healthy_beside_inf",
-                base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+                base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+                split_draws=2)
 
     key = sweep_manifest_key("hpo_infinite_draws")
     path = FileBackend().path_for(key)
@@ -1529,7 +1530,7 @@ def test_list_sweeps_serves_a_manifest_with_an_infinite_split_draws_value_beside
     assert "hpo_infinite_draws" in by_id
     healthy_row = by_id["hpo_healthy_beside_inf"]
     assert healthy_row["relaunchable"] is True
-    assert healthy_row["split_draws"] is None
+    assert healthy_row["split_draws"] == 2
     infinite_row = by_id["hpo_infinite_draws"]
     assert infinite_row["relaunchable"] is False
     assert infinite_row["split_draws"] is None
@@ -1539,8 +1540,8 @@ def test_list_sweeps_serves_a_manifest_with_an_infinite_split_draws_value_beside
 def test_list_sweeps_on_the_sqlite_backend_never_sees_a_loose_manifest_beside_the_database(
     client: TestClient, hpo_root,
 ) -> None:
-    """Coverage: records the sqlite backend's own standing behavior with a loose manifest file
-    rather than guarding a change this fixup makes. Bound to the sqlite backend on purpose: a
+    """Coverage: records the sqlite backend's own standing behavior with a loose manifest file.
+    Bound to the sqlite backend on purpose: a
     manifest.json hand-written straight to the file-backend path, the way the test above
     produces one, is a loose record beside store.db rather than a row inside it, and store.read
     (what _read_manifest calls) never sees it, so the sweep it names never reaches the listing
