@@ -199,6 +199,33 @@ describe("openTrainingStream", () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
+  it("keeps reconnecting past an error-only status frame, since the run is not known yet", () => {
+    const onMessage = vi.fn();
+    openTrainingStream("/data/proj", "r1", onMessage);
+    lastSocket().open();
+    lastSocket().message(
+      JSON.stringify({ type: "status", run_id: "r1", status: null, error: "unknown run" }),
+    );
+    expect(onMessage).toHaveBeenCalledWith({
+      type: "status",
+      run_id: "r1",
+      status: null,
+      error: "unknown run",
+    });
+
+    lastSocket().drop();
+    vi.advanceTimersByTime(500);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    lastSocket().open();
+    lastSocket().message(
+      JSON.stringify({ type: "status", run_id: "r1", status: { status: "running" } }),
+    );
+    lastSocket().drop();
+    vi.advanceTimersByTime(60_000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
   it("closing the stream suppresses any further reconnect", () => {
     const stop = openTrainingStream("/data/proj", "r1", vi.fn());
     lastSocket().open();

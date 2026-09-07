@@ -333,14 +333,20 @@ export function TrainingTab() {
     // breeder is watching; only a run still live at open time toasts on its own terminal frame.
     const knownAtOpen = runsRef.current.find((r) => r.run_id === selectedRun)?.status;
     const alreadyTerminal = TERMINAL_STATUSES.has(knownAtOpen ?? "");
+    // A run selected at its launch moment can be unknown to the backend for a few reconnects;
+    // the toast names that once per selection, not once per silent retry.
+    let errorToasted = false;
     streamRef.current = openTrainingStream(projectRoot, selectedRun, (msg) => {
       if (msg.type === "metric" && msg.row) {
         setMetrics((prev) => mergeMetric(prev, msg.row as MetricRow));
       } else if (msg.type === "status") {
-        // Terminal frame: an unknown run carries error and no status; a known run carries its
-        // status report and no error.
+        // A known run carries its status report and no error; an unknown run carries error and
+        // no status, is not terminal, and the socket keeps reconnecting behind it.
         if (msg.error) {
-          useStore.getState().pushToast(`Training stream error: ${msg.error}`);
+          if (!errorToasted) {
+            errorToasted = true;
+            useStore.getState().pushToast(`Training stream error: ${msg.error}`);
+          }
           return;
         }
         const st = msg.status?.status;
