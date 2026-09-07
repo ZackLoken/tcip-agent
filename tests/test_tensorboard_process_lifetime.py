@@ -10,7 +10,11 @@ where no guardian exists, the two pids are the same, so the ``--no-tie`` test as
 The normal-exit test disables the platform tie (``--no-tie``) so it proves the ``atexit`` hook
 alone, since the job object and the guardian each end the child on a normal exit too; the
 hard-kill tests keep the tie and prove it directly, one launching from the main thread and one
-from a background thread that has already exited by the time the parent is killed.
+from a background thread that has already exited by the time the parent is killed. The
+stop-path test launches in-process instead, to prove ``stop_tensorboard`` itself ends a child
+that ignores SIGTERM before the call returns. The guardian usage-error tests run the guardian's
+own ``python -m`` entry point directly, with no parent process spawned at all, since they are
+proving the argument parser's refusals rather than any process lifetime.
 """
 
 from __future__ import annotations
@@ -23,6 +27,8 @@ from pathlib import Path
 
 import psutil
 import pytest
+
+from tests._tensorboard_parent import _standin_pid
 
 _PARENT_SCRIPT = Path(__file__).parent / "_tensorboard_parent.py"
 _DEATH_TIMEOUT = 10.0
@@ -168,20 +174,6 @@ def test_child_is_gone_within_ten_seconds_of_a_normal_exit(tmp_path):
         parent.stderr.close()
 
 
-def _wait_for_guardian_child(guardian_pid: int, timeout: float = 5.0) -> psutil.Process:
-    deadline = time.monotonic() + timeout
-    children: list = []
-    while time.monotonic() < deadline:
-        children = psutil.Process(guardian_pid).children()
-        if len(children) == 1:
-            return children[0]
-        time.sleep(0.1)
-    raise AssertionError(
-        f"expected exactly one guardian child of pid {guardian_pid} within {timeout} seconds, "
-        f"found {len(children)}"
-    )
-
-
 @pytest.mark.skipif(sys.platform == "win32", reason="no guardian there")
 def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypatch, tmp_path):
     """A regression guard for the guardian's grace staying under the manager's wait: without
@@ -201,14 +193,26 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypa
     standin_pid = standin_create_time = None
     try:
         info = tb.launch_tensorboard(str(tmp_path), key="stubborn-run")
-        standin = _wait_for_guardian_child(info["pid"])
+        standin_num = _standin_pid(info["pid"], guardian_expected=True)
+        standin = psutil.Process(standin_num)
         standin_pid, standin_create_time = standin.pid, standin.create_time()
         result = tb.stop_tensorboard(key="stubborn-run")
         assert result["status"] == "stopped"
         assert not _child_alive(standin_pid, standin_create_time)
     finally:
+        # a partway failure above must not leave the run tracked or its child running.
+        tb.stop_tensorboard(key="stubborn-run")
         if standin_pid is not None:
             _force_kill_and_wait(standin_pid, standin_create_time)
+
+
+def _run_guardian(*args: str) -> subprocess.CompletedProcess:
+    """Run the guardian's real ``python -m`` entry point with ``args``, so a usage-error
+    assertion exercises the actual subprocess boundary rather than ``_parse_args`` alone."""
+    return subprocess.run(
+        [sys.executable, "-m", "tcip_mcp.pipelines.training.tensorboard_guardian", *args],
+        capture_output=True, text=True, timeout=30,
+    )
 
 
 def test_guardian_usage_error_for_a_missing_term_grace():
@@ -216,10 +220,66 @@ def test_guardian_usage_error_for_a_missing_term_grace():
     message rather than a traceback, run as the real subprocess entry point."""
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
-    result = subprocess.run(
-        [sys.executable, "-m", "tcip_mcp.pipelines.training.tensorboard_guardian",
-         "--parent", str(os.getpid()), "--", sys.executable, "-c", "pass"],
-        capture_output=True, text=True, timeout=30,
+    result = _run_guardian("--parent", str(os.getpid()), "--", sys.executable, "-c", "pass")
+    assert result.returncode == 1
+    assert guardian._USAGE in result.stderr
+
+
+def test_guardian_usage_error_for_a_non_integer_parent():
+    """A --parent that does not parse as an integer is a usage error, not a traceback."""
+    from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
+
+    result = _run_guardian(
+        "--parent", "x", "--term-grace", "1", "--", sys.executable, "-c", "pass"
+    )
+    assert result.returncode == 1
+    assert guardian._USAGE in result.stderr
+
+
+def test_guardian_usage_error_for_a_non_numeric_term_grace():
+    """A --term-grace that does not parse as a float is a usage error, not a traceback."""
+    from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
+
+    result = _run_guardian(
+        "--parent", str(os.getpid()), "--term-grace", "x", "--", sys.executable, "-c", "pass"
+    )
+    assert result.returncode == 1
+    assert guardian._USAGE in result.stderr
+
+
+def test_guardian_usage_error_for_a_negative_term_grace():
+    """A negative --term-grace is a usage error, since the guardian has no wait to use it for."""
+    from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
+
+    result = _run_guardian(
+        "--parent", str(os.getpid()), "--term-grace", "-1", "--", sys.executable, "-c", "pass"
+    )
+    assert result.returncode == 1
+    assert guardian._USAGE in result.stderr
+
+
+@pytest.mark.parametrize("term_grace", ["nan", "inf"])
+def test_guardian_usage_error_for_a_non_finite_term_grace(term_grace):
+    """nan and inf both parse as floats but name no usable escalation wait, so both are usage
+    errors rather than a grace the guardian would wait on forever or not at all."""
+    from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
+
+    result = _run_guardian(
+        "--parent", str(os.getpid()), "--term-grace", term_grace,
+        "--", sys.executable, "-c", "pass",
+    )
+    assert result.returncode == 1
+    assert guardian._USAGE in result.stderr
+
+
+@pytest.mark.parametrize("parent_pid", ["0", "-1"])
+def test_guardian_usage_error_for_a_non_positive_parent(parent_pid):
+    """A --parent of zero or less parses as an integer but names no real process, so it is a
+    usage error rather than a pid the guardian would poll forever."""
+    from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
+
+    result = _run_guardian(
+        "--parent", parent_pid, "--term-grace", "1", "--", sys.executable, "-c", "pass"
     )
     assert result.returncode == 1
     assert guardian._USAGE in result.stderr
