@@ -646,7 +646,7 @@ export interface DeliveryEventRecord {
   door: string;
   output_path: string | null;
   output_sha256: string | null;
-  documents: Record<string, unknown>;
+  documents: Record<string, DocumentBinding>;
   // Every reconciliation the delivering door's gate ran, keyed by the document or dimension it
   // reconciled; undefined/null on a record written before these fields existed.
   document_reconciliations?: Record<string, ReconciledDocument> | null;
