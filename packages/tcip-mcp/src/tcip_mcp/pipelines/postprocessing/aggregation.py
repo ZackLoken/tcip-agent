@@ -533,13 +533,12 @@ def export_aggregated_csv(
         "ordinal_operating_point": reconcile_ordinal_validity,
         "regression_operating_point": reconcile_regression_validity,
     }
-    tile_recon: dict = {"operative": False, "validated": None}
-    scale_recon: dict = {"operative": False, "validated": None}
+    tile_recon: dict | None = None
+    scale_recon: dict | None = None
     # Claim scope is a fact about the bucket, not the document being delivered: any bucket recording
     # one reconciles, regardless of measurement_document.
-    claim_scope_recon: dict = (reconcile_claim_scope_validity(pred_dirs) if pred_dirs
-                               else {"operative": False, "validated": None})
-    operating_point_recon: dict = {"bindings": {}}
+    claim_scope_recon: dict | None = reconcile_claim_scope_validity(pred_dirs) if pred_dirs else None
+    operating_point_recon: dict | None = None
     if pred_dirs:
         operating_point_recon = _reconcilers[measurement_document](
             pred_dirs, trait=trait, asserted=operating_point_validated)
@@ -562,19 +561,19 @@ def export_aggregated_csv(
         # No pred_dirs, no on-disk source; a bare caller-asserted string is never trusted alone.
         state = VALIDATED_FALSE
     flags: dict[str, str | None] = {"operating_point": state}
-    if tile_recon["operative"]:
+    if tile_recon is not None and tile_recon["operative"]:
         flags["tile_size"] = tile_recon["validated"]
-    if scale_recon["operative"]:
+    if scale_recon is not None and scale_recon["operative"]:
         flags["scale"] = scale_recon["validated"]
-    if claim_scope_recon["operative"]:
+    if claim_scope_recon is not None and claim_scope_recon["operative"]:
         flags["claim_scope"] = claim_scope_recon["validated"]
     gate = check_delivery_gate(flags, acknowledgement=acknowledgement)
     if not gate.ok:
         notes = " ".join(filter(None, (
-            binding_notes_text(operating_point_recon.get("binding_notes", {})),
-            binding_notes_text(tile_recon.get("binding_notes", {})),
-            binding_notes_text(scale_recon.get("binding_notes", {})),
-            binding_notes_text(claim_scope_recon.get("binding_notes", {})),
+            binding_notes_text((operating_point_recon or {}).get("binding_notes", {})),
+            binding_notes_text((tile_recon or {}).get("binding_notes", {})),
+            binding_notes_text((scale_recon or {}).get("binding_notes", {})),
+            binding_notes_text((claim_scope_recon or {}).get("binding_notes", {})),
         )))
         raise DeliveryRefused(gate, notes)
 
@@ -589,7 +588,7 @@ def export_aggregated_csv(
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    stamp = delivered_tail(provenance, operating_point_recon["bindings"], gate,
+    stamp = delivered_tail(provenance, (operating_point_recon or {}).get("bindings", {}), gate,
                            columns=_PROVENANCE_COLUMNS)
     fieldnames = [
         "plant_id", "crop", "delivered_phenotype", "value", "units", "value_key",
@@ -621,8 +620,18 @@ def export_aggregated_csv(
                 **stamp,
             })
 
+    dimension_reconciliations = {
+        **({"claim_scope": claim_scope_recon} if claim_scope_recon is not None else {}),
+        **({"tile_size": tile_recon} if tile_recon is not None else {}),
+        **({"scale": scale_recon} if scale_recon is not None else {}),
+    }
     event_recorded = record_delivery_binding_event(
-        door, output_path, pred_dirs, operating_point_recon["bindings"],
+        door, output_path, pred_dirs,
+        document_reconciliations=(
+            {measurement_document: operating_point_recon} if operating_point_recon is not None
+            else {}
+        ),
+        dimension_reconciliations=dimension_reconciliations,
         measurement_documents=[measurement_document], scale_document=scale_document,
         acknowledgement=gate.effective_acknowledgement(), trait=trait, delivery_kind=delivery_kind,
         project_root=project_root, plant_mapping=plant_mapping)
