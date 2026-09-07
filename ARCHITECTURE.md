@@ -2334,7 +2334,7 @@ and nothing ever read it back out: the dataset's real confirmed-negative store i
 `image_status.json`, addressed by `image_status_key`, the seam this entry once asked to agree
 with. The key stopped being written; a project's existing record still carrying it was corrected
 by a one-off operator script, since applied and retired.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:918` (`def is_confirmed_negative(`, the one membership predicate, beside `is_finished_status` at `:919` for the wider complete-or-negative pair; `normalize_status_store` is the one store guard, called by `confirmed_negative_names` and the resolver's confirmations term instead of inline re-implementations).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:918` (`def is_confirmed_negative(`, the one membership predicate, beside `is_finished_status` at `:926` for the wider complete-or-negative pair; `normalize_status_store` is the one store guard, called by `confirmed_negative_names` and the resolver's confirmations term instead of inline re-implementations).
 Side B: `packages/tcip-web/src/tcip_web/routes/classes.py` (`set_image_status`, writing through the registered store).
 Phase 3 verdict: single. `packages/tcip-web/src/tcip_web/routes/sessions.py:291` (`if is_confirmed_negative(status):`, session time classification) calls the same predicate against the real `image_status.json` rather than restating it.
 
