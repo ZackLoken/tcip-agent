@@ -666,10 +666,34 @@ def test_the_statement_read_route_refuses_an_unregistered_trait(
 def test_confirm_statement_route_refuses_when_nothing_is_stated(
     client: TestClient, tmp_path: Path,
 ) -> None:
+    """The route reads only the statement store, so it cannot tell an unregistered trait from a
+    registered spec with no statement; the message names both doors, one for each state."""
     resp = _confirm_statement(client, tmp_path, "no_such_trait", "a hash of nothing")
 
     assert resp.status_code == 400
-    assert "author_trait_spec" in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    assert "author_trait_spec" in detail
+    assert "revise_trait_spec" in detail
+
+
+def test_confirm_statement_route_refuses_when_a_registered_spec_has_no_statement(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """The same not-found message, this time over a trait that does have a spec on record."""
+    import tcip_store as ts
+    from tcip_mcp import traits
+
+    directory = traits.trait_specs_dir(str(tmp_path))
+    key = traits.trait_spec_key(directory, "unstated_trait")
+    ts.replace(key, {"name": "unstated_trait", "delivers": ["astringency"]},
+               expect=ts.Version.ABSENT)
+
+    resp = _confirm_statement(client, tmp_path, "unstated_trait", "a hash of nothing")
+
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert "author_trait_spec" in detail
+    assert "revise_trait_spec" in detail
 
 
 def test_confirm_statement_route_returns_409_when_the_record_moved(

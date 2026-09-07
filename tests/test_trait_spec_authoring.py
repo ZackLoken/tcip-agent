@@ -153,6 +153,7 @@ def test_author_and_update_persist_through_the_same_shared_write(tmp_path: Path)
 
     updated = traits.write_trait_spec_fields(
         "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
+        rationale="the breeder raised the minimum acceptable held-out match quality",
     )
     assert updated.holdout_match_quality_floor == 0.6
 
@@ -184,6 +185,7 @@ def test_a_stamped_trait_specs_schema_version_survives_a_field_edit(tmp_path: Pa
 
     traits.write_trait_spec_fields(
         "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
+        rationale="the breeder raised the minimum acceptable held-out match quality",
     )
 
     rewritten = ts.read_versioned(key).value

@@ -1987,7 +1987,10 @@ def _write_reference_csv(path, rows, header=("image_stem", "physical_extent", "u
 def _author_scale_tolerance(tmp_path, trait, tolerance_frac=0.1):
     from tcip_mcp.traits import write_trait_spec_fields
 
-    write_trait_spec_fields(trait, {"scale_tolerance_frac": tolerance_frac}, project_root=tmp_path)
+    write_trait_spec_fields(
+        trait, {"scale_tolerance_frac": tolerance_frac}, project_root=tmp_path,
+        rationale="the breeder set how much reference disagreement a physical-scale calibration may show",
+    )
 
 
 def _write_bucket_image(images_dir, stem, *, color=(120, 120, 120)):

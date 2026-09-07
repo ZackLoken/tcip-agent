@@ -263,7 +263,10 @@ def test_revise_trait_spec_tool_end_to_end(tmp_path: Path, monkeypatch: pytest.M
     specs_dir = tmp_path / "trait_specs"
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
     _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"], "count_bias_tolerance_frac": 1.0})
-    result = revise_trait_spec(str(tmp_path), "leaf", {"count_bias_tolerance_frac": 4.0})
+    result = revise_trait_spec(
+        str(tmp_path), "leaf", {"count_bias_tolerance_frac": 4.0},
+        rationale="the breeder set the acceptable relative per-image count bias",
+    )
     assert result["count_bias_tolerance_frac"] == 4.0
     assert get_trait("leaf").count_bias_tolerance_frac == 4.0
     assert result["superseded"] == []

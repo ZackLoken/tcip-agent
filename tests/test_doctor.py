@@ -14,6 +14,7 @@ from PIL import Image
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import traits
+from tests._operationalization_fixtures import confirm_spec_statement
 from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
 from tcip_mcp.dataset_layout import (
     annotation_dir,
@@ -571,15 +572,10 @@ def test_trait_specs_are_read_from_the_registrys_own_directory(tmp_path):
     ts.replace(traits.trait_spec_key(specs_dir, "burr_size"),
               {"name": "burr_size", "delivers": ["burr_size"], "measured_with": "calipers"},
               expect=ts.Version.ABSENT)
-    # A statement isolates bloom_length from check_trait_spec_statements's own separate finding.
-    ts.replace(
-        traits.trait_spec_statement_key(traits.trait_spec_statements_scope(root), "bloom_length"),
-        {"trait": "bloom_length", "statement_fields": {"delivers": ["bloom_length"]},
-         "rationale": "test fixture", "stated_by": "test", "stated_at": "2026-03-04T00:00:00+00:00",
-         "relayed_note": "", "confirmed_by": None, "confirmed_at": None,
-         "identity_from_request": None, "record_seen": None},
-        expect=ts.Version.ABSENT,
-    )
+    # A confirmed, current statement isolates the loadable spec's own finding, named off the
+    # spec that actually loads rather than spelled here.
+    (loadable,) = traits.load_trait_specs(project_root=root)
+    confirm_spec_statement(root, loadable.name)
 
     res = _run(root)
     assert res.returncode == 2, res.stdout
