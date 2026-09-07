@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -987,11 +988,10 @@ def _audit_entries(root: Path) -> list[dict]:
     return list(tcip_store.read_log(audit_log_key(root)).records)
 
 
-def _cwd_store_fingerprint(path: Path) -> tuple[int, int] | None:
-    """``(size, mtime_ns)`` for a raw stat of a store's own file, or ``None`` when the file is
-    absent; a stat rather than a store read, since the platform's own reader (a file-backend
-    lock, a database connect) can create the very file a probe of an unwritten location must
-    not."""
+def _stat_fingerprint(path: Path) -> tuple[int, int] | None:
+    """``(size, mtime_ns)`` for a raw stat of a file, or ``None`` when it is absent; a stat
+    rather than a store read, since the platform's own reader (a file-backend lock, a database
+    connect) can create the very file a probe of an unwritten location must not."""
     try:
         st = path.stat()
     except FileNotFoundError:
@@ -999,16 +999,29 @@ def _cwd_store_fingerprint(path: Path) -> tuple[int, int] | None:
     return (st.st_size, st.st_mtime_ns)
 
 
-def _cwd_audit_store_path(cwd: Path) -> Path:
-    """Where the audit log an empty ``dataset_root`` would resolve to actually lives on disk,
-    whichever backend this process bound; computed the way the backend itself would (a pure
-    key-to-path or root-to-path mapping), never opened."""
+def _cwd_write_fingerprint(cwd: Path) -> tuple:
+    """Everything an unguarded review route resolving an empty ``dataset_root`` to ``cwd``
+    could leave on disk, read without opening any store: the review-verdict store directory's
+    own entries (the review engine writes verdicts and completion marks under
+    ``review_state_dir_of(cwd)``), and the audit store's file for the bound backend with its
+    write-ahead sibling, since a database write lands in ``store.db-wal`` until a checkpoint.
+    Coverage on the tree the gate runs on, where ``cwd`` is the repository root and its
+    ``.tcip`` already exists; the probe bites on a clean checkout."""
+    from tcip_mcp.prediction_buckets import review_state_dir_of
     from tcip_store.binding import is_database_backend
     from tcip_store.file_backend import FileBackend, database_file
 
+    state_dir = review_state_dir_of(cwd)
+    try:
+        state_entries: tuple[str, ...] | None = tuple(sorted(os.listdir(state_dir)))
+    except FileNotFoundError:
+        state_entries = None
     if is_database_backend():
-        return database_file(str(cwd))
-    return FileBackend().path_for(audit_log_key(cwd))
+        audit_file = database_file(str(cwd))
+    else:
+        audit_file = FileBackend().path_for(audit_log_key(cwd))
+    wal = audit_file.with_name(audit_file.name + "-wal")
+    return (state_entries, _stat_fingerprint(audit_file), _stat_fingerprint(wal))
 
 
 def test_review_matches_returns_400_for_a_stem_collision(
@@ -1557,22 +1570,16 @@ def test_review_action_requires_dataset_root(
     """No read or write happens before the refusal: an empty ``dataset_root`` is named rather
     than resolving to the process cwd. In this test environment the process cwd does not
     resolve under an allowed root, so the pre-refusal baseline answered the path guard's 403,
-    not the 200 a resolvable cwd would reach. The location a lost guard would actually leave a
-    mark at is the process cwd, not this fixture's own ``dataset_root`` tree (an unguarded call
-    resolves the empty string to the cwd, never to a directory this fixture never creates), so
-    the probes below read the cwd-resolved image-status document and audit-log store rather
-    than a location nothing was ever going to touch either way."""
-    from tcip_mcp.dataset_layout import image_status_path
-
+    not the 200 a resolvable cwd would reach; the guard is the 400 assertion. The location a
+    lost guard would leave a mark at is the process cwd, not this fixture's own
+    ``dataset_root`` tree, so the write probe reads the cwd's review-verdict store and audit
+    store (coverage on the gate's tree, where the cwd's ``.tcip`` already exists)."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     pred = tmp_path / "pred.json"
     _write_pred(pred, [(40, 32, 60, 48, 0.9)])
 
     cwd = Path.cwd()
-    status_path = image_status_path(cwd)
-    audit_path = _cwd_audit_store_path(cwd)
-    status_before = _cwd_store_fingerprint(status_path)
-    audit_before = _cwd_store_fingerprint(audit_path)
+    before = _cwd_write_fingerprint(cwd)
 
     resp = client.post(
         "/api/review/action",
@@ -1589,17 +1596,7 @@ def test_review_action_requires_dataset_root(
     )
     assert resp.status_code == 400
     assert "dataset root" in resp.json()["detail"]
-
-    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
-
-    written = [
-        k for k in tcip_store.keys(REVIEW_VERDICTS_STORE, str(dataset_root / ".tcip" / "state"))
-        if k.parts[1] == "IMG_0000.JPG"
-    ]
-    assert written == []
-    assert _audit_entries(dataset_root) == []
-    assert _cwd_store_fingerprint(status_path) == status_before
-    assert _cwd_store_fingerprint(audit_path) == audit_before
+    assert _cwd_write_fingerprint(cwd) == before
 
 
 def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> None:
@@ -1649,26 +1646,16 @@ def test_review_mark_complete_answers_409_with_the_committed_body_on_a_lost_audi
     assert status.json()["statuses"]["IMG_9.JPG"] == "completed"
 
 
-def test_review_mark_complete_requires_dataset_root(
-    client: TestClient, tmp_path: Path,
-) -> None:
+def test_review_mark_complete_requires_dataset_root(client: TestClient) -> None:
     """No read or write happens before the refusal: an empty ``dataset_root`` is named rather
     than resolving to the process cwd. In this test environment the process cwd does not
     resolve under an allowed root, so the pre-refusal baseline answered the path guard's 403,
-    not the 200 a resolvable cwd would reach. The location a lost guard would actually leave a
-    mark at is the process cwd, not this fixture's own ``dataset_root`` tree (an unguarded call
-    resolves the empty string to the cwd, never to a directory this fixture never creates), so
-    the probes below read the cwd-resolved image-status document and audit-log store rather
-    than a location nothing was ever going to touch either way."""
-    from tcip_mcp.dataset_layout import image_status_path
-
-    dataset_root = tmp_path / "data"
-
+    not the 200 a resolvable cwd would reach; the guard is the 400 assertion. The location a
+    lost guard would leave a mark at is the process cwd, not a directory this test never
+    creates, so the write probe reads the cwd's review-verdict store and audit store (coverage
+    on the gate's tree, where the cwd's ``.tcip`` already exists)."""
     cwd = Path.cwd()
-    status_path = image_status_path(cwd)
-    audit_path = _cwd_audit_store_path(cwd)
-    status_before = _cwd_store_fingerprint(status_path)
-    audit_before = _cwd_store_fingerprint(audit_path)
+    before = _cwd_write_fingerprint(cwd)
 
     resp = client.post(
         "/api/review/mark_complete",
@@ -1676,15 +1663,7 @@ def test_review_mark_complete_requires_dataset_root(
     )
     assert resp.status_code == 400
     assert "dataset root" in resp.json()["detail"]
-
-    status = client.get(
-        "/api/review/image_statuses",
-        params={"dataset_root": str(dataset_root)},
-    )
-    assert "IMG_9.JPG" not in status.json()["statuses"]
-    assert _audit_entries(dataset_root) == []
-    assert _cwd_store_fingerprint(status_path) == status_before
-    assert _cwd_store_fingerprint(audit_path) == audit_before
+    assert _cwd_write_fingerprint(cwd) == before
 
 
 def test_review_mark_complete_refuses_an_unreadable_gt(
