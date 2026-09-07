@@ -29,10 +29,14 @@ def _standin_pid(returned_pid: int, guardian_expected: bool) -> int:
     When a guardian is expected (POSIX with the tie enabled) the returned pid is the guardian's
     and its one child is the stand-in; this waits up to five seconds for that child to appear,
     since the guardian may not have spawned it yet, and exits naming the condition if it never
-    settles on exactly one, including the guardian itself having already died, whether or not it
-    had spawned a child before then. Otherwise (Windows, or the tie disabled under ``--no-tie``)
-    nothing sits in front of the stand-in, so the returned pid is used directly and children are
-    never consulted.
+    settles on exactly one. A guardian that has already died is not a separate case: it stays a
+    zombie, still resolvable and reporting zero children, until reaped by its own caller (which
+    has not yet called ``wait`` at this point), so that outcome also reaches the five-second
+    diagnosis below rather than a ``NoSuchProcess`` raised on its own. Otherwise (Windows, or the
+    tie disabled under ``--no-tie``) nothing sits in front of the stand-in, so the returned pid is
+    used directly and children are never consulted. This is called both from the standalone
+    script's own ``main`` and directly by a pytest test; the ``SystemExit`` it raises on failure
+    is accepted in the latter case too, since it fails the calling test the same as any exception.
     """
     if not guardian_expected:
         return returned_pid
@@ -41,10 +45,7 @@ def _standin_pid(returned_pid: int, guardian_expected: bool) -> int:
     deadline = time.monotonic() + 5.0
     children: list = []
     while time.monotonic() < deadline:
-        try:
-            children = psutil.Process(returned_pid).children()
-        except psutil.NoSuchProcess:
-            sys.exit(f"guardian pid {returned_pid} not found (gone before this lookup)")
+        children = psutil.Process(returned_pid).children()
         if len(children) == 1:
             return children[0].pid
         time.sleep(0.1)
