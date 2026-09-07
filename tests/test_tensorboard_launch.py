@@ -67,11 +67,11 @@ def test_launch_reports_the_platform_lifetime_tie(monkeypatch, tmp_path):
         lambda logdir, port: [sys.executable, "-c", "import time; time.sleep(30)"],
     )
 
-    info = tb.launch_tensorboard(str(tmp_path), run_id="tie-run")
+    info = tb.launch_tensorboard(str(tmp_path), key="tie-run")
     try:
         assert info["lifetime_tie"] == ("job" if sys.platform == "win32" else "guardian")
     finally:
-        tb.stop_tensorboard(run_id="tie-run")
+        tb.stop_tensorboard(key="tie-run")
 
 
 def test_launch_reports_the_tie_disabled_under_the_test_seam(monkeypatch, tmp_path):
@@ -83,11 +83,11 @@ def test_launch_reports_the_tie_disabled_under_the_test_seam(monkeypatch, tmp_pa
     )
     monkeypatch.setattr(tb, "_DISABLE_LIFETIME_TIE", True)
 
-    info = tb.launch_tensorboard(str(tmp_path), run_id="tie-disabled-run")
+    info = tb.launch_tensorboard(str(tmp_path), key="tie-disabled-run")
     try:
         assert info["lifetime_tie"] == "none: disabled for test"
     finally:
-        tb.stop_tensorboard(run_id="tie-disabled-run")
+        tb.stop_tensorboard(key="tie-disabled-run")
 
 
 def test_manager_refuses_to_import_when_the_grace_leaves_no_margin(tmp_path):

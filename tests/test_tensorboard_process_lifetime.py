@@ -200,10 +200,10 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypa
 
     standin_pid = standin_create_time = None
     try:
-        info = tb.launch_tensorboard(str(tmp_path), run_id="stubborn-run")
+        info = tb.launch_tensorboard(str(tmp_path), key="stubborn-run")
         standin = _wait_for_guardian_child(info["pid"])
         standin_pid, standin_create_time = standin.pid, standin.create_time()
-        result = tb.stop_tensorboard(run_id="stubborn-run")
+        result = tb.stop_tensorboard(key="stubborn-run")
         assert result["status"] == "stopped"
         assert not _child_alive(standin_pid, standin_create_time)
     finally:
