@@ -884,9 +884,9 @@ anything.
 | `launch_training` | `training_tools.py:757` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
 | `monitor_training` | `training_tools.py:1015` | yes | Check the status of a training run, or of a hyperparameter sweep. |
 | `cancel_training` | `training_tools.py:1455` | yes | Request graceful cancellation of a running training run. |
-| `run_hyperparameter_search` | `training_tools.py:2173` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hyperparameter_search` | `training_tools.py:2579` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:3325` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `run_hyperparameter_search` | `training_tools.py:2185` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `cancel_hyperparameter_search` | `training_tools.py:2591` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:3337` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (1 tool)
 
