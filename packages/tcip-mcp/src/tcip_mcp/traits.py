@@ -500,13 +500,12 @@ def write_trait_spec_fields(
 ) -> TraitSpec:
     """Update one or more fields on an already-registered trait spec, returning it as written.
 
-    This is the one write path for updating a trait spec anywhere in the platform: creating a
-    new trait is a separate, still-manual authoring step, out of scope here. Every existing call
-    keeps working unchanged; ``rationale`` and ``relayed_note`` are new, keyword-only. A thin
-    wrapper over :func:`revise_trait_spec_fields`, which holds the compare-and-set loop and the
-    trait-spec statement it restates; the ``revise_trait_spec`` MCP tool calls that function
-    directly for its fuller return, while the derived localization kind and every other
-    field-only caller keep calling this one for its plain ``TraitSpec``.
+    Creating a new trait is a separate, still-manual authoring step, out of scope here. Every
+    existing call keeps working unchanged; ``rationale`` and ``relayed_note`` are new,
+    keyword-only. A thin wrapper over :func:`revise_trait_spec_fields`, which holds the
+    compare-and-set loop and the trait-spec statement it restates; the ``revise_trait_spec`` MCP
+    tool calls that function directly for its fuller return, while the derived localization kind
+    and every other field-only caller keep calling this one for its plain ``TraitSpec``.
     """
     return revise_trait_spec_fields(
         trait_name, fields_, specs_dir, project_root=project_root,
@@ -528,6 +527,13 @@ def revise_trait_spec_fields(
     config editor stamp a version the store seam never validated; the stamp already on record,
     if any, survives every field edit unchanged. A ``rationale`` that is given must say
     something, checked before any read.
+
+    The statements scope this reads and writes is :func:`trait_spec_statements_scope` (project_root)
+    whenever ``project_root`` is given or neither argument is (the pinned root, where
+    ``trait_specs_dir(None)`` and ``trait_spec_statements_scope(None)`` resolve under one state
+    directory), and :func:`_trait_specs_state_root` (directory) only for a ``specs_dir`` caller,
+    which no production code is. The two coincide except under a monkeypatched
+    ``_TRAIT_SPECS_RELPATH``, which ``tests/test_trait_authoring.py``'s revise-tool test exercises.
 
     The read, the merge, the validation and the spec write are one compare-and-set against the
     version read, retried on conflict against whatever landed meanwhile; the candidate is parsed
