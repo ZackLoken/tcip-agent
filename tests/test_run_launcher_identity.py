@@ -144,8 +144,11 @@ def test_a_launch_inside_an_mcp_handshake_writes_launcher_agent_with_identity_fi
 def test_declare_launcher_stamps_the_declared_name(tmp_path, monkeypatch):
     """The mechanism the web route uses: a launch made inside ``declare_launcher(name)`` stamps
     that name whatever the connected identity, since a declaration on the calling thread takes
-    precedence over the handshake fallback."""
+    precedence over the handshake fallback. An identity is begun on this thread first, so the
+    precedence branch of ``_resolve_launched_by`` is the one exercised, not the untested case of
+    no identity at all."""
     monkeypatch.chdir(tmp_path)
+    from tcip_mcp import agent_identity
     from tcip_mcp.experiments import read_member, status_key
     from tcip_mcp.tools import training_tools
 
@@ -153,9 +156,13 @@ def test_declare_launcher_stamps_the_declared_name(tmp_path, monkeypatch):
     _seed_one_image(images_dir, labels_dir)
     _fake_popen(monkeypatch, [])
 
-    with training_tools.declare_launcher("gui"):
-        result = training_tools.launch_training(
-            _detection_cfg(images_dir, labels_dir, "exp-gui-launch"), str(tmp_path / "out"))
+    agent_identity.begin("claude-code", "2.1.238")
+    try:
+        with training_tools.declare_launcher("gui"):
+            result = training_tools.launch_training(
+                _detection_cfg(images_dir, labels_dir, "exp-gui-launch"), str(tmp_path / "out"))
+    finally:
+        agent_identity.end()
     assert "error" not in result, result
 
     status = read_member(status_key(result["experiment_id"]))
