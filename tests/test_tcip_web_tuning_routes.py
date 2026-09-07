@@ -1429,6 +1429,24 @@ def test_manifest_fields_reports_not_relaunchable_for_an_unreadable_split_draws_
     assert fields["split_draws"] is None
 
 
+def test_manifest_fields_reports_relaunchable_for_a_manifest_recording_split_draws_zero() -> None:
+    """split_draws=0 reads as one draw at every consumer of coerce_split_draws, the tool's own
+    argument's own regime, so a manifest recording it, with every other relaunch field present
+    and no caller-supplied seed axis, is relaunchable rather than refused as an invalid draw
+    count the way the tool itself never refuses it."""
+    from tcip_web.routes.tuning import _manifest_fields
+
+    manifest = {
+        "n_trials": 1, **_RELAUNCH_FIELD_DEFAULTS,
+        "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+        "split_draws": 0,
+    }
+    fields = _manifest_fields(manifest)
+    assert fields["relaunchable"] is True
+    assert fields["reason"] is None
+    assert fields["split_draws"] == 0
+
+
 def test_manifest_fields_reports_not_relaunchable_for_an_infinite_split_draws_value() -> None:
     """A JSON Infinity literal decodes to float("inf") through the store's plain json.loads
     even though its own encode refuses to write one, so a manifest of unknown provenance under

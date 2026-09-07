@@ -2969,23 +2969,28 @@ _SEED_AXIS_REMEDY = (
 
 def coerce_split_draws(split_draws: object) -> int | None:
     """``split_draws`` read the way a manifest of unknown provenance must be read: ``None``
-    stands for 1, the platform's own unset default; an ``int`` that is not a ``bool`` and is at
-    least one is read directly; a ``str`` or a finite ``float`` is read as a draw count only when
-    ``int()`` of it equals the value it was given and that int is at least one, so ``2`` and
-    ``"2"`` and ``2.0`` all read as ``2`` while ``2.5`` reads as ``None`` rather than silently
-    truncating to ``2``. A draw count is a whole number of at least one: zero and any negative
-    value, whatever its type, read as ``None``, along with a ``bool`` (``int(True)`` would
-    otherwise read as 1), a non-numeric string, a non-finite float and anything else ``int()``
-    cannot read. Shared by :func:`caller_split_seed_refusal`, which treats an unreadable value as
-    no refusal, and by the Tuning route's relaunch surface, which refuses a manifest recording
-    one outright rather than replaying it into a crash or a silently reinterpreted value.
+    stands for 1, the platform's own unset default; an ``int`` that is not a ``bool`` is read
+    directly, whatever its sign; a ``str`` or a finite ``float`` is read as the integer its
+    ``int()`` names when that integer equals the value it was given, so ``2`` and ``"2"`` and
+    ``2.0`` all read as ``2`` while ``2.5`` reads as ``None`` rather than silently truncating to
+    ``2``. This helper carries no lower bound of its own: a value at or below one, positive,
+    zero or negative alike, is not a draw count for it to refuse, since every consumer already
+    reads such a value as one draw (``_split_draws_refusal`` and
+    ``_base_config_for_split_draws`` both answer nothing below ``split_draws <= 1``), the same
+    way ``run_hyperparameter_search``'s own ``split_draws`` argument reads it; a refusal of such
+    a value belongs at the tool's own door, which this helper does not own. A ``bool``
+    (``int(True)`` would otherwise read as 1), a non-numeric string, a non-finite float and
+    anything else ``int()`` cannot read still answer ``None``. Shared by
+    :func:`caller_split_seed_refusal`, which treats an unreadable value as no refusal, and by the
+    Tuning route's relaunch surface, which refuses a manifest recording one outright rather than
+    replaying it into a crash or a silently reinterpreted value.
     """
     if split_draws is None:
         return 1
     if isinstance(split_draws, bool):
         return None
     if isinstance(split_draws, int):
-        return split_draws if split_draws >= 1 else None
+        return split_draws
     if not isinstance(split_draws, (float, str)):
         return None
     try:
@@ -2997,7 +3002,7 @@ def coerce_split_draws(split_draws: object) -> int | None:
             return None
     except (TypeError, ValueError, OverflowError):
         return None
-    return coerced if coerced >= 1 else None
+    return coerced
 
 
 def caller_split_seed_refusal(

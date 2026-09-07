@@ -275,6 +275,29 @@ def test_run_hyperparameter_search_refuses_a_caller_split_seed_axis_at_one_draw(
     assert not ran
 
 
+def test_run_hyperparameter_search_refuses_a_caller_split_seed_axis_at_zero_draws(
+    tmp_path, real_hpo_base_config, monkeypatch,
+):
+    """split_draws=0 reads as one draw at every consumer of coerce_split_draws
+    (_split_draws_refusal and _base_config_for_split_draws both already read split_draws <= 1
+    that way), the same regime a caller-supplied data.split.seed axis refuses at the unset
+    default of 1; tune_search must never be reached, and the error dict carries the remedy."""
+    import tcip_mcp.tools.training_tools as tt
+
+    ran = []
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
+
+    result = tt.run_hyperparameter_search(
+        base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+        scheduler="none", split_draws=0,
+        param_space={"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
+    )
+
+    assert "error" in result and "cannot be replayed as recorded" in result["error"]
+    assert "drop data.split.seed from param_space" in result["error"]
+    assert not ran
+
+
 @pytest.mark.parametrize("value, expected", [
     pytest.param(2.5, None, id="a-fractional-float"),
     pytest.param(False, None, id="the-bool-False"),
@@ -284,16 +307,19 @@ def test_run_hyperparameter_search_refuses_a_caller_split_seed_axis_at_one_draw(
     pytest.param(2.0, 2, id="a-whole-float"),
     pytest.param(1e30, int(1e30), id="a-whole-float-past-ordinary-int-range"),
     pytest.param(float("inf"), None, id="positive-infinity"),
-    pytest.param(-3, None, id="a-negative-int"),
-    pytest.param(0, None, id="zero"),
-    pytest.param(-3.0, None, id="a-negative-float"),
+    pytest.param(-3, -3, id="a-negative-int-reads-as-one-draw-everywhere"),
+    pytest.param(0, 0, id="zero-reads-as-one-draw-everywhere"),
+    pytest.param(-3.0, -3, id="a-negative-float-reads-as-one-draw-everywhere"),
 ])
 def test_coerce_split_draws_verdicts(value, expected):
-    """coerce_split_draws answers an int only for an int that is not a bool and is at least one,
-    or a str or finite float whose int() equals the value it was given and is at least one; a
-    bool (int(True) would otherwise silently read as 1), a fractional float (int(2.5) would
-    otherwise silently truncate to 2), a non-numeric string, a non-finite float, zero and any
-    negative value are none of those and answer None. The 1e30 row admits that magnitude only
+    """coerce_split_draws answers an int for an int that is not a bool, whatever its sign, or
+    for a str or finite float whose int() equals the value it was given; a bool (int(True) would
+    otherwise silently read as 1), a fractional float (int(2.5) would otherwise silently
+    truncate to 2), a non-numeric string and a non-finite float are none of those and answer
+    None. This helper carries no lower bound: zero and a negative value read as the integers they
+    name and read as one draw at every consumer, since _split_draws_refusal and
+    _base_config_for_split_draws both already read split_draws <= 1 as one draw, the tool's own
+    argument's own regime. The 1e30 row admits that magnitude only
     because run_hyperparameter_search's own split_draws argument carries no upper bound either
     (_split_draws_refusal refuses nothing above one on size); this row states no ceiling of its
     own, only that a whole number reads through whatever its size."""
