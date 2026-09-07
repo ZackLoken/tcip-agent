@@ -12,6 +12,7 @@ tests/test_checkpoint_digest_rails.py.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -121,10 +122,11 @@ def test_resumed_run_records_and_binds_its_own_weights(tmp_path, monkeypatch):
     first = complete_run(base, str(first_weights))
     assert "error" not in first, first
 
-    resumed_id = _ensure_experiment(
-        base, {"model_source": {"builder": "x:y"}}, None, str(first_weights), "run-2",
-        output_dir=str(tmp_path / "out2"), launched_by={"launcher": "process"})
+    resumed_id, resumed_output_dir = _ensure_experiment(
+        base, {"model_source": {"builder": "x:y"}}, None, str(first_weights),
+        output_base=str(tmp_path), launched_by={"launcher": "process"})
     assert resumed_id != base  # a non-pristine base mints a fresh id, per _ensure_experiment
+    assert Path(resumed_output_dir) == tmp_path / resumed_id
 
     second_weights = tmp_path / "out2" / "model_best.pt"
     second_weights.parent.mkdir(parents=True, exist_ok=True)
