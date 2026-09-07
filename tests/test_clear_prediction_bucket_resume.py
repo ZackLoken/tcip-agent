@@ -231,20 +231,23 @@ def test_an_undecodable_stamp_at_the_destination_refuses_by_name_on_resume(tmp_p
 
 
 def test_unfinished_clear_no_destination_content_refuses_a_keyword_less_call(tmp_path, monkeypatch):
+    """A crash before any stamp write leaves the destination holding no document: the artifact
+    already names it, so a keyword-less call refuses on record as unfinished, naming it."""
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
 
     built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expUnfinishedNoContent")
     _fix_stamp(monkeypatch)
     destination = _expected_destination(built)
 
-    fault = inject_store_fault(monkeypatch, method_name="put_blob")
+    fault = inject_store_fault(
+        monkeypatch, method_name="replace", predicate=key_in_store("operating_point_sidecar"))
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built["bucket"]), "should crash before the first document")
+        clear_prediction_bucket(str(built["bucket"]), "should crash before any stamp write")
     assert fault.fired
 
     result = clear_prediction_bucket(str(built["bucket"]), "keyword-less call over the wreckage")
     assert "error" in result
-    assert "unfinished" in result["error"]
+    assert "is on record and unfinished" in result["error"]
     assert repr(str(destination)) in result["error"]
 
 
@@ -263,8 +266,60 @@ def test_unfinished_clear_stamp_at_both_refuses_a_keyword_less_call(tmp_path, mo
 
     result = clear_prediction_bucket(str(built["bucket"]), "keyword-less call over the wreckage")
     assert "error" in result
-    assert "unfinished" in result["error"]
+    assert "is on record and unfinished" in result["error"]
     assert repr(str(destination)) in result["error"]
+
+
+def test_a_keyword_less_call_in_the_stamps_moved_state_refuses_naming_the_newest_archive(
+        tmp_path, monkeypatch):
+    """A crash after every stamp has moved but before the first document leaves the source with no
+    operating_point stamp at all and its documents still in place: the door reads no experiment
+    from a stampless source, so the keyword-less refusal is the archive-walking one
+    (_find_cleared_candidate_with_no_source_stamp), not the artifact-record one, and it names the
+    same destination as the remedy."""
+    from tcip_mcp.prediction_buckets import bucket_stems
+    from tcip_mcp.tools.inference_tools import clear_prediction_bucket
+
+    built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expStampsMovedNoDoc")
+    _fix_stamp(monkeypatch)
+    destination = _expected_destination(built)
+
+    fault = inject_store_fault(monkeypatch, method_name="put_blob")
+    with pytest.raises(RuntimeError):
+        clear_prediction_bucket(str(built["bucket"]), "should crash after the stamps moved")
+    assert fault.fired
+    assert bucket_stems(built["bucket"]) == {"img"}
+
+    result = clear_prediction_bucket(str(built["bucket"]), "keyword-less call over the wreckage")
+    assert "error" in result
+    assert "carries no operating_point.json" in result["error"]
+    assert f"cleared_bucket={str(destination)!r}" in result["error"]
+
+
+def test_a_keyword_less_call_in_the_emptied_state_refuses_naming_the_newest_archive(
+        tmp_path, monkeypatch):
+    """A source a clear emptied entirely, whose own audit entry never appended (the crash after the
+    last delete and before the body returns): the source carries neither a stamp nor a document, so
+    a later keyword-less call over it still reads no experiment and is answered by the same
+    archive-walking refusal, naming this already-finished archive as the remedy."""
+    from tcip_mcp.prediction_buckets import bucket_stems
+    import tcip_mcp.prediction_buckets as prediction_buckets_mod
+    from tcip_mcp.tools.inference_tools import clear_prediction_bucket
+
+    built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expEmptiedNoAuditLine")
+    _fix_stamp(monkeypatch)
+    destination = _expected_destination(built)
+
+    raise_on_nth_call(monkeypatch, prediction_buckets_mod, "review_state_count", 2)
+    with pytest.raises(RuntimeError):
+        clear_prediction_bucket(str(built["bucket"]), "should crash after the last write")
+    assert bucket_stems(built["bucket"]) == set()
+    assert bucket_stems(destination) == {"img"}
+
+    result = clear_prediction_bucket(str(built["bucket"]), "keyword-less call over the empty source")
+    assert "error" in result
+    assert "carries no operating_point.json" in result["error"]
+    assert f"cleared_bucket={str(destination)!r}" in result["error"]
 
 
 def test_a_document_arrived_during_the_move_refuses_naming_the_stem(tmp_path, monkeypatch):
