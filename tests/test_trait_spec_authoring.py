@@ -43,8 +43,9 @@ def _author(root: Path, trait: str = "bud_opening_e2e", **overrides: object) -> 
 def test_authoring_a_trait_that_already_exists_refuses(tmp_path: Path) -> None:
     _author(tmp_path)
 
-    with pytest.raises(ValueError, match="already on record"):
+    with pytest.raises(ValueError, match="already on record") as excinfo:
         _author(tmp_path)
+    assert "revise_trait_spec" in str(excinfo.value)
 
 
 def test_a_spec_with_no_statement_is_not_a_collision_and_the_call_proceeds_as_a_restatement(
@@ -276,3 +277,208 @@ def test_a_trait_authored_and_confirmed_through_this_surface_delivers_end_to_end
     assert "error" not in res, res
     assert res["positive_class_assessed"] is True
     assert out_csv.exists()
+
+
+# ── revising an authored field over an existing statement ────────────────────
+
+
+def _confirmed_leaf(tmp_path: Path, **overrides: object) -> dict:
+    statement = _author(
+        tmp_path, trait="leaf", delivers=("leaf_length",), holdout_match_quality_floor=0.4,
+        **overrides,
+    )
+    seen = traits.trait_spec_statement_seen_hash(statement)
+    return traits.confirm_trait_spec(
+        str(tmp_path), "leaf", user="breeder", record_seen=seen, identity_from_request=True,
+    )
+
+
+def test_revising_an_authored_field_with_no_rationale_over_a_statement_refuses(
+    tmp_path: Path,
+) -> None:
+    confirmed = _confirmed_leaf(tmp_path)
+
+    with pytest.raises(ValueError, match="rationale") as excinfo:
+        traits.write_trait_spec_fields(
+            "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
+        )
+    assert "holdout_match_quality_floor" in str(excinfo.value)
+
+    reloaded = traits.get_trait_for("leaf", str(tmp_path))
+    assert reloaded.holdout_match_quality_floor == 0.4
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    on_file = ts.read_versioned(traits.trait_spec_statement_key(scope, "leaf")).value
+    assert on_file == confirmed
+
+
+def test_repairing_an_unparseable_record_back_to_confirmed_values_with_no_rationale_refuses(
+    tmp_path: Path,
+) -> None:
+    """A stored record written raw to an out-of-range authored value has no parsed values to
+    compare, so the repair back to the confirmed value is read as moving it by construction."""
+    confirmed = _confirmed_leaf(tmp_path)
+    directory = traits.trait_specs_dir(str(tmp_path))
+    key = traits.trait_spec_key(directory, "leaf")
+    stored = ts.read_versioned(key)
+    ts.replace(key, {**stored.value, "holdout_match_quality_floor": 2.0}, expect=stored.version)
+
+    with pytest.raises(ValueError, match="rationale"):
+        traits.write_trait_spec_fields(
+            "leaf", {"holdout_match_quality_floor": 0.4}, project_root=tmp_path,
+        )
+
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    on_file = ts.read_versioned(traits.trait_spec_statement_key(scope, "leaf")).value
+    assert on_file == confirmed
+
+
+def test_revising_an_authored_field_with_a_rationale_restates_and_clears_confirmation(
+    tmp_path: Path,
+) -> None:
+    _confirmed_leaf(tmp_path)
+
+    revision = traits.revise_trait_spec_fields(
+        "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
+        rationale="the breeder raised the minimum acceptable held-out match quality",
+    )
+
+    assert revision.spec.holdout_match_quality_floor == 0.6
+    assert revision.statement is not None
+    assert revision.statement["confirmed_by"] is None
+    assert revision.statement["rationale"] == (
+        "the breeder raised the minimum acceptable held-out match quality"
+    )
+    assert revision.statement["stated_by"] == traits.TRAIT_SPEC_REVISION_SURFACE
+    assert revision.statement["statement_fields"]["holdout_match_quality_floor"] == 0.6
+    assert "stale" in revision.statement_note
+
+
+def test_repairing_an_unparseable_record_with_a_rationale_restates(tmp_path: Path) -> None:
+    _confirmed_leaf(tmp_path)
+    directory = traits.trait_specs_dir(str(tmp_path))
+    key = traits.trait_spec_key(directory, "leaf")
+    stored = ts.read_versioned(key)
+    ts.replace(key, {**stored.value, "holdout_match_quality_floor": 2.0}, expect=stored.version)
+
+    revision = traits.revise_trait_spec_fields(
+        "leaf", {"holdout_match_quality_floor": 0.4}, project_root=tmp_path,
+        rationale="repairing a record written raw back to the breeder's confirmed value",
+    )
+
+    assert revision.spec.holdout_match_quality_floor == 0.4
+    assert revision.statement is not None
+    assert revision.statement["confirmed_by"] is None
+
+
+def test_reverting_to_the_confirmed_values_still_restates_for_re_confirmation(
+    tmp_path: Path,
+) -> None:
+    """A spec moved past its confirmed statement by a raw write and then revised back to the
+    confirmed values still needs a fresh statement: ``moved`` is never folded into ``stale``."""
+    _confirmed_leaf(tmp_path)
+    directory = traits.trait_specs_dir(str(tmp_path))
+    key = traits.trait_spec_key(directory, "leaf")
+    stored = ts.read_versioned(key)
+    ts.replace(key, {**stored.value, "holdout_match_quality_floor": 0.9}, expect=stored.version)
+
+    revision = traits.revise_trait_spec_fields(
+        "leaf", {"holdout_match_quality_floor": 0.4}, project_root=tmp_path,
+        rationale="reverting to the value the breeder actually confirmed",
+    )
+
+    assert revision.spec.holdout_match_quality_floor == 0.4
+    assert revision.statement is not None
+    assert revision.statement["confirmed_by"] is None
+    assert revision.statement["rationale"] == (
+        "reverting to the value the breeder actually confirmed"
+    )
+    assert "moved" in revision.statement_note
+
+
+def test_reverting_to_a_withdrawn_statements_values_still_restates(tmp_path: Path) -> None:
+    _confirmed_leaf(tmp_path)
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    statement_key = traits.trait_spec_statement_key(scope, "leaf")
+    withdrawn = ts.read_versioned(statement_key)
+    ts.replace(
+        statement_key,
+        {**withdrawn.value, "confirmed_by": None, "confirmed_at": None,
+         "identity_from_request": None, "record_seen": None},
+        expect=withdrawn.version,
+    )
+    directory = traits.trait_specs_dir(str(tmp_path))
+    key = traits.trait_spec_key(directory, "leaf")
+    stored = ts.read_versioned(key)
+    ts.replace(key, {**stored.value, "holdout_match_quality_floor": 0.9}, expect=stored.version)
+
+    revision = traits.revise_trait_spec_fields(
+        "leaf", {"holdout_match_quality_floor": 0.4}, project_root=tmp_path,
+        rationale="reverting to the value the breeder originally confirmed",
+    )
+
+    assert revision.spec.holdout_match_quality_floor == 0.4
+    assert revision.statement is not None
+    assert revision.statement["confirmed_by"] is None
+
+
+def test_an_empty_rationale_refuses_by_name(tmp_path: Path) -> None:
+    _author(tmp_path, trait="leaf", delivers=("leaf_length",))
+
+    with pytest.raises(ValueError, match="rationale"):
+        traits.write_trait_spec_fields(
+            "leaf", {"notes": "a note"}, project_root=tmp_path, rationale="   ",
+        )
+
+
+def test_a_stamped_specs_schema_version_survives_a_restating_revision(tmp_path: Path) -> None:
+    _confirmed_leaf(tmp_path)
+    directory = traits.trait_specs_dir(str(tmp_path))
+    key = traits.trait_spec_key(directory, "leaf")
+    stored = ts.read_versioned(key)
+    ts.replace(key, {**stored.value, "schema_version": 1}, expect=stored.version)
+
+    traits.revise_trait_spec_fields(
+        "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
+        rationale="the breeder raised the minimum acceptable held-out match quality",
+    )
+
+    rewritten = ts.read_versioned(key).value
+    assert rewritten["schema_version"] == 1
+    assert rewritten["holdout_match_quality_floor"] == 0.6
+
+
+def test_the_revise_tool_reports_statement_restated_and_its_note(tmp_path: Path) -> None:
+    from tcip_mcp.tools.trait_spec_authoring_tools import revise_trait_spec
+
+    _confirmed_leaf(tmp_path)
+
+    restating = revise_trait_spec(
+        str(tmp_path), "leaf", {"holdout_match_quality_floor": 0.6},
+        rationale="the breeder raised the minimum acceptable held-out match quality",
+    )
+    assert restating["statement_restated"] is True
+    assert "stale" in restating["statement_note"]
+    assert "record_seen" in restating
+
+    untouched = revise_trait_spec(
+        str(tmp_path), "leaf", {"localization": traits.CENTER_MATCH},
+        rationale="a carried-forward edit with no bearing on the authored fields",
+    )
+    assert untouched["statement_restated"] is False
+    assert untouched["statement_note"] == "left as it is, current"
+
+
+def test_a_relayed_note_lands_fresh_never_carried_from_the_old_statement(tmp_path: Path) -> None:
+    from tcip_mcp.tools.trait_spec_authoring_tools import revise_trait_spec
+
+    _confirmed_leaf(tmp_path, relayed_note="said at the fence line, not in the app")
+
+    result = revise_trait_spec(
+        str(tmp_path), "leaf", {"holdout_match_quality_floor": 0.6},
+        rationale="the breeder raised the minimum acceptable held-out match quality",
+    )
+
+    assert result["statement_restated"] is True
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    stated = ts.read_versioned(traits.trait_spec_statement_key(scope, "leaf")).value
+    assert stated["relayed_note"] == ""
