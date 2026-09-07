@@ -33,6 +33,15 @@ import { schemaChangeSweepToast } from "@/lib/registrySweep";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { useStore } from "@/store";
 
+// Composed once so the schema-stamp-gap sentence stays identical on the optimistic 200 path
+// and the audit-gap 409 path.
+function schemaStampGapToast(imageName: string): string {
+  return (
+    `${imageName}'s status was recorded, but its schema stamp did not land; it still needs ` +
+    "re-confirmation."
+  );
+}
+
 // Progression order (start state first, terminal states last), matches Review's parallel
 // status filter, which already reads Unreviewed before Reviewed.
 const STATUS_FILTERS: { value: "all" | ImageStatus; label: string }[] = [
@@ -260,26 +269,14 @@ export function AnnotateToolbar({
       // land on one leaves it exactly as unverifiable as before the write.
       if (FINISHED_STATUSES.includes(newStatus) && !result.digest_stamped) {
         useStore.getState().markStale(currentImage);
-        useStore
-          .getState()
-          .pushToast(
-            `${currentImage}'s status was recorded, but its schema stamp did not land; it ` +
-              "still needs re-confirmation.",
-            "info",
-          );
+        useStore.getState().pushToast(schemaStampGapToast(currentImage), "info");
       }
     } catch (e) {
       const committed = committedOf<{ status: string; digest_stamped: boolean }>(e);
       if (committed) {
         if (FINISHED_STATUSES.includes(newStatus) && !committed.digest_stamped) {
           useStore.getState().markStale(currentImage);
-          useStore
-            .getState()
-            .pushToast(
-              `${currentImage}'s status was recorded, but its schema stamp did not land; it ` +
-                "still needs re-confirmation.",
-              "info",
-            );
+          useStore.getState().pushToast(schemaStampGapToast(currentImage), "info");
         }
         useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
         return;
