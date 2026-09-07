@@ -373,6 +373,41 @@ describe("ProjectPicker", () => {
     expect(freshApi.dataset.select).not.toHaveBeenCalled();
   });
 
+  it("selects a card through a real button named by the project name alone", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+    });
+    render(<ProjectPicker />);
+
+    const card = await screen.findByRole("button", { name: "crop_a_subject_a_valley-farm" });
+    expect(card).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(card);
+    expect(card).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("keeps the selected panel's controls outside any role=button nesting", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+    });
+    render(<ProjectPicker />);
+    fireEvent.click(await screen.findByText("crop_a_subject_a_valley-farm"));
+
+    const card = screen.getByRole("button", { name: "crop_a_subject_a_valley-farm" });
+    const dateSelect = screen.getByLabelText("Date");
+    const openButton = screen.getByText("Open project");
+    expect(card.contains(dateSelect)).toBe(false);
+    expect(card.contains(openButton)).toBe(false);
+    expect(screen.queryAllByRole("button", { name: "crop_a_subject_a_valley-farm" })).toHaveLength(
+      1,
+    );
+  });
+
   it("has no advanced folder-open escape hatch (project creation is agent-driven)", async () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",

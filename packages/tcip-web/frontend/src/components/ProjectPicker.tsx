@@ -175,67 +175,69 @@ export function ProjectPicker() {
               return (
                 <div
                   key={p.name}
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={isSelected}
-                  className={`tcip-panel p-4 flex flex-col gap-2 cursor-pointer transition-colors animate-tcip-rise focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg ${
+                  className={`tcip-panel p-4 flex flex-col gap-2 animate-tcip-rise transition-colors ${
                     isSelected ? "border-tcip-accent" : "hover:border-tcip-border-hover"
                   }`}
-                  onClick={() => selectCard(p)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      selectCard(p);
-                    }
-                  }}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium text-tcip-fg truncate" title={p.name}>
-                      {p.name}
-                    </span>
-                    {p.is_active && (
-                      <span className="tcip-badge bg-tcip-accent/20 text-tcip-accent">active</span>
-                    )}
-                  </div>
-                  {p.site ? (
-                    <span className="text-[11px] text-tcip-muted truncate" title={p.site}>
-                      {p.site}
-                    </span>
-                  ) : (
-                    p.site_problem && (
-                      <span className="text-[11px] text-tcip-fp truncate" title={p.site_problem}>
-                        {p.site_problem}
+                  <button
+                    type="button"
+                    aria-pressed={isSelected}
+                    aria-label={p.name}
+                    className="flex flex-col gap-2 w-full text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg"
+                    onClick={() => selectCard(p)}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-tcip-fg truncate" title={p.name}>
+                        {p.name}
                       </span>
-                    )
-                  )}
-                  {p.label_problem && (
-                    <span className="text-[11px] text-tcip-fp truncate" title={p.label_problem}>
-                      {p.label_problem}
+                      {p.is_active && (
+                        <span className="tcip-badge bg-tcip-accent/20 text-tcip-accent">
+                          active
+                        </span>
+                      )}
+                    </div>
+                    {p.site ? (
+                      <span className="text-[11px] text-tcip-muted truncate" title={p.site}>
+                        {p.site}
+                      </span>
+                    ) : (
+                      p.site_problem && (
+                        <span className="text-[11px] text-tcip-fp truncate" title={p.site_problem}>
+                          {p.site_problem}
+                        </span>
+                      )
+                    )}
+                    {p.label_problem && (
+                      <span className="text-[11px] text-tcip-fp truncate" title={p.label_problem}>
+                        {p.label_problem}
+                      </span>
+                    )}
+                    {/* Signature: the project's captures across the season, each date labelled. */}
+                    <SeasonRail
+                      dates={p.dates}
+                      showLabels
+                      active={date || null}
+                      className="my-0.5"
+                    />
+                    <div className="text-[11px] text-tcip-muted flex flex-wrap gap-x-3 gap-y-0.5">
+                      <span>{p.image_count} image(s)</span>
+                      <span>
+                        {p.dates.length} date{p.dates.length === 1 ? "" : "s"}
+                      </span>
+                      <span>
+                        {p.subjects.length} subject{p.subjects.length === 1 ? "" : "s"}
+                      </span>
+                      <span>
+                        {p.models.length} model{p.models.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-tcip-muted">
+                      Updated {relativeTime(p.modified)}
                     </span>
-                  )}
-                  {/* Signature: the project's captures across the season, each date labelled. */}
-                  <SeasonRail dates={p.dates} showLabels active={date || null} className="my-0.5" />
-                  <div className="text-[11px] text-tcip-muted flex flex-wrap gap-x-3 gap-y-0.5">
-                    <span>{p.image_count} image(s)</span>
-                    <span>
-                      {p.dates.length} date{p.dates.length === 1 ? "" : "s"}
-                    </span>
-                    <span>
-                      {p.subjects.length} subject{p.subjects.length === 1 ? "" : "s"}
-                    </span>
-                    <span>
-                      {p.models.length} model{p.models.length === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-tcip-muted">
-                    Updated {relativeTime(p.modified)}
-                  </span>
+                  </button>
 
                   {isSelected && (
-                    <div
-                      className="flex flex-col gap-2 pt-2 mt-1 border-t border-tcip-border"
-                      onClick={(e) => e.stopPropagation()}
-                    >
+                    <div className="flex flex-col gap-2 pt-2 mt-1 border-t border-tcip-border">
                       <div className="grid grid-cols-3 gap-2">
                         <label className="flex flex-col gap-1">
                           <span className="tcip-label">Date</span>
@@ -298,17 +300,19 @@ export function ProjectPicker() {
                         </label>
                       </div>
                       {openError && <span className="text-[11px] text-tcip-fp">{openError}</span>}
-                      <button
-                        className="tcip-btn-primary"
-                        disabled={opening || !date}
-                        onClick={() => openProject(p, date, subject, model)}
-                      >
-                        {opening
-                          ? "Opening…"
-                          : !date
-                            ? "This project has no dated images"
-                            : "Open project"}
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          className="tcip-btn-primary"
+                          disabled={opening || !date}
+                          onClick={() => openProject(p, date, subject, model)}
+                        >
+                          {opening
+                            ? "Opening…"
+                            : !date
+                              ? "This project has no dated images"
+                              : "Open project"}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
