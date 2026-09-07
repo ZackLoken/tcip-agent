@@ -453,6 +453,21 @@ class TestSharedWebStateDeclarations:
         for store in (web_client.CANVAS_META_STORE, web_client.CANVAS_GEOMETRY_STORE):
             assert ts.get_descriptor(store).declared_in == web_client.__name__
 
+    def test_the_web_only_stores_are_declared_where_the_catalogue_reaches_them(self) -> None:
+        """The three stores only the web package reads are declared beside the shared ones, so
+        the catalogue names them without importing the web package, and each web-side reader
+        addresses the same declaration rather than one of its own."""
+        import tcip_store as ts
+        from tcip_mcp import web_client
+        from tcip_web import jobstore
+        from tcip_web.routes import sessions
+
+        assert jobstore.job_registry_key is web_client.job_registry_key
+        assert sessions.annotation_stats_key is web_client.annotation_stats_key
+        for store in (web_client.LEARNING_CAPTURE_STORE, web_client.JOB_REGISTRY_STORE,
+                      web_client.ANNOTATION_STATS_STORE):
+            assert ts.get_descriptor(store).declared_in == web_client.__name__
+
 
 # ── Tool output schemas (unchanged from pre-HTTP migration) ─────────────
 

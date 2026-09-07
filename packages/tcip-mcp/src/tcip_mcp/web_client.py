@@ -292,9 +292,9 @@ register_store(
 def annotation_stats_key(project_root: str) -> Key:
     """The project's per-image annotation timings and session rollups.
 
-    ``cas``: every route here reads the document, edits one session row or one image entry
-    inside it, and writes the whole thing back, so an unconditional write would drop a slice
-    another request had just recorded.
+    ``cas``: every route in ``tcip_web.routes.sessions`` reads the document, edits one session
+    row or one image entry inside it, and writes the whole thing back, so an unconditional
+    write would drop a slice another request had just recorded.
     """
     return Key(ANNOTATION_STATS_STORE, project_root, _ANNOTATION_STATS_PARTS)
 

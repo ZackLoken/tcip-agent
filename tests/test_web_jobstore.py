@@ -4,10 +4,11 @@ import pytest
 
 
 def test_job_registry_documents_each_match_the_job_registry_claim():
-    """tcip-store cannot import tcip-web, so the ``job_registry`` claim in
+    """tcip-store cannot import tcip-mcp, so the ``job_registry`` claim in
     ``tcip_store.layout_claims`` cannot enumerate ``JOB_REGISTRY_DOCUMENTS`` itself; this test
-    holds the agreement from this side, so a document added to the tuple without a matching
-    claim template fails here rather than going unclaimed by the conform rail."""
+    holds the agreement from the tuple's side, beside the registries that persist under it, so
+    a document added to the tuple without a matching claim template fails here rather than
+    going unclaimed by the conform rail."""
     from tcip_mcp.web_client import JOB_REGISTRY_DOCUMENTS
     from tcip_store.layout_claims import PLATFORM_CLAIMS, matches_template
 
