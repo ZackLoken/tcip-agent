@@ -151,6 +151,9 @@ export interface ProjectSummary {
   site_problem: string | null;
   // The first date's labels that would not read, naming the file; the project still lists.
   label_problem: string | null;
+  // Why this card's own removal control is disabled, or null: the backend's own
+  // identity_conflict text, the same string the door's refusal answers with.
+  removal_refusal: string | null;
 }
 
 /** One workspace project the listing carries under `pending_removal`: archived, marked, and
@@ -176,6 +179,9 @@ export interface RemovalOutcome {
   name: string;
   moved_to?: string;
   blocked_by?: string;
+  // The OSError's own errno behind blocked_by, null when it carried none: EACCES/EPERM name a
+  // held handle, EXDEV a filesystem boundary.
+  blocked_errno?: number | null;
   skipped?: string;
   archive_path: string | null;
 }

@@ -147,10 +147,25 @@ export interface TerminalResizeFrame {
   cols: number;
 }
 
+export interface DependentProject {
+  project: string;
+  dataset_id?: string | null;
+  dataset_path?: string | null;
+  pending?: boolean | null;
+  unreadable?: string | null;
+}
+
+export interface ExternalRoot {
+  path: string;
+  layouts: string[];
+  present: boolean;
+}
+
 export interface RemovalPreview {
-  external_roots: Record<string, unknown>[];
-  dependent_projects: Record<string, unknown>[];
+  external_roots: ExternalRoot[];
+  dependent_projects: DependentProject[];
   refusal?: string | null;
+  external_roots_unreadable?: string | null;
 }
 
 export interface RemovalRequest {
@@ -163,8 +178,8 @@ export interface RemovalResponse {
   name: string;
   archive_path: string;
   holding_dir: string;
-  external_roots: Record<string, unknown>[];
-  dependent_projects: Record<string, unknown>[];
+  external_roots: ExternalRoot[];
+  dependent_projects: DependentProject[];
   completes: string;
   audit_scope: string;
 }
