@@ -514,7 +514,8 @@ export function TuningTab() {
                                       : "never answered"}
                                   </td>
                                   <td className="pr-2">
-                                    {g.block.seeds_complete.length} of {sweepDraws.splitDraws}
+                                    {g.block.seeds_complete.length} of{" "}
+                                    {cellText(sweepDraws.splitDraws)}
                                   </td>
                                   <td className="pr-2">
                                     {cellText(g.block.n_complete)} of {cellText(g.block.n)}

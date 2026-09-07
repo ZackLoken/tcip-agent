@@ -77,7 +77,7 @@ export interface SweepDraws {
   groups: SplitSensitivityGroup[];
   best: SplitDrawBlock | null;
   bestReason: string | null;
-  splitDraws: number;
+  splitDraws: number | null;
 }
 
 function numberOrNull(value: unknown): number | null {
@@ -122,7 +122,7 @@ export function sweepDrawsOf(result: unknown): SweepDraws | null {
     groups: r.split_sensitivity.map(splitSensitivityGroupOf),
     best: r.best_value_spread == null ? null : splitDrawBlockOf(r.best_value_spread),
     bestReason: typeof r.best_value_reason === "string" ? r.best_value_reason : null,
-    splitDraws: numberOrNull(r.split_draws) ?? 1,
+    splitDraws: numberOrNull(r.split_draws),
   };
 }
 
