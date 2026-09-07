@@ -328,6 +328,67 @@ def test_record_delivery_binding_event_refuses_naming_the_classifier_document_wh
     assert _delivery_event_records(tmp_path.resolve()) == []
 
 
+def test_record_delivery_binding_event_refuses_a_document_entry_missing_a_key_the_reconciler_returns(
+    tmp_path: Path,
+) -> None:
+    """Every key _reconcile_validity always returns is required of a document entry: one that
+    dropped per_bucket raises naming the key, with the audit line already on the log and no
+    record built, rather than landing a record whose empty per_bucket reads as a reconciliation
+    of nothing. Guards the renderer reading the key as required instead of defaulting it."""
+    from tcip_mcp.pipelines.resolution import StampBinding
+
+    from tests._binding_fixtures import document_reconciliation
+
+    d = str(tmp_path / "bucket")
+    binding = StampBinding(ok=True, claimed=True, experiment_id="exp-1",
+                           producing_experiment_id="exp-1", checkpoint_sha256="0" * 64,
+                           record_digest="digest-1")
+    recon = document_reconciliation(
+        {d: binding}, validated="held_out_annotations", per_bucket={d: "held_out_annotations"},
+        unvalidated_buckets=[], missing_sidecars=[], on_disk_validated=True)
+    del recon["per_bucket"]
+
+    with pytest.raises(KeyError, match="per_bucket"):
+        resolution.record_delivery_binding_event(
+            "test_door", None, [d], document_reconciliations={"operating_point": recon},
+            dimension_reconciliations={}, measurement_documents=["operating_point"],
+            scale_document=None, acknowledgement=None, trait="astringency",
+            delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
+        )
+
+    assert _delivery_event_records(tmp_path.resolve()) == []
+
+
+def test_record_delivery_binding_event_refuses_a_dimension_entry_missing_a_key_the_reconciler_returns(
+    tmp_path: Path,
+) -> None:
+    """The dimension renderer reads its five keys as required the same way: a tile_size entry
+    that dropped binding_notes raises naming the key and builds no record."""
+    from tcip_mcp.pipelines.resolution import StampBinding
+
+    from tests._binding_fixtures import document_reconciliation
+
+    d = str(tmp_path / "bucket")
+    binding = StampBinding(ok=True, claimed=True, experiment_id="exp-1",
+                           producing_experiment_id="exp-1", checkpoint_sha256="0" * 64,
+                           record_digest="digest-1")
+    recon = document_reconciliation(
+        {d: binding}, validated="held_out_annotations", per_bucket={d: "held_out_annotations"},
+        unvalidated_buckets=[], missing_sidecars=[], on_disk_validated=True)
+    tile = {"operative": False, "validated": None, "per_bucket": {}, "unvalidated_buckets": []}
+
+    with pytest.raises(KeyError, match="binding_notes"):
+        resolution.record_delivery_binding_event(
+            "test_door", None, [d], document_reconciliations={"operating_point": recon},
+            dimension_reconciliations={"tile_size": tile},
+            measurement_documents=["operating_point"], scale_document=None,
+            acknowledgement=None, trait="astringency", delivery_kind=STATE_CROSSING_DATES,
+            project_root=tmp_path, plant_mapping=None,
+        )
+
+    assert _delivery_event_records(tmp_path.resolve()) == []
+
+
 def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(tmp_path: Path) -> None:
     """No two of the three ``plant_mapping`` disclosure shapes share a required key set: a dict
     validates against exactly the one model whose keys it carries, and a hybrid combining keys
