@@ -497,6 +497,209 @@ def test_dependent_project_is_listed_and_never_refused(client, tmp_path):
     assert "sample_plot_dependent" in names2
 
 
+def test_a_dependents_own_log_carries_the_dependency_line(client, tmp_path):
+    """GUARDS: the baseline admits the request and writes no dependency_pending_removal line."""
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    dependent = _init(ws, "sample_plot_dependent")
+    reg = register_dataset(str(target), crop="black locust", project_root=str(dependent))
+    assert "error" not in reg, reg
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    dep_lines = _audit_lines(dependent)
+    line = next(l for l in dep_lines if l["tool"] == "dependency_pending_removal")
+    assert line["arguments"]["target"] == "sample_plot_target"
+    assert reg["id"] in line["arguments"]["dataset_ids"]
+
+
+def test_a_dependent_registering_two_datasets_gets_one_line(client, tmp_path):
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    sub = target / "sub_dataset"
+    sub.mkdir()
+    dependent = _init(ws, "sample_plot_two-datasets")
+
+    reg1 = register_dataset(str(target), crop="black locust", project_root=str(dependent))
+    reg2 = register_dataset(str(sub), crop="black locust", project_root=str(dependent))
+    assert "error" not in reg1, reg1
+    assert "error" not in reg2, reg2
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    dep_lines = [l for l in _audit_lines(dependent) if l["tool"] == "dependency_pending_removal"]
+    assert len(dep_lines) == 1
+    assert set(dep_lines[0]["arguments"]["dataset_ids"]) == {reg1["id"], reg2["id"]}
+
+
+def test_a_pending_dependent_still_gets_its_own_line(client, tmp_path):
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    dependent = _init(ws, "sample_plot_dep-pending")
+    reg = register_dataset(str(target), crop="black locust", project_root=str(dependent))
+    assert "error" not in reg, reg
+
+    pending_resp = client.post(
+        "/api/projects/remove",
+        json={
+            "name": "sample_plot_dep-pending", "confirm_name": "sample_plot_dep-pending",
+            "user": "t",
+        },
+    )
+    assert pending_resp.status_code == 200, pending_resp.text
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
+    dep = next(
+        d for d in resp.json()["dependent_projects"] if d["project"] == "sample_plot_dep-pending"
+    )
+    assert dep["pending"] is True
+
+    dep_lines = _audit_lines(dependent)
+    assert any(l["tool"] == "dependency_pending_removal" for l in dep_lines)
+
+
+def test_an_unreadable_dependent_gets_no_dependency_line(client, tmp_path):
+    from tests._record_damage_fixtures import damage_record
+
+    from tcip_mcp.tools.project_tools import dataset_registry_key, register_dataset
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    damaged = _init(ws, "sample_plot_damaged-dep")
+    reg = register_dataset(str(target), crop="black locust", project_root=str(damaged))
+    assert "error" not in reg, reg
+    damage_record(dataset_registry_key(damaged), b"not json")
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
+    unreadable_names = {
+        d.get("project") for d in resp.json()["dependent_projects"] if d.get("unreadable")
+    }
+    assert "sample_plot_damaged-dep" in unreadable_names
+    damaged_lines = _audit_lines(damaged)
+    assert not any(l["tool"] == "dependency_pending_removal" for l in damaged_lines)
+
+
+def test_an_entry_with_a_path_but_no_id_is_listed_as_unreadable_with_no_line(client, tmp_path):
+    from tcip_mcp.tools.project_tools import registry_path_for, upsert_dataset
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    malformed = _init(ws, "sample_plot_malformed")
+    upsert_dataset(
+        malformed, {"path": registry_path_for(target, malformed), "crop": "black locust"},
+    )
+
+    preview = client.get("/api/projects/sample_plot_target/removal-preview").json()
+    entry = next(d for d in preview["dependent_projects"] if d["project"] == "sample_plot_malformed")
+    assert entry.get("unreadable") is not None
+    assert "no id" in entry["unreadable"]
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 200, resp.text
+    malformed_lines = _audit_lines(malformed)
+    assert not any(l["tool"] == "dependency_pending_removal" for l in malformed_lines)
+
+
+def test_a_dependents_line_refused_by_a_raising_append_names_it_and_leaves_the_others(
+    client, tmp_path, monkeypatch,
+):
+    import tcip_store
+    from tcip_mcp import audit
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    ok_dependent = _init(ws, "sample_plot_dep-ok")
+    bad_dependent = _init(ws, "sample_plot_dep-bad")
+    reg_ok = register_dataset(str(target), crop="black locust", project_root=str(ok_dependent))
+    reg_bad = register_dataset(str(target), crop="black locust", project_root=str(bad_dependent))
+    assert "error" not in reg_ok, reg_ok
+    assert "error" not in reg_bad, reg_bad
+
+    real_append = tcip_store.append
+    bad_root = str(bad_dependent.resolve())
+
+    def _flaky_append(key, record):
+        if record.get("tool") == "dependency_pending_removal" and key.root == bad_root:
+            raise RuntimeError("simulated append failure")
+        return real_append(key, record)
+
+    monkeypatch.setattr(audit, "append", _flaky_append)
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert "sample_plot_dep-bad" in detail
+    assert "marker" in detail
+
+    ok_lines = _audit_lines(ok_dependent)
+    assert any(l["tool"] == "dependency_pending_removal" for l in ok_lines)
+    bad_lines = _audit_lines(bad_dependent)
+    assert not any(l["tool"] == "dependency_pending_removal" for l in bad_lines)
+    target_lines = _audit_lines(target)
+    assert target_lines[-1]["tool"] == "project_removal_requested"
+
+
+def test_the_routes_own_line_and_a_dependents_both_refused_answer_one_409(
+    client, tmp_path, monkeypatch,
+):
+    import tcip_store
+    from tcip_mcp import audit
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    ws = tmp_path.parent
+    open_project, target = _seed(ws)
+    dependent = _init(ws, "sample_plot_dep-both")
+    reg = register_dataset(str(target), crop="black locust", project_root=str(dependent))
+    assert "error" not in reg, reg
+
+    real_append = tcip_store.append
+
+    def _flaky_append(key, record):
+        if record.get("tool") in ("dependency_pending_removal", "gui_project_removal_requested"):
+            raise RuntimeError("simulated append failure")
+        return real_append(key, record)
+
+    monkeypatch.setattr(audit, "append", _flaky_append)
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert "sample_plot_dep-both" in detail
+    assert "route" in detail
+
+
 def test_a_refused_preview_skips_the_dependent_and_external_root_scan(client, tmp_path):
     """A refused request never walks the sibling registries: a dependent registered against the
     marker's own project (refused before any scan) is never found."""
