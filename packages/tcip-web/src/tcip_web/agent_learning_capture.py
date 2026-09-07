@@ -18,35 +18,10 @@ from __future__ import annotations
 import json
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
-from tcip_store import LOG_JSON, Key, StoreDescriptor, append, register_store
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import append
 
-_CAPTURE_LOG = RootedFileLocator(prefix=(".tcip",), suffix=".jsonl")
-"""The capture log under a root's own ``.tcip/``."""
-
-LEARNING_CAPTURE_STORE = "learning_capture"
-_CAPTURE_PARTS = ("learning_capture",)
-register_store(
-    StoreDescriptor(
-        name=LEARNING_CAPTURE_STORE,
-        kind="log",
-        key_fields=("document",),
-        frozen=True,
-        codec=LOG_JSON,
-        locator=_CAPTURE_LOG,
-    )
-)
-
-
-def learning_capture_key(root: str | Path) -> Key:
-    """The session-boundary log under ``root``.
-
-    Every session's hook appends here, from its own process, so the entries are serialized and
-    each one is on disk before the hook exits rather than buffered in a bare handle.
-    """
-    return Key(LEARNING_CAPTURE_STORE, str(Path(root).resolve()), _CAPTURE_PARTS)
+from tcip_mcp.web_client import learning_capture_key
 
 
 def main() -> None:

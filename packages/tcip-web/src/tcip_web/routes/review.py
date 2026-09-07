@@ -52,6 +52,7 @@ from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status
 from tcip_mcp.pipelines.image_utils import (
     AmbiguousImageStem, image_dimensions, resolve_image_source,
 )
+from tcip_mcp.web_client import REVIEW_PRIORITY_JOBS
 from tcip_web import jobstore
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.label_annotations_cache import cached_label_annotations
@@ -1055,13 +1056,13 @@ def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
 # Its sibling door, triage_predictions, can auto-accept predictions as GT above a breeder-confirmed threshold, a different and more consequential capability deliberately left agent/operator-only for now.
 
 
-REVIEW_PRIORITY_REGISTRY = jobstore.REVIEW_PRIORITY_JOBS
+REVIEW_PRIORITY_REGISTRY = REVIEW_PRIORITY_JOBS
 """The job registry this module persists its priority-queue jobs to."""
 
 
 def _pq_current_root() -> str:
-    from tcip_web import jobstore
-    return jobstore.current_root()
+    from tcip_mcp.web_client import current_root
+    return current_root()
 
 
 @dataclass

@@ -39,6 +39,7 @@ from tcip_mcp.pipelines.resolution import (
     DEFAULT_NMS_IOU,
     DEFAULT_OVERLAP,
 )
+from tcip_mcp.web_client import INFERENCE_JOBS
 from tcip_web import jobstore
 from tcip_web.paths import assert_path_allowed
 from tcip_web.routes._body_common import EmptyBodyPayload
@@ -51,13 +52,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/inference", tags=["inference"])
 
-INFERENCE_REGISTRY = jobstore.INFERENCE_JOBS
+INFERENCE_REGISTRY = INFERENCE_JOBS
 """The job registry this module persists its jobs to."""
 
 
 def _current_root() -> str:
-    from tcip_web import jobstore
-    return jobstore.current_root()
+    from tcip_mcp.web_client import current_root
+    return current_root()
 
 
 # ── Job registry ────────────────────────────────────────────────────────
@@ -169,8 +170,8 @@ def _get(job_id: str) -> Optional[InferenceJob]:
 
 
 def _list_jobs() -> list[InferenceJob]:
-    from tcip_web import jobstore
-    return _registry.list(jobstore.current_root())
+    from tcip_mcp.web_client import current_root
+    return _registry.list(current_root())
 
 
 def rehydrate_for_current_root() -> None:

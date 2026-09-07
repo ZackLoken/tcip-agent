@@ -38,38 +38,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import tcip_store
-from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import Key
+
+from tcip_mcp.web_client import annotation_stats_key
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
-
-ANNOTATION_STATS_STORE = "annotation_stats"
-_ANNOTATION_STATS_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
-_ANNOTATION_STATS_PARTS = ("annotation_stats",)
-
-register_store(
-    StoreDescriptor(
-        name=ANNOTATION_STATS_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        locator=_ANNOTATION_STATS_DOC,
-    )
-)
-
-
-def annotation_stats_key(project_root: str) -> Key:
-    """The project's per-image annotation timings and session rollups.
-
-    ``cas``: every route here reads the document, edits one session row or one image entry
-    inside it, and writes the whole thing back, so an unconditional write would drop a slice
-    another request had just recorded.
-    """
-    return Key(ANNOTATION_STATS_STORE, project_root, _ANNOTATION_STATS_PARTS)
 
 
 def _guarded_stats_key(project_root: str) -> Key:

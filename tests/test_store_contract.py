@@ -65,10 +65,8 @@ from tcip_store.file_backend import (
     creation_temp_name,
 )
 from tcip_store.sqlite_backend import SqliteBackend, database_path, encode_parts
-from tcip_web import agent_learning_capture
-from tcip_web import jobstore
 from tcip_web import state as web_state
-from tcip_web.routes import canvas, sessions
+from tcip_web.routes import canvas
 from tests._store_worker import (
     BACKEND_ENV,
     BLOB,
@@ -2059,7 +2057,7 @@ REGISTERED = {
         model_registry.registry_index_key, ".tcip/models/registry.json"),
     "job_registry": Registered(
         _real_job_registry_summary(),
-        lambda root: jobstore.job_registry_key("inference_jobs"),
+        lambda root: web_client.job_registry_key("inference_jobs"),
         ".tcip/state/inference_jobs.json", pin=_pin_platform_root),
     "workspace_active_project": Registered(
         "currant_bud_valley\n", lambda root: workspace.active_project_key(), ".active",
@@ -2204,7 +2202,7 @@ REGISTERED = {
     "annotation_stats": Registered(
         {"sessions": [{"user": "ü", "images_annotated": 1, "total_annotations": 3,
                        "total_time_seconds": 42.5}]},
-        lambda root: sessions.annotation_stats_key(str(root)), ".tcip/state/annotation_stats.json"),
+        lambda root: web_client.annotation_stats_key(str(root)), ".tcip/state/annotation_stats.json"),
     "band_group_manifest": Registered(
         BAND_GROUP_MANIFEST_BYTES,
         lambda root: band_groups.band_group_manifest_key(_band_group_dir(root), "cap_ü"),
@@ -2295,7 +2293,7 @@ REGISTERED = {
     "learning_capture": Registered(
         {"ts": "2026-03-04T12:00:00+00:00", "session_id": "s_1", "reason": "clear",
          "active_project": "grüne_reihe", "note": "session ended"},
-        lambda root: agent_learning_capture.learning_capture_key(root),
+        lambda root: web_client.learning_capture_key(root),
         ".tcip/learning_capture.jsonl"),
     "hpo_trial_metrics": Registered(
         {"epoch": 1, "val_loss": 0.25, "selection": 0.25},
