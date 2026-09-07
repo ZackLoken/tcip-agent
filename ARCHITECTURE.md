@@ -25,19 +25,19 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD e47fb9d2.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 7a46cd77.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD e47fb9d2 has 433 modules across the six scanned roots (140086 total lines):
+HEAD 7a46cd77 has 433 modules across the six scanned roots (140080 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
 | tcip-mcp | 137 | 62538 |
 | tcip-annotation | 12 | 4299 |
-| tcip-web | 40 | 13647 |
+| tcip-web | 40 | 13641 |
 | tcip-store | 13 | 5282 |
 | tcip-web-frontend | 214 | 49381 |
 | tools | 17 | 4939 |
@@ -523,7 +523,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | tools/verify_skill_tools.py | Guardrail: hold every tool name in agent-facing prose to the registry. | 3 | 0 |
 | tools/verify_skill_traits.py | Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in crops.yml. | 1 | 0 |
 
-## Package-level dependency rules holding at HEAD cbec8c02
+## Package-level dependency rules holding at HEAD 7a46cd77
 
 The following sentences are checked against every in-repo Python import edge in the regenerated module inventory (an edge is counted only when both the importing file and the imported file resolve to a file inside this repo; stdlib and third-party imports are excluded by `build_module_inventory.py`, see docstring at `tools/build_module_inventory.py:9-20`).
 
@@ -995,10 +995,10 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_inference` | `routes/inference.py:460` |
-| GET | `/jobs` | `list_jobs` | `routes/inference.py:609` |
-| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:614` |
-| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:624` |
+| POST | `/launch` | `launch_inference` | `routes/inference.py:458` |
+| GET | `/jobs` | `list_jobs` | `routes/inference.py:607` |
+| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:612` |
+| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:622` |
 
 ### routes/meta.py, prefix `/api/meta` (2 routes)
 
@@ -1044,8 +1044,8 @@ registered at HEAD.
 | POST | `/backup_labels` | `backup_labels` | `routes/review.py:951` |
 | GET | `/image_statuses` | `image_statuses` | `routes/review.py:1005` |
 | GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1036` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1199` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1227` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1198` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1226` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -1085,16 +1085,16 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/sweeps` | `relaunch_sweep` | `routes/tuning.py:475` |
-| POST | `/sweeps/{sweep_id}/cancel` | `cancel_sweep_route` | `routes/tuning.py:515` |
-| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:526` |
-| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:542` |
-| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:583` |
-| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:604` |
-| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:631` |
-| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:717` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:734` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:748` |
+| POST | `/sweeps` | `relaunch_sweep` | `routes/tuning.py:474` |
+| POST | `/sweeps/{sweep_id}/cancel` | `cancel_sweep_route` | `routes/tuning.py:514` |
+| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:525` |
+| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:539` |
+| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:580` |
+| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:601` |
+| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:628` |
+| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:714` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:731` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:745` |
 
 ### routes/validation.py, prefix `/api/review` (1 route)
 
@@ -1525,7 +1525,7 @@ doors span every category by whatever root their declared argument resolves; thi
 names the explicit-emitter files, not a closed census of the decorator's doors.
 Dataset-scoped: two GUI route writers passing the dataset root their own guard resolved
 (`routes/classes.py`'s `_audit_dataset_write`, `routes/classes.py:63`, which `routes/inference.py`'s own prediction
-writer calls too (`_audit_dataset_write`, `routes/inference.py:406`); `routes/review.py`'s `_audit`,
+writer calls too (`_audit_dataset_write`, `routes/inference.py:404`); `routes/review.py`'s `_audit`,
 `routes/review.py:96`), plus `routes/annotate.py`'s `_audit_gui_write` (`routes/annotate.py:156`), dataset-scoped
 when its guard resolves one and platform-scoped otherwise (a label path confined to an allowed
 root but outside any dataset tree), `resolution.py`'s `record_delivery_binding_event`
@@ -2291,7 +2291,7 @@ Phase 3 verdict: single.
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
 Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:999` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
-Side B: `packages/tcip-web/src/tcip_web/routes/training.py:334` (`asyncio.to_thread(read_log, key, after=cursor)`, the training stream's incremental tail read off the event loop, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:617` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
+Side B: `packages/tcip-web/src/tcip_web/routes/training.py:334` (`asyncio.to_thread(read_log, key, after=cursor)`, the training stream's incremental tail read off the event loop, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:614` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->
@@ -2440,7 +2440,7 @@ Phase 3 verdict: single.
 
 Must agree: every writer stamps, and every consumer finds, the same provenance keys next to a bucket's predictions.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:961` (`def operating_point_stamp(`, the one stamp constructor, every field required of every producer; the stamp's whole key set is declared beside it as `STAMP_KEYS`, the constructor's own, plus `STAMP_EXTENSION_KEYS`, the producer-local additions each named for the producer that writes it; `write_sidecar`, `resolution.py:911`, and `update_sidecar`, `resolution.py:926`, are the only writers, both through `sidecar_key`, `resolution.py:696`, both refusing an unearned validation claim, and for this document refusing a top-level key outside that declared union: a fresh mint on its whole body, an update on the keys it introduces). A validated claim is earned in two phases beside the resolvers it selects among: `open_validation`, `resolution.py:1547`, runs the document's own resolver over the evidence and refuses a result that cleared no accepted reference, and `seal_validation`, `resolution.py:1686`, takes the covered buckets' content identity from the files as they landed, files the row through the experiment record's validations member, and returns the stamp body with its pointer merged in.
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1091` (`read_operating_point_sidecar`, the one reader, with `verify_stamp_binding`, `resolution.py:1832`, deciding inside every reconciler whether a claiming stamp is answered for). The producers are `tools/inference_tools.py:917` and `tools/inference_tools.py:1250` and `packages/tcip-web/src/tcip_web/routes/inference.py:331` (`operating_point_stamp(`); the review promotion merges into the stored stamp under its lock at `routes/validation.py:407`.
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1091` (`read_operating_point_sidecar`, the one reader, with `verify_stamp_binding`, `resolution.py:1832`, deciding inside every reconciler whether a claiming stamp is answered for). The producers are `tools/inference_tools.py:917` and `tools/inference_tools.py:1250` and `packages/tcip-web/src/tcip_web/routes/inference.py:329` (`operating_point_stamp(`); the review promotion merges into the stored stamp under its lock at `routes/validation.py:407`.
 Phase 3 verdict: single.
 
 ## S29. Prediction-bucket immutability
@@ -2451,7 +2451,7 @@ path, and the web route's own launch), to a second agreement that no writer publ
 bucket that already holds a prediction document with no verdict yet recorded, whatever
 `overwrite` says.
 Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:332` (`def resolve_writable_bucket(`, the one guard, its `refuse_documents` keyword the document agreement's opt-in; `bucket_stems`, `prediction_buckets.py:54`, excludes every provenance stamp through `tcip_annotation.json_io.prediction_documents` rather than naming one filename).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/proposal_tools.py:459` (`from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes`) and `tools/proposal_tools.py:608` (`from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes`, both leaving `refuse_documents` at its default off), `tools/inference_tools.py:1069` (`_resolve_writable_bucket_for`, passing `refuse_documents=True` on every branch) and `packages/tcip-web/src/tcip_web/routes/inference.py:532` (`refuse_documents=True`, the document agreement now reaching the route's own `resolve_prediction_bucket` call too).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/proposal_tools.py:459` (`from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes`) and `tools/proposal_tools.py:608` (`from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes`, both leaving `refuse_documents` at its default off), `tools/inference_tools.py:1069` (`_resolve_writable_bucket_for`, passing `refuse_documents=True` on every branch) and `packages/tcip-web/src/tcip_web/routes/inference.py:530` (`refuse_documents=True`, the document agreement now reaching the route's own `resolve_prediction_bucket` call too).
 Phase 3 verdict: single.
 
 ## S30. split.json train/val manifest
@@ -2480,7 +2480,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP entry point and the GUI entry point start from the same unresolved defaults, and both read a caller's unstated parameter off the `None` sentinel rather than off equality with the default, so a caller who states the default value is honored as an override instead of being resolved as if they had stated nothing.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:159` (`DEFAULT_CONF = 0.5`, with `DEFAULT_NMS_IOU`, `DEFAULT_OVERLAP` and `DEFAULT_MAX_DETS` declared beside it).
-Side B: `packages/tcip-web/src/tcip_web/routes/inference.py:32` (import; the sentinel form is `resolved_iou = DEFAULT_NMS_IOU if payload.iou is None else payload.iou`, `routes/inference.py:562`) and `packages/tcip-mcp/src/tcip_mcp/pipelines/training/eval_runners.py:15` (the tile-level regime's own default conf, `DEFAULT_CONF`). The full-frame runner, `evaluate_model`, and `run_inference`'s preview, verified body and raster branch all resolve a stated-or-default conf, NMS and cap through one function, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:167` (`def applied_operating_point(`), so the point a run is selected at starts where the point it ships at does; the cap parameters of `run_inference` and `deliver_per_image_counts` default to `None`, the shared constant supplies the pass, and the unstated parameter travels to the resolver as unstated so it can derive one from the data.
+Side B: `packages/tcip-web/src/tcip_web/routes/inference.py:32` (import; the sentinel form is `resolved_iou = DEFAULT_NMS_IOU if payload.iou is None else payload.iou`, `routes/inference.py:560`) and `packages/tcip-mcp/src/tcip_mcp/pipelines/training/eval_runners.py:15` (the tile-level regime's own default conf, `DEFAULT_CONF`). The full-frame runner, `evaluate_model`, and `run_inference`'s preview, verified body and raster branch all resolve a stated-or-default conf, NMS and cap through one function, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:167` (`def applied_operating_point(`), so the point a run is selected at starts where the point it ships at does; the cap parameters of `run_inference` and `deliver_per_image_counts` default to `None`, the shared constant supplies the pass, and the unstated parameter travels to the resolver as unstated so it can derive one from the data.
 Phase 3 verdict: single. One value is still spelled as a literal rather than bound: `predict_tiled`'s overlap default, `packages/tcip-mcp/src/tcip_mcp/pipelines/inference/generic_predictor.py:422`.
 
 ## S34. check_delivery_gate behind every delivery path
@@ -2599,7 +2599,7 @@ Phase 3 verdict: duplicated.
 ## S50. Inference job stream WebSocket  <!-- queued: P5-304 unify -->
 
 Must agree: the browser recognizes the terminal frame and the status vocabulary the backend uses.
-Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:623` (`@router.websocket("/jobs/{job_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:621` (`@router.websocket("/jobs/{job_id}/stream")`).
 Side B: `packages/tcip-web/src/tcip_web/jobstore.py:63` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
 Phase 3 verdict: duplicated.
 
