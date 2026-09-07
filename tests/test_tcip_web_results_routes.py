@@ -454,7 +454,8 @@ def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_k
     store.open_project(tmp_path.resolve())
 
     record_delivery_binding_event(
-        "deliver_orthomosaic_plant_counts", None, [], {},
+        "deliver_orthomosaic_plant_counts", None, [],
+        document_reconciliations={}, dimension_reconciliations={},
         measurement_documents=["operating_point"], scale_document=None, acknowledgement=None,
         trait="stem_count", delivery_kind="per_plant_count_aggregate", project_root=tmp_path,
         plant_mapping={
@@ -469,7 +470,8 @@ def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_k
         },
     )
     record_delivery_binding_event(
-        "results.export_csv", None, [], {},
+        "results.export_csv", None, [],
+        document_reconciliations={}, dimension_reconciliations={},
         measurement_documents=["operating_point"], scale_document=None, acknowledgement=None,
         trait="bud_opening", delivery_kind="state_crossing_dates", project_root=tmp_path,
         plant_mapping={
@@ -726,6 +728,29 @@ def test_phenology_measurement_response_carries_every_field_the_two_deleted_door
         assert response[key] == value, key
 
 
+def test_phenology_measurement_validity_carries_exactly_its_eleven_named_keys(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """_PhenologyMeasurement.validity is a property derived from the reconciliations the
+    measurement was built from; this pins the eleven key names it has always served as
+    validity_detail, so a caller reading it by name never meets a silently renamed or dropped
+    one."""
+    from tcip_web.routes.results import PhenologyPayload, _measure_phenology
+
+    body = _phenology_fixture(tmp_path, validated=True, detections=100)
+    measurement = _measure_phenology(PhenologyPayload(**body))
+
+    assert set(measurement.validity) == {
+        "operating_point", "classifier", "operating_point_conf", "operating_point_confs",
+        "missing_operating_point_sidecars", "unvalidated_buckets", "binding_notes",
+        "missing_classifier_sidecars", "classifier_binding_note", "tile_size",
+        "unvalidated_tile_size_buckets",
+    }
+    assert measurement.validity["operating_point"] == measurement.recon["validated"]
+    assert measurement.validity["classifier"] == measurement.classifier_state
+    assert measurement.validity["tile_size"] == measurement.tile_recon["validated"]
+
+
 def test_web_and_mcp_phenology_doors_agree_on_validity(client: TestClient, tmp_path: Path) -> None:
     # The web route's phenology_measurement and the MCP tool's deliver_phenology_milestones read the same
     # on-disk evidence through the identical tcip_mcp.pipelines.resolution reconciliation.
@@ -743,6 +768,41 @@ def test_web_and_mcp_phenology_doors_agree_on_validity(client: TestClient, tmp_p
     assert "error" not in mcp_result, mcp_result
     assert mcp_result["operating_point_validated"] == web_validated["operating_point"]
     assert mcp_result["positive_state_classifier_validated"] == web_validated["classifier"]
+
+
+def test_the_two_phenology_doors_classifier_reconciliations_agree_on_a_coincident_bucket_list(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """The MCP door reconciles the classifier over its own caller-stated classifier_pred_dirs; the
+    web door reconciles it over the _belonging-resolved buckets its own delivery reads. Handed the
+    web door's own resolved strings as the MCP door's classifier_pred_dirs, the two
+    reconciliations read the identical buckets and compare whole."""
+    from tcip_mcp.pipelines.resolution import read_delivery_events
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+    from tcip_web.routes.results import PhenologyPayload, _measure_phenology
+
+    body = _phenology_fixture(tmp_path, validated=True, detections=100)
+    web_measurement = _measure_phenology(PhenologyPayload(**body))
+    resolved_dirs = list(web_measurement.predictions_by_date.values())
+
+    mcp_result = deliver_phenology_milestones(
+        trait=body["trait"], mapping_name=body["mapping_name"],
+        predictions_by_date=body["predictions_by_date"], output_csv_path=str(tmp_path / "mcp.csv"),
+        classifier_pred_dirs=resolved_dirs,
+    )
+    assert "error" not in mcp_result, mcp_result
+
+    resp = _export(client, body, "milestones", filename="web.csv")
+    assert resp.status_code == 200, resp.text[:300]
+
+    mcp_record = next(
+        r for r in read_delivery_events(tmp_path) if r["door"] == "deliver_phenology_milestones")
+    web_record = next(
+        r for r in read_delivery_events(tmp_path) if r["door"] == "results.export_csv")
+
+    mcp_entry = mcp_record["document_reconciliations"]["classifier_operating_point"]
+    web_entry = web_record["document_reconciliations"]["classifier_operating_point"]
+    assert mcp_entry == web_entry
 
 
 def test_web_and_mcp_export_csv_join_confs_the_same_way(
@@ -854,6 +914,31 @@ def test_a_classifier_calibrated_against_another_experiment_does_not_validate_th
                        json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 400
     assert "records producing run 'exp-OTHER'" in resp.json()["detail"]
+
+
+def test_an_acknowledged_delivery_over_a_producing_run_mismatch_records_bound_validated_false(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """The one case document_reconciliations' bound_validated and delivery_note exist for: a
+    classifier stamp the binding floors (recording a producing run other than the delivery's own)
+    still carries the reconciler's own on-disk validated reference, while bound_validated is the
+    delivery-level state bind_classifier_validity actually returned, and the note explains why
+    the two differ."""
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, read_delivery_events
+
+    body = _phenology_fixture(tmp_path, validated=True)
+    _rewrite_classifier_sidecars(body, trait="bud_opening", experiment_id="exp-OTHER")
+
+    resp = _export(client, body, "milestones",
+                   acknowledgement={"reason": "shipping unvalidated for now"}, user="user:tester")
+    assert resp.status_code == 200, resp.text[:300]
+
+    records = [r for r in read_delivery_events(tmp_path) if r["door"] == "results.export_csv"]
+    assert len(records) == 1, records
+    classifier_entry = records[0]["document_reconciliations"]["classifier_operating_point"]
+    assert classifier_entry["validated"] == "held_out_annotations"
+    assert classifier_entry["bound_validated"] == VALIDATED_FALSE
+    assert "records producing run" in classifier_entry["delivery_note"]
 
 
 def test_a_correctly_bound_classifier_still_delivers(client: TestClient, tmp_path: Path) -> None:
