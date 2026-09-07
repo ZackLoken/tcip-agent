@@ -24,10 +24,8 @@ import {
   VAL_METRIC_PREFIX,
 } from "@/tabs/trainingMetrics";
 
-/** One marked run: the id the tab tracks it by, and the experiment id compare_experiments
- * and rank_registered_models take. Only a run with a resolved experiment_id is ever marked. */
+/** One marked run: the one id it is tracked by, compared, ranked and streamed under. */
 export interface MarkedRun {
-  runId: string;
   experimentId: string;
 }
 
@@ -193,19 +191,19 @@ export function RunComparison({
   useEffect(() => {
     setSeriesByRun({});
     if (!projectRoot) return;
-    const stops = marked.map(({ runId }) =>
-      openTrainingStream(projectRoot, runId, (msg) => {
+    const stops = marked.map(({ experimentId }) =>
+      openTrainingStream(projectRoot, experimentId, (msg) => {
         if (msg.type !== "metric" || !msg.row) return;
         setSeriesByRun((prev) => ({
           ...prev,
-          [runId]: mergeMetric(prev[runId] ?? [], msg.row as MetricRow),
+          [experimentId]: mergeMetric(prev[experimentId] ?? [], msg.row as MetricRow),
         }));
       }),
     );
     return () => stops.forEach((stop) => stop());
-    // marked's own identity (run ids) is what a stream subscribes to; re-derive on every change.
+    // marked's own identity is what a stream subscribes to; re-derive on every change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [marked.map((m) => m.runId).join(","), projectRoot]);
+  }, [markedKey, projectRoot]);
 
   const byExperimentId = useMemo(() => {
     const map = new Map<string, CompareExperiment>();
@@ -261,8 +259,8 @@ export function RunComparison({
           : null;
 
   const runSeries: RunSeries[] = marked.map((m) => ({
-    runId: m.runId,
-    rows: seriesByRun[m.runId] ?? [],
+    runId: m.experimentId,
+    rows: seriesByRun[m.experimentId] ?? [],
   }));
   const overlayMetricOptions = metricKeysAcross(runSeries);
   const [overlayMetric, setOverlayMetric] = useState("");
@@ -335,28 +333,18 @@ export function RunComparison({
             <tr className="border-b border-tcip-border">
               <th className="tcip-th" />
               {columns.map((c) => (
-                <th key={c.runId} className="tcip-th font-mono">
-                  {c.runId}
+                <th key={c.experimentId} className="tcip-th font-mono">
+                  {c.experimentId}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {columns.some((c) => c.experimentId !== c.runId) && (
-              <tr className="border-b border-tcip-border">
-                <th className="tcip-th">Experiment</th>
-                {columns.map((c) => (
-                  <td key={c.runId} className="px-2 py-1 font-mono">
-                    {c.experimentId}
-                  </td>
-                ))}
-              </tr>
-            )}
             {columns.some((c) => c.exp?.error) && (
               <tr className="border-b border-tcip-border">
                 <th className="tcip-th">Read error</th>
                 {columns.map((c) => (
-                  <td key={c.runId} className="px-2 py-1 text-tcip-fp">
+                  <td key={c.experimentId} className="px-2 py-1 text-tcip-fp">
                     {c.exp?.error ?? ""}
                   </td>
                 ))}
@@ -365,7 +353,7 @@ export function RunComparison({
             <tr className="border-b border-tcip-border">
               <th className="tcip-th">Builder</th>
               {columns.map((c) => (
-                <td key={c.runId} className="px-2 py-1">
+                <td key={c.experimentId} className="px-2 py-1">
                   {c.hasEntry ? (c.exp?.model ?? UNRECORDED) : NOT_IN_ANSWER}
                 </td>
               ))}
@@ -373,7 +361,7 @@ export function RunComparison({
             <tr className="border-b border-tcip-border">
               <th className="tcip-th">Task / subject</th>
               {columns.map((c) => (
-                <td key={c.runId} className="px-2 py-1">
+                <td key={c.experimentId} className="px-2 py-1">
                   {c.hasEntry
                     ? `${c.exp?.task ?? UNRECORDED} / ${c.exp?.subject ?? UNRECORDED}`
                     : NOT_IN_ANSWER}
@@ -383,7 +371,7 @@ export function RunComparison({
             <tr className="border-b border-tcip-border">
               <th className="tcip-th">State</th>
               {columns.map((c) => (
-                <td key={c.runId} className="px-2 py-1">
+                <td key={c.experimentId} className="px-2 py-1">
                   {c.hasEntry ? (c.exp?.state ?? UNRECORDED) : NOT_IN_ANSWER}
                   {c.exp?.status_error ? (
                     <span className="block text-tcip-fp">{c.exp.status_error}</span>
@@ -394,7 +382,7 @@ export function RunComparison({
             <tr className="border-b border-tcip-border">
               <th className="tcip-th">Epochs logged</th>
               {columns.map((c) => (
-                <td key={c.runId} className="px-2 py-1 tabular-nums">
+                <td key={c.experimentId} className="px-2 py-1 tabular-nums">
                   {c.hasEntry ? (c.exp?.n_epochs ?? UNRECORDED) : NOT_IN_ANSWER}
                 </td>
               ))}
@@ -412,7 +400,7 @@ export function RunComparison({
             <tr className="border-b border-tcip-border">
               <th className="tcip-th">Partition</th>
               {columns.map((c) => (
-                <td key={c.runId} className="px-2 py-1">
+                <td key={c.experimentId} className="px-2 py-1">
                   {c.hasEntry ? splitLine(c.exp?.split) : NOT_IN_ANSWER}
                 </td>
               ))}
@@ -430,8 +418,8 @@ export function RunComparison({
             <tr className="border-b border-tcip-border">
               <th className="tcip-th" />
               {columns.map((c) => (
-                <th key={c.runId} className="tcip-th font-mono">
-                  {c.runId}
+                <th key={c.experimentId} className="tcip-th font-mono">
+                  {c.experimentId}
                 </th>
               ))}
             </tr>
@@ -448,7 +436,7 @@ export function RunComparison({
                 <tr key={key} className="border-b border-tcip-border">
                   <th className="tcip-th">{key}</th>
                   {columns.map((c) => (
-                    <td key={c.runId} className="px-2 py-1 tabular-nums">
+                    <td key={c.experimentId} className="px-2 py-1 tabular-nums">
                       {c.hasEntry
                         ? loggedMetricCell(c.exp?.last_logged_metrics, key)
                         : NOT_IN_ANSWER}
@@ -468,8 +456,8 @@ export function RunComparison({
             <tr className="border-b border-tcip-border">
               <th className="tcip-th" />
               {columns.map((c) => (
-                <th key={c.runId} className="tcip-th font-mono">
-                  {c.runId}
+                <th key={c.experimentId} className="tcip-th font-mono">
+                  {c.experimentId}
                 </th>
               ))}
             </tr>
@@ -478,7 +466,7 @@ export function RunComparison({
             <tr>
               <th className="tcip-th">Entries</th>
               {columns.map((c) => (
-                <td key={c.runId} className="px-2 py-1 align-top">
+                <td key={c.experimentId} className="px-2 py-1 align-top">
                   {!c.hasEntry ? (
                     <span className="text-tcip-muted">{NOT_IN_ANSWER}</span>
                   ) : c.exp?.registry_error ? (
@@ -552,10 +540,10 @@ export function RunComparison({
               <Legend wrapperStyle={{ fontSize: 11, color: CHART.legendText }} />
               {marked.map((m, i) => (
                 <Line
-                  key={m.runId}
+                  key={m.experimentId}
                   type="monotone"
-                  dataKey={m.runId}
-                  name={m.runId}
+                  dataKey={m.experimentId}
+                  name={m.experimentId}
                   stroke={CHART_LINE_COLORS[i % CHART_LINE_COLORS.length]}
                   dot={false}
                   strokeWidth={1.5}
@@ -575,8 +563,8 @@ export function RunComparison({
             {Object.entries(droppedByRun)
               .filter(([, n]) => n > 0)
               .map(
-                ([runId, n]) =>
-                  `${runId}: ${n} row(s) with no epoch/step, dropped from the overlay`,
+                ([experimentId, n]) =>
+                  `${experimentId}: ${n} row(s) with no epoch/step, dropped from the overlay`,
               )
               .join(" / ")}
           </div>

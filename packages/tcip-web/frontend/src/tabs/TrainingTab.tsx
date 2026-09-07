@@ -38,15 +38,6 @@ import {
 // Runs can only be stopped while still active; terminal/historical runs show no button.
 const TRAINING_CANCELLABLE: ReadonlySet<string> = new Set(["created", "running"]);
 
-/** Why a row's Compare toggle is disabled, when it is: the two reasons a run's own
- * experiment_id/experiment_error name, the one implementation both the row and the toggle's
- * own click handler consult. Markable (neither reason) returns null. */
-function unmarkableReason(run: TrainingRunSummary): string | null {
-  if (run.experiment_error) return `experiment tracking failed: ${run.experiment_error}`;
-  if (!run.experiment_id) return "experiment not resolved yet";
-  return null;
-}
-
 function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -99,18 +90,13 @@ function heartbeatAge(heartbeat: string | null | undefined): string | null {
   return mins < 1 ? "last heartbeat under a minute ago" : `last heartbeat ${mins} min ago`;
 }
 
-/** The row's own select control name: id, its experiment id when the two differ (exactly as the
- * visible row states it), status, a running row's own heartbeat age, and the record's own
- * launcher sentence, with the best value's metric appended exactly as the record carries them
- * when present; the same order the visible row itself reads in. */
+/** The row's own select control name: id, status, a running row's own heartbeat age, and the
+ * record's own launcher sentence, with the best value's metric appended exactly as the record
+ * carries them when present; the same order the visible row itself reads in. */
 function runRowLabel(run: TrainingRunSummary): string {
-  const idPart =
-    run.experiment_id && run.experiment_id !== run.run_id
-      ? `${run.run_id} · ${run.experiment_id}`
-      : run.run_id;
   const age = run.status === "running" ? heartbeatAge(run.heartbeat) : null;
   const statusPart = age ? `${run.status}, ${age}` : run.status;
-  const base = `${idPart} ${statusPart}, ${launcherSentence(run.launched_by)}`;
+  const base = `${run.experiment_id} ${statusPart}, ${launcherSentence(run.launched_by)}`;
   if (run.best_metric === undefined || run.best_metric === null || !run.best_metric_name) {
     return base;
   }
@@ -222,35 +208,31 @@ export function TrainingTab() {
   const chartTableId = useId();
 
   const marked: MarkedRun[] = runs
-    .filter((r) => markedRunIds.has(r.run_id) && !unmarkableReason(r))
-    .map((r) => ({ runId: r.run_id, experimentId: r.experiment_id as string }));
+    .filter((r) => markedRunIds.has(r.experiment_id))
+    .map((r) => ({ experimentId: r.experiment_id }));
   const comparing = marked.length >= 2;
 
   function toggleMarked(run: TrainingRunSummary) {
     setMarkedRunIds((prev) => {
       const next = new Set(prev);
-      if (next.has(run.run_id)) {
-        next.delete(run.run_id);
+      if (next.has(run.experiment_id)) {
+        next.delete(run.experiment_id);
         return next;
       }
-      if (unmarkableReason(run)) return prev;
-      // The same markable count the header prints, not the raw id set: a lingering id for a
-      // run that turned unmarkable since must not count toward the cap.
-      const markableCount = runs.filter((r) => next.has(r.run_id) && !unmarkableReason(r)).length;
-      if (markableCount >= MAX_MARKED_RUNS) {
+      if (next.size >= MAX_MARKED_RUNS) {
         useStore
           .getState()
           .pushToast(`Compare fits at most ${MAX_MARKED_RUNS} runs at once; unmark one first.`);
         return prev;
       }
-      next.add(run.run_id);
+      next.add(run.experiment_id);
       return next;
     });
   }
 
   // A run's own marked state, never "No run selected" left over: once the marked set settles
   // at exactly one, that run becomes the one the detail region shows.
-  const soleMarkedRunId = marked.length === 1 ? marked[0].runId : null;
+  const soleMarkedRunId = marked.length === 1 ? marked[0].experimentId : null;
   useEffect(() => {
     if (soleMarkedRunId) setSelectedRun(soleMarkedRunId);
   }, [soleMarkedRunId]);
@@ -263,7 +245,7 @@ export function TrainingTab() {
       setRunsError(null);
       // A run that leaves the list must also leave the marked set, or the cap (which counts
       // markedRunIds itself) can read full while the header (runs still present) shows fewer.
-      const stillPresent = new Set(nextRuns.map((run) => run.run_id));
+      const stillPresent = new Set(nextRuns.map((run) => run.experiment_id));
       setMarkedRunIds((prev) => {
         const pruned = new Set(Array.from(prev).filter((id) => stillPresent.has(id)));
         return pruned.size === prev.size ? prev : pruned;
@@ -324,7 +306,7 @@ export function TrainingTab() {
     const result = await trainingApi.relaunch(experimentId, splitManifestDir);
     setPickerOpen(false);
     void refreshRuns();
-    if (typeof result.run_id === "string") setSelectedRun(result.run_id);
+    if (typeof result.experiment_id === "string") setSelectedRun(result.experiment_id);
   }
 
   function sendToAgent() {
@@ -348,7 +330,7 @@ export function TrainingTab() {
     streamRef.current?.();
     // A run already terminal when this stream opened is a rediscovery, not a transition the
     // breeder is watching; only a run still live at open time toasts on its own terminal frame.
-    const knownAtOpen = runsRef.current.find((r) => r.run_id === selectedRun)?.status;
+    const knownAtOpen = runsRef.current.find((r) => r.experiment_id === selectedRun)?.status;
     const alreadyTerminal = TERMINAL_STATUSES.has(knownAtOpen ?? "");
     // A run selected at its launch moment can be unknown to the backend for a few reconnects;
     // the toast names that once per selection, not once per silent retry.
@@ -465,7 +447,7 @@ export function TrainingTab() {
     [metrics],
   );
 
-  const selectedRunSummary = runs.find((r) => r.run_id === selectedRun);
+  const selectedRunSummary = runs.find((r) => r.experiment_id === selectedRun);
   const selectedRunTerminal = TERMINAL_STATUSES.has(selectedRunSummary?.status ?? "");
 
   const noLogsMessage = tbNoLogs
@@ -701,34 +683,28 @@ export function TrainingTab() {
         )}
         <ul className="space-y-1">
           {runs.map((r) => {
-            const isMarked = markedRunIds.has(r.run_id);
-            const reason = unmarkableReason(r);
-            const cancelling = pendingCancel.has(r.run_id);
-            const cancelError = cancelErrors[r.run_id];
+            const isMarked = markedRunIds.has(r.experiment_id);
+            const cancelling = pendingCancel.has(r.experiment_id);
+            const cancelError = cancelErrors[r.experiment_id];
             const heartbeatText = r.status === "running" ? heartbeatAge(r.heartbeat) : null;
             return (
-              <li key={r.run_id}>
+              <li key={r.experiment_id}>
                 <div
                   className={`flex items-start gap-1 p-2 rounded border transition-colors ${
-                    selectedRun === r.run_id && !isMarked
+                    selectedRun === r.experiment_id && !isMarked
                       ? "border-tcip-accent bg-tcip-accent/10"
                       : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
                   }`}
                 >
                   <button
                     type="button"
-                    aria-pressed={selectedRun === r.run_id}
+                    aria-pressed={selectedRun === r.experiment_id}
                     aria-label={runRowLabel(r)}
-                    aria-describedby={`origin-mark-${r.run_id}`}
+                    aria-describedby={`origin-mark-${r.experiment_id}`}
                     className="flex-1 min-w-0 text-left"
-                    onClick={() => setSelectedRun(r.run_id)}
+                    onClick={() => setSelectedRun(r.experiment_id)}
                   >
-                    <div className="font-mono text-[11px]">
-                      {r.run_id}
-                      {r.experiment_id && r.experiment_id !== r.run_id && (
-                        <span className="text-tcip-muted break-words"> · {r.experiment_id}</span>
-                      )}
-                    </div>
+                    <div className="font-mono text-[11px]">{r.experiment_id}</div>
                     <div className="text-[10px] text-tcip-muted flex justify-between">
                       <span>
                         {r.status}
@@ -736,7 +712,7 @@ export function TrainingTab() {
                         <span title={launcherDescription(r.launched_by)}>
                           {` · ${launcherSentence(r.launched_by)}`}
                         </span>
-                        <span id={`origin-mark-${r.run_id}`} className="sr-only">
+                        <span id={`origin-mark-${r.experiment_id}`} className="sr-only">
                           {launcherDescription(r.launched_by)}
                         </span>
                       </span>
@@ -758,9 +734,7 @@ export function TrainingTab() {
                       <button
                         type="button"
                         aria-pressed={isMarked}
-                        aria-label={`Compare ${r.run_id}`}
-                        aria-describedby={reason ? `compare-reason-${r.run_id}` : undefined}
-                        disabled={!isMarked && !!reason}
+                        aria-label={`Compare ${r.experiment_id}`}
                         className={`px-2 py-1 text-[10px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
                           isMarked ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
                         }`}
@@ -776,27 +750,19 @@ export function TrainingTab() {
                               ? "Reaches a live process only; a stale running row keeps this control until its heartbeat window lapses."
                               : "Cancels a run that has not started yet."
                           }
-                          aria-label={`Cancel ${r.run_id}`}
-                          aria-describedby={cancelError ? `cancel-error-${r.run_id}` : undefined}
+                          aria-label={`Cancel ${r.experiment_id}`}
+                          aria-describedby={cancelError ? `cancel-error-${r.experiment_id}` : undefined}
                           disabled={cancelling}
                           className="px-2 py-1 text-[10px] border-l border-tcip-border hover:bg-tcip-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
-                          onClick={() => void onCancel(r.run_id)}
+                          onClick={() => void onCancel(r.experiment_id)}
                         >
                           {cancelling ? "Cancelling…" : "Cancel"}
                         </button>
                       )}
                     </div>
-                    {reason && (
-                      <span
-                        id={`compare-reason-${r.run_id}`}
-                        className="text-[10px] text-tcip-muted text-right max-w-[150px]"
-                      >
-                        {reason}
-                      </span>
-                    )}
                     {cancelError && (
                       <span
-                        id={`cancel-error-${r.run_id}`}
+                        id={`cancel-error-${r.experiment_id}`}
                         className="text-[10px] text-tcip-fp text-right max-w-[150px]"
                       >
                         {cancelError}
