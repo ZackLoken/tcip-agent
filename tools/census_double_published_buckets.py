@@ -139,7 +139,10 @@ def census_project(project_root: Path) -> ProjectCensus:
         registered = {
             Path(path).resolve() for path, layout in roots if layout == PREDICTION_BUCKET
         }
-        own = {p.resolve() for p in dataset_layout.prediction_bucket_dirs(project_root)}
+        own = {
+            p.resolve()
+            for p in dataset_layout.prediction_bucket_dirs(project_root, include_cleared=False)
+        }
         result.unregistered_tree = bool(own) and not own & registered
 
     mixed_by_path = {b.bucket.resolve(): b for b in result.mixed}
