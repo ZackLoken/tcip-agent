@@ -867,12 +867,17 @@ def test_manifest_with_a_seed_axis_and_no_split_draws_is_not_relaunchable_on_bot
     live_id = resp.json()["sweep_id"]
     assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
 
+    from tcip_mcp.tools.training_tools import caller_split_seed_refusal
+
+    seed_axis_refusal = caller_split_seed_refusal(seed_space, None)
+
     listing = client.get("/api/tuning/sweeps").json()["sweeps"]
     by_id = {s["sweep_id"]: s for s in listing}
     live_row, disk_row = by_id[live_id], by_id["hpo_seedaxis_disk"]
     for row in (live_row, disk_row):
         assert row["relaunchable"] is False
-        assert "cannot be replayed as recorded" in row["reason"]
+        assert row["reason"] == seed_axis_refusal.reason
+        assert seed_axis_refusal.remedy not in row["reason"]
 
 
 def test_relaunch_reads_the_source_manifest_under_the_sweeps_own_launch_root(
