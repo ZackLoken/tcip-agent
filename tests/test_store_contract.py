@@ -2268,6 +2268,12 @@ REGISTERED = {
     "dataset_registry": Registered(
         [{"id": "a1", "path": "dü", "crop": "currant", "fingerprint": "9f2c"}],
         project_tools.dataset_registry_key, ".tcip/datasets.json"),
+    "pending_removal": Registered(
+        {"requested_at": "20260304T120000Z", "requested_by": "user:ü",
+         "archive_path": "C:/orchards/.removed/bud_orchard_valley-20260304T120000Z.zip",
+         "holding_dir": "C:/orchards/.removed/bud_orchard_valley-20260304T120000Z",
+         "external_roots": [], "dependent_projects": []},
+        workspace.pending_removal_key, ".tcip/pending_removal.json"),
     "split_manifest": Registered(
         _real_split_manifest(),
         lambda root: data_tools.split_manifest_key(_split_dir(root)),

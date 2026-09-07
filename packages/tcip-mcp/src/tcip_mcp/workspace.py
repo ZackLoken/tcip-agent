@@ -23,7 +23,16 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from tcip_store import DecodeError, Key, StoreDescriptor, read, register_store, replace, text_codec
+from tcip_store import (
+    RECORD_JSON,
+    DecodeError,
+    Key,
+    StoreDescriptor,
+    read,
+    register_store,
+    replace,
+    text_codec,
+)
 from tcip_store.file_backend import RootedFileLocator
 from tcip_store.layout_claims import NAME_SEGMENT as _SEGMENT_RE
 
@@ -181,6 +190,48 @@ def read_active_project(*, create: bool = True) -> Optional[str]:
         # 500 the whole front door: treat it as unset.
         return None
     return (val.strip() or None) if val is not None else None
+
+
+# ── the pending-removal marker store ─────────────────────────────────────────
+
+_PENDING_REMOVAL_DOC = RootedFileLocator(prefix=(".tcip",), suffix=".json")
+"""A project's own top-level ``.tcip`` document, the shape ``dataset_registry`` uses."""
+
+PENDING_REMOVAL_STORE = "pending_removal"
+_PENDING_REMOVAL_PARTS = ("pending_removal",)
+register_store(
+    StoreDescriptor(
+        name=PENDING_REMOVAL_STORE,
+        kind="record",
+        key_fields=("document",),
+        frozen=True,
+        codec=RECORD_JSON,
+        concurrency="cas",
+        locator=_PENDING_REMOVAL_DOC,
+    )
+)
+
+
+def pending_removal_key(project_root: str | Path) -> Key:
+    """The workspace project's own pending-removal marker, one document per project.
+
+    ``cas``: written once by ``tcip_mcp.project_removal.request_project_removal`` with
+    ``expect=Version.ABSENT`` (a second request over an existing marker is a conflict, not an
+    overwrite) and deleted, at the version the completing walk read it at, by
+    ``complete_pending_removals``.
+    """
+    return Key(PENDING_REMOVAL_STORE, str(Path(project_root).absolute()), _PENDING_REMOVAL_PARTS)
+
+
+def pending_removal_record(project_root: str | Path) -> Optional[dict]:
+    """The project's pending-removal marker, or ``None`` when it carries none.
+
+    Reads through the seam and lets the store's own refusals (``StoreError``, ``DecodeError``,
+    ``SchemaVersionRefused``) propagate rather than folding them to ``None``, for a caller that
+    must report the refusal as its own (the removal door's own read of the marker it is about
+    to write).
+    """
+    return read(pending_removal_key(project_root), default=None)
 
 
 def adoptable_project_root(name: str) -> Path:
