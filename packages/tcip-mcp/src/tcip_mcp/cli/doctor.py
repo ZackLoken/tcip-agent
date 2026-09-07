@@ -597,19 +597,23 @@ def check_trait_specs(root: Path, findings: list) -> None:
 
 
 def check_trait_spec_statements(root: Path, findings: list) -> None:
-    """A registered trait spec with no authoring statement behind it: the recoverable gap
-    author_trait_spec's own second write can leave when it fails partway. The breeder's new
-    confirmation panel would show no row for a trait that plainly exists, so this is worth
-    surfacing rather than leaving to be found only when the breeder asks why.
+    """Every registered trait spec whose own trait-spec statement is not both confirmed and
+    current, one of three states: absent (the recoverable gap ``author_trait_spec``'s own second
+    write can leave when it fails partway), stale (the spec moved past what the statement
+    recorded), or current but never confirmed by the breeder. The Results tab's confirmation
+    panel reads the same three states, so this is worth surfacing rather than leaving to be
+    found only when the breeder asks why, or when ``state_trait_operationalization`` refuses.
 
     Deliberately absent from ``gated_stores()`` for the same reason as ``check_trait_specs``:
-    it reads only through the storage seam (``load_trait_specs``/``ts.keys``), never a raw file,
-    so it cannot be stale relative to the backend it is reading from."""
+    it reads only through the storage seam (``load_trait_specs``/``ts.read_versioned``), never a
+    raw file, so it cannot be stale relative to the backend it is reading from."""
     import tcip_store as ts
+    from tcip_store import DecodeError, SchemaVersionRefused
 
     from tcip_mcp.traits import (
-        TRAIT_SPEC_STATEMENTS_STORE,
         load_trait_specs,
+        trait_spec_statement_key,
+        trait_spec_statement_stale,
         trait_spec_statements_scope,
     )
 
@@ -617,12 +621,31 @@ def check_trait_spec_statements(root: Path, findings: list) -> None:
     if not specs:
         return
     scope = trait_spec_statements_scope(root)
-    stated = {key.parts[0] for key in ts.keys(TRAIT_SPEC_STATEMENTS_STORE, str(scope))}
     for spec in specs:
-        if spec.name not in stated:
+        key = trait_spec_statement_key(scope, spec.name)
+        try:
+            statement = ts.read_versioned(key, default=None).value
+        except DecodeError as exc:
+            findings.append(("error", f"trait spec {spec.name!r}'s authoring statement will "
+                            f"not read: {exc}"))
+            continue
+        except SchemaVersionRefused as exc:
+            findings.append(("warn", f"trait spec {spec.name!r}'s authoring statement: {exc}"))
+            continue
+        if not statement:
             findings.append(("warn", f"trait spec {spec.name!r} has no authoring statement on "
-                            "record; author it with author_trait_spec so the breeder has "
-                            "something to confirm"))
+                            "record; state it with revise_trait_spec(project_root=..., "
+                            f"trait_name={spec.name!r}, fields={{}}, rationale=...) so the "
+                            "breeder has something to confirm"))
+        elif trait_spec_statement_stale(spec, statement):
+            findings.append(("warn", f"trait spec {spec.name!r}'s authoring statement no longer "
+                            "matches its live spec; restate it with "
+                            f"revise_trait_spec(project_root=..., trait_name={spec.name!r}, "
+                            "fields=..., rationale=...) and have the breeder confirm it again"))
+        elif not statement.get("confirmed_by"):
+            findings.append(("warn", f"trait spec {spec.name!r}'s authoring statement is current "
+                            "but the breeder has not confirmed it; ask them to confirm it in the "
+                            "Results tab"))
 
 
 def check_project_record(root: Path, findings: list) -> None:
