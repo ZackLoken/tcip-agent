@@ -1984,8 +1984,8 @@ export function ReviewTab() {
                   text:
                     "Corner mark at a prediction's top-left corner, in its outcome colour: " +
                     "pre-admitted by this bucket's validated count operating point (conf at or " +
-                    `above ${admissionConf.toFixed(2)}, the same number the Conf chip reads as ` +
-                    "the bucket's generation confidence). Unmarked boxes take their own verdict.",
+                    `above ${admissionConf.toFixed(2)}, the bucket's own generation confidence, ` +
+                    "the floor its predictions were exported at). Unmarked boxes take their own verdict.",
                 }
               : null
           }
