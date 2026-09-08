@@ -640,9 +640,9 @@ class ProvenanceFacts:
     ``scored`` and ``machine_authored`` are exactly what :func:`require_reference_ground_truth`
     already computed inline before this extraction (the same :func:`is_unadjudicated_prediction`/
     :func:`is_unadjudicated_agent_authorship` predicates, so its own refusal wording holds
-    unchanged); ``no_created_by``/``not_positively_a_persons`` are index lists into the annotations
-    passed in, for a caller (the canopy rule) that names the specific record its own refusal is
-    about.
+    unchanged); ``no_created_by``/``not_positively_a_persons``/``rule_admitted_unsigned`` are index
+    lists into the annotations passed in, for a caller (the canopy rule, or the reference rail's
+    own third arm) that names the specific record its own refusal is about.
     """
 
     total: int
@@ -714,8 +714,13 @@ def require_reference_ground_truth(directory: str | Path) -> None:
     """
     directory = Path(directory)
     annotations: list[Annotation] = []
+    # (path, index within that document): the third arm's own walk, so its refusal can name a
+    # file to open rather than an index into the concatenation nothing else reconstructs.
+    sources: list[tuple[Path, int]] = []
     for path in prediction_documents(directory):
-        annotations.extend(read_annotations(path))
+        doc = read_annotations(path)
+        annotations.extend(doc)
+        sources.extend((path, i) for i in range(len(doc)))
     facts = provenance_facts(annotations)
     scored, total, agent_authored = facts.scored, facts.total, facts.machine_authored
     if scored:
@@ -739,8 +744,9 @@ def require_reference_ground_truth(directory: str | Path) -> None:
         )
     if facts.rule_admitted_unsigned:
         indices = facts.rule_admitted_unsigned
+        named = ", ".join(f"{sources[i][0]} record {sources[i][1]}" for i in indices)
         raise ValueError(
-            f"{len(indices)} of {total} annotations in {directory} (indices {indices}) carry "
+            f"{len(indices)} of {total} annotations in {directory} ({named}) carry "
             "accepted_by_rule with no person's accepted_by: a rule-based admission was verified "
             "for these records, but nobody has signed off on them, so no person stands behind "
             "them yet. Confirm each one through Review so it carries the person's sign-off, or "
