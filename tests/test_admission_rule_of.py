@@ -26,9 +26,12 @@ def test_parse_validation_reference(value: str, expected: tuple[str, str] | None
 
 
 def test_admission_rule_of_answers_none_for_no_stamp(tmp_path: Path) -> None:
+    """An absent stamp reads as its own reason, distinct from a stamp claiming nothing: the file
+    itself does not exist, so nothing here asserts what its content says."""
     resolution = admission_rule_of(None, tmp_path)
     assert resolution.rule is None
-    assert "does not claim validated" in resolution.reason
+    assert "no operating_point.json" in resolution.reason
+    assert "does not claim validated" not in resolution.reason
 
 
 def test_admission_rule_of_answers_none_for_a_stamp_claiming_nothing(tmp_path: Path) -> None:
