@@ -49,8 +49,8 @@ class AnnotationPayload(BaseModel):
                                                  # a point and a one-vertex contour are not the
                                                  # same geometry.
     attributes: dict[str, str] = {}
-    # Provenance round-trips through the client: a loaded shape carries its original created_by,
-    # sign-off and rule marker back on save, so a re-save never re-stamps existing labels.
+    # Keep-original-creator: a loaded shape's created_by, sign-off and rule marker round-trip
+    # back on save, so a re-save never re-stamps existing labels; new shapes carry none of them.
     created_by: Optional[str] = None
     created_at: Optional[str] = None
     accepted_by: Optional[str] = None
