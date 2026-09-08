@@ -20,6 +20,7 @@ import { ringsBbox } from "@/lib/polygonGeometry";
 import type { ReviewColors } from "@/lib/reviewColors";
 import {
   annotationGeometry,
+  detectionAdmitted,
   detGtAnnotation,
   detPredAnnotation,
   type ReviewGeom,
@@ -327,8 +328,7 @@ export function buildReviewShapes(
       : undefined;
     // An admitted prediction: at or above the bucket's own validated count operating point,
     // never a point (matching.py never builds a detection on one, so this never applies there).
-    const admitted =
-      admissionConf != null && d.det_type !== "fn" && d.conf != null && d.conf >= admissionConf;
+    const admitted = detectionAdmitted(d, matches, admissionConf);
 
     const push = (
       geom: ReviewGeom | null,
@@ -391,9 +391,11 @@ export function buildReviewShapes(
           tag: d.det_type,
         });
       }
-      if (active && d.det_type === "tp" && showPred) {
-        push(annotationGeometry(detPredAnnotation(d, matches)), colors.active, {
-          dashed: true,
+      // Every admitted tp's own prediction shape carries the flag in the mirror, focused or
+      // not, since the canvas marks every admitted tp; only the focused one draws dashed here.
+      if (d.det_type === "tp" && showPred && (active || admitted)) {
+        push(annotationGeometry(detPredAnnotation(d, matches)), active ? colors.active : outcome, {
+          dashed: active,
           fill: true,
           tag: "pred",
           admitted,
