@@ -1020,9 +1020,9 @@ registered at HEAD.
 |---|---|---|---|
 | GET | `` (root) | `list_projects` | `routes/projects.py:151` |
 | POST | `/active` | `activate_project` | `routes/projects.py:221` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
-| GET | `/{name}/removal-preview` | `removal_preview_route` | `routes/projects.py:353` |
-| POST | `/remove` | `remove_project` | `routes/projects.py:362` |
-| POST | `/{name}/release-binding` | `release_binding_route` | `routes/projects.py:376` |
+| GET | `/{name}/removal-preview` | `removal_preview_route` | `routes/projects.py:354` |
+| POST | `/remove` | `remove_project` | `routes/projects.py:363` |
+| POST | `/{name}/release-binding` | `release_binding_route` | `routes/projects.py:377` |
 
 ### routes/results.py, prefix `/api/results` (15 routes)
 
@@ -2173,7 +2173,7 @@ Shape: `{requested_at, requested_by, archive_path, holding_dir, external_roots,
 dependent_projects}`, one document per project. Written once, `concurrency="cas"` with
 `expect=Version.ABSENT`, by `request_project_removal`
 (`packages/tcip-mcp/src/tcip_mcp/project_removal.py:606`); deleted, at the version the
-completing walk read it at, by `complete_pending_removals` (`project_removal.py:896`).
+completing walk read it at, by `complete_pending_removals` (`project_removal.py:906`).
 
 Readers: `pending_removal_record` (`workspace.py:240`) and `pending_removal_or_none`
 (`workspace.py:252`), the
