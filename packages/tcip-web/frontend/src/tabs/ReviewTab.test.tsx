@@ -1674,6 +1674,28 @@ describe("ReviewTab confirm-admitted", () => {
     expect(screen.getByText(/admitted at or above 0\.50/)).toBeInTheDocument();
   });
 
+  it("drops the floating canvas label rather than silently losing its admitted clause while editing a focused fp", async () => {
+    vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.5));
+    matchesSpy.mockResolvedValue(
+      matchesRes(
+        [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
+        { preds: [{ subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 }] },
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+    const before = screen
+      .getAllByTestId("k-text")
+      .find((t) => t.getAttribute("data-text")?.includes("admitted"));
+    expect(before).toBeDefined();
+
+    fireEvent.click(screen.getByTitle("Adjust this shape on the canvas (E)"));
+    const during = screen
+      .queryAllByTestId("k-text")
+      .some((t) => t.getAttribute("data-text")?.startsWith("subject_a"));
+    expect(during).toBe(false);
+  });
+
   it("reactively disables the button while a reload is in flight", async () => {
     vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.5));
     matchesSpy.mockResolvedValue(
