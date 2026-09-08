@@ -958,10 +958,11 @@ def test_dependency_problem_named_for_a_damaged_registry(tmp_path):
 def test_dependency_warnings_names_a_no_id_entry_as_a_problem_not_a_null_id_warning(
     client, tmp_path,
 ):
-    """coverage: dependency_warnings does not exist at the baseline. The entry names a target
-    already pending removal, the one state a no-id entry would otherwise reach the warning
-    branch through, so this actually exercises the malformed-entry rule rather than a state
-    (a live target) neither the old nor the new code ever turns into a warning."""
+    """coverage: the fix-up before this one already routes a no-id entry to the registry problem,
+    so both assertions hold at this test's own baseline. The entry names a target already
+    pending removal, the one state a no-id entry would otherwise reach the warning branch
+    through, so this exercises the malformed-entry rule rather than a state (a live target)
+    that never turns into a warning."""
     from tcip_mcp.project_removal import dependency_warnings
     from tcip_mcp.tools.project_tools import registry_path_for, upsert_dataset
 
@@ -1230,6 +1231,45 @@ def test_release_canvas_record_missing_generation_after_the_marker_cleared_still
     assert resp.status_code == 409
     detail = resp.json()["detail"]
     assert "sample_plot_canvas-no-gen" in detail
+    assert "marker_cleared=True" in detail
+
+    lines = _audit_lines(target)
+    line = next(l for l in lines if l["tool"] == "project_binding_released")
+    assert line["arguments"]["marker_cleared"] is True
+    assert line["arguments"]["canvas_binding_released"] is False
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"generation": "3", "root": None, "project_name": None, "issued_at": "2026-03-04T12:00:00+00:00"},
+        {"generation": 3, "root": ["not", "a", "path"], "issued_at": "2026-03-04T12:00:00+00:00"},
+        ["not", "a", "mapping"],
+    ],
+    ids=["generation_not_an_integer", "root_not_a_path", "record_not_a_mapping"],
+)
+def test_release_canvas_record_of_a_malformed_shape_after_the_marker_cleared_still_records_the_line(
+    client, tmp_path, record,
+):
+    """GUARDS: the baseline folds only a record with no generation field; a string generation,
+    a root that is not a path, or a record that is not a mapping raised a TypeError or an
+    AttributeError out of the route after the marker was already cleared, with no line."""
+    from tcip_mcp.web_client import canvas_open_binding_key
+
+    ws = tmp_path.parent
+    _seed(ws)
+    target = _init(ws, "sample_plot_canvas-shape")
+    workspace.activate_project("sample_plot_canvas-shape")
+    if isinstance(record, dict) and record.get("root") is None:
+        record = {**record, "root": str(target)}
+
+    ts.replace(canvas_open_binding_key(), record, expect=ts.Version.ABSENT)
+
+    resp = client.post(
+        "/api/projects/sample_plot_canvas-shape/release-binding", json={"user": "t"},
+    )
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
     assert "marker_cleared=True" in detail
 
     lines = _audit_lines(target)

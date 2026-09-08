@@ -820,15 +820,12 @@ def release_project_binding(name: str, *, released_by: str) -> dict:
 
     marker_cleared = False
     marker_key = workspace.active_project_key()
-    versioned: Optional[tcip_store.Versioned] = None
     try:
-        versioned = tcip_store.read_versioned(marker_key, default=None)
-        marker_value = (versioned.value or "").strip()
+        versioned: Optional[tcip_store.Versioned] = tcip_store.read_versioned(marker_key, default=None)
     except (OSError, tcip_store.DecodeError):
-        marker_value = ""
-    if marker_value:
-        # marker_value is only truthy when the read above succeeded, so versioned is bound.
-        assert versioned is not None
+        versioned = None
+    marker_value = (versioned.value or "").strip() if versioned is not None else ""
+    if versioned is not None and marker_value:
         try:
             marker_root: Optional[Path] = workspace.project_path(marker_value, create=False)
         except ValueError:
@@ -847,20 +844,33 @@ def release_project_binding(name: str, *, released_by: str) -> dict:
     try:
         with tcip_store.transaction(canvas_key) as txn:
             current = txn.read(canvas_key, default=None)
-            if current is not None and _same_path(project, current.get("root")):
-                if "generation" not in current:
+            if current is not None:
+                if not isinstance(current, dict):
                     raise tcip_store.DecodeError(
-                        f"the canvas-open binding record for {current.get('root')!r} carries no "
-                        "generation field"
+                        f"the canvas-open binding record is {type(current).__name__}, not a "
+                        "mapping"
                     )
-                txn.write(canvas_key, {
-                    "generation": current["generation"] + 1,
-                    "root": current["root"],
-                    "project_name": current.get("project_name"),
-                    "released": True,
-                    "issued_at": datetime.now(timezone.utc).isoformat(),
-                })
-                canvas_binding_released = True
+                bound_root = current.get("root")
+                if bound_root is not None and not isinstance(bound_root, str):
+                    raise tcip_store.DecodeError(
+                        f"the canvas-open binding record's root is {type(bound_root).__name__}, "
+                        "not a path"
+                    )
+                if bound_root is not None and _same_path(project, bound_root):
+                    generation = current.get("generation")
+                    if not isinstance(generation, int) or isinstance(generation, bool):
+                        raise tcip_store.DecodeError(
+                            f"the canvas-open binding record for {bound_root} carries no usable "
+                            f"generation: {generation!r}"
+                        )
+                    txn.write(canvas_key, {
+                        "generation": generation + 1,
+                        "root": bound_root,
+                        "project_name": current.get("project_name"),
+                        "released": True,
+                        "issued_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                    canvas_binding_released = True
     except tcip_store.StoreError as exc:
         canvas_failure = exc
 
