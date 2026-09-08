@@ -56,3 +56,18 @@ export function detPredAnnotation(d: Detection, m: MatchesResponse): Annotation 
 export function detOutcomeGeometry(d: Detection, m: MatchesResponse): ReviewGeom | null {
   return annotationGeometry(d.det_type === "fp" ? detPredAnnotation(d, m) : detGtAnnotation(d, m));
 }
+
+/** Whether ``d`` is admitted by the bucket's own validated count operating point: never an fn,
+ *  and tested against the resolved prediction record's own ``score`` (never the rounded, possibly
+ *  1.0-defaulted ``d.conf`` a scoreless prediction reads as for matching), the same fact the
+ *  route's own verified claim checks. Null ``admissionConf`` (no rule, or a classified scope)
+ *  admits nothing. */
+export function detectionAdmitted(
+  d: Detection,
+  m: MatchesResponse,
+  admissionConf: number | null,
+): boolean {
+  if (admissionConf == null || d.det_type === "fn") return false;
+  const pred = detPredAnnotation(d, m);
+  return pred != null && pred.score != null && pred.score >= admissionConf;
+}

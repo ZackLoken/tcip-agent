@@ -8,6 +8,7 @@ import { ReviewRect } from "@/components/review/ReviewRect";
 import type { ReviewColors } from "@/lib/reviewColors";
 import {
   annotationGeometry,
+  detectionAdmitted,
   detGtAnnotation,
   detPredAnnotation,
   type ReviewGeom,
@@ -70,14 +71,25 @@ export const ReviewOverlays = memo(function ReviewOverlays({
 
   /** A filled square at the prediction's own top-left corner, in the detection's outcome colour
    *  (never the active colour, so the mark keeps its meaning on the focused detection): the
-   *  channel that names a rule pre-admitted this box, distinct from colour, dash and fill. */
+   *  channel that names a rule pre-admitted this box, distinct from colour, dash and fill. A
+   *  thin white outline keeps it legible on a same-colour corner (a tp's box coinciding with its
+   *  ground truth, or under the focused dash) where the fill alone would vanish into the box. */
   const drawAdmittedMark = (geom: ReviewGeom | null, outcome: string): ReactNode => {
     const anchor = geom ? markAnchor(geom) : null;
     if (!anchor) return null;
     const side = Math.min(6 * lw, anchor.shortSide / 3);
     if (side <= 0) return null;
     return (
-      <Rect key="admitted" x={anchor.x} y={anchor.y} width={side} height={side} fill={outcome} />
+      <Rect
+        key="admitted"
+        x={anchor.x}
+        y={anchor.y}
+        width={side}
+        height={side}
+        fill={outcome}
+        stroke="#ffffff"
+        strokeWidth={lw}
+      />
     );
   };
 
@@ -194,21 +206,22 @@ export const ReviewOverlays = memo(function ReviewOverlays({
           }
         }
 
+        // A mark is drawn only when a shape of this detection was actually drawn above: an
+        // admitted tp with ground truth hidden has no shape to anchor a lone square on.
+        const shapeDrawn = nodes.length > 0;
         // Admitted: scored at or above the bucket's own validated count operating point, under a
         // detector scope, drawn only under showPred since it is the prediction's own mark.
         const admitted =
+          shapeDrawn &&
           showPred &&
           !matches.attribute &&
-          admissionConf != null &&
-          d.det_type !== "fn" &&
-          d.conf != null &&
-          d.conf >= admissionConf &&
+          detectionAdmitted(d, matches, admissionConf ?? null) &&
           !(active && suppressFocusedPred);
         if (admitted) {
           nodes.push(drawAdmittedMark(annotationGeometry(detPredAnnotation(d, matches)), outcome));
         }
 
-        if (active) {
+        if (active && shapeDrawn) {
           nodes.push(
             <HaloLabel
               key="lbl"
