@@ -219,7 +219,8 @@ def test_the_rail_refuses_a_person_created_record_carrying_the_rule_with_no_sign
 
     message = str(exc.value)
     assert "accepted_by_rule with no person's accepted_by" in message
-    assert "[0]" in message
+    assert "a.json record 0" in message  # names the document and its own record index, not a
+    # concatenated-list index nothing else could resolve back to a file
 
 
 def test_the_rail_refuses_a_tool_created_record_with_a_non_person_sign_off_and_the_rule(tmp_path):
