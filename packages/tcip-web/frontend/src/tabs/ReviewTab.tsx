@@ -46,7 +46,7 @@ import { currentImage, labelPath, predictionPath } from "@/lib/paths";
 import { zoomToRect } from "@/lib/viewGeometry";
 import { compositeParams, showsBandPicker } from "@/lib/bandSelection";
 import { datasetKey, loadDatasetVisibility, saveDatasetVisibility } from "@/lib/datasetUiState";
-import { detOutcomeGeometry } from "@/lib/reviewGeometry";
+import { detectionAdmitted, detOutcomeGeometry } from "@/lib/reviewGeometry";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { useStore } from "@/store";
 import type { MatchesResponse, ReviewImageStatus, ReviewStatusFilter } from "@/store/types";
@@ -89,6 +89,9 @@ export function ReviewTab() {
   const refetchNonce = useStore((s) => s.review.refetchNonce);
   const setMatches = useStore((s) => s.setMatches);
   const setLoading = useStore((s) => s.setReviewLoading);
+  // Subscribed (not a getState() read) so a reload-in-flight disabled reason updates the render
+  // it gates, rather than only refreshing on some other, unrelated re-render.
+  const reviewLoading = useStore((s) => s.review.loading);
   const setDetectionIdx = useStore((s) => s.setReviewDetectionIdx);
   const markDetReviewed = useStore((s) => s.markDetectionReviewed);
   // Shared annotation status (coloring, Complete lock), synced when a verdict authors GT.
@@ -240,7 +243,7 @@ export function ReviewTab() {
       cancelled = true;
     };
   }, [dataset.predictions_dir]);
-  // A detector scope only (Q52): a classified review judges values, never a count the gate floors.
+  // A detector scope only: a classified review judges values, never a count the gate floors.
   const admissionConf = matches && !matches.attribute && admissionRule ? admissionRule.conf : null;
   // Raising this filter above the predictions' own generation confidence hides low-confidence
   // detections from review; any verdict then recorded under it raises review_conf_threshold past
@@ -732,7 +735,7 @@ export function ReviewTab() {
   const admittedUnreviewedCount = useMemo(() => {
     if (!matches || admissionConf == null) return 0;
     return matches.detections.filter(
-      (d) => d.det_type !== "fn" && d.conf != null && d.conf >= admissionConf && !d.reviewed,
+      (d) => detectionAdmitted(d, matches, admissionConf) && !d.reviewed,
     ).length;
   }, [matches, admissionConf]);
   const belowFilterAdmittedCount = useMemo(() => {
@@ -744,27 +747,30 @@ export function ReviewTab() {
       return !!p.bbox || !!(p.rings && p.rings.length);
     }).length;
   }, [matches, admissionConf, filters.conf_threshold]);
+  const filtersNarrowing = filters.filter_type !== "all" || filters.filter_class !== "all";
+  // Ordered so a reason the breeder cannot see from the button comes first and the empty set
+  // (the only reason the button's own count already shows) comes last.
   const confirmAdmittedDisabledReason = (() => {
     if (runBlocked) return "A confirm-admitted run is already in progress.";
-    if (filters.filter_type !== "all" || filters.filter_class !== "all") {
-      return "Set both the type and class filters to All to confirm the image's whole admitted set.";
-    }
     if (classifiedScope) {
       return "The count operating point admits detections; a classified review judges values.";
     }
     if (admissionConf == null) {
       return admissionReason || "This bucket has no validated count operating point.";
     }
-    if (admittedUnreviewedCount === 0)
-      return "No admitted detections remain unreviewed on this image.";
-    if (!showPred) return "Predictions are hidden, so the admitted marks are hidden too.";
     if (reviewLocked) return "This image is reviewed; uncheck Reviewed to edit.";
     if (edit) return "Finish or cancel the current edit first.";
     if (drawingMiss) return "Finish or cancel drawing the missed object first.";
     if (!canReview) return "No dataset root, so review verdicts have nowhere to be recorded.";
-    if (matchesImageRef.current !== imgName || useStore.getState().review.loading) {
+    if (matchesImageRef.current !== imgName || reviewLoading) {
       return "The installed matches are still loading for this image.";
     }
+    if (filtersNarrowing) {
+      return "Set both the type and class filters to All to confirm the image's whole admitted set.";
+    }
+    if (!showPred) return "Predictions are hidden, so the admitted marks are hidden too.";
+    if (admittedUnreviewedCount === 0)
+      return "No admitted detections remain unreviewed on this image.";
     return "";
   })();
 
@@ -991,11 +997,8 @@ export function ReviewTab() {
    *  above the bucket's own validated count operating point, under the detector scope
    *  ``admissionConf`` already resolves to null outside of. */
   function admittedUnreviewed(m: MatchesResponse) {
-    const conf = admissionConf;
-    if (conf == null) return [];
-    return m.detections.filter(
-      (d) => d.det_type !== "fn" && d.conf != null && d.conf >= conf && !d.reviewed,
-    );
+    if (admissionConf == null) return [];
+    return m.detections.filter((d) => detectionAdmitted(d, m, admissionConf) && !d.reviewed);
   }
 
   /** Confirm every admitted, unreviewed detection on this image in sequence through the existing
@@ -1014,9 +1017,18 @@ export function ReviewTab() {
     let confirmed = 0;
     let addedToGt = 0;
     let lastAnnotationStatus: ImageStatus | null = null;
+    // Set once the run actually starts posting (the backup succeeded): a run that never started
+    // installs nothing and toasts nothing success-shaped.
+    let started = false;
+    // Set on any ending other than "no admitted unreviewed detection remains"; carries the
+    // cause so the ending toast reads as what it is, never as a clean success.
+    let endCause: string | null = null;
     try {
       if (!(await ensureBackup())) return;
-      while (true) {
+      started = true;
+      // Bounded by the total the run announced: a response that leaves the just-posted
+      // detection unreviewed must not make this loop re-post the same one forever.
+      for (let step = 0; step < total; step++) {
         const next = admittedUnreviewed(freshest)[0];
         if (!next) break;
         try {
@@ -1048,8 +1060,16 @@ export function ReviewTab() {
           confirmed += 1;
           if (res.annotation_status) addedToGt += 1;
           setConfirmRun({ confirmed, total });
+          const stillUnreviewed = freshest.detections.some(
+            (d) => d.det_type === next.det_type && d.pred_idx === next.pred_idx && !d.reviewed,
+          );
+          if (stillUnreviewed) {
+            endCause = "the response left that detection unreviewed; reload before confirming more";
+            break;
+          }
         } catch (e) {
           const committed = committedOf<Awaited<ReturnType<typeof api.review.action>>>(e);
+          endCause = e instanceof Error ? e.message : String(e);
           if (committed) {
             freshest = committed.matches;
             lastAnnotationStatus = committed.annotation_status;
@@ -1061,18 +1081,31 @@ export function ReviewTab() {
         }
       }
     } finally {
-      if (imgName && matchesImageRef.current === imgName) {
-        applyMatches(freshest, useStore.getState().gui.review.detection_idx);
-        setImageStatus(freshest.image_status);
-        setReviewImageStatus(imgName, freshest.image_status);
-        if (lastAnnotationStatus) setStoreImageStatus(imgName, lastAnnotationStatus);
+      if (started) {
+        if (imgName && matchesImageRef.current === imgName) {
+          applyMatches(freshest, useStore.getState().gui.review.detection_idx);
+          setImageStatus(freshest.image_status);
+          setReviewImageStatus(imgName, freshest.image_status);
+          if (lastAnnotationStatus) setStoreImageStatus(imgName, lastAnnotationStatus);
+        }
+        if (endCause) {
+          useStore
+            .getState()
+            .pushToast(
+              `Confirmed ${confirmed} of ${total} admitted as ${useStore.getState().user || "you"} ` +
+                `before this stopped it: ${endCause}`,
+              "error",
+            );
+        } else {
+          useStore
+            .getState()
+            .pushToast(
+              `Confirmed ${confirmed} admitted as ${useStore.getState().user || "you"}: ${addedToGt} ` +
+                `added to ground truth, ${confirmed - addedToGt} already matched and left as they were`,
+              "success",
+            );
+        }
       }
-      useStore
-        .getState()
-        .pushToast(
-          `Confirmed ${confirmed} admitted as ${useStore.getState().user || "you"}: ${addedToGt} ` +
-            `added to ground truth, ${confirmed - addedToGt} already matched and left as they were`,
-        );
       actionPending.current = false;
       setConfirmRun(null);
     }
@@ -1457,15 +1490,6 @@ export function ReviewTab() {
             >
               {confFilterCensoring ? "⚠ " : ""}Conf ≥ {filters.conf_threshold.toFixed(2)}
             </FilterChip>
-            {/* Not tooltip-only: a breeder who raises this filter needs to see why it matters
-                without hovering. */}
-            {confFilterCensoring && (
-              <span className="text-tcip-warn max-w-[280px]">
-                {generationConf === null
-                  ? "no recorded generation confidence for this bucket, always conf-censored for validation"
-                  : `above this bucket's own generation confidence (${generationConf.toFixed(2)}), new verdicts will be conf-censored for validation`}
-              </span>
-            )}
             <FilterChip>
               {filters.filter_type === "all" ? "All types" : filters.filter_type.toUpperCase()}
             </FilterChip>
@@ -1608,7 +1632,9 @@ export function ReviewTab() {
           </button>
 
           {/* One button, in sequence through the existing accept route: confirms every admitted,
-              unreviewed detection at the review confidence filter, the breeder's own knob. */}
+              unreviewed detection at the review confidence filter, the breeder's own knob. Under
+              a narrowing filter it shows no count: the filtered set is not the set its title
+              names. */}
           <button
             className="tcip-btn"
             onClick={() => void confirmAdmitted()}
@@ -1619,20 +1645,18 @@ export function ReviewTab() {
             }
           >
             {runBlocked
-              ? `Confirming ${confirmRun.confirmed} of ${confirmRun.total}…`
-              : `✓ Confirm ${admittedUnreviewedCount} admitted`}
+              ? `Confirming ${Math.min(confirmRun.confirmed + 1, confirmRun.total)} of ${confirmRun.total}…`
+              : filtersNarrowing
+                ? "✓ Confirm admitted"
+                : `✓ Confirm ${admittedUnreviewedCount} admitted`}
           </button>
-          {admissionConf != null && (
-            <span className="text-tcip-muted max-w-[360px]">
-              Pre-admitted by count, not by box: a confident false positive above{" "}
-              {admissionConf.toFixed(2)} is admitted too, so look before confirming
-            </span>
-          )}
-          {belowFilterAdmittedCount > 0 && (
-            <span className="text-tcip-muted">
-              {belowFilterAdmittedCount} more admitted predictions are below the Conf filter
-            </span>
-          )}
+          {/* Progress and the run's own ending, for a screen reader: the progress otherwise lives
+              only in the disabled button's own text. */}
+          <span aria-live="polite" className="sr-only">
+            {runBlocked
+              ? `Confirming ${Math.min(confirmRun.confirmed + 1, confirmRun.total)} of ${confirmRun.total} admitted detections.`
+              : ""}
+          </span>
 
           <span className="flex-1" />
 
@@ -1674,6 +1698,7 @@ export function ReviewTab() {
             <input
               ref={counterRef}
               className="tcip-input w-10 text-center font-mono"
+              aria-label="Image position"
               value={counterDraft ?? (nav.position > 0 ? String(nav.position) : "")}
               disabled={runBlocked}
               onChange={(e) => setCounterDraft(e.target.value.replace(/[^0-9]/g, ""))}
@@ -1714,6 +1739,15 @@ export function ReviewTab() {
           </label>
         </div>
 
+        {/* Its own full-width line, never sharing the button row: the caveat stayed inline once
+            crowded that row into tall columns even with the shelf closed. */}
+        {admissionConf != null && (
+          <div className="px-3 pb-1.5 text-[11px] text-tcip-muted">
+            Pre-admitted by count, not by box: a confident false positive at or above{" "}
+            {admissionConf.toFixed(2)} is admitted too, so look before confirming
+          </div>
+        )}
+
         {/* Row 2: the filter controls, collapsed by default and remembered across sessions */}
         {filtersOpen && (
           <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 border-t border-tcip-border text-[11px]">
@@ -1748,6 +1782,19 @@ export function ReviewTab() {
               }
             />
             <span className="tabular-nums w-10">{filters.conf_threshold.toFixed(2)}</span>
+            {confFilterCensoring && (
+              <span className="text-tcip-warn max-w-[320px]">
+                {generationConf === null
+                  ? "no recorded generation confidence for this bucket, always conf-censored for validation"
+                  : `above this bucket's own generation confidence (${generationConf.toFixed(2)}), new verdicts will be conf-censored for validation`}
+              </span>
+            )}
+            {belowFilterAdmittedCount > 0 && (
+              <span className="text-tcip-muted">
+                {belowFilterAdmittedCount} more admitted prediction
+                {belowFilterAdmittedCount === 1 ? " is" : "s are"} below the Conf filter
+              </span>
+            )}
 
             <span aria-hidden className="mx-2 h-4 w-px bg-tcip-border" />
             <select
@@ -1798,6 +1845,7 @@ export function ReviewTab() {
               <input
                 type="checkbox"
                 checked={showGT}
+                disabled={runBlocked}
                 onChange={(e) => updateShowGT(e.target.checked)}
               />
               Ground truth
@@ -1806,6 +1854,7 @@ export function ReviewTab() {
               <input
                 type="checkbox"
                 checked={showPred}
+                disabled={runBlocked}
                 onChange={(e) => updateShowPred(e.target.checked)}
               />
               Predictions
@@ -1930,7 +1979,7 @@ export function ReviewTab() {
           items={COLOR_LABELS}
           onEdit={setColorEditKey}
           note={
-            admissionConf != null
+            admissionConf != null && showPred
               ? {
                   text:
                     "Corner mark at a prediction's top-left corner, in its outcome colour: " +
@@ -2006,6 +2055,12 @@ export function ReviewTab() {
               {current.iou !== null && (
                 <>
                   <span className="mx-1.5 text-tcip-border">|</span>IoU {current.iou.toFixed(2)}
+                </>
+              )}
+              {matches && showPred && detectionAdmitted(current, matches, admissionConf) && (
+                <>
+                  <span className="mx-1.5 text-tcip-border">|</span>
+                  admitted at or above {admissionConf!.toFixed(2)}
                 </>
               )}
             </span>
