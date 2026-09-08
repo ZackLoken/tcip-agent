@@ -492,6 +492,9 @@ export function ReviewTab() {
   // disable during the run reads it on render). Non-null for the whole run's span.
   const [confirmRun, setConfirmRun] = useState<{ confirmed: number; total: number } | null>(null);
   const runBlocked = confirmRun !== null;
+  // The last run's ending sentence, read by the polite live region after the run so a screen
+  // reader hears how it ended without the toast's assertive interruption; cleared on the next run.
+  const [runEnding, setRunEnding] = useState("");
   // A ref mirror so an in-flight async continuation (reloadMatches) reads the run's current
   // state rather than the render closure it started under.
   const runBlockedRef = useRef(false);
@@ -1013,6 +1016,7 @@ export function ReviewTab() {
     if (total === 0) return;
     actionPending.current = true;
     setConfirmRun({ confirmed: 0, total });
+    setRunEnding("");
     let freshest = matches;
     let confirmed = 0;
     let addedToGt = 0;
@@ -1080,6 +1084,10 @@ export function ReviewTab() {
           break;
         }
       }
+      if (started && !endCause && admittedUnreviewed(freshest).length > 0) {
+        endCause =
+          "the announced total was reached with admitted detections still unreviewed; reload before confirming more";
+      }
     } finally {
       if (started) {
         if (imgName && matchesImageRef.current === imgName) {
@@ -1088,23 +1096,13 @@ export function ReviewTab() {
           setReviewImageStatus(imgName, freshest.image_status);
           if (lastAnnotationStatus) setStoreImageStatus(imgName, lastAnnotationStatus);
         }
-        if (endCause) {
-          useStore
-            .getState()
-            .pushToast(
-              `Confirmed ${confirmed} of ${total} admitted as ${useStore.getState().user || "you"} ` +
-                `before this stopped it: ${endCause}`,
-              "error",
-            );
-        } else {
-          useStore
-            .getState()
-            .pushToast(
-              `Confirmed ${confirmed} admitted as ${useStore.getState().user || "you"}: ${addedToGt} ` +
-                `added to ground truth, ${confirmed - addedToGt} already matched and left as they were`,
-              "success",
-            );
-        }
+        const who = useStore.getState().user || "you";
+        const ending = endCause
+          ? `Confirmed ${confirmed} of ${total} admitted as ${who} before this stopped it: ${endCause}`
+          : `Confirmed ${confirmed} admitted as ${who}: ${addedToGt} added to ground truth, ` +
+            `${confirmed - addedToGt} already matched and left as they were`;
+        useStore.getState().pushToast(ending, endCause ? "error" : "success");
+        setRunEnding(ending);
       }
       actionPending.current = false;
       setConfirmRun(null);
@@ -1655,7 +1653,7 @@ export function ReviewTab() {
           <span aria-live="polite" className="sr-only">
             {runBlocked
               ? `Confirming ${Math.min(confirmRun.confirmed + 1, confirmRun.total)} of ${confirmRun.total} admitted detections.`
-              : ""}
+              : runEnding}
           </span>
 
           <span className="flex-1" />
@@ -1747,6 +1745,16 @@ export function ReviewTab() {
             {admissionConf.toFixed(2)} is admitted too, so look before confirming
           </div>
         )}
+        {/* Always visible, never tooltip-only and never behind the shelf: a bucket with no
+            recorded generation confidence is censored whatever the filter, and a persisted
+            raised filter can boot with the shelf closed. */}
+        {confFilterCensoring && (
+          <div className="px-3 pb-1.5 text-[11px] text-tcip-warn">
+            {generationConf === null
+              ? "no recorded generation confidence for this bucket, always conf-censored for validation"
+              : `above this bucket's own generation confidence (${generationConf.toFixed(2)}), new verdicts will be conf-censored for validation`}
+          </div>
+        )}
 
         {/* Row 2: the filter controls, collapsed by default and remembered across sessions */}
         {filtersOpen && (
@@ -1782,13 +1790,6 @@ export function ReviewTab() {
               }
             />
             <span className="tabular-nums w-10">{filters.conf_threshold.toFixed(2)}</span>
-            {confFilterCensoring && (
-              <span className="text-tcip-warn max-w-[320px]">
-                {generationConf === null
-                  ? "no recorded generation confidence for this bucket, always conf-censored for validation"
-                  : `above this bucket's own generation confidence (${generationConf.toFixed(2)}), new verdicts will be conf-censored for validation`}
-              </span>
-            )}
             {belowFilterAdmittedCount > 0 && (
               <span className="text-tcip-muted">
                 {belowFilterAdmittedCount} more admitted prediction
@@ -1873,7 +1874,7 @@ export function ReviewTab() {
               className="tcip-select"
               aria-label="Priority-order model"
               value={pqModelPath}
-              disabled={pqStatus === "running"}
+              disabled={pqStatus === "running" || runBlocked}
               onChange={(e) => setPqModelPath(e.target.value)}
             >
               <option value="">Choose a model…</option>
@@ -1885,7 +1886,7 @@ export function ReviewTab() {
             </select>
             <button
               className="tcip-btn"
-              disabled={!pqModelPath || pqStatus === "running" || !canReview}
+              disabled={!pqModelPath || pqStatus === "running" || !canReview || runBlocked}
               onClick={() => void computePriorityQueue()}
               title="Rank this date's images by how useful reviewing them would be"
             >

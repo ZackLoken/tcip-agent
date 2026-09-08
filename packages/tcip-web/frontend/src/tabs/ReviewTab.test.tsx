@@ -1927,9 +1927,12 @@ describe("ReviewTab confirm-admitted", () => {
     fireEvent.click(screen.getByText("✓ Confirm 1 admitted"));
     await waitFor(() => expect(actionSpy).toHaveBeenCalledTimes(1));
 
+    // The a key is also held off by actionPending for the run's span, so this half is coverage
+    // of the guard rather than a proof of it; the image flip below is the proof.
     fireEvent.keyDown(window, { key: "a" });
-    fireEvent.keyDown(window, { key: "ArrowRight" });
     expect(actionSpy).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(useStore.getState().gui.dataset.current_image_index).toBe(0);
 
     expect(screen.getByLabelText("Reviewed")).toBeDisabled();
     expect(screen.getByLabelText("Next image")).toBeDisabled();
