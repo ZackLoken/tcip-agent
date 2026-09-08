@@ -25,21 +25,21 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD a51eac27.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 3d51a310.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD a51eac27 has 435 modules across the six scanned roots (145085 total lines):
+HEAD 3d51a310 has 435 modules across the six scanned roots (145095 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
 | tcip-mcp | 137 | 64103 |
 | tcip-annotation | 12 | 4347 |
-| tcip-web | 40 | 14100 |
+| tcip-web | 40 | 14102 |
 | tcip-store | 13 | 5282 |
-| tcip-web-frontend | 216 | 52297 |
+| tcip-web-frontend | 216 | 52305 |
 | tools | 17 | 4956 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
