@@ -1049,13 +1049,13 @@ registered at HEAD.
 | method | path | handler | line |
 |---|---|---|---|
 | POST | `/matches` | `compute_image_matches` | `routes/review.py:501` |
-| POST | `/action` | `record_action` | `routes/review.py:789` |
-| POST | `/mark_complete` | `mark_complete` | `routes/review.py:977` |
-| POST | `/backup_labels` | `backup_labels` | `routes/review.py:1052` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1106` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1143` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1332` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1360` |
+| POST | `/action` | `record_action` | `routes/review.py:791` |
+| POST | `/mark_complete` | `mark_complete` | `routes/review.py:979` |
+| POST | `/backup_labels` | `backup_labels` | `routes/review.py:1054` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1108` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1145` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1334` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1362` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -1388,7 +1388,7 @@ resolved dataset root.
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:878`, imported by the web route module.
 
 The token a Complete stores here is subject-scoped before it ever reaches a writer: `mark_complete`,
-`packages/tcip-web/src/tcip_web/routes/review.py:977`, derives it from the GT file through
+`packages/tcip-web/src/tcip_web/routes/review.py:979`, derives it from the GT file through
 `annotations_hold_subject`, scoped to the confirmed subject, and the browser posts that value on
 through `set_image_status`.
 
