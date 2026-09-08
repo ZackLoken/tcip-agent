@@ -619,15 +619,19 @@ def _apply_gt_mutation(
     with empty ``attributes``: ``reviewed`` is exactly the attribute values this review adjudicated,
     none under a detector review, which adjudicated presence and nothing about state. ``accepted_by_rule``
     is written only there, the one arm a verified rule-admitted claim can reach (a classified scope
-    refuses one); every other branch writes ``None`` explicitly. Reject on a false positive leaves
-    ground truth untouched under either regime. Reject on a true positive or false negative under a
-    classified scope refuses: removing the object is a detector-scope act.
+    refuses one); the unpaired classified accept and both edit branches write ``None`` explicitly,
+    and the paired classified accept keeps the record's own value, which no producer sets. Reject
+    on a false positive leaves ground truth untouched under either regime. Reject on a true
+    positive or false negative under a classified scope refuses: removing the object is a
+    detector-scope act.
 
     Edit authors the edited geometry onto the record it edits (a true positive/false negative, or a
     paired false positive) with the reviewer as author, keeping the record's other attribute values
-    and dropping any sign-off; a stated ``gt_idx`` out of range refuses. An unpaired false positive
-    edited into ground truth is a fresh record, no score and no sign-off. A reviewer-drawn new
-    shape (:func:`_is_reviewer_drawn_new_shape`) refuses under a classified scope.
+    and dropping any sign-off and rule marker alike, since an edit is the reviewer's own geometry
+    now and unmarks a record a rule had admitted; a stated ``gt_idx`` out of range refuses. An
+    unpaired false positive edited into ground truth is a fresh record, no score and no sign-off.
+    A reviewer-drawn new shape (:func:`_is_reviewer_drawn_new_shape`) refuses under a classified
+    scope.
     """
     dt, act = payload.det_type, payload.action
     classifying = scope.attribute is not None
@@ -713,7 +717,7 @@ def _apply_gt_mutation(
             accepted = replace(pred, score=None, attributes={scope.attribute: payload.class_name},
                                accepted_by=reviewer, accepted_at=now_iso, accepted_by_rule=None)
         else:
-            # The one arm a verified rule-admitted claim can reach (D4 refuses a classified scope).
+            # The one arm a verified rule-admitted claim can reach: a classified scope refuses one.
             accepted = replace(pred, score=None, attributes={},
                                accepted_by=reviewer, accepted_at=now_iso,
                                accepted_by_rule=accepted_by_rule)
@@ -1144,14 +1148,25 @@ def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
     validate_reference's identical gate reads as conf_censored, exposed here so the breeder can
     see it live. Also answers the bucket's own validated count operating point through
     admission_rule_of, the one reader /action verifies a rule_admitted claim against, and the
-    binding's own diagnosis when no rule applies (admission_reason).
+    binding's own diagnosis when no rule applies (admission_reason): a stamp read strictly here,
+    so a stamp that will not decode answers its own decode error as the reason, an absent stamp
+    and a stamp claiming nothing each read as what they are.
     """
-    from tcip_mcp.pipelines.resolution import admission_rule_of, read_operating_point_sidecar
+    from tcip_mcp.pipelines.resolution import (
+        AdmissionResolution, admission_rule_of, read_operating_point_sidecar,
+    )
+    from tcip_store import StoreError
 
     guarded_dir = _guarded(pred_dir)
-    sidecar = read_operating_point_sidecar(guarded_dir) or {}
-    conf = ((sidecar.get("operating_point") or {}).get("conf") or {}).get("value")
-    resolution = admission_rule_of(sidecar, guarded_dir)
+    try:
+        sidecar = read_operating_point_sidecar(guarded_dir, strict=True)
+    except StoreError as exc:
+        sidecar = None
+        resolution = AdmissionResolution(rule=None, reason=str(exc))
+    else:
+        resolution = admission_rule_of(sidecar, guarded_dir)
+    conf_field = ((sidecar or {}).get("operating_point") or {}).get("conf") or {}
+    conf = conf_field.get("value")
     rule_body = (
         AdmissionRuleBody(
             conf=resolution.rule.conf,
