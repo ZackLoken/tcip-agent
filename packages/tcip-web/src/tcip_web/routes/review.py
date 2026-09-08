@@ -620,7 +620,9 @@ def _apply_gt_mutation(
     none under a detector review, which adjudicated presence and nothing about state. ``accepted_by_rule``
     is written only there, the one arm a verified rule-admitted claim can reach (a classified scope
     refuses one); the unpaired classified accept and both edit branches write ``None`` explicitly,
-    and the paired classified accept keeps the record's own value, which no producer sets. Reject
+    and the paired classified accept keeps the record's own value (no platform producer mints one
+    there; a client-supplied marker the Annotate save door round-tripped stays, as the sign-off
+    beside it does). Reject
     on a false positive leaves ground truth untouched under either regime. Reject on a true
     positive or false negative under a classified scope refuses: removing the object is a
     detector-scope act.

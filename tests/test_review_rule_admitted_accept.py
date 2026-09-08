@@ -182,8 +182,9 @@ def _row_gone_bucket(
 def test_ordinary_accept_still_succeeds_when_the_pointed_experiment_is_gone(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Admits valid work: an ordinary accept (no claim) still writes ground truth on a bucket
-    whose validated_by row's own experiment record is gone, a real accept rather than a no-op."""
+    """Admits valid work: an ordinary accept (no claim), a real fp accept rather than a no-op,
+    answers 200 rather than a refusal on a bucket whose validated_by row's own experiment
+    record is gone; the write it makes is the ordinary accept's, covered by its own tests."""
     built, _validated_by = _row_gone_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-gone")
     resp = client.post("/api/review/action", json=_accept_payload(
         built, det_type="fp", gt_idx=None, pred_idx=0, rule_admitted=False))

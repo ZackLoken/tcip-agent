@@ -2061,9 +2061,9 @@ def admission_rule_of(stamp: dict | None, pred_dir: str | Path) -> AdmissionReso
 
     Otherwise ``rule`` is ``None`` and ``reason`` names which of no stamp at all, a stamp claiming
     nothing, the binding's own floor reason, or no readable conf answers for it, each its own
-    sentence: a caller (:func:`~tcip_web.routes.review.get_generation_conf`) that reads the stamp
-    strictly can also route a decode failure to this same ``AdmissionResolution`` shape without
-    this function folding it into the no-stamp reading.
+    sentence: a caller that reads the stamp strictly (the review routes do) can also route a
+    decode failure to this same ``AdmissionResolution`` shape without this function folding it
+    into the no-stamp reading.
     """
     if stamp is None:
         return AdmissionResolution(
