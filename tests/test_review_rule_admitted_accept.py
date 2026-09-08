@@ -65,14 +65,12 @@ def _accept_payload(built: dict, *, det_type: str, gt_idx: int | None, pred_idx:
     }
 
 
-def test_a_verified_claim_writes_the_marker_beside_the_person(
+def test_generation_conf_answers_the_earned_rule(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The producer chain: a published, sealed bucket; the rule read back through
-    /generation_conf; an accept on the fp with rule_admitted true writes accepted_by_rule naming
-    the stamp's own validated_by; a second accept on the now-tp answers reviewed and leaves the
-    raw document's version unchanged."""
-    built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-1")
+    """Coverage: the rule an earned, bound stamp answers through /generation_conf, read back
+    against the score the accept below relies on being at or above it."""
+    built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-conf")
     stamp = built["stamp"]
     validated_by = stamp["validated_by"]
     rule_conf = stamp["operating_point"]["conf"]["value"]
@@ -88,6 +86,17 @@ def test_a_verified_claim_writes_the_marker_beside_the_person(
         "conf": pytest.approx(rule_conf), "experiment_id": validated_by["experiment_id"],
         "record_digest": validated_by["record_digest"],
     }
+
+
+def test_a_verified_claim_writes_the_marker_beside_the_person(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The producer chain: a published, sealed bucket; an accept on the fp with rule_admitted
+    true writes accepted_by_rule naming the stamp's own validated_by; a second accept on the
+    now-tp answers reviewed and leaves the raw document's version unchanged."""
+    built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-1")
+    stamp = built["stamp"]
+    validated_by = stamp["validated_by"]
 
     resp = client.post("/api/review/action", json=_accept_payload(
         built, det_type="fp", gt_idx=None, pred_idx=0, rule_admitted=True))
@@ -155,25 +164,49 @@ def test_refusal_unvalidated_stamp(
     assert "validated" in resp.text or "claim" in resp.text
 
 
-def test_refusal_pointer_names_a_row_no_experiment_holds(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The precondition: an ordinary accept (no claim) still answers 200 on this same bucket."""
+def _row_gone_bucket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, experiment_id: str,
+) -> tuple[dict, dict]:
+    """An earned bucket whose validated_by row's own experiment has since been deleted from the
+    store: the raw-write case verify_stamp_binding's own docstring accepts as a bound claim's
+    experiment going missing after the fact."""
     from tcip_mcp.experiments import config_key
     import tcip_store
 
-    built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-gone")
+    built = _earned_bucket(tmp_path, monkeypatch, experiment_id=experiment_id)
     validated_by = built["stamp"]["validated_by"]
     tcip_store.delete(config_key(validated_by["experiment_id"]))
+    return built, validated_by
 
-    precondition = client.post("/api/review/action", json=_accept_payload(
-        built, det_type="tp", gt_idx=None, pred_idx=None, rule_admitted=False))
-    assert precondition.status_code == 200, precondition.text
+
+def test_ordinary_accept_still_succeeds_when_the_pointed_experiment_is_gone(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Admits valid work: an ordinary accept (no claim) still writes ground truth on a bucket
+    whose validated_by row's own experiment record is gone, a real accept rather than a no-op."""
+    built, _validated_by = _row_gone_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-gone")
+    resp = client.post("/api/review/action", json=_accept_payload(
+        built, det_type="fp", gt_idx=None, pred_idx=0, rule_admitted=False))
+    assert resp.status_code == 200, resp.text
+
+
+def test_generation_conf_names_the_gone_experiment(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Coverage: /generation_conf answers a null rule naming the experiment its pointer names."""
+    built, validated_by = _row_gone_bucket(
+        tmp_path, monkeypatch, experiment_id="exp-admit-gone-conf")
     conf_resp = client.get(
         "/api/review/generation_conf", params={"pred_dir": str(built["bucket"])})
     assert conf_resp.json()["admission_rule"] is None
     assert validated_by["experiment_id"] in conf_resp.json()["admission_reason"]
 
+
+def test_refusal_pointer_names_a_row_no_experiment_holds(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    built, _validated_by = _row_gone_bucket(
+        tmp_path, monkeypatch, experiment_id="exp-admit-gone-refuse")
     resp = client.post("/api/review/action", json=_accept_payload(
         built, det_type="fp", gt_idx=None, pred_idx=0, rule_admitted=True))
     assert resp.status_code == 400, resp.text
@@ -302,3 +335,81 @@ def test_refusal_stale_detection(
     resp = client.post("/api/review/action", json=_accept_payload(
         built, det_type="fp", gt_idx=None, pred_idx=0, rule_admitted=True))
     assert resp.status_code == 409, resp.text
+
+
+def test_refusal_wrong_action(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GUARDS: at the baseline pydantic ignores rule_admitted and a reject answers 200 (rejecting
+    an fp is always a no-op on ground truth, claim or not)."""
+    built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-wrong-action")
+    payload = _accept_payload(built, det_type="fp", gt_idx=None, pred_idx=0, rule_admitted=True)
+    payload["action"] = "rejected"
+    resp = client.post("/api/review/action", json=payload)
+    assert resp.status_code == 400, resp.text
+    assert "rejected" in resp.text
+
+
+def test_refusal_wrong_det_type(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GUARDS: at the baseline an accept on a fn no-ops (only dt=='fp' appends), so it answers
+    200 rather than refusing the claim by name."""
+    built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-wrong-dettype")
+    payload = _accept_payload(built, det_type="fn", gt_idx=None, pred_idx=0, rule_admitted=True)
+    resp = client.post("/api/review/action", json=payload)
+    assert resp.status_code == 400, resp.text
+    assert "fn" in resp.text
+
+
+def test_refusal_out_of_range_pred_idx(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GUARDS: at the baseline _names_prediction already guards the accept branch itself, so an
+    out-of-range pred_idx silently no-ops (200) rather than refusing the claim by name."""
+    built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-oor-pred-idx")
+    payload = _accept_payload(built, det_type="fp", gt_idx=None, pred_idx=5, rule_admitted=True)
+    resp = client.post("/api/review/action", json=payload)
+    assert resp.status_code == 400, resp.text
+    assert "pred_idx" in resp.text
+
+
+def test_parsed_marker_resolves_through_find_validation(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Coverage: parse_validation_reference has no production caller today; this proves the
+    marker a rule-admitted accept writes parses back to the experiment and digest find_validation
+    resolves its own row from."""
+    from tcip_mcp.experiments import find_validation
+    from tcip_mcp.pipelines.resolution import parse_validation_reference
+
+    built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-parse")
+    resp = client.post("/api/review/action", json=_accept_payload(
+        built, det_type="fp", gt_idx=None, pred_idx=0, rule_admitted=True))
+    assert resp.status_code == 200, resp.text
+    gt_path = Path(_accept_payload(built, det_type="fp", gt_idx=None, pred_idx=0,
+                                   rule_admitted=True)["gt_path"])
+    raw = json.loads(gt_path.read_text(encoding="utf-8"))
+    marker = raw["annotations"][0]["accepted_by_rule"]
+
+    parsed = parse_validation_reference(marker)
+    assert parsed is not None
+    experiment_id, record_digest = parsed
+    row = find_validation(experiment_id, record_digest)
+    assert row is not None
+
+
+def test_the_rail_admits_the_directory_a_rule_admitted_accept_produced(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The rail's admits-valid-work case, fed the directory the button's accept actually
+    produced rather than a hand-written record: a signed, rule-admitted record is admitted."""
+    from tcip_annotation.json_io import require_reference_ground_truth
+
+    built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-rail")
+    resp = client.post("/api/review/action", json=_accept_payload(
+        built, det_type="fp", gt_idx=None, pred_idx=0, rule_admitted=True))
+    assert resp.status_code == 200, resp.text
+    gt_path = Path(_accept_payload(built, det_type="fp", gt_idx=None, pred_idx=0,
+                                   rule_admitted=True)["gt_path"])
+    require_reference_ground_truth(gt_path.parent)
