@@ -20,11 +20,11 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / "tools" / "prove_test_fails_before.py"
-TEST_FILE = REPO / "tests" / "test_orthomosaic_tools.py"
-KNOWN_GUARD = (
-    "test_deliver_orthomosaic_plant_counts_refuses_a_registry_csv_rewritten_after_registration"
-)
-BASELINE = "d766eaa6"
+TEST_FILE = REPO / "tests" / "test_admission_rule_of.py"
+KNOWN_GUARD = "test_admission_rule_of_answers_none_for_no_stamp"
+# The commit before the guard's own fix; the guard is a unit test over one function, so no
+# fixture of the working tree's tests/ overlay depends on production code newer than this.
+BASELINE = "b8ed53a4"
 
 
 def _run_guard_check(test_file: str) -> subprocess.CompletedProcess:
@@ -41,7 +41,7 @@ def test_a_known_guard_named_by_its_absolute_path_reports_guards():
 
 
 def test_the_same_guard_named_by_its_repo_relative_path_reports_guards():
-    result = _run_guard_check("tests/test_orthomosaic_tools.py")
+    result = _run_guard_check("tests/test_admission_rule_of.py")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "GUARDS" in result.stdout
 
