@@ -564,14 +564,18 @@ describe("buildReviewShapes", () => {
   });
 
   it("carries the admitted flag on an unfocused tp's own prediction shape too", () => {
-    // The canvas marks every admitted tp, focused or not; the mirror must carry the flag on a
-    // shape for the unfocused one too, since buildReviewShapes otherwise pushes it nowhere.
+    // The canvas marks an admitted tp while its ground-truth shape is drawn, focused or not; the
+    // mirror carries the flag on a prediction shape for the unfocused one on the same terms.
     const shapes = buildReviewShapes(matches, COLORS, -1, {}, 0.8);
     const predShapes = shapes.filter((s) => s.tag === "pred");
     expect(predShapes).toHaveLength(1);
     expect(predShapes[0].admitted).toBe(true);
     expect(predShapes[0].color).toBe(COLORS.tp); // outcome colour, never the active colour
     expect(predShapes[0].dashed).toBeFalsy();
+    // With ground truth hidden the canvas draws nothing for an unfocused tp and marks nothing,
+    // so the mirror carries no shape for it either.
+    const gtHidden = buildReviewShapes(matches, COLORS, -1, { showGT: false }, 0.8);
+    expect(gtHidden.filter((s) => s.tag === "pred")).toHaveLength(0);
   });
 
   it("marks nothing when no admission conf is given", () => {

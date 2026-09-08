@@ -391,9 +391,9 @@ export function buildReviewShapes(
           tag: d.det_type,
         });
       }
-      // Every admitted tp's own prediction shape carries the flag in the mirror, focused or
-      // not, since the canvas marks every admitted tp; only the focused one draws dashed here.
-      if (d.det_type === "tp" && showPred && (active || admitted)) {
+      // An admitted tp's prediction shape carries the flag on the canvas's own terms: focused
+      // always, unfocused only while its ground-truth shape shows (the canvas marks nothing else).
+      if (d.det_type === "tp" && showPred && (active || (admitted && showGT))) {
         push(annotationGeometry(detPredAnnotation(d, matches)), active ? colors.active : outcome, {
           dashed: active,
           fill: true,
