@@ -563,6 +563,17 @@ describe("buildReviewShapes", () => {
     expect(bothAdmitted.find((s) => s.tag === "fp")?.admitted).toBe(true);
   });
 
+  it("carries the admitted flag on an unfocused tp's own prediction shape too", () => {
+    // The canvas marks every admitted tp, focused or not; the mirror must carry the flag on a
+    // shape for the unfocused one too, since buildReviewShapes otherwise pushes it nowhere.
+    const shapes = buildReviewShapes(matches, COLORS, -1, {}, 0.8);
+    const predShapes = shapes.filter((s) => s.tag === "pred");
+    expect(predShapes).toHaveLength(1);
+    expect(predShapes[0].admitted).toBe(true);
+    expect(predShapes[0].color).toBe(COLORS.tp); // outcome colour, never the active colour
+    expect(predShapes[0].dashed).toBeFalsy();
+  });
+
   it("marks nothing when no admission conf is given", () => {
     const shapes = buildReviewShapes(matches, COLORS, 0);
     expect(shapes.every((s) => !s.admitted)).toBe(true);
