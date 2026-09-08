@@ -179,6 +179,9 @@ Grid cell system:
    or swept (an explicit "checked this image, found nothing missed" attestation that mutates no
    ground truth)
 
+The Review canvas draws a corner mark on a prediction the bucket's own validated count operating
+point pre-admits; the canvas state body carries `admitted` on that shape.
+
 ### The review channel: propose on canvas, never write GT blind
 
 The agent must never write ground truth the human hasn't seen. Stage proposals to the
