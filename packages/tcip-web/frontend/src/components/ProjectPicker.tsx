@@ -150,7 +150,7 @@ function RemovalDialog({
         useStore
           .getState()
           .pushToast(
-            `Nothing to release: ${name} is not the default and the GUI does not have it open.`,
+            `Nothing was released: as far as this backend could read, ${name} is neither the default nor the project the GUI has open.`,
             "info",
           );
       }
@@ -733,9 +733,11 @@ export function ProjectPicker() {
           onClose={() => setRemovalTarget(null)}
           onRemoved={() => {
             setRemovalTarget(null);
-            // The dialog's own unmount hands focus back to the removed card's still-mounted
-            // button; move it to the field the listing update leaves in place once that card is gone.
-            void refetch().then(() => annotatorFieldRef.current?.focus());
+            // The dialog's unmount hands focus to the removed card's still-mounted button; the
+            // listing update drops it to the body, and only then does it move to a survivor.
+            void refetch().then(() => {
+              if (document.activeElement === document.body) annotatorFieldRef.current?.focus();
+            });
           }}
           onRefetchListing={() => void refetch()}
         />

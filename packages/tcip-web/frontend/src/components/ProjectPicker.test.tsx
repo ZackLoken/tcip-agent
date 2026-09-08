@@ -951,8 +951,8 @@ describe("ProjectPicker removal", () => {
     [
       false,
       false,
-      `Nothing to release: ${PROJECTS[0].name} is not the default and the GUI does not have ` +
-        "it open.",
+      `Nothing was released: as far as this backend could read, ${PROJECTS[0].name} is neither ` +
+        "the default nor the project the GUI has open.",
       "info",
     ],
   ] as const)(
@@ -1195,7 +1195,7 @@ describe("ProjectPicker removal", () => {
     expect(screen.queryByText(/Register the dataset again/)).not.toBeInTheDocument();
   });
 
-  it("keeps the singular remedy for a group of one dataset, plural for more than one, in the absent case too", async () => {
+  it("keeps the plural remedy for a group of more than one dataset in the absent case too", async () => {
     const withWarnings: ProjectSummary[] = [
       {
         ...PROJECTS[0],
