@@ -160,8 +160,8 @@ export interface ProjectSummary {
   // Every dataset this project registered under another workspace project now pending
   // removal or gone.
   dependency_warnings: DependencyWarning[];
-  // A complete sentence: this project's own registry decode failure, or an entry with a path
-  // and no id; the other entries still produce their own dependency_warnings beside it.
+  // A complete sentence, or null: a registry that will not decode leaves dependency_warnings
+  // empty beside it; an entry with a path and no id leaves the other entries' warnings beside it.
   dependency_problem: string | null;
 }
 
