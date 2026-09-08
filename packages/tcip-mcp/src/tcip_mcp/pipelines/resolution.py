@@ -2059,9 +2059,18 @@ def admission_rule_of(stamp: dict | None, pred_dir: str | Path) -> AdmissionReso
     ``experiment_id`` and ``record_digest``, never a value this function invents; a caller that
     admits a prediction under the rule names that identity, never a fresh one of its own.
 
-    Otherwise ``rule`` is ``None`` and ``reason`` is one sentence naming which of no stamp, a
-    stamp claiming nothing, the binding's own floor reason, or no readable conf answers for it.
+    Otherwise ``rule`` is ``None`` and ``reason`` names which of no stamp at all, a stamp claiming
+    nothing, the binding's own floor reason, or no readable conf answers for it, each its own
+    sentence: a caller (:func:`~tcip_web.routes.review.get_generation_conf`) that reads the stamp
+    strictly can also route a decode failure to this same ``AdmissionResolution`` shape without
+    this function folding it into the no-stamp reading.
     """
+    if stamp is None:
+        return AdmissionResolution(
+            rule=None,
+            reason=f"no operating_point.json at {str(pred_dir)!r}, so no rule admits any "
+                   "prediction here.",
+        )
     binding = verify_stamp_binding(stamp, pred_dir, document="operating_point")
     if not binding.claimed:
         return AdmissionResolution(
