@@ -607,6 +607,10 @@ describe("ReviewTab Conf >= filter censoring warning", () => {
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText(/⚠ Conf ≥ 0\.25/)).toBeInTheDocument());
+    // The sentence itself lives in the filter shelf beside the Conf slider, not the button row.
+    // Idempotent: localStorage's remembered open/closed state carries across tests in this file.
+    const toggle = screen.getByTitle("Show or hide the review filters");
+    if (toggle.getAttribute("aria-expanded") !== "true") fireEvent.click(toggle);
     expect(screen.getByText(/conf-censored/)).toBeInTheDocument();
   });
 
@@ -619,6 +623,8 @@ describe("ReviewTab Conf >= filter censoring warning", () => {
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText(/⚠ Conf ≥ 0\.25/)).toBeInTheDocument());
+    const toggle = screen.getByTitle("Show or hide the review filters");
+    if (toggle.getAttribute("aria-expanded") !== "true") fireEvent.click(toggle);
     expect(screen.getByText(/conf-censored/)).toBeInTheDocument();
   });
 
@@ -1415,6 +1421,13 @@ describe("ReviewTab symbology", () => {
 });
 
 describe("ReviewTab confirm-admitted", () => {
+  // Idempotent: localStorage's remembered open/closed state carries across tests in this file, so
+  // a bare toggle click would close an already-open shelf instead of opening it.
+  function openFilterShelf() {
+    const toggle = screen.getByTitle("Show or hide the review filters");
+    if (toggle.getAttribute("aria-expanded") !== "true") fireEvent.click(toggle);
+  }
+
   function ruleConf(conf: number) {
     return {
       generation_conf: conf,
@@ -1444,9 +1457,11 @@ describe("ReviewTab confirm-admitted", () => {
     render(<ReviewTab />);
     await waitFor(() => expect(screen.getByText("1 / 3")).toBeInTheDocument());
 
-    // The admitted mark is its own Rect with no stroke, distinct from every outcome box (which
-    // always carries one); only the fp scored at or above the rule's own conf gets one.
-    const marks = screen.getAllByTestId("k-rect").filter((r) => !r.hasAttribute("data-stroke"));
+    // The admitted mark is its own Rect with a white outline, distinct from an outcome box's own
+    // stroke colour; only the fp scored at or above the rule's own conf gets one.
+    const marks = screen
+      .getAllByTestId("k-rect")
+      .filter((r) => r.getAttribute("data-stroke") === "#ffffff");
     expect(marks).toHaveLength(1);
     expect(marks[0]).toHaveAttribute("data-x", "10");
     expect(marks[0]).toHaveAttribute("data-y", "10");
@@ -1584,7 +1599,9 @@ describe("ReviewTab confirm-admitted", () => {
       det_type: "fp",
       rule_admitted: true,
     });
-    await waitFor(() => expect(screen.getByText(/Confirming 0 of 2/)).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Confirming 1 of 2/ })).toBeInTheDocument(),
+    );
 
     resolveFirst({
       status: "ok",
@@ -1602,11 +1619,312 @@ describe("ReviewTab confirm-admitted", () => {
     });
 
     await waitFor(() =>
-      expect(useStore.getState().toasts.map((t) => t.message)).toContainEqual(
-        expect.stringContaining("Confirmed 2 admitted"),
+      expect(useStore.getState().toasts).toContainEqual(
+        expect.objectContaining({
+          message: expect.stringContaining("Confirmed 2 admitted"),
+          level: "success",
+        }),
       ),
     );
     expect(useStore.getState().review.matches!.detections.every((d) => d.reviewed)).toBe(true);
+  });
+
+  it("does not admit a scoreless prediction despite its rounded confidence reading as 1.0", async () => {
+    vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.5));
+    matchesSpy.mockResolvedValue(
+      matchesRes(
+        [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 1.0, bbox: [10, 10, 30, 30] })],
+        { preds: [{ subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {} }] },
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+    expect(screen.getByText("✓ Confirm 0 admitted")).toBeInTheDocument();
+    const marks = screen
+      .getAllByTestId("k-rect")
+      .filter((r) => r.getAttribute("data-stroke") === "#ffffff");
+    expect(marks).toHaveLength(0);
+  });
+
+  it("does not admit a score that rounds up to the rule's own conf", async () => {
+    vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.9));
+    matchesSpy.mockResolvedValue(
+      matchesRes(
+        [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
+        {
+          preds: [{ subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.89999 }],
+        },
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+    expect(screen.getByText("✓ Confirm 0 admitted")).toBeInTheDocument();
+  });
+
+  it("names the admitted clause on the toolbar's detection line", async () => {
+    vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.5));
+    matchesSpy.mockResolvedValue(
+      matchesRes(
+        [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
+        { preds: [{ subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 }] },
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+    expect(screen.getByText(/admitted at or above 0\.50/)).toBeInTheDocument();
+  });
+
+  it("reactively disables the button while a reload is in flight", async () => {
+    vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.5));
+    matchesSpy.mockResolvedValue(
+      matchesRes(
+        [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
+        { preds: [{ subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 }] },
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("✓ Confirm 1 admitted")).toBeInTheDocument());
+    const btn = () => screen.getByText("✓ Confirm 1 admitted").closest("button")!;
+    expect(btn()).not.toBeDisabled();
+
+    act(() => {
+      useStore.getState().setReviewLoading(true);
+    });
+    expect(btn()).toBeDisabled();
+    expect(btn()).toHaveAttribute(
+      "title",
+      "The installed matches are still loading for this image.",
+    );
+
+    act(() => {
+      useStore.getState().setReviewLoading(false);
+    });
+    expect(btn()).not.toBeDisabled();
+  });
+
+  it("shows no count on the button under a narrowing filter", async () => {
+    vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.5));
+    matchesSpy.mockResolvedValue(
+      matchesRes(
+        [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
+        { preds: [{ subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 }] },
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("✓ Confirm 1 admitted")).toBeInTheDocument());
+
+    act(() => {
+      useStore.setState((s) => ({
+        gui: { ...s.gui, review: { ...s.gui.review, filter_type: "fp" } },
+      }));
+    });
+    await waitFor(() => expect(screen.getByText("✓ Confirm admitted")).toBeInTheDocument());
+    expect(screen.getByText("✓ Confirm admitted").closest("button")).toBeDisabled();
+
+    act(() => {
+      useStore.setState((s) => ({
+        gui: { ...s.gui, review: { ...s.gui.review, filter_type: "all" } },
+      }));
+    });
+    await waitFor(() => expect(screen.getByText("✓ Confirm 1 admitted")).toBeInTheDocument());
+  });
+
+  it("agrees in number with the below-filter count", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, review: { ...s.gui.review, conf_threshold: 0.8 } },
+    }));
+    vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.5));
+    matchesSpy.mockResolvedValue(
+      matchesRes(
+        [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
+        {
+          preds: [
+            { subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
+            { subject: "subject_a", bbox: [50, 50, 70, 70], attributes: {}, score: 0.6 },
+          ],
+        },
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+    openFilterShelf();
+    expect(
+      screen.getByText("1 more admitted prediction is below the Conf filter"),
+    ).toBeInTheDocument();
+  });
+
+  it("ends a run early on a committed 409, counting that step and naming the cause", async () => {
+    vi.spyOn(api.review, "backupLabels").mockResolvedValue({ status: "ok", files_backed_up: 0 });
+    vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.5));
+    const fp1 = det({
+      det_type: "fp",
+      gt_idx: null,
+      pred_idx: 0,
+      conf: 0.9,
+      bbox: [10, 10, 30, 30],
+    });
+    const fp2 = det({
+      det_type: "fp",
+      gt_idx: null,
+      pred_idx: 1,
+      conf: 0.85,
+      bbox: [50, 50, 70, 70],
+    });
+    const preds: Annotation[] = [
+      { subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
+      { subject: "subject_a", bbox: [50, 50, 70, 70], attributes: {}, score: 0.85 },
+    ];
+    matchesSpy.mockResolvedValue(matchesRes([fp1, fp2], { preds }));
+
+    const committedBody = {
+      status: "ok",
+      image_status: "started",
+      annotation_status: "partial",
+      matches: matchesRes([{ ...fp1, reviewed: true, reviewed_action: "accepted" }, fp2], {
+        preds,
+      }),
+    };
+    const gapError = new StructuredRefusalError(
+      {
+        error: "audit_entry_not_written",
+        committed: committedBody,
+        message: "the audit log write failed",
+      },
+      409,
+      "the audit log write failed",
+    );
+    const actionSpy = vi.spyOn(api.review, "action").mockRejectedValueOnce(gapError);
+
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("✓ Confirm 2 admitted")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("✓ Confirm 2 admitted"));
+
+    await waitFor(() => expect(actionSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(useStore.getState().toasts).toContainEqual(
+        expect.objectContaining({
+          message: expect.stringMatching(/Confirmed 1 of 2.*the audit log write failed/),
+          level: "error",
+        }),
+      ),
+    );
+  });
+
+  it("ends a run early on a plain failure, with no success-shaped toast", async () => {
+    vi.spyOn(api.review, "backupLabels").mockResolvedValue({ status: "ok", files_backed_up: 0 });
+    vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.5));
+    const fp1 = det({
+      det_type: "fp",
+      gt_idx: null,
+      pred_idx: 0,
+      conf: 0.9,
+      bbox: [10, 10, 30, 30],
+    });
+    const preds: Annotation[] = [
+      { subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
+    ];
+    matchesSpy.mockResolvedValue(matchesRes([fp1], { preds }));
+    vi.spyOn(api.review, "action").mockRejectedValueOnce(new Error("network exploded"));
+
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("✓ Confirm 1 admitted")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("✓ Confirm 1 admitted"));
+
+    await waitFor(() =>
+      expect(useStore.getState().toasts).toContainEqual(
+        expect.objectContaining({
+          message: expect.stringMatching(/Confirmed 0 of 1.*network exploded/),
+          level: "error",
+        }),
+      ),
+    );
+    expect(useStore.getState().toasts.some((t) => /added to ground truth/.test(t.message))).toBe(
+      false,
+    );
+  });
+
+  it("ends the run rather than re-posting when a response leaves the detection unreviewed", async () => {
+    vi.spyOn(api.review, "backupLabels").mockResolvedValue({ status: "ok", files_backed_up: 0 });
+    vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.5));
+    const fp1 = det({
+      det_type: "fp",
+      gt_idx: null,
+      pred_idx: 0,
+      conf: 0.9,
+      bbox: [10, 10, 30, 30],
+    });
+    const preds: Annotation[] = [
+      { subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
+    ];
+    matchesSpy.mockResolvedValue(matchesRes([fp1], { preds }));
+    const actionSpy = vi.spyOn(api.review, "action").mockResolvedValue({
+      status: "ok",
+      image_status: "started",
+      annotation_status: "partial",
+      matches: matchesRes([fp1], { preds }),
+    });
+
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("✓ Confirm 1 admitted")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("✓ Confirm 1 admitted"));
+
+    await waitFor(() => expect(actionSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(
+        useStore.getState().toasts.some((t) => /left that detection unreviewed/.test(t.message)),
+      ).toBe(true),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    expect(actionSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks verdict, navigation and visibility controls for the run's span", async () => {
+    vi.spyOn(api.review, "backupLabels").mockResolvedValue({ status: "ok", files_backed_up: 0 });
+    vi.spyOn(api.review, "generationConf").mockResolvedValue(ruleConf(0.5));
+    const fp1 = det({
+      det_type: "fp",
+      gt_idx: null,
+      pred_idx: 0,
+      conf: 0.9,
+      bbox: [10, 10, 30, 30],
+    });
+    const preds: Annotation[] = [
+      { subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
+    ];
+    matchesSpy.mockResolvedValue(matchesRes([fp1], { preds }));
+    let resolveAction!: (v: unknown) => void;
+    const pending = new Promise((r) => {
+      resolveAction = r;
+    });
+    const actionSpy = vi
+      .spyOn(api.review, "action")
+      .mockImplementation(() => pending as ReturnType<typeof api.review.action>);
+
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("✓ Confirm 1 admitted")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("✓ Confirm 1 admitted"));
+    await waitFor(() => expect(actionSpy).toHaveBeenCalledTimes(1));
+
+    fireEvent.keyDown(window, { key: "a" });
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(actionSpy).toHaveBeenCalledTimes(1);
+
+    expect(screen.getByLabelText("Reviewed")).toBeDisabled();
+    expect(screen.getByLabelText("Next image")).toBeDisabled();
+    openFilterShelf();
+    expect(
+      screen.getByText("Ground truth").closest("label")!.querySelector("input"),
+    ).toBeDisabled();
+    expect(screen.getByText("Predictions").closest("label")!.querySelector("input")).toBeDisabled();
+    expect(screen.getByLabelText("Class filter")).toBeDisabled();
+
+    resolveAction({
+      status: "ok",
+      image_status: "completed",
+      annotation_status: "partial",
+      matches: matchesRes([{ ...fp1, reviewed: true, reviewed_action: "accepted" }], { preds }),
+    });
+    await waitFor(() => expect(screen.queryByText(/Confirming/)).not.toBeInTheDocument());
   });
 });
 
