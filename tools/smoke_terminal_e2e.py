@@ -3,8 +3,8 @@
 Exercises the exact flow the GUI uses: POST /api/terminal/sessions (spawns claude.exe
 in a ConPTY, cwd = repo root), attach the WebSocket, answer the terminal's
 Device-Attributes query like xterm.js would, type a prompt, and assert a real model
-response streams back. This is the scenario that silently failed in the old chat
-implementation; run it after any change to the terminal stack.
+response streams back: a streaming failure here can pass silently, so run this after any
+change to the terminal stack.
 
 Usage (from the repo root, tcip-agent env):
     python tools/smoke_terminal_e2e.py

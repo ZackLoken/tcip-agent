@@ -1,13 +1,11 @@
 #!/usr/bin/env python
 """Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in crops.yml.
 
-The crop skills' failure mode was asserting trait names that don't exist in the breeder-defined
-controlled vocabulary. This is the deterministic backstop: LLM reviewers approved drafts that
-still carried fabricated traits; this check did not.
+The deterministic backstop against a crop skill asserting a trait name outside the
+breeder-defined controlled vocabulary, catching a fabrication review alone might pass.
 
-Two independent checks, deliberately not sharing one extraction mechanism (a single
-regex-extraction path used to miss 11 of 180 real trait names, `dbh`, `sex`, `ploidy`, and
-others with no underscore, invisible to both checks it fed):
+Two independent checks, deliberately not sharing one extraction mechanism, so a gap in one
+check's coverage does not also blind the other:
 
 - `unknown_trait_tokens` (fabrication detection) extracts backtick-quoted, snake_case-shaped
   tokens via regex and flags any not in crops.yml or the allowlist. Regex-based because finding
