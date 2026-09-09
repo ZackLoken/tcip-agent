@@ -2,7 +2,7 @@
 
 Pins the softened scope-tentative behavior: registering trait #2 is a breeder-authored config
 edit (cross-checked against the crops.yml controlled vocab, never agent-invented), the open
-class id is a mapping fact derived from classes.json by name (never a pinned default), and the
+class id is a mapping fact derived from subjects.json by name (never a pinned default), and the
 crossing-unconfirmed 95%-mapping marker travels with the delivery. There are no built-in traits:
 bud_opening is authored the same way as any other trait; this module's ``pytestmark`` requests
 ``conftest.py``'s ``seed_bud_trait_spec``, which writes a real config file matching

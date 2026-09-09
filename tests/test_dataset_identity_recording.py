@@ -28,16 +28,16 @@ def _make_dataset(root: Path) -> None:
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp import class_registry
-    from tcip_mcp.class_registry import ClassRegistry, Subject
+    from tcip_mcp import subject_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject
 
     (root / "images" / "2-11-26").mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (32, 32)).save(root / "images" / "2-11-26" / "img_000.jpg")
     (root / "annotations" / "2-11-26").mkdir(parents=True, exist_ok=True)
     json_io.write_annotations(str(root / "annotations" / "2-11-26" / "img_000.json"),
                               [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
-    class_registry.write_registry(root / "classes.json",
-                                  ClassRegistry(subjects=(Subject(name="bud"),)))
+    subject_registry.write_registry(root / "subjects.json",
+                                  SubjectRegistry(subjects=(Subject(name="bud"),)))
 
 
 def test_create_experiment_records_identity_in_lineage(exp_dir):

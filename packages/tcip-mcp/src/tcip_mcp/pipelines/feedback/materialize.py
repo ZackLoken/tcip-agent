@@ -255,11 +255,11 @@ def _copy_source_registry_for_classified_scope(source_images_dir: str, output_di
     names no dataset root, that root's registry does not decode, or ``output_dir`` already holds
     one: an existing output registry is never silently overwritten by a second harvest into it.
     """
-    from tcip_mcp.class_registry import RegistryError, copy_registry, read_registry
-    from tcip_mcp.dataset_layout import classes_path, dataset_root_of
+    from tcip_mcp.subject_registry import RegistryError, copy_registry, read_registry
+    from tcip_mcp.dataset_layout import dataset_root_of, subjects_path
 
     src_root = dataset_root_of(source_images_dir)
-    src_classes = classes_path(src_root) if src_root is not None else None
+    src_classes = subjects_path(src_root) if src_root is not None else None
     if src_classes is None or not src_classes.is_file():
         raise ValueError(
             f"{source_images_dir} names no dataset root with a class registry to copy: a "
@@ -274,7 +274,7 @@ def _copy_source_registry_for_classified_scope(source_images_dir: str, output_di
             f"{src_classes} does not decode as a class registry ({exc}); repair it before "
             "materializing this classified review."
         ) from exc
-    out_classes = classes_path(output_dir)
+    out_classes = subjects_path(output_dir)
     if out_classes.is_file():
         raise ValueError(
             f"{output_dir} already holds a class registry at {out_classes}; materializing a "
@@ -416,23 +416,23 @@ def materialize_dataset(
         replace_image_status_store(out, {bucket_key: negatives})
 
         # A registry copy + a fresh per-image schema stamp, so quarantine (which needs
-        # confirmed_negative_names' own classes.json) can protect these negatives later.
-        from tcip_mcp.class_registry import (
+        # confirmed_negative_names' own subjects.json) can protect these negatives later.
+        from tcip_mcp.subject_registry import (
             RegistryError, attribute_schema_digest, copy_registry, read_registry,
         )
         from tcip_mcp.dataset_layout import (
-            classes_path, dataset_root_of, stamp_image_status_digests,
+            dataset_root_of, stamp_image_status_digests, subjects_path,
         )
 
         src_root = dataset_root_of(source_images_dir)
-        src_classes = classes_path(src_root) if src_root is not None else None
+        src_classes = subjects_path(src_root) if src_root is not None else None
         if src_classes is not None and src_classes.is_file():
             try:
                 digest = attribute_schema_digest(read_registry(src_classes), neg_subject)
             except (OSError, RegistryError):
                 digest = None
             if digest is not None:
-                copy_registry(src_classes, classes_path(out))
+                copy_registry(src_classes, subjects_path(out))
                 stamp_image_status_digests(out, bucket_key, negatives, digest)
 
     manifest = {

@@ -846,7 +846,7 @@ def _source_dataset_with_registry(root: Path) -> Path:
     dataset_root = root / "source_dataset"
     images = dataset_root / "images"
     _source_images(images)
-    (dataset_root / "classes.json").write_text(
+    (dataset_root / "subjects.json").write_text(
         '{"leaf": {"attributes": {"condition": {"type": "categorical", '
         '"values": ["healthy", "diseased"]}}}}',
         encoding="utf-8",
@@ -964,9 +964,9 @@ def test_materialize_copies_the_source_registry_under_a_classified_scope(tmp_pat
         str(dataset_root), str(source / "images"), str(out), bucket=CLASSIFIED_BUCKET)
 
     assert "error" not in r
-    assert (out / "classes.json").is_file()
-    assert (out / "classes.json").read_text(encoding="utf-8") == (
-        (source / "classes.json").read_text(encoding="utf-8"))
+    assert (out / "subjects.json").is_file()
+    assert (out / "subjects.json").read_text(encoding="utf-8") == (
+        (source / "subjects.json").read_text(encoding="utf-8"))
 
 
 def test_materialize_refuses_a_classified_scope_with_no_source_registry(tmp_path):
@@ -989,14 +989,14 @@ def test_materialize_refuses_a_classified_scope_into_a_populated_output(tmp_path
     source = _source_dataset_with_registry(tmp_path)
     out = tmp_path / "out"
     out.mkdir(parents=True)
-    (out / "classes.json").write_text('{"other": {}}', encoding="utf-8")
+    (out / "subjects.json").write_text('{"other": {}}', encoding="utf-8")
 
     r = materialize_review_dataset(
         str(dataset_root), str(source / "images"), str(out), bucket=CLASSIFIED_BUCKET)
 
     assert "error" in r
     assert "already holds a class registry" in r["error"]
-    assert (out / "classes.json").read_text(encoding="utf-8") == '{"other": {}}'
+    assert (out / "subjects.json").read_text(encoding="utf-8") == '{"other": {}}'
 
 
 def test_materialize_refuses_a_neither_key_stamp(tmp_path):

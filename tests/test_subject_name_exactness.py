@@ -55,7 +55,7 @@ def test_subject_names_differing_only_by_case_stay_distinct(
     assert set(subjects) == {"bud", "Bud", "bush"}
     assert subjects["bud"]["description"] == "the first spelling a human typed"
     assert subjects["Bud"]["description"] == "a second spelling a human typed"
-    assert set(json.loads((tmp_path / "classes.json").read_text(encoding="utf-8"))) == {
+    assert set(json.loads((tmp_path / "subjects.json").read_text(encoding="utf-8"))) == {
         "bud", "Bud", "bush"}
 
 
@@ -131,4 +131,4 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
     ).json()["subjects"]
     assert set(subjects) == {"bud", "hazel_leaf"}
     assert subjects["bud"]["description"] == "corrected"
-    assert len(json.loads((tmp_path / "classes.json").read_text(encoding="utf-8"))) == 2
+    assert len(json.loads((tmp_path / "subjects.json").read_text(encoding="utf-8"))) == 2

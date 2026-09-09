@@ -16,10 +16,10 @@ import pytest
 from PIL import Image
 
 from tcip_annotation import json_io
-from tcip_mcp import class_registry
-from tcip_mcp.class_registry import (
+from tcip_mcp import subject_registry
+from tcip_mcp.subject_registry import (
     Attribute,
-    ClassRegistry,
+    SubjectRegistry,
     RegistryError,
     Subject,
     assign_class_ids,
@@ -32,9 +32,9 @@ from tcip_mcp.class_registry import (
 from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
 
 
-def _severity_registry(attr_type: str) -> ClassRegistry:
+def _severity_registry(attr_type: str) -> SubjectRegistry:
     """A leaf severity vocabulary declared with the given attribute type, values held identical."""
-    return ClassRegistry(subjects=(
+    return SubjectRegistry(subjects=(
         Subject(name="bush", description="one bush crown"),
         Subject(name="leaf", description="one leaf", attributes=(
             Attribute(name="efb_severity", type=attr_type,
@@ -42,10 +42,10 @@ def _severity_registry(attr_type: str) -> ClassRegistry:
     ))
 
 
-def _prefixed_attributes() -> ClassRegistry:
+def _prefixed_attributes() -> SubjectRegistry:
     """One subject carrying two attributes whose names share a prefix, the longer declared first,
     with vocabularies of different size so the two scopes cannot be confused for one another."""
-    return ClassRegistry(subjects=(
+    return SubjectRegistry(subjects=(
         Subject(name="bud", attributes=(
             Attribute(name="opening_stage", type="ordinal",
                       values=("closed", "swelling", "partial", "shedding")),
@@ -54,11 +54,11 @@ def _prefixed_attributes() -> ClassRegistry:
     ))
 
 
-def _case_variant_subjects() -> ClassRegistry:
+def _case_variant_subjects() -> SubjectRegistry:
     """Two subject names differing only in case, each with its own attribute vocabulary. The GUI
     accepts a free-text subject name, so a case variant is an ordinary registry state: the two are
     distinct subjects and each scope must resolve to its own vocabulary."""
-    return ClassRegistry(subjects=(
+    return SubjectRegistry(subjects=(
         Subject(name="bud", attributes=(
             Attribute(name="opening", type="categorical", values=("open", "closed")),)),
         Subject(name="Bud", attributes=(
@@ -86,7 +86,7 @@ def test_digest_ignores_free_text_provenance():
     base = _severity_registry("ordinal")
     leaf = base.subject("leaf")
     assert leaf is not None
-    reworded = ClassRegistry(subjects=(
+    reworded = SubjectRegistry(subjects=(
         Subject(name="bush", description="a bush crown, reworded"),
         Subject(name="leaf", description="one currant leaf, reworded", defined_by="user:breeder",
                 defined_at="2026-01-02", attributes=leaf.attributes),
@@ -106,8 +106,8 @@ def test_confirmation_is_quarantined_when_an_attribute_type_is_redefined(tmp_pat
     Image.new("RGB", (96, 40), color=(120, 120, 120)).save(root / "images" / "img_001.jpg")
     json_io.write_annotations(labels_dir / "img_001.json", [], 96, 40, keep_empty=True)
 
-    write_registry(root / "classes.json", _severity_registry("categorical"))
-    old_digest = attribute_schema_digest(read_registry(root / "classes.json"), "leaf")
+    write_registry(root / "subjects.json", _severity_registry("categorical"))
+    old_digest = attribute_schema_digest(read_registry(root / "subjects.json"), "leaf")
     assert old_digest is not None
     bucket = status_bucket("leaf", None)
     record_image_statuses(root, bucket, {"img_001.jpg": "negative"}, recorded_by="user:breeder")
@@ -116,7 +116,7 @@ def test_confirmation_is_quarantined_when_an_attribute_type_is_redefined(tmp_pat
     tcip_store.replace(image_status_digest_key(root), {bucket: {"img_001.jpg": old_digest}},
                        expect=tcip_store.Version.ABSENT)
 
-    write_registry(root / "classes.json", _severity_registry("ordinal"))
+    write_registry(root / "subjects.json", _severity_registry("ordinal"))
 
     quarantined: set[str] = set()
     admitted = confirmed_negative_names(labels_dir, subject="leaf", date=None, quarantined_out=quarantined)
@@ -154,7 +154,7 @@ def test_attribute_lookup_resolves_the_exactly_named_attribute():
 def test_an_attribute_name_that_only_prefixes_a_declared_one_refuses():
     """A truncated scope name names no declared attribute and must refuse, rather than train over
     the longer attribute's ranks while reporting the name the caller asked for."""
-    reg = ClassRegistry(subjects=(
+    reg = SubjectRegistry(subjects=(
         Subject(name="bud", attributes=(
             Attribute(name="opening_stage", type="ordinal",
                       values=("closed", "swelling", "partial", "shedding")),)),
@@ -197,7 +197,7 @@ def test_case_variant_subjects_survive_a_file_roundtrip_as_distinct_subjects(tmp
     """Names are stored and read back verbatim: nothing folds two similar names into one subject,
     which would merge two label populations into a single scope."""
     reg = _case_variant_subjects()
-    path = tmp_path / "classes.json"
+    path = tmp_path / "subjects.json"
     write_registry(path, reg)
 
     on_disk = json.loads(path.read_text(encoding="utf-8"))
@@ -213,4 +213,4 @@ def test_case_variant_subjects_survive_a_file_roundtrip_as_distinct_subjects(tmp
     assert lower is not None and upper is not None
     assert lower.attributes[0].values == ("open", "closed")
     assert upper.attributes[0].values == ("closed", "swelling", "partial")
-    assert class_registry.num_classes(back, "Bud", "opening") == 3
+    assert subject_registry.num_classes(back, "Bud", "opening") == 3

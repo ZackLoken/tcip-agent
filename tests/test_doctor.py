@@ -14,7 +14,7 @@ from PIL import Image
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import traits
-from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
 from tcip_mcp.dataset_layout import (
     annotation_dir,
     annotation_path,
@@ -37,7 +37,7 @@ def _project(tmp_path: Path) -> Path:
     ann.mkdir(parents=True)
     state = root / ".tcip" / "state"
     state.mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
     for name in ("IMG_A", "IMG_B", "IMG_C"):
         Image.new("RGB", (32, 32)).save(root / "images" / "2026-02-11" / f"{name}.JPG")
     # A: confirmed negative (empty + status). B: empty without confirmation (the IMG_0150 case).
@@ -115,7 +115,7 @@ def test_doctor_admits_a_confirmed_negative_under_dated_labels_flat_images(tmp_p
     (root / "images").mkdir(parents=True)
     ann = root / "annotations" / "2026-02-11"
     ann.mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (32, 32)).save(root / "images" / "IMG_A.JPG")
     json_io.write_annotations(ann / "IMG_A.json", [], 32, 32, keep_empty=True)
 
@@ -141,7 +141,7 @@ def test_doctor_reports_a_stem_collision_and_completes(tmp_path):
     images.mkdir(parents=True)
     ann = root / "annotations" / "2026-02-11"
     ann.mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="bloom"),)))
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bloom"),)))
     Image.new("RGB", (32, 32)).save(images / "foo.jpg")
     Image.new("RGB", (32, 32)).save(images / "foo.png")
     json_io.write_annotations(ann / "foo.json", [], 32, 32, keep_empty=True)
@@ -189,7 +189,7 @@ def test_doctor_flags_a_stale_region_completeness_attestation(tmp_path):
     ann_dir.mkdir(parents=True)
     state_dir = root / ".tcip" / "state"
     state_dir.mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (32, 32)).save(root / "images" / "2026-02-11" / "IMG_A.JPG")
     ann_path = ann_dir / "IMG_A.json"
     json_io.write_annotations(
@@ -246,7 +246,7 @@ def test_doctor_flags_incomplete_source_snapshot(tmp_path):
     ann = root / "annotations" / "d"
     ann.mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (32, 32)).save(root / "images" / "d" / "IMG_A.JPG")
     json_io.write_annotations(
         ann / "IMG_A.json",
@@ -271,7 +271,7 @@ def test_doctor_clean_project_exits_zero(tmp_path):
     ann = root / "annotations" / "d"
     ann.mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (32, 32)).save(root / "images" / "d" / "IMG_A.JPG")
     json_io.write_annotations(
         ann / "IMG_A.json",
@@ -288,8 +288,8 @@ def _layout_project(tmp_path: Path, date: str | None, name: str = "resolved") ->
     image_dir(root, date).mkdir(parents=True)
     annotation_dir(root, date).mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
-    write_registry(root / "classes.json",
-                   ClassRegistry(subjects=(Subject(name="bud"), Subject(name="leaf"))))
+    write_registry(root / "subjects.json",
+                   SubjectRegistry(subjects=(Subject(name="bud"), Subject(name="leaf"))))
     return root
 
 
@@ -356,7 +356,7 @@ def test_confirmations_are_matched_on_a_dateless_dataset(tmp_path):
     image_dir(root, None).mkdir(parents=True)
     annotation_dir(root, None).mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (40, 24)).save(image_dir(root, None) / "IMG_F.JPG")
     json_io.write_annotations(
         annotation_path(root, None, "IMG_F"),

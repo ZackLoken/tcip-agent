@@ -97,7 +97,7 @@ def _images_term(images_root: Path, cache_path: Path | None) -> str | None:
 def _registry_term(dataset_root: Path) -> str:
     """Digest over the canonical registry serialization in *declared order* (load-bearing in
     ``assign_class_ids``). Serialized via ``registry_to_dict`` rather than raw bytes, so a
-    whitespace-only reformat of ``classes.json`` does not change identity but a value reorder/addition
+    whitespace-only reformat of ``subjects.json`` does not change identity but a value reorder/addition
     does. Empty string when the dataset has no registry, or when ``read_registry`` refuses it as
     undecodable/malformed (``OSError``/``ValueError``/``RegistryError``).
 
@@ -107,10 +107,10 @@ def _registry_term(dataset_root: Path) -> str:
     propagates uncaught, refusing the whole fingerprint computation (:func:`dataset_fingerprint`)
     rather than folding into the empty-string "no registry" answer.
     """
-    from tcip_mcp.class_registry import RegistryError, read_registry, registry_to_dict
-    from tcip_mcp.dataset_layout import classes_path
+    from tcip_mcp.subject_registry import RegistryError, read_registry, registry_to_dict
+    from tcip_mcp.dataset_layout import subjects_path
 
-    cp = classes_path(dataset_root)
+    cp = subjects_path(dataset_root)
     if not cp.is_file():
         return ""
     try:
@@ -126,7 +126,7 @@ def _confirmations_term(dataset_root: Path) -> str:
     Reads the dataset's own confirmed-negative store through
     ``dataset_layout.read_image_status_store``, the one read every other consumer of that store
     goes through, and never a foreign store, since confirmations are dataset-native the same way
-    ``_registry_term`` reads only ``classes_path``. Hashes stored negative membership, not the
+    ``_registry_term`` reads only ``subjects_path``. Hashes stored negative membership, not the
     quarantine-filtered view
     ``confirmed_negative_names`` returns: fingerprint is content identity (should two datasets be
     considered the same content), quarantine is a training-time trust decision, and conflating them
@@ -180,7 +180,7 @@ def dataset_fingerprint(dataset_root: str | Path) -> str | None:
 
     A superset of :func:`~tcip_mcp.pipelines.resolution.dataset_hash` (which stays the
     per-split-subset firewall key): the label term *calls* ``dataset_hash``; the image term
-    hashes each file's raw bytes; the registry term digests the canonical class registry; the
+    hashes each file's raw bytes; the registry term digests the canonical subject registry; the
     confirmations term digests the dataset-native confirmed-negative store.
     Content-addressed, so it is machine-independent (a moved dataset keeps its fingerprint) and detects
     a change to any of the four (a re-encode, a relabel, a registry edit, confirming/un-confirming a

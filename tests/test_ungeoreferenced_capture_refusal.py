@@ -203,12 +203,12 @@ def _delivery_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Pa
     _, _, preds_by_date = _write_scene(dataset_root, dates=[DATE])
     _seed_currant_bloom_trait(tmp_path)
 
-    from tcip_mcp.class_registry import copy_registry
-    from tcip_mcp.dataset_layout import classes_path
+    from tcip_mcp.subject_registry import copy_registry
+    from tcip_mcp.dataset_layout import subjects_path
 
     # The project's own registry (seeded by _seed_currant_bloom_trait) is copied to the delivered
     # dataset root, since the web door resolves its registry from there, not the project.
-    copy_registry(classes_path(tmp_path), classes_path(dataset_root))
+    copy_registry(subjects_path(tmp_path), subjects_path(dataset_root))
     return dataset_root, preds_by_date
 
 

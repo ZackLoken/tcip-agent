@@ -1115,10 +1115,10 @@ def _compute_negative_carry(label_map: dict, parts: dict, image_map: dict,
     """
     if not subject:
         return None
-    from tcip_mcp.class_registry import (
+    from tcip_mcp.subject_registry import (
         RegistryError, attribute_schema_digest, read_registry,
     )
-    from tcip_mcp.dataset_layout import classes_path, dataset_root_of
+    from tcip_mcp.dataset_layout import dataset_root_of, subjects_path
     from tcip_mcp.pipelines.data.label_queries import confirmed_negative_records
     from tcip_mcp.pipelines.image_utils import logical_image_name
 
@@ -1141,7 +1141,7 @@ def _compute_negative_carry(label_map: dict, parts: dict, image_map: dict,
         root = dataset_root_of(d)
         if root is None:
             continue
-        cp = classes_path(root)
+        cp = subjects_path(root)
         if not cp.is_file():
             continue
         try:
@@ -1169,9 +1169,9 @@ def _apply_negative_carry(carry: "_NegativeCarry | None", out_dir: Path,
     dataset's own answer, rather than re-attributing the human's work to the split writer."""
     if carry is None or not carry.by_split or not subject:
         return
-    from tcip_mcp.class_registry import copy_registry
+    from tcip_mcp.subject_registry import copy_registry
     from tcip_mcp.dataset_layout import (
-        classes_path, replace_image_status_store, stamp_image_status_digests, status_bucket,
+        replace_image_status_store, stamp_image_status_digests, status_bucket, subjects_path,
     )
 
     bucket_key = status_bucket(subject, None)
@@ -1180,5 +1180,5 @@ def _apply_negative_carry(carry: "_NegativeCarry | None", out_dir: Path,
         split_root.mkdir(parents=True, exist_ok=True)
         replace_image_status_store(split_root, {bucket_key: carried})
         if carry.digest is not None and carry.src_classes is not None:
-            copy_registry(carry.src_classes, classes_path(split_root))
+            copy_registry(carry.src_classes, subjects_path(split_root))
             stamp_image_status_digests(split_root, bucket_key, carried, carry.digest)

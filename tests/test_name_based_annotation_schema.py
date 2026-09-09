@@ -17,8 +17,8 @@ from PIL import Image
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Polygon
-from tcip_mcp import class_registry
-from tcip_mcp.class_registry import ClassRegistry, Subject
+from tcip_mcp import subject_registry
+from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
 
 
@@ -27,9 +27,9 @@ def _write_image(images_dir: Path, stem: str, size=(640, 480)) -> None:
     Image.new("RGB", size, color=(128, 128, 128)).save(images_dir / f"{stem}.jpg")
 
 
-def _write_registry(root: Path, *subjects: Subject) -> ClassRegistry:
-    registry = ClassRegistry(subjects=tuple(subjects))
-    class_registry.write_registry(root / "classes.json", registry)
+def _write_registry(root: Path, *subjects: Subject) -> SubjectRegistry:
+    registry = SubjectRegistry(subjects=tuple(subjects))
+    subject_registry.write_registry(root / "subjects.json", registry)
     return registry
 
 
@@ -46,13 +46,13 @@ def test_registry_decodes_its_own_labels(tmp_path):
         labels_dir / "img_001.json",
         [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 640, 480)
 
-    id_map = class_registry.assign_class_ids(registry, "bud")
+    id_map = subject_registry.assign_class_ids(registry, "bud")
     coco = assemble_coco(labels_dir, images_dir, subject="bud", date=None, id_map=id_map)
 
     # The COCO categories are the assign_class_ids map, and every emitted annotation decodes back to
     # the name its label carried: the registry reads its own labels without guessing.
     assert {c["name"]: c["id"] for c in coco["categories"]} == id_map
-    inv = class_registry.decode_class_ids(id_map)
+    inv = subject_registry.decode_class_ids(id_map)
     assert coco["annotations"], "the labeled image produced no COCO annotation"
     assert all(inv[a["category_id"]] == "bud" for a in coco["annotations"])
 
@@ -73,7 +73,7 @@ def test_geometryless_annotation_roundtrips_and_marks_image_annotated(tmp_path):
     back = json_io.read_annotations(str(labels_dir / "img_001.json"))
     assert len(back) == 1 and back[0].subject == "bud" and back[0].geometry is None
 
-    id_map = class_registry.assign_class_ids(registry, "bud")
+    id_map = subject_registry.assign_class_ids(registry, "bud")
     coco = assemble_coco(labels_dir, images_dir, subject="bud", date=None, id_map=id_map)
     # The image is annotated (it carries a subject annotation), so it is present as an image and is
     # not collapsed to an empty negative; the geometry-less label just has no detection target.
@@ -81,7 +81,7 @@ def test_geometryless_annotation_roundtrips_and_marks_image_annotated(tmp_path):
     assert coco["annotations"] == []
 
 
-# (c) loader.num_classes == class_registry.num_classes == len(assemble_coco categories), one map.
+# (c) loader.num_classes == subject_registry.num_classes == len(assemble_coco categories), one map.
 def test_num_classes_agree_on_one_assign_class_ids_map(tmp_path):
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.data.label_queries import assemble_coco
@@ -97,12 +97,12 @@ def test_num_classes_agree_on_one_assign_class_ids_map(tmp_path):
             labels_dir / f"{stem}.json",
             [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 640, 480)
 
-    id_map = class_registry.assign_class_ids(registry, "bud")
+    id_map = subject_registry.assign_class_ids(registry, "bud")
     coco = assemble_coco(labels_dir, images_dir, subject="bud", date=None, id_map=id_map)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
                        subject="bud")
 
-    assert ds.num_classes == class_registry.num_classes(registry, "bud") == len(coco["categories"])
+    assert ds.num_classes == subject_registry.num_classes(registry, "bud") == len(coco["categories"])
     assert len(id_map) == ds.num_classes == 1
 
 
@@ -161,7 +161,7 @@ def test_decode_inverts_the_recorded_map(tmp_path):
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
     registry = _write_registry(tmp_path, Subject(name="bud"))
-    id_map = class_registry.assign_class_ids(registry, "bud")  # the run's single map
+    id_map = subject_registry.assign_class_ids(registry, "bud")  # the run's single map
 
     # A prediction with a 1-indexed detector label decodes to its name through the recorded map.
     out = tmp_path / "pred.json"
@@ -170,7 +170,7 @@ def test_decode_inverts_the_recorded_map(tmp_path):
         created_by="model:x", subject="bud", attribute=None, id_map=id_map)
     preds = json_io.read_annotations(str(out))
     assert len(preds) == 1
-    inv = class_registry.decode_class_ids(id_map)
+    inv = subject_registry.decode_class_ids(id_map)
     # loader-side map (id_map) inverted == the name the recorded-map decode wrote on disk.
     assert preds[0].subject == inv[0] == "bud"
 
@@ -329,7 +329,7 @@ def test_geometryless_only_image_is_not_a_trainable_stem_on_either_path(tmp_path
     # geomless: a bud annotation with NO geometry (an image-level label, not a box).
     json_io.write_annotations(labels_dir / "geomless.json", [Annotation(subject="bud")], 640, 480)
 
-    id_map = class_registry.assign_class_ids(registry, "bud")
+    id_map = subject_registry.assign_class_ids(registry, "bud")
     coco = assemble_coco(labels_dir, images_dir, subject="bud", date=None, id_map=id_map)
     stems_direct, _ = trainable_stems(labels_dir, images_dir, subject="bud", date=None)          # coco=None path
     stems_coco, _ = trainable_stems(labels_dir, images_dir, subject="bud", date=None, coco=coco)  # COCO path

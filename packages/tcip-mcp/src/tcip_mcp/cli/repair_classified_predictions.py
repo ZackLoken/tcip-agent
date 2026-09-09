@@ -92,10 +92,10 @@ from tcip_store import StoreError
 from tcip_store.binding import bind_default
 
 from tcip_mcp.audit import dataset_scope_of, record_event_or_raise
-from tcip_mcp.class_registry import RegistryError, read_registry
+from tcip_mcp.subject_registry import RegistryError, read_registry
 from tcip_mcp.dataset_layout import (
-    annotation_root, classes_path, dataset_root_of, is_bucket_name, prediction_bucket_dirs,
-    prediction_root,
+    annotation_root, dataset_root_of, is_bucket_name, prediction_bucket_dirs,
+    prediction_root, subjects_path,
 )
 from tcip_mcp.experiments import config_key, read_member
 from tcip_mcp.pipelines.resolution import (
@@ -574,7 +574,7 @@ def ground_truth_candidates(dataset_root: Path, conformed_id_maps: list[dict]) -
     candidate_names: set[str] = set()
     for id_map in conformed_id_maps:
         candidate_names.update(id_map)
-    cp = classes_path(dataset_root)
+    cp = subjects_path(dataset_root)
     if cp.is_file():
         try:
             registry = read_registry(cp)

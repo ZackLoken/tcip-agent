@@ -784,7 +784,7 @@ def scope_consistent_with_map(
     ``id_map``, or the reason it is not (``None`` when it is).
 
     A detector pair (``attribute`` ``None``) needs a map that is absent or keyed by exactly the
-    subject, the shape a detector run records (``class_registry.assign_class_ids`` with no
+    subject, the shape a detector run records (``subject_registry.assign_class_ids`` with no
     attribute); a map keyed otherwise says the bucket classified. A classified pair (``attribute``
     not ``None``) needs a map that is not keyed by the subject alone, since a run that decoded
     along an attribute never records that shape.

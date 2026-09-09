@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tcip_mcp import class_registry as cr
+from tcip_mcp import subject_registry as cr
 from tcip_mcp import operationalization as op
 from tcip_mcp import traits
 from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingBuild

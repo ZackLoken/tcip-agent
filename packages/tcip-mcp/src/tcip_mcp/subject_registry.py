@@ -1,7 +1,7 @@
-"""The dataset's class registry, subjects, their attributes, and the deterministic
+"""The dataset's subject registry, subjects, their attributes, and the deterministic
 name→id assignment a training run uses (and records, so predictions stay decodable).
 
-The on-disk registry (``<dataset_root>/classes.json``) is self-describing and name-based::
+The on-disk registry (``<dataset_root>/subjects.json``) is self-describing and name-based::
 
     {
       "bush": {"description": "one bush crown", "defined_by": "...", "defined_at": "..."},
@@ -87,8 +87,8 @@ class Subject:
 
 
 @dataclass(frozen=True)
-class ClassRegistry:
-    """The whole ``classes.json``, the dataset's subjects, in declared order."""
+class SubjectRegistry:
+    """The whole ``subjects.json``, the dataset's subjects, in declared order."""
 
     subjects: tuple[Subject, ...] = ()
 
@@ -100,11 +100,11 @@ class ClassRegistry:
 
 
 class RegistryError(ValueError):
-    """A registry that cannot be read as a valid class registry, or a scope it does not contain."""
+    """A registry that cannot be read as a valid subject registry, or a scope it does not contain."""
 
 
-def registry_from_dict(data: object) -> ClassRegistry:
-    """Parse the nested registry mapping into a :class:`ClassRegistry`, preserving declared order.
+def registry_from_dict(data: object) -> SubjectRegistry:
+    """Parse the nested registry mapping into a :class:`SubjectRegistry`, preserving declared order.
 
     Refuses a malformed shape rather than guessing (an attribute whose ``type`` is unknown, or whose
     ``values`` are absent/empty/non-string/duplicated), so a bad registry fails loudly instead of
@@ -145,11 +145,11 @@ def registry_from_dict(data: object) -> ClassRegistry:
             defined_at=str(sbody.get("defined_at", "")),
             attributes=tuple(attrs),
         ))
-    return ClassRegistry(subjects=tuple(subjects))
+    return SubjectRegistry(subjects=tuple(subjects))
 
 
-def registry_to_dict(registry: ClassRegistry) -> dict:
-    """Serialize a :class:`ClassRegistry` back to the nested mapping (inverse of
+def registry_to_dict(registry: SubjectRegistry) -> dict:
+    """Serialize a :class:`SubjectRegistry` back to the nested mapping (inverse of
     :func:`registry_from_dict`; empty description/provenance fields are still written for legibility)."""
     out: dict[str, dict] = {}
     for s in registry.subjects:
@@ -162,7 +162,7 @@ def registry_to_dict(registry: ClassRegistry) -> dict:
     return out
 
 
-def attribute_schema_digest(registry: ClassRegistry, subject: str) -> str | None:
+def attribute_schema_digest(registry: SubjectRegistry, subject: str) -> str | None:
     """Digest over ``subject``'s attribute vocabulary (name -> {type, declared-order values}) only.
 
     ``None`` if ``subject`` is not in the registry at all. Deliberately excludes ``description``/
@@ -184,10 +184,10 @@ def attribute_schema_digest(registry: ClassRegistry, subject: str) -> str | None
 
 
 def _registry_key(path: str | Path) -> "Key":
-    """The stored registry a ``classes.json`` path names, addressed by the dataset root holding it."""
-    from tcip_mcp.dataset_layout import class_registry_key
+    """The stored registry a ``subjects.json`` path names, addressed by the dataset root holding it."""
+    from tcip_mcp.dataset_layout import subject_registry_key
 
-    return class_registry_key(Path(path).absolute().parent)
+    return subject_registry_key(Path(path).absolute().parent)
 
 
 def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
@@ -207,14 +207,14 @@ def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
         document = tcip_store.RECORD_JSON.decode(data)
     except ValueError as exc:
         raise RegistryError(f"{path} does not decode as JSON: {exc}") from exc
-    from tcip_mcp.dataset_layout import CLASS_REGISTRY_STORE
+    from tcip_mcp.dataset_layout import SUBJECT_REGISTRY_STORE
 
-    tcip_store.check_schema_version(tcip_store.get_descriptor(CLASS_REGISTRY_STORE), document)
+    tcip_store.check_schema_version(tcip_store.get_descriptor(SUBJECT_REGISTRY_STORE), document)
     return document
 
 
-def read_registry(path: str | Path) -> ClassRegistry:
-    """Read ``classes.json`` into a :class:`ClassRegistry`.
+def read_registry(path: str | Path) -> SubjectRegistry:
+    """Read ``subjects.json`` into a :class:`SubjectRegistry`.
 
     Absence and corruption are different answers: no registry raises ``FileNotFoundError``, and
     a registry whose bytes are present but will not decode raises :class:`RegistryError`, the
@@ -236,8 +236,8 @@ def read_registry(path: str | Path) -> ClassRegistry:
     return registry_from_dict(document)
 
 
-def write_registry(path: str | Path, registry: ClassRegistry) -> None:
-    """Write a :class:`ClassRegistry` to ``classes.json``, unconditionally.
+def write_registry(path: str | Path, registry: SubjectRegistry) -> None:
+    """Write a :class:`SubjectRegistry` to ``subjects.json``, unconditionally.
 
     Encoded through the canonical record codec object rather than a spelling of its own, so
     the ordered subject and attribute sequences land exactly as every other JSON document does.
@@ -264,7 +264,7 @@ def read_version(path: str | Path) -> "Version":
     return tcip_store.read_blob_versioned(_registry_key(path), default=None).version
 
 
-def _dropped_names(outgoing: ClassRegistry, incoming: ClassRegistry) -> list[str]:
+def _dropped_names(outgoing: SubjectRegistry, incoming: SubjectRegistry) -> list[str]:
     """Every subject, attribute or attribute value ``outgoing`` declares that ``incoming`` does
     not, dotted (``subject``, ``subject.attribute``, ``subject.attribute=value``)."""
     dropped: list[str] = []
@@ -285,7 +285,7 @@ def _dropped_names(outgoing: ClassRegistry, incoming: ClassRegistry) -> list[str
 
 
 def _sweep_schema_change(
-    dataset_root: Path, outgoing: ClassRegistry | None, incoming: ClassRegistry
+    dataset_root: Path, outgoing: SubjectRegistry | None, incoming: SubjectRegistry
 ) -> dict:
     """Stamp the outgoing attribute-schema digest onto every confirmation of an affected subject
     that carries no stamp yet, before ``incoming`` is what a later read sees.
@@ -379,7 +379,7 @@ def _sweep_schema_change(
 
 
 def replace_registry(
-    path: str | Path, registry: ClassRegistry, *, expect: "Version | None", allow_removals: bool = False,
+    path: str | Path, registry: SubjectRegistry, *, expect: "Version | None", allow_removals: bool = False,
     allow_type_changes: bool = False,
 ) -> dict:
     """The one write both registry doors call: read what it replaces, refuse a silent drop.
@@ -428,7 +428,7 @@ def replace_registry(
 
     key = _registry_key(path)
     versioned = tcip_store.read_blob_versioned(key, default=None)
-    outgoing: ClassRegistry | None = None
+    outgoing: SubjectRegistry | None = None
     decode_warning: str | None = None
     if versioned.value is not None:
         try:
@@ -506,7 +506,7 @@ def copy_registry(source: str | Path, destination: str | Path) -> None:
         ) from exc
 
 
-def assign_class_ids(registry: ClassRegistry, subject: str, attribute: str | None = None) -> dict[str, int]:
+def assign_class_ids(registry: SubjectRegistry, subject: str, attribute: str | None = None) -> dict[str, int]:
     """The deterministic name→id map for one training scope, in the registry's *declared* order.
 
     - ``attribute`` given: one class per value of that attribute (``{value: 0..N-1}``), in the order
@@ -532,7 +532,7 @@ def assign_class_ids(registry: ClassRegistry, subject: str, attribute: str | Non
     return {value: idx for idx, value in enumerate(attr.values)}
 
 
-def num_classes(registry: ClassRegistry, subject: str, attribute: str | None = None) -> int:
+def num_classes(registry: SubjectRegistry, subject: str, attribute: str | None = None) -> int:
     """Class count for a training scope, the size of :func:`assign_class_ids` (0 = background is the
     detector's own offset, applied by the loader, not counted here)."""
     return len(assign_class_ids(registry, subject, attribute))
@@ -543,15 +543,15 @@ def decode_class_ids(id_map: dict[str, int]) -> dict[int, str]:
     return {cid: name for name, cid in id_map.items()}
 
 
-def positive_class_problem(registry: ClassRegistry, subject_name: str, class_name: str) -> str | None:
-    """Why ``class_name`` cannot be ``subject_name``'s positive class in ``registry``, or ``None``
+def positive_value_problem(registry: SubjectRegistry, subject_name: str, value: str) -> str | None:
+    """Why ``value`` cannot be ``subject_name``'s positive value in ``registry``, or ``None``
     when some attribute of that subject lists it among its values.
 
     Deliberately stricter than :func:`assign_class_ids`'s own id-map shape: a subject with no
     attributes decodes as a single class keyed by its own name, a bare detector with no
     classification axis at all, and a bare single-class detector never assessed a trait's positive
     state (the precondition ``count_by_class`` checks), so a subject with no attributes cannot
-    carry a positive class here even though it decodes fine as a training scope.
+    carry a positive value here even though it decodes fine as a training scope.
     """
     subject = registry.subject(subject_name)
     if subject is None:
@@ -564,18 +564,18 @@ def positive_class_problem(registry: ClassRegistry, subject_name: str, class_nam
             "classification axis never assessed a trait's positive state, so it cannot carry one"
         )
     values = sorted({v for a in subject.attributes for v in a.values})
-    if class_name not in values:
-        return f"class {class_name!r} is not among subject {subject_name!r}'s attributes' values {values}"
+    if value not in values:
+        return f"value {value!r} is not among subject {subject_name!r}'s attributes' values {values}"
     return None
 
 
-def registry_for_dataset_root(dataset_root: str | Path) -> ClassRegistry | None:
-    """The registry at ``dataset_root``, or ``None`` when no ``classes.json`` has been written there
+def registry_for_dataset_root(dataset_root: str | Path) -> SubjectRegistry | None:
+    """The registry at ``dataset_root``, or ``None`` when no ``subjects.json`` has been written there
     yet (a dataset with no registry is not corrupt, only unregistered so far)."""
-    from tcip_mcp.dataset_layout import classes_path
+    from tcip_mcp.dataset_layout import subjects_path
 
     try:
-        return read_registry(classes_path(dataset_root))
+        return read_registry(subjects_path(dataset_root))
     except FileNotFoundError:
         return None
 
@@ -621,7 +621,7 @@ def dataset_root_for_pred_dirs(pred_dirs: Sequence[str | Path]) -> Path:
     return root
 
 
-def registry_for_pred_dirs(pred_dirs: Sequence[str | Path]) -> ClassRegistry | None:
+def registry_for_pred_dirs(pred_dirs: Sequence[str | Path]) -> SubjectRegistry | None:
     """The registry for the single dataset every one of ``pred_dirs`` resolves under.
 
     ``None`` when none of the directories resolves to a dataset root, or the one they do resolve

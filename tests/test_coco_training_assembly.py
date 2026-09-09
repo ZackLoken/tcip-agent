@@ -15,8 +15,8 @@ from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tcip_mcp.dataset_layout import (
     record_image_statuses, stamp_image_status_digests, status_bucket,
 )  # noqa: E402
-from tcip_mcp.class_registry import (  # noqa: E402
-    Attribute, ClassRegistry, Subject, assign_class_ids,
+from tcip_mcp.subject_registry import (  # noqa: E402
+    Attribute, SubjectRegistry, Subject, assign_class_ids,
 )
 
 BUD = "bud"
@@ -48,7 +48,7 @@ def _reg_id_map(subject=BUD, attribute=None, values=()):
     """A registry + its ``assign_class_ids`` map (the single name→id map) for a training scope."""
     attrs = ((Attribute(name=attribute, type="categorical", values=tuple(values)),)
              if attribute else ())
-    reg = ClassRegistry(subjects=(Subject(name=subject, attributes=attrs),))
+    reg = SubjectRegistry(subjects=(Subject(name=subject, attributes=attrs),))
     return reg, assign_class_ids(reg, subject, attribute)
 
 
@@ -733,24 +733,24 @@ def test_split_tree_carries_its_confirmed_negatives(tmp_path):
 
 
 def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
-    """A split's carried negatives must get their own classes.json + digest stamp too; without it
+    """A split's carried negatives must get their own subjects.json + digest stamp too; without it
     quarantine can never fire on a split tree."""
     import tcip_store as ts
-    from tcip_mcp import class_registry
-    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp import subject_registry
+    from tcip_mcp.subject_registry import write_registry
     from tcip_mcp.dataset_layout import image_status_digest_key
     from tcip_mcp.tools.data_tools import draw_splits
 
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
-    registry = ClassRegistry(subjects=(
+    registry = SubjectRegistry(subjects=(
         Subject(name="bud", attributes=(
             Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
-    write_registry(tmp_path / "classes.json", registry)
-    expected_digest = class_registry.attribute_schema_digest(registry, "bud")
+    write_registry(tmp_path / "subjects.json", registry)
+    expected_digest = subject_registry.attribute_schema_digest(registry, "bud")
 
     _make_images(images, [f"i{n:02d}" for n in range(10)])
     for n in range(10):
@@ -775,7 +775,7 @@ def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
         stamps = ts.read(digest_key).get(status_bucket("bud", None), {})
         carried_here = set(stamps) & neg_names
         if carried_here:
-            assert (split_root / "classes.json").is_file()
+            assert (split_root / "subjects.json").is_file()
             assert all(stamps[n] == expected_digest for n in carried_here)
             found = True
     assert found, "no split carried both a negative and its schema stamp"
@@ -788,20 +788,20 @@ def test_quarantined_negative_reads_the_same_reason_on_both_label_paths(tmp_path
     ("nobody ever looked") there, while the direct-JSON branch on the identical fixture correctly
     reads ``quarantined_stale_definition`` ("looked, but the schema changed since"). Same image,
     same real reason, two different label paths must not disagree on which it was."""
-    from tcip_mcp import class_registry
-    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp import subject_registry
+    from tcip_mcp.subject_registry import write_registry
     from tcip_mcp.pipelines.data.label_queries import assemble_coco, trainable_stems
 
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
-    registry = ClassRegistry(subjects=(
+    registry = SubjectRegistry(subjects=(
         Subject(name=BUD, attributes=(
             Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
-    write_registry(tmp_path / "classes.json", registry)
-    current_digest = class_registry.attribute_schema_digest(registry, BUD)
+    write_registry(tmp_path / "subjects.json", registry)
+    current_digest = subject_registry.attribute_schema_digest(registry, BUD)
 
     _make_images(images, ["a"])
     json_io.write_annotations(labels / "a.json", [], 100, 100, keep_empty=True)
@@ -826,8 +826,8 @@ def test_a_stale_complete_confirmation_is_quarantined_on_both_label_paths(tmp_pa
     alone: a bud image finished under a two-value attribute vocabulary that grew to three must be
     held out exactly as a stale negative already is, on both label paths, never admitted as
     ``annotated`` by the boxes it happens to carry."""
-    from tcip_mcp import class_registry
-    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp import subject_registry
+    from tcip_mcp.subject_registry import write_registry
     from tcip_mcp.pipelines.data.label_queries import (
         assemble_coco, require_samples, trainable_stems,
     )
@@ -835,13 +835,13 @@ def test_a_stale_complete_confirmation_is_quarantined_on_both_label_paths(tmp_pa
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
-    registry = ClassRegistry(subjects=(
+    registry = SubjectRegistry(subjects=(
         Subject(name=BUD, attributes=(
             Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
-    write_registry(tmp_path / "classes.json", registry)
-    current_digest = class_registry.attribute_schema_digest(registry, BUD)
+    write_registry(tmp_path / "subjects.json", registry)
+    current_digest = subject_registry.attribute_schema_digest(registry, BUD)
 
     _make_images(images, ["a"])
     json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12)], 100, 100)
@@ -868,20 +868,20 @@ def test_a_stale_complete_confirmation_is_quarantined_on_both_label_paths(tmp_pa
 def test_a_reconfirmed_complete_trains_again_after_the_schema_change(tmp_path):
     """Re-confirming restamps the current digest, so the same image trains once a human has
     looked again under the vocabulary now in effect."""
-    from tcip_mcp import class_registry
-    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp import subject_registry
+    from tcip_mcp.subject_registry import write_registry
     from tcip_mcp.pipelines.data.label_queries import trainable_stems
 
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
-    registry = ClassRegistry(subjects=(
+    registry = SubjectRegistry(subjects=(
         Subject(name=BUD, attributes=(
             Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
-    write_registry(tmp_path / "classes.json", registry)
-    current_digest = class_registry.attribute_schema_digest(registry, BUD)
+    write_registry(tmp_path / "subjects.json", registry)
+    current_digest = subject_registry.attribute_schema_digest(registry, BUD)
 
     _make_images(images, ["a"])
     json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12)], 100, 100)
@@ -898,18 +898,18 @@ def test_a_reconfirmed_complete_trains_again_after_the_schema_change(tmp_path):
 def test_an_unstamped_complete_trains(tmp_path):
     """A complete confirmation the stamp transaction never reached is admitted, not quarantined:
     absence of a stamp is never evidence of staleness."""
-    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp.subject_registry import write_registry
     from tcip_mcp.pipelines.data.label_queries import trainable_stems
 
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
-    registry = ClassRegistry(subjects=(
+    registry = SubjectRegistry(subjects=(
         Subject(name=BUD, attributes=(
             Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
-    write_registry(tmp_path / "classes.json", registry)
+    write_registry(tmp_path / "subjects.json", registry)
 
     _make_images(images, ["a"])
     json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12)], 100, 100)
@@ -925,21 +925,21 @@ def test_a_complete_under_an_unchanged_subject_trains(tmp_path):
     """Another subject's own schema change never quarantines a bucket the change had no part in:
     only bud's digest moves, so bush's complete, stamped under its own still-current digest,
     admits."""
-    from tcip_mcp import class_registry
-    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp import subject_registry
+    from tcip_mcp.subject_registry import write_registry
     from tcip_mcp.pipelines.data.label_queries import trainable_stems
 
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
-    registry = ClassRegistry(subjects=(
+    registry = SubjectRegistry(subjects=(
         Subject(name=BUD, attributes=(
             Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
         Subject(name="bush"),
     ))
-    write_registry(tmp_path / "classes.json", registry)
-    bush_digest = class_registry.attribute_schema_digest(registry, "bush")
+    write_registry(tmp_path / "subjects.json", registry)
+    bush_digest = subject_registry.attribute_schema_digest(registry, "bush")
 
     _make_images(images, ["a"])
     json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12, subject="bush")], 100, 100)
@@ -957,18 +957,18 @@ def test_a_complete_under_an_unchanged_subject_trains(tmp_path):
 def test_a_partial_carrying_a_stale_stamp_still_trains(tmp_path):
     """A partial is not a human's assertion (it carries no Complete), so a stamp on it, however
     stale, never quarantines: the quarantine is over finished statuses only."""
-    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp.subject_registry import write_registry
     from tcip_mcp.pipelines.data.label_queries import trainable_stems
 
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
-    registry = ClassRegistry(subjects=(
+    registry = SubjectRegistry(subjects=(
         Subject(name=BUD, attributes=(
             Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
-    write_registry(tmp_path / "classes.json", registry)
+    write_registry(tmp_path / "subjects.json", registry)
 
     _make_images(images, ["a"])
     json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12)], 100, 100)
@@ -986,18 +986,18 @@ def test_a_partial_carrying_a_stale_stamp_still_trains(tmp_path):
 def test_a_stale_and_contradicted_negative_still_trains_by_content(tmp_path):
     """Real content contradicts a stored negative outright; staleness never overrides that, and
     the contradiction is still named for the caller to surface."""
-    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp.subject_registry import write_registry
     from tcip_mcp.pipelines.data.label_queries import trainable_stems
 
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
-    registry = ClassRegistry(subjects=(
+    registry = SubjectRegistry(subjects=(
         Subject(name=BUD, attributes=(
             Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
-    write_registry(tmp_path / "classes.json", registry)
+    write_registry(tmp_path / "subjects.json", registry)
 
     _make_images(images, ["a"])
     # Recorded negative, but the label file now carries real content: a contradiction.
@@ -1100,14 +1100,14 @@ def test_detection_dataset_excludes_incomplete_attribute_on_the_real_build_datas
     assembles an in-memory COCO and passes it as coco_data, which forces label_format='coco'. A
     check guarded only by label_format == 'json' is inert here, and the dropped image would be
     reported under the false reason 'skipped_unconfirmed_empty'."""
-    from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, write_registry
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     root = tmp_path / "ds"
     images_dir, labels_dir = root / "images", root / "annotations"
     _make_images(images_dir, ["complete_a", "complete_b", "partial"])
     labels_dir.mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(
         Subject(name=BUD, attributes=(
             Attribute(name="opening", type="categorical", values=("open", "closed")),)),)))
     for stem in ("complete_a", "complete_b"):
@@ -1133,7 +1133,7 @@ def test_tiled_detection_indexes_no_tile_from_an_attribute_incomplete_image(tmp_
     image the attribute-completeness rail held out must contribute no tile at all. Asserting on the
     tile index, not on the base's stems, is what pins that: a tile carrying the image's real but
     unlabeled objects would train them as background, one tile at a time."""
-    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp.subject_registry import write_registry
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     root = tmp_path / "ds"
@@ -1141,7 +1141,7 @@ def test_tiled_detection_indexes_no_tile_from_an_attribute_incomplete_image(tmp_
     _make_images(images_dir, ["complete", "partial"])
     labels_dir.mkdir(parents=True)
     reg, _id_map = _reg_id_map(attribute="opening", values=("open", "closed"))
-    write_registry(root / "classes.json", reg)
+    write_registry(root / "subjects.json", reg)
     json_io.write_annotations(labels_dir / "complete.json", [
         _box(10, 10, 30, 30, opening="open")], 100, 100)
     json_io.write_annotations(labels_dir / "partial.json", [

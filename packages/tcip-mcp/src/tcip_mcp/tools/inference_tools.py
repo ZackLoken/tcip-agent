@@ -264,11 +264,11 @@ def resolve_decode_id_map(predictor, images_dir: str | None, *,
     if not (subject and images_dir):
         return None
 
-    from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map, resolved_classes_path
+    from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map, resolved_subjects_path
 
-    # Precondition, not a broad except: an attribute-scoped run with no classes.json here returns
-    # None so unmapped_classified_run composes the write_class_map remedy, rather than crashing.
-    if attribute is not None and resolved_classes_path(images_dir) is None:
+    # Precondition, not a broad except: an attribute-scoped run with no subjects.json here returns
+    # None so unmapped_classified_run composes the write_subject_registry remedy, rather than crashing.
+    if attribute is not None and resolved_subjects_path(images_dir) is None:
         return None
     _reg, id_map = resolve_registry_id_map(images_dir, subject, attribute)
     return id_map

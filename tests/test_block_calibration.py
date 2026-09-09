@@ -1008,7 +1008,7 @@ def _build_attribute_scoped_experiment(
     the order the registry on disk declares now. ``labeled_value`` is the value every annotation
     carries. Returns the same keys ``_build_experiment`` does plus ``recorded_id_map``.
     """
-    from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, write_registry
     from tcip_mcp.experiments import create_experiment
     from tcip_mcp.pipelines.model_build import build_model
     from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
@@ -1016,7 +1016,7 @@ def _build_attribute_scoped_experiment(
     from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
     def _write_registry(values: tuple[str, ...]) -> None:
-        write_registry(root / "classes.json", ClassRegistry(subjects=(
+        write_registry(root / "subjects.json", SubjectRegistry(subjects=(
             Subject(name="bud", attributes=(
                 Attribute(name="stage", type="categorical", values=values),)),)))
 
@@ -1082,12 +1082,12 @@ def test_ground_truth_decodes_through_the_checkpoints_own_recorded_id_map(tmp_pa
     _attest_regions_complete(
         exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
 
-    from tcip_mcp.class_registry import assign_class_ids, read_registry
+    from tcip_mcp.subject_registry import assign_class_ids, read_registry
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    live_id_map = assign_class_ids(read_registry(exp["root"] / "classes.json"), "bud", "stage")
+    live_id_map = assign_class_ids(read_registry(exp["root"] / "subjects.json"), "bud", "stage")
     recorded_category = exp["recorded_id_map"]["open"] + 1
     live_category = live_id_map["open"] + 1
     assert recorded_category != live_category
@@ -1131,7 +1131,7 @@ def test_block_calibration_refuses_when_no_id_map_can_be_resolved(tmp_path: Path
         reordered_values=("closed", "open", "shed"), labeled_value="open",
         experiment_id="exp_block_no_id_map")
     _drop_the_checkpoints_recorded_id_map(exp["checkpoint_path"], project_root=tmp_path)
-    (exp["root"] / "classes.json").unlink()
+    (exp["root"] / "subjects.json").unlink()
 
     from tcip_mcp.pipelines.block_calibration import (
         BlockCalibrationRefused, resolve_block_calibration_records,
@@ -1150,7 +1150,7 @@ def test_block_calibration_refuses_when_no_id_map_can_be_resolved(tmp_path: Path
 
 def test_block_calibration_runs_on_a_recorded_id_map_with_no_registry_on_disk(tmp_path: Path):
     """The refusal above must not swallow the legitimate case: a checkpoint that carries its own
-    recorded map needs no registry at all, so calibration resolves with classes.json gone."""
+    recorded map needs no registry at all, so calibration resolves with subjects.json gone."""
     exp = _build_attribute_scoped_experiment(
         tmp_path, trained_values=("closed", "open", "shed"),
         reordered_values=("closed", "open", "shed"), labeled_value="open",
@@ -1158,7 +1158,7 @@ def test_block_calibration_runs_on_a_recorded_id_map_with_no_registry_on_disk(tm
     manifest = exp["spatial_manifest"]
     _attest_regions_complete(
         exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
-    (exp["root"] / "classes.json").unlink()
+    (exp["root"] / "subjects.json").unlink()
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
     from tcip_mcp.model_registry import load_registered_checkpoint

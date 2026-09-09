@@ -195,7 +195,7 @@ class TestFullClassificationPipeline:
 # ---------------------------------------------------------------------------
 
 # A real nested-schema dataset to run the detection pipeline against: set TCIP_SAMPLE_PROJECT to a
-# converted project root (holds classes.json + annotations/<date>/ + images/<date>/); defaults to an
+# converted project root (holds subjects.json + annotations/<date>/ + images/<date>/); defaults to an
 # in-repo <repo>/data sample. Skips when neither is present.
 SAMPLE_PROJECT = Path(os.environ.get(
     "TCIP_SAMPLE_PROJECT", str(Path(__file__).resolve().parent.parent / "data")))
@@ -203,7 +203,7 @@ SAMPLE_PROJECT = Path(os.environ.get(
 
 def _sample_date() -> str | None:
     """A capture date under SAMPLE_PROJECT that has both images and bud annotations, or None."""
-    if not (SAMPLE_PROJECT / "classes.json").is_file():
+    if not (SAMPLE_PROJECT / "subjects.json").is_file():
         return None
     from tcip_annotation import json_io
     ann_root = SAMPLE_PROJECT / "annotations"
@@ -259,7 +259,7 @@ class TestDetectionPipelineRealData:
             labels_dir=str(labels_dir),
             subject="bud",
         )
-        # num_classes is derived from the dataset's classes.json via assign_class_ids (single-class
+        # num_classes is derived from the dataset's subjects.json via assign_class_ids (single-class
         # bud here), and num_samples from the bud-annotated images on this date.
         assert dataset.num_classes == 1
         assert dataset.num_samples > 0

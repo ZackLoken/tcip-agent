@@ -50,14 +50,14 @@ def _detection_dataset(tmp_path, sizes):
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
     from tcip_mcp.pipelines.data.datasets import DetectionDataset
 
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
     images_dir.mkdir()
     labels_dir.mkdir()
-    write_registry(Path(tmp_path) / "classes.json", ClassRegistry((Subject("bud"),)))
+    write_registry(Path(tmp_path) / "subjects.json", SubjectRegistry((Subject("bud"),)))
     for i, (w, h) in enumerate(sizes):
         Image.new("RGB", (w, h)).save(images_dir / f"img{i}.png")
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),

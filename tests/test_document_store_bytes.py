@@ -159,14 +159,14 @@ SNAPSHOT_MANIFEST_BYTES = (
 ).encode("utf-8")
 
 
-def test_the_class_registry_lands_as_the_ordered_json_document_labels_are_decoded_by(tmp_path):
+def test_the_subject_registry_lands_as_the_ordered_json_document_labels_are_decoded_by(tmp_path):
     """Written through ``write_registry``, which encodes with the canonical record codec: the
     subject and attribute sequences keep their declared order rather than being sorted."""
-    from tcip_mcp import class_registry
-    from tcip_mcp.dataset_layout import classes_path
+    from tcip_mcp import subject_registry
+    from tcip_mcp.dataset_layout import subjects_path
 
-    path = classes_path(tmp_path)
-    class_registry.write_registry(path, class_registry.registry_from_dict(REGISTRY_VALUE))
+    path = subjects_path(tmp_path)
+    subject_registry.write_registry(path, subject_registry.registry_from_dict(REGISTRY_VALUE))
 
     assert path.read_bytes() == REGISTRY_BYTES
 

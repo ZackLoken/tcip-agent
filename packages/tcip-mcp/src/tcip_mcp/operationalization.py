@@ -37,7 +37,7 @@ from tcip_store import RECORD_JSON, Key, StoreDescriptor, Version, Versioned, re
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp import agent_identity
-from tcip_mcp.class_registry import ClassRegistry, positive_class_problem
+from tcip_mcp.subject_registry import SubjectRegistry, positive_value_problem
 from tcip_mcp.identity import user_identity
 from tcip_mcp.statements import canonical, content_hash, now_iso
 from tcip_mcp.traits import (
@@ -374,7 +374,7 @@ def check_operationalization(
     delivered_phenotype: str | None = None,
     value_keys: Sequence[Any] | None = None,
     counted_subjects: Mapping[str, Collection[Any]] | None = None,
-    registry: ClassRegistry | None = None,
+    registry: SubjectRegistry | None = None,
     basis: OperationalizationBasis | None = None,
 ) -> OperationalizationCheck:
     """Whether this trait's delivered number has a confirmed meaning, and what to say if not.
@@ -426,7 +426,7 @@ def check_operationalization(
 
     # An unauthored positive class is state 4's own report (below), not a registry mismatch.
     if delivery_kind == STATE_CROSSING_DATES and registry is not None and spec.positive_class_name:
-        registry_problem = positive_class_problem(
+        registry_problem = positive_value_problem(
             registry, str(stated.get("measured_subject") or ""), spec.positive_class_name
         )
         if registry_problem is not None:
@@ -739,7 +739,7 @@ def state_operationalization(
     delivered_phenotypes: Sequence[str] = (),
     delivered_value_keys: Sequence[str] = (),
     relayed_note: str = "",
-    registry: ClassRegistry | None = None,
+    registry: SubjectRegistry | None = None,
     **payload: Any,
 ) -> dict[str, Any]:
     """Record what a trait's delivered number means for one delivery kind, unconfirmed.
@@ -824,13 +824,13 @@ def state_operationalization(
             raise ValueError(
                 f"a {STATE_CROSSING_DATES} statement for trait {trait!r} needs the delivered "
                 "dataset's registry (the registry keyword): a state trait cannot be "
-                "operationalized against classes nobody declared. Pass the ClassRegistry read "
+                "operationalized against classes nobody declared. Pass the SubjectRegistry read "
                 "from the dataset this statement's classes belong to."
             )
         # An unauthored positive class (spec.positive_class_name empty) is a spec-authoring gap
         # state 4 reports at delivery time, not a registry mismatch: nothing is named yet to check.
         if spec.positive_class_name:
-            problem = positive_class_problem(registry, subject_text, spec.positive_class_name)
+            problem = positive_value_problem(registry, subject_text, spec.positive_class_name)
             if problem is not None:
                 raise ValueError(
                     f"a {STATE_CROSSING_DATES} statement for trait {trait!r} names positive class "
@@ -857,26 +857,26 @@ def state_operationalization(
     return record
 
 
-def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> ClassRegistry:
+def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> SubjectRegistry:
     """The registry a ``state_crossing_dates`` statement is checked against.
 
     ``dataset_root`` given: that dataset's own registry. Empty: the project root's own registry,
     served when ``project_root`` is unambiguously the one dataset the project uses (its own
-    ``classes.json`` exists, and the project's dataset registry names at most one dataset), the
+    ``subjects.json`` exists, and the project's dataset registry names at most one dataset), the
     common single-dataset project layout. Otherwise refuses by name, naming the registered
     datasets and the ``dataset_root`` parameter, rather than guess which dataset a multi-dataset
     project means.
     """
-    from tcip_mcp.class_registry import read_registry
-    from tcip_mcp.dataset_layout import classes_path
+    from tcip_mcp.subject_registry import read_registry
+    from tcip_mcp.dataset_layout import subjects_path
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
     if dataset_root:
         try:
-            return read_registry(classes_path(dataset_root))
+            return read_registry(subjects_path(dataset_root))
         except FileNotFoundError as exc:
             raise ValueError(
-                f"dataset_root {dataset_root!r} carries no class registry of its own. Write one "
+                f"dataset_root {dataset_root!r} carries no subject registry of its own. Write one "
                 "(write_class_map) before a statement's classes can be checked against it."
             ) from exc
 
@@ -889,10 +889,10 @@ def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> C
             "this statement's classes belong to cannot be guessed. Pass dataset_root naming it."
         )
     try:
-        return read_registry(classes_path(project_root))
+        return read_registry(subjects_path(project_root))
     except FileNotFoundError as exc:
         raise ValueError(
-            f"project root {project_root!r} carries no class registry of its own (registered "
+            f"project root {project_root!r} carries no subject registry of its own (registered "
             f"datasets: {roots}). Pass dataset_root naming the dataset this statement's classes "
             "belong to."
         ) from exc

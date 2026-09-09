@@ -52,8 +52,8 @@ def export_files(root) -> None:
 
 def _project(tmp_path: Path) -> Path:
     """A dataset root with one image, one empty label, and the registry that decodes it."""
-    from tcip_mcp import class_registry
-    from tcip_mcp.class_registry import ClassRegistry, Subject
+    from tcip_mcp import subject_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject
 
     root = tmp_path / "project"
     (root / "images" / "2026-03-04").mkdir(parents=True)
@@ -62,8 +62,8 @@ def _project(tmp_path: Path) -> Path:
     (root / "annotations" / "2026-03-04" / "a_1.json").write_text(
         '{"annotations": []}', encoding="utf-8"
     )
-    class_registry.write_registry(
-        root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),))
+    subject_registry.write_registry(
+        root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),))
     )
     return root
 

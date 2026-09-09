@@ -16,8 +16,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from tcip_mcp import class_registry  # noqa: E402
-from tcip_mcp.dataset_layout import classes_path  # noqa: E402
+from tcip_mcp import subject_registry  # noqa: E402
+from tcip_mcp.dataset_layout import subjects_path  # noqa: E402
 from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map  # noqa: E402
 from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE, detect_kind  # noqa: E402
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
@@ -59,19 +59,19 @@ def _write_registry(dataset_root: Path) -> None:
     """A registry with three subjects of different shape, so no scope's class count is guessable
     from the file's overall size: 'leaf' carries a three-value ordinal axis, 'bush' a two-value
     categorical one, and 'bud' none at all."""
-    registry = class_registry.ClassRegistry(subjects=(
-        class_registry.Subject(
+    registry = subject_registry.SubjectRegistry(subjects=(
+        subject_registry.Subject(
             name="leaf",
-            attributes=(class_registry.Attribute(
+            attributes=(subject_registry.Attribute(
                 name="condition", type="ordinal", values=("healthy", "mild", "severe")),)),
-        class_registry.Subject(
+        subject_registry.Subject(
             name="bush",
-            attributes=(class_registry.Attribute(
+            attributes=(subject_registry.Attribute(
                 name="vigor", type="categorical", values=("low", "high")),)),
-        class_registry.Subject(name="bud"),
+        subject_registry.Subject(name="bud"),
     ))
     dataset_root.mkdir(parents=True, exist_ok=True)
-    class_registry.write_registry(classes_path(dataset_root), registry)
+    subject_registry.write_registry(subjects_path(dataset_root), registry)
 
 
 def _agent_package(root: Path, name: str, modules: dict) -> Path:

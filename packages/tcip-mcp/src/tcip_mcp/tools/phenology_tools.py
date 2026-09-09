@@ -427,10 +427,10 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     if vocabulary_map is None:
         from tcip_mcp.pipelines.data.label_queries import (
             resolve_registry_id_map,
-            resolved_classes_path,
+            resolved_subjects_path,
         )
 
-        if resolved_classes_path(gt_dir) is None:
+        if resolved_subjects_path(gt_dir) is None:
             absent = (
                 "carries no stamp at all" if scope is None
                 else "records a classified scope with no usable id_map"
@@ -438,7 +438,7 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
             raise ValueError(
                 f"{pred_p} {absent}, and {gt_p} resolves no dataset registry of its own: place "
                 "the split under its dataset root (<root>/annotations/<date>/, or a labels/ tree "
-                "directly under a root carrying classes.json), since the vocabulary a classifier "
+                "directly under a root carrying subjects.json), since the vocabulary a classifier "
                 "is calibrated against is the registry the reference belongs to, never the values "
                 "the reference happens to carry."
             )
@@ -769,7 +769,7 @@ def deliver_phenology_milestones(
     ``n_dates_missing_images``) but carry no fabricated milestone dates for that plant (see
     CLAUDE.md's measurement-integrity invariant).
     """
-    from tcip_mcp.class_registry import RegistryError, registry_for_pred_dirs
+    from tcip_mcp.subject_registry import RegistryError, registry_for_pred_dirs
     from tcip_mcp.operationalization import (
         STATE_CROSSING_DATES,
         check_operationalization,

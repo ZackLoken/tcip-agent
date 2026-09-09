@@ -98,14 +98,14 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
 ) -> None:
     """The tree route and the project-picker summary both derive dates from the layout's one
     grammar, so a hidden directory under ``images/`` is invisible to both alike."""
-    from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
     from tcip_mcp.project_removal import read_open_project_state
     from tcip_web.routes.projects import _summarize
 
     root = tmp_path / "Valley_Farm"
     (root / "images" / "2026-03-02").mkdir(parents=True)
     (root / "images" / ".hidden").mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry((Subject("leaf"),)))
+    write_registry(root / "subjects.json", SubjectRegistry((Subject("leaf"),)))
 
     tree = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
     picker = _summarize(root, active_name=None, open_state=read_open_project_state())

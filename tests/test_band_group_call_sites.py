@@ -36,8 +36,8 @@ def grouped_dataset(tmp_path: Path) -> Path:
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp import class_registry
-    from tcip_mcp.class_registry import ClassRegistry, Subject
+    from tcip_mcp import subject_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject
 
     root = tmp_path / "proj"
     date = "2026-04-01"
@@ -46,9 +46,9 @@ def grouped_dataset(tmp_path: Path) -> Path:
     images_dir.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
 
-    class_registry.write_registry(
-        root / "classes.json",
-        ClassRegistry(subjects=(Subject(name="bud", description="a currant bud"),)),
+    subject_registry.write_registry(
+        root / "subjects.json",
+        SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)),
     )
 
     _write_group(images_dir, "capture_001")

@@ -15,7 +15,7 @@ import tcip_store
 from tcip_annotation.json_io import read_annotations, write_annotations
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.audit import audit_log_key
-from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
 from tcip_web.app import app
 from tcip_web.paths import safe_join
 
@@ -85,7 +85,7 @@ def dataset_root(tmp_path: Path) -> Path:
     (root / "images" / "3-2-26").mkdir(parents=True)
     (root / "predictions" / "baseline").mkdir(parents=True)
     # The dataset's subjects come from its nested registry, not from listing annotations/.
-    write_registry(root / "classes.json", ClassRegistry((Subject("bud"), Subject("bush"))))
+    write_registry(root / "subjects.json", SubjectRegistry((Subject("bud"), Subject("bush"))))
     # Add some images
     for i in range(3):
         img = Image.new("RGB", (100, 80), color=(128, 128, 128))

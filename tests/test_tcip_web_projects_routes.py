@@ -35,10 +35,10 @@ def _make_project(ws: Path, name: str, *, dates=(), subjects=(), models=()) -> P
         Image.new("RGB", (8, 8), (0, 0, 0)).save(ddir / "img.png")
     if subjects:
         # Subjects live in the dataset's nested registry now, not as child dirs of annotations/.
-        from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+        from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
 
-        write_registry(proj / "classes.json",
-                       ClassRegistry(tuple(Subject(s) for s in sorted(subjects))))
+        write_registry(proj / "subjects.json",
+                       SubjectRegistry(tuple(Subject(s) for s in sorted(subjects))))
     for m in models:
         (proj / "predictions" / m).mkdir(parents=True)
     return proj

@@ -359,10 +359,10 @@ def test_derive_block_scale_px_truncated_raster_refuses_named(tmp_path):
 def test_write_class_map(tmp_path):
     import json
 
-    from tcip_mcp import class_registry
+    from tcip_mcp import subject_registry
     from tcip_mcp.tools.annotation_tools import write_class_map
 
-    out = tmp_path / "classes.json"
+    out = tmp_path / "subjects.json"
     # The expert authors the nested registry: two ordered values of a categorical attribute.
     res = write_class_map(
         str(tmp_path),
@@ -373,11 +373,11 @@ def test_write_class_map(tmp_path):
     )
     assert "error" not in res
     assert res["subjects"] == ["bud"]
-    assert res["classes_path"] == str(out)
+    assert res["subjects_path"] == str(out)
     # Declared order is the id order (assign_class_ids is the one name->id derivation): 0=closed,
     # 1=open, and the on-disk nested shape carries the same value order.
-    reg = class_registry.read_registry(out)
-    assert class_registry.assign_class_ids(reg, "bud", "opening") == {"closed": 0, "open": 1}
+    reg = subject_registry.read_registry(out)
+    assert subject_registry.assign_class_ids(reg, "bud", "opening") == {"closed": 0, "open": 1}
     assert json.loads(out.read_text())["bud"]["attributes"]["opening"]["values"] == \
         ["closed", "open"]
 
@@ -422,7 +422,7 @@ def test_run_inference_dry_run_unset_tile_is_pending_not_a_default(tmp_path):
 
 
 def test_write_class_map_defaults_into_the_dataset(tmp_path):
-    """No output_path: the registry lands at the dataset's canonical classes.json."""
+    """No output_path: the registry lands at the dataset's canonical subjects.json."""
     from tcip_mcp.tools.annotation_tools import write_class_map
 
     res = write_class_map(
@@ -432,5 +432,5 @@ def test_write_class_map_defaults_into_the_dataset(tmp_path):
                                                            "values": ["closed", "open"]}}}},
     )
     assert "error" not in res
-    assert res["classes_path"] == str(tmp_path / "classes.json")
-    assert (tmp_path / "classes.json").is_file()
+    assert res["subjects_path"] == str(tmp_path / "subjects.json")
+    assert (tmp_path / "subjects.json").is_file()

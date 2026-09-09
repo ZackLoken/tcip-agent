@@ -11,7 +11,7 @@ Convention: the canonical layout (see :mod:`tcip_mcp.dataset_layout`):
         images/<date>/*.JPG
         annotations/<date>/<stem>.json          # ground truth, one file per image (all subjects)
         predictions/<model>/<date>/<stem>.json  # model outputs
-        classes.json                            # the nested subject/attribute registry
+        subjects.json                           # the nested subject/attribute registry
 """
 
 from __future__ import annotations
@@ -30,7 +30,6 @@ from tcip_mcp import workspace
 from tcip_mcp.dataset_layout import (
     annotation_dir,
     annotation_root,
-    classes_path,
     image_dir,
     image_root,
     list_dates,
@@ -39,6 +38,7 @@ from tcip_mcp.dataset_layout import (
     models_with_predictions,
     prediction_dir,
     prediction_root,
+    subjects_path,
     subjects_with_labels,
 )
 from tcip_mcp.pipelines.image_utils import (
@@ -69,7 +69,7 @@ _selected_this_session = False
 class DatasetTree(BaseModel):
     dataset_root: str
     dates_with_images: list[str]
-    # Every subject the dataset's registry (``classes.json``) declares, e.g.
+    # Every subject the dataset's registry (``subjects.json``) declares, e.g.
     # ["bush", "leaf"]. This is *what a label set is about*, not the shape kind; a label file
     # names its subject on each annotation rather than in the path.
     subjects: list[str]
@@ -139,7 +139,7 @@ def _tree_signature(root: Path, dates: list[str], models: list[str]) -> tuple:
         _dir_mtime_ns(image_root(root)),
         _dir_mtime_ns(annotation_root(root)),
         _dir_mtime_ns(prediction_root(root)),
-        _dir_mtime_ns(classes_path(root)),
+        _dir_mtime_ns(subjects_path(root)),
     ]
     for d in dates:
         sig.append(_dir_mtime_ns(annotation_dir(root, d)))

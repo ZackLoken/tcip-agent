@@ -13,17 +13,17 @@ torch = pytest.importorskip("torch")
 
 
 def _write_classes_json(dataset_root, subject="bud", attribute=None, values=None):
-    # classes.json lives at the dataset root, the parent of the canonical labels/images/annotations
+    # subjects.json lives at the dataset root, the parent of the canonical labels/images/annotations
     # segment (dataset_layout.py's _DATASET_SEGMENTS), not inside the labels dir itself.
     from pathlib import Path
 
-    from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, write_registry
 
     attrs = ()
     if attribute:
         attrs = (Attribute(name=attribute, type="categorical", values=tuple(values)),)
-    write_registry(Path(dataset_root) / "classes.json",
-                   ClassRegistry((Subject(subject, attributes=attrs),)))
+    write_registry(Path(dataset_root) / "subjects.json",
+                   SubjectRegistry((Subject(subject, attributes=attrs),)))
 
 
 def test_resolve_run_id_map_works_with_no_dataset_object_at_all(tmp_path):
@@ -92,7 +92,7 @@ def test_resolve_run_id_map_none_for_attribute_scope_with_no_registry(tmp_path):
     from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
 
     labels_dir = tmp_path / "labels"
-    labels_dir.mkdir()  # no classes.json
+    labels_dir.mkdir()  # no subjects.json
     data_cfg = {"labels_dir": str(labels_dir), "subject": "bud", "attribute": "opening"}
     assert _resolve_run_id_map("detection", data_cfg) is None
 

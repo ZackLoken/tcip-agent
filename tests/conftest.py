@@ -264,15 +264,15 @@ def data_dir(tmp_path: Path) -> Path:
 
     One file per image under ``annotations/<date>/`` holding every subject (here one detection
     subject, ``bud``), predictions under ``predictions/<model>/<date>/``, and one nested
-    ``classes.json``. Geometry is two boxes per image on a 640x480 frame, matching the
+    ``subjects.json``. Geometry is two boxes per image on a 640x480 frame, matching the
     count/geometry expectations downstream.
     """
     from PIL import Image
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp import class_registry
-    from tcip_mcp.class_registry import ClassRegistry, Subject
+    from tcip_mcp import subject_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject
 
     date = "2-11-26"
     subject = DATA_DIR_SUBJECT
@@ -284,9 +284,9 @@ def data_dir(tmp_path: Path) -> Path:
     preds_dir.mkdir(parents=True)
 
     # One nested registry travelling with the labels: a single detection subject, no attributes.
-    class_registry.write_registry(
-        tmp_path / "classes.json",
-        ClassRegistry(subjects=(Subject(name=subject, description="a bud"),)),
+    subject_registry.write_registry(
+        tmp_path / "subjects.json",
+        SubjectRegistry(subjects=(Subject(name=subject, description="a bud"),)),
     )
 
     for name in ("img_001", "img_002", "img_003"):

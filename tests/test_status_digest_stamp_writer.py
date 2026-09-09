@@ -145,7 +145,7 @@ def test_a_bulk_write_stamps_only_the_statuses_it_applied(
 def test_a_confirmation_made_with_no_registry_present_is_still_admitted(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A dataset with no ``classes.json`` yet has nothing to stamp against; its confirmations are
+    """A dataset with no ``subjects.json`` yet has nothing to stamp against; its confirmations are
     admitted, never punished for a stamp the writer could not produce."""
     labels = tmp_path / "annotations"
     labels.mkdir()

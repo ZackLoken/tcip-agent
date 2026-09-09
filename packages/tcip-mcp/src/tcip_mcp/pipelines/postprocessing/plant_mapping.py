@@ -1767,7 +1767,7 @@ def resolve_delivery_mapping(
     """
     from tcip_store import StoreError
 
-    from tcip_mcp.class_registry import RegistryError, dataset_root_for_pred_dirs
+    from tcip_mcp.subject_registry import RegistryError, dataset_root_for_pred_dirs
     from tcip_mcp.dataset_layout import require_dataset_identity
 
     try:

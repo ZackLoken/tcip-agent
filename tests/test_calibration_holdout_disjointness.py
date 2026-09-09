@@ -739,11 +739,11 @@ def test_calibration_discloses_excluded_incomplete_attribute_count(tmp_path):
     record set (the missing-label-file precedent): the count must travel back to the caller,
     not vanish, so a caller can see the reference shrank rather than assume every stem measured."""
     import tcip_mcp.pipelines.calibration as calibration
-    from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, write_registry
 
     root = tmp_path / "ds"
     images_dir, labels_dir = root / "images", root / "labels"
-    write_registry(root / "classes.json", ClassRegistry(subjects=(
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(
         Subject(name="bud", attributes=(
             Attribute(name="state", type="categorical", values=("open", "closed")),)),)))
 
@@ -778,16 +778,16 @@ def test_calibration_attribute_registry_refusal_reaches_the_caller(tmp_path):
     not silently degrade an attribute-classification calibration to a single-class GT read when
     the registry read fails for a real reason, sitting directly on the calibration/
     operating-point rail, worse than the delivery-grade-eval instance of the same bug. No
-    classes.json exists here for an attribute-scoped config, so this must refuse."""
+    subjects.json exists here for an attribute-scoped config, so this must refuse."""
     import tcip_mcp.pipelines.calibration as calibration
 
     stems = ["a_0_0", "a_0_1"]
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
 
     stub = _CalStub()
-    stub.config = {"data": {"subject": "bud", "attribute": "state"}}  # no classes.json written
+    stub.config = {"data": {"subject": "bud", "attribute": "state"}}  # no subjects.json written
 
-    with pytest.raises(ValueError, match="classes.json"):
+    with pytest.raises(ValueError, match="subjects.json"):
         calibration.calibrate_operating_point(
             stub, "bud_opening", str(labels_dir), str(images_dir),
             tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
@@ -799,7 +799,7 @@ def test_calibration_attribute_registry_refusal_reaches_the_caller(tmp_path):
 # ===========================================================================
 # Calibration's GT-side id-map resolution must prefer the training-recorded map over a fresh
 # registry read, the same preference resolve_decode_id_map already applies to decode: a
-# classes.json whose declared attribute-value order was edited since training must not silently
+# subjects.json whose declared attribute-value order was edited since training must not silently
 # relabel the calibration GT.
 # ===========================================================================
 
@@ -818,7 +818,7 @@ def test_calibration_gt_id_map_prefers_the_training_recorded_map_over_a_fresh_re
 
     stub = _CalStub()
     # A recorded map present: the registry read must never even be attempted, regardless of what
-    # a fresh classes.json (absent here) would derive.
+    # a fresh subjects.json (absent here) would derive.
     stub.config = {"data": {"subject": "bud", "attribute": "state",
                             "id_map": {"open": 0, "closed": 1}}}
 
@@ -829,7 +829,7 @@ def test_calibration_gt_id_map_prefers_the_training_recorded_map_over_a_fresh_re
 
     monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.resolve_registry_id_map", _boom)
 
-    # No classes.json exists for this dataset, so the pre-fix code (which always re-derived from
+    # No subjects.json exists for this dataset, so the pre-fix code (which always re-derived from
     # the registry when `subject` was set) would have raised the ValueError
     # test_calibration_attribute_registry_refusal_reaches_the_caller pins -- this must instead
     # succeed, using only the recorded map.

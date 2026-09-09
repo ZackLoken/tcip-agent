@@ -311,7 +311,7 @@ def write_coco(
     ``images_annotations`` maps ``file_name -> (annotations, img_w, img_h)``. ``id_map`` is a
     ``subject -> category_id`` map; when omitted it is enumerated from the distinct subjects present
     (COCO carries its category names in the file, so the enumeration travels with the data; this is
-    interop export, not the training id assignment, which is ``class_registry.assign_class_ids``).
+    interop export, not the training id assignment, which is ``subject_registry.assign_class_ids``).
 
     Every emitted record is a box (plus a polygon's ``segmentation``), so a geometry-less annotation
     and a :class:`~tcip_annotation.state.Point` are both skipped: COCO's own box/segmentation record

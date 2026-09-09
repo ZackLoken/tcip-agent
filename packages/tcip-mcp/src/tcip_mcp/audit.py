@@ -270,11 +270,11 @@ def dataset_scope_of(value: Any) -> Path | None:
     (an annotations or predictions directory, an image), or the dataset root itself. A path
     under a canonical dataset segment resolves through :func:`dataset_layout.dataset_root_of`,
     the one resolver for that shape. A path that is not under one counts as a root only when it
-    is a directory that actually carries dataset or project state (its own ``.tcip/`` or a class
+    is a directory that actually carries dataset or project state (its own ``.tcip/`` or a subject
     registry); anything else is not evidence of a dataset and yields ``None``, since a guessed
     root would file the event against a log nobody can trace it back to.
     """
-    from tcip_mcp.dataset_layout import CLASSES_FILENAME, dataset_root_of
+    from tcip_mcp.dataset_layout import SUBJECTS_FILENAME, dataset_root_of
 
     if not isinstance(value, (str, Path)) or not str(value):
         return None
@@ -282,7 +282,7 @@ def dataset_scope_of(value: Any) -> Path | None:
     if root is None:
         candidate = Path(value)
         if not candidate.is_dir() or not (
-            (candidate / ".tcip").is_dir() or (candidate / CLASSES_FILENAME).is_file()
+            (candidate / ".tcip").is_dir() or (candidate / SUBJECTS_FILENAME).is_file()
         ):
             return None
         root = candidate
