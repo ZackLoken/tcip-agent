@@ -1,4 +1,4 @@
-import type { SchemaChangeSweep } from "@/api/classes";
+import type { SchemaChangeSweep } from "@/api/subjects";
 
 /** The toast a registry save's `schema_change_sweep` earns, shared by every door that grows the
  *  registry (the attribute panel's declare paths, the toolbar's subject add): names each affected

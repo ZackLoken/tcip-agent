@@ -287,7 +287,7 @@ def test_an_annotations_link_inside_an_allowed_root_loads_in_both_routes(
     assert by_date[date] == ["bud"]
     assert problem is None
 
-    load = client.get("/api/classes/load", params={
+    load = client.get("/api/subjects/load", params={
         "project_root": str(project), "dataset_root": str(project),
         "annotations_dir": str(ann_dir / date)})
     assert load.status_code == 200
@@ -324,7 +324,7 @@ def test_an_annotations_link_outside_every_allowed_root_is_refused_by_both_route
     assert by_date[date] == []
     assert problem is not None and "outside the allowed roots" in problem
 
-    resp = client.get("/api/classes/load", params={
+    resp = client.get("/api/subjects/load", params={
         "project_root": str(project), "dataset_root": str(project),
         "annotations_dir": str(ann_dir / date)})
     assert resp.status_code == 403

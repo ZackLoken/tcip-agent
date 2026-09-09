@@ -1,7 +1,7 @@
 """The content-digest-keyed label-document parse memo shared by every scan of per-image label
 files.
 
-``routes/classes.py``'s registry scan and status derivation, ``routes/dataset.py``'s per-date
+``routes/subjects.py``'s registry scan and status derivation, ``routes/dataset.py``'s per-date
 subject listing, and ``routes/review.py``'s detection-presence scan all re-parse the same files
 under a dataset's ``annotations/`` and ``predictions/`` trees; a memo hit skips the decode and
 the parse, not the file read, so the cost of one route's scan is not re-paid by the next.

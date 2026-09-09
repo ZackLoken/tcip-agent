@@ -33,7 +33,7 @@ def test_subject_names_differing_only_by_case_stay_distinct(
     """Nothing case-folds a subject name on the way in, so a name typed a second way is stored as
     its own subject with its own description rather than silently absorbed into the first."""
     save = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={
             "project_root": str(tmp_path),
             "dataset_root": str(tmp_path),
@@ -49,7 +49,7 @@ def test_subject_names_differing_only_by_case_stay_distinct(
     assert save.json()["n_subjects"] == 3
 
     subjects = client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
     ).json()["subjects"]
     assert set(subjects) == {"bud", "Bud", "bush"}
@@ -77,7 +77,7 @@ def test_registry_derived_from_labels_keeps_each_name_exactly_as_labelled(
     )
 
     body = client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(tmp_path), "annotations_dir": str(labels)},
     ).json()
     assert set(body["subjects"]) == {"bud", "Bud", "bush"}
@@ -96,7 +96,7 @@ def test_registry_derivation_reports_a_document_it_cannot_read(
     write_annotations(str(labels / "IMG_B.json"), [_box("", 700, 100, 760, 220)], 900, 500)
 
     body = client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(tmp_path), "annotations_dir": str(labels)},
     ).json()
     assert set(body["subjects"]) == {"bud"}
@@ -109,14 +109,14 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
     """Authoring a subject stays open: a later save adds the new name and updates the existing one
     in place, leaving one entry per name rather than a duplicate."""
     first = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"bud": {"description": "first pass"}}, "version": None},
     )
     assert first.status_code == 200, first.text
 
     second = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"bud": {"description": "corrected"},
                            "hazel_leaf": {"description": "one leaf blade"}},
@@ -126,7 +126,7 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
     assert second.json()["n_subjects"] == 2
 
     subjects = client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
     ).json()["subjects"]
     assert set(subjects) == {"bud", "hazel_leaf"}

@@ -31,7 +31,7 @@ def test_gui_route_rows_and_platform_rows_agree_on_their_core_fields(
     monkeypatch.setattr(audit_module, "AUDIT_ROOT", dataset_root)
 
     resp = client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(tmp_path / "project"), "dataset_root": str(dataset_root),
               "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
     )

@@ -10,7 +10,7 @@
  * immediately overridden; restoring it would fight the tab, not help.
  */
 
-import type { ImageStatus } from "@/api/classes";
+import type { ImageStatus } from "@/api/subjects";
 import { TAB_NAMES } from "@/api/types.generated";
 import type { DatasetSelection, ReviewFilters, TabName } from "@/store/types";
 

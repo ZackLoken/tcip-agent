@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { subjectColor } from "@/api/classes";
+import { subjectColor } from "@/api/subjects";
 import { ColorPickerModal } from "@/components/ColorPickerModal";
 import {
   resetSubjectColorOverride,

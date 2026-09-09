@@ -1,6 +1,6 @@
-"""Class registry routes.
+"""Subject registry routes.
 
-The dataset's class registry is a single nested ``<dataset_root>/classes.json`` describing every
+The dataset's subject registry is a single nested ``<dataset_root>/subjects.json`` describing every
 subject, its attributes, and their value names: never integer ids or colors (a label references
 these names; an id is a per-training-run artifact and a color is GUI-local). Shape::
 
@@ -33,13 +33,13 @@ from tcip_web.label_annotations_cache import cached_label_annotations
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/classes", tags=["classes"])
+router = APIRouter(prefix="/api/subjects", tags=["subjects"])
 
 
 def _guard_dataset_root(root: str) -> str:
     """Confine a resolved dataset root to the allowed image roots (no-op unless ``TCIP_IMAGE_ROOTS``
     is set): the same lockdown the rest of the backend applies to absolute reads. The single choke
-    point every ``classes.py`` route resolves through, so a new caller can't forget it the way a
+    point every ``subjects.py`` route resolves through, so a new caller can't forget it the way a
     route-local guard could."""
     from tcip_web.paths import assert_path_allowed
 
@@ -62,7 +62,7 @@ def _resolve_dataset_root(dataset_root: str | None, annotations_dir: str | None)
 
 def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
     """Record a dataset-native GUI mutation in that dataset's own audit log: this module's own
-    ``image_status.json`` and ``classes.json`` writes, and ``inference.py``'s prediction writes.
+    ``image_status.json`` and ``subjects.json`` writes, and ``inference.py``'s prediction writes.
 
     All three are dataset-native, not project-private (a dataset can be opened by more than one
     project, see ``dataset_layout.image_status_path`` and ``dataset_layout.dataset_root_of``), so
@@ -70,7 +70,7 @@ def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
     trail with the state it describes, rather than guessing a project, is deliberate. A failed
     append raises ``AuditEntryNotWritten``: the mutation has already committed by the time this
     runs, so the caller answers the gap rather than have it pass as silently recorded. Every
-    caller (``save_classes``, ``set_image_status``, ``set_image_status_bulk``, and
+    caller (``save_subjects``, ``set_image_status``, ``set_image_status_bulk``, and
     ``inference.py``'s worker) refuses a falsy root before calling this, so there is no
     empty-scope case here to guard against.
     """
@@ -98,14 +98,14 @@ def _subjects_in_dir(d: Path) -> tuple[set[str], list[str]]:
 
 
 @router.get("/load")
-def load_classes(
+def load_subjects(
     project_root: str,
     dataset_root: Optional[str] = None,
     annotations_dir: Optional[str] = None,
 ) -> dict:
-    """Load the dataset's nested class registry.
+    """Load the dataset's nested subject registry.
 
-    Resolution: the dataset's saved ``classes.json`` -> else a draft registry of the subjects
+    Resolution: the dataset's saved ``subjects.json`` -> else a draft registry of the subjects
     actually present in the labels (detection-only, no attributes) -> else empty. Returns
     ``{"subjects": <nested registry mapping>, "version": <token> | None, "unreadable": [paths]}``:
     ``version`` is the stored registry's compare-and-set token when one was saved, else ``None`` (a
@@ -151,19 +151,19 @@ def load_classes(
     return {"subjects": {}, "version": None, "unreadable": unreadable}
 
 
-class SaveClassesPayload(BaseModel):
+class SaveSubjectsPayload(BaseModel):
     project_root: str
     subjects: dict  # the nested registry mapping (subjects -> attributes -> values)
     dataset_root: Optional[str] = None
     annotations_dir: Optional[str] = None
-    # Required: the version load_classes returned beside the registry this save was built from.
+    # Required: the version load_subjects returned beside the registry this save was built from.
     # None means the registry was absent at load, asserted as Version.ABSENT, never skipped.
     version: Optional[str]
 
 
 @router.post("/save")
-def save_classes(payload: SaveClassesPayload) -> dict:
-    """Write the dataset's class registry through :func:`subject_registry.replace_registry`.
+def save_subjects(payload: SaveSubjectsPayload) -> dict:
+    """Write the dataset's subject registry through :func:`subject_registry.replace_registry`.
 
     Refuses (400) a write dropping a subject, attribute or attribute value the stored registry
     declares: the GUI's own save is additive by construction (see ``AnnotateToolbar``), so a drop
@@ -187,12 +187,12 @@ def save_classes(payload: SaveClassesPayload) -> dict:
 
     root = _resolve_dataset_root(payload.dataset_root, payload.annotations_dir)
     if not root:
-        raise HTTPException(400, "cannot locate the dataset to save the class registry into; "
+        raise HTTPException(400, "cannot locate the dataset to save the subject registry into; "
                                  "pass dataset_root or an annotations dir")
     try:
         registry = registry_from_dict(payload.subjects)
     except RegistryError as exc:
-        raise HTTPException(400, f"invalid class registry: {exc}") from exc
+        raise HTTPException(400, f"invalid subject registry: {exc}") from exc
     path = subjects_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     expect = Version(payload.version) if payload.version is not None else Version.ABSENT
@@ -214,7 +214,7 @@ def save_classes(payload: SaveClassesPayload) -> dict:
 
     try:
         _audit_dataset_write(
-            root, "gui_save_classes",
+            root, "gui_save_subjects",
             {"subjects_path": str(path), "n_subjects": len(registry.subjects),
              "confirmations_stamped_with_outgoing_schema": sweep["newly_stamped"],
              "confirmations_predating_vocabulary": sweep["predating_vocabulary"]},
@@ -241,7 +241,7 @@ class ImageStatusPayload(BaseModel):
 
 def _require_dataset_root(dataset_root: str | None, annotations_dir: str | None) -> str:
     """``_resolve_dataset_root``, but a write must locate the dataset or fail loudly (mirrors
-    ``save_classes``): a silent fallback would write a human's Complete nowhere anyone reads it."""
+    ``save_subjects``): a silent fallback would write a human's Complete nowhere anyone reads it."""
     root = _resolve_dataset_root(dataset_root, annotations_dir)
     if not root:
         raise HTTPException(400, "cannot locate the dataset to record image status against; "

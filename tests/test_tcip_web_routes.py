@@ -190,7 +190,7 @@ def test_the_label_memo_serves_the_tree_the_registry_and_the_review_scan_alike(
 
     client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)})
     client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(dataset_root), "annotations_dir": str(ann)},
     )
     client.get(

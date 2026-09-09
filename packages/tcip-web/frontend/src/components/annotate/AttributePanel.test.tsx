@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-import { classesApi } from "@/api/classes";
+import { subjectsApi } from "@/api/subjects";
 import { StructuredRefusalError } from "@/api/http";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
 import { useStore } from "@/store";
@@ -39,12 +39,12 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
     const committed = {
       status: "ok",
       n_subjects: 1,
-      classes_path: "C:/data/classes.json",
+      subjects_path: "C:/data/subjects.json",
       version: "v2",
       schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     };
-    const message = "gui_save_classes completed and its audit entry could not be written";
-    vi.spyOn(classesApi, "save").mockRejectedValue(
+    const message = "gui_save_subjects completed and its audit entry could not be written";
+    vi.spyOn(subjectsApi, "save").mockRejectedValue(
       new StructuredRefusalError(
         { error: "audit_entry_not_written", message, committed },
         409,
@@ -65,8 +65,8 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
   });
 
   it("reloads the registry from the server on an ordinary refusal, unlike the audit-gap case", async () => {
-    vi.spyOn(classesApi, "save").mockRejectedValue(new Error("409 stale version"));
-    vi.spyOn(classesApi, "load").mockResolvedValue({
+    vi.spyOn(subjectsApi, "save").mockRejectedValue(new Error("409 stale version"));
+    vi.spyOn(subjectsApi, "load").mockResolvedValue({
       subjects: { bud: {} },
       version: "v3",
       unreadable: [],

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 
-import { classesApi } from "@/api/classes";
+import { subjectsApi } from "@/api/subjects";
 import { StructuredRefusalError } from "@/api/http";
 import { useImageStatusHydrate } from "@/hooks/useImageStatusHydrate";
 import { useStore } from "@/store";
@@ -27,16 +27,16 @@ const PARAMS = {
 
 describe("useImageStatusHydrate", () => {
   it("flags a stored complete whose derived token is negative as stale, never writes it", async () => {
-    vi.spyOn(classesApi, "loadImageStatus").mockResolvedValue({
+    vi.spyOn(subjectsApi, "loadImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "complete" },
       stale_definition: [],
     });
-    vi.spyOn(classesApi, "deriveImageStatus").mockResolvedValue({
+    vi.spyOn(subjectsApi, "deriveImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "negative" },
       unreadable: [],
     });
     const bulk = vi
-      .spyOn(classesApi, "setImageStatusBulk")
+      .spyOn(subjectsApi, "setImageStatusBulk")
       .mockResolvedValue({ status: "ok", n: 0, digest_unstamped: [] });
 
     renderHook(() => useImageStatusHydrate(PARAMS));
@@ -47,16 +47,16 @@ describe("useImageStatusHydrate", () => {
   });
 
   it("heals an unconfirmed name from unannotated to partial and writes it", async () => {
-    vi.spyOn(classesApi, "loadImageStatus").mockResolvedValue({
+    vi.spyOn(subjectsApi, "loadImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "unannotated" },
       stale_definition: [],
     });
-    vi.spyOn(classesApi, "deriveImageStatus").mockResolvedValue({
+    vi.spyOn(subjectsApi, "deriveImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "partial" },
       unreadable: [],
     });
     const bulk = vi
-      .spyOn(classesApi, "setImageStatusBulk")
+      .spyOn(subjectsApi, "setImageStatusBulk")
       .mockResolvedValue({ status: "ok", n: 1, digest_unstamped: [] });
 
     renderHook(() => useImageStatusHydrate(PARAMS));
@@ -77,15 +77,15 @@ describe("useImageStatusHydrate", () => {
   });
 
   it("flags a digest-stale name with no content disagreement", async () => {
-    vi.spyOn(classesApi, "loadImageStatus").mockResolvedValue({
+    vi.spyOn(subjectsApi, "loadImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "complete" },
       stale_definition: ["img1.jpg"],
     });
-    vi.spyOn(classesApi, "deriveImageStatus").mockResolvedValue({
+    vi.spyOn(subjectsApi, "deriveImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "complete" },
       unreadable: [],
     });
-    vi.spyOn(classesApi, "setImageStatusBulk").mockResolvedValue({
+    vi.spyOn(subjectsApi, "setImageStatusBulk").mockResolvedValue({
       status: "ok",
       n: 0,
       digest_unstamped: [],
@@ -98,15 +98,15 @@ describe("useImageStatusHydrate", () => {
 
   it("unions a digest-stale name with a separately content-stale name", async () => {
     const params = { ...PARAMS, imageList: ["img1.jpg", "img2.jpg"] };
-    vi.spyOn(classesApi, "loadImageStatus").mockResolvedValue({
+    vi.spyOn(subjectsApi, "loadImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "complete", "img2.jpg": "complete" },
       stale_definition: ["img2.jpg"],
     });
-    vi.spyOn(classesApi, "deriveImageStatus").mockResolvedValue({
+    vi.spyOn(subjectsApi, "deriveImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "negative", "img2.jpg": "complete" },
       unreadable: [],
     });
-    vi.spyOn(classesApi, "setImageStatusBulk").mockResolvedValue({
+    vi.spyOn(subjectsApi, "setImageStatusBulk").mockResolvedValue({
       status: "ok",
       n: 0,
       digest_unstamped: [],
@@ -120,15 +120,15 @@ describe("useImageStatusHydrate", () => {
   });
 
   it("leaves a digest-stale name out of staleMarks when it is not in the loaded image list", async () => {
-    vi.spyOn(classesApi, "loadImageStatus").mockResolvedValue({
+    vi.spyOn(subjectsApi, "loadImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "complete" },
       stale_definition: ["img1.jpg", "img_outside.jpg"],
     });
-    vi.spyOn(classesApi, "deriveImageStatus").mockResolvedValue({
+    vi.spyOn(subjectsApi, "deriveImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "complete" },
       unreadable: [],
     });
-    vi.spyOn(classesApi, "setImageStatusBulk").mockResolvedValue({
+    vi.spyOn(subjectsApi, "setImageStatusBulk").mockResolvedValue({
       status: "ok",
       n: 0,
       digest_unstamped: [],
@@ -140,7 +140,7 @@ describe("useImageStatusHydrate", () => {
   });
 
   it("does nothing with no subject selected: nothing to scope image status to yet", () => {
-    const load = vi.spyOn(classesApi, "loadImageStatus");
+    const load = vi.spyOn(subjectsApi, "loadImageStatus");
     renderHook(() => useImageStatusHydrate({ ...PARAMS, subject: null }));
     expect(load).not.toHaveBeenCalled();
   });
@@ -152,16 +152,16 @@ describe("useImageStatusHydrate", () => {
   });
 
   it("continues with its own writes and toasts the message when the bulk write's audit line is lost", async () => {
-    vi.spyOn(classesApi, "loadImageStatus").mockResolvedValue({
+    vi.spyOn(subjectsApi, "loadImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "unannotated" },
       stale_definition: [],
     });
-    vi.spyOn(classesApi, "deriveImageStatus").mockResolvedValue({
+    vi.spyOn(subjectsApi, "deriveImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "partial" },
       unreadable: [],
     });
     const message = "gui_set_image_status_bulk completed and its audit entry could not be written";
-    vi.spyOn(classesApi, "setImageStatusBulk").mockRejectedValue(
+    vi.spyOn(subjectsApi, "setImageStatusBulk").mockRejectedValue(
       new StructuredRefusalError(
         { error: "audit_entry_not_written", message, committed: { status: "ok", n: 1 } },
         409,
@@ -178,15 +178,15 @@ describe("useImageStatusHydrate", () => {
   });
 
   it("skips its own writes on any other bulk-write failure", async () => {
-    vi.spyOn(classesApi, "loadImageStatus").mockResolvedValue({
+    vi.spyOn(subjectsApi, "loadImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "unannotated" },
       stale_definition: [],
     });
-    vi.spyOn(classesApi, "deriveImageStatus").mockResolvedValue({
+    vi.spyOn(subjectsApi, "deriveImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "partial" },
       unreadable: [],
     });
-    vi.spyOn(classesApi, "setImageStatusBulk").mockRejectedValue(new Error("network down"));
+    vi.spyOn(subjectsApi, "setImageStatusBulk").mockRejectedValue(new Error("network down"));
 
     renderHook(() => useImageStatusHydrate(PARAMS));
 

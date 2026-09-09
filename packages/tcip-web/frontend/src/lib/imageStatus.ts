@@ -1,4 +1,4 @@
-import type { ImageStatus } from "@/api/classes";
+import type { ImageStatus } from "@/api/subjects";
 
 /** What a hydrate reconcile does with one image name: write its derived token to the store, or
  *  hold it back because a human already confirmed a different one. */

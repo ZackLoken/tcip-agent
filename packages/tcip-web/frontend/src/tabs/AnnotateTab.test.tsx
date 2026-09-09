@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 
 import { api } from "@/api/client";
 import type { SaveResult } from "@/api/client";
-import { classesApi, subjectColor } from "@/api/classes";
+import { subjectsApi, subjectColor } from "@/api/subjects";
 import { StructuredRefusalError } from "@/api/http";
 import * as CanvasStageMock from "@/components/Canvas/CanvasStage";
 import * as canvasSync from "@/lib/canvasSync";
@@ -157,7 +157,7 @@ beforeEach(() => {
     .spyOn(api.annotate, "load")
     .mockImplementation((imagePath) => Promise.resolve(labelsFor(imagePath)));
   saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue({ status: "ok", base_mtime: "1" });
-  vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({ status: "ok", digest_stamped: true });
+  vi.spyOn(subjectsApi, "setImageStatus").mockResolvedValue({ status: "ok", digest_stamped: true });
   vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue({});
   // Default: a standard 3-band RGB image; the band picker's own describe block overrides this
   // per-case to exercise the >3-band path.
@@ -240,7 +240,7 @@ describe("AnnotateTab save/load race", () => {
     expect(useStore.getState().canvas.dirty).toBe(true);
     // ...but the per-image status for the image actually saved is still recorded, scoped to the
     // selected subject, so it cannot mark the image negative under another subject.
-    expect(classesApi.setImageStatus).toHaveBeenCalledWith(
+    expect(subjectsApi.setImageStatus).toHaveBeenCalledWith(
       "C:/proj",
       "img1.jpg",
       "partial",
@@ -296,7 +296,7 @@ describe("AnnotateTab save/load race", () => {
     await flush();
 
     expect(useStore.getState().user).toBe("breeder");
-    expect(vi.mocked(classesApi.setImageStatus).mock.calls[0][7]).toBe("breeder");
+    expect(vi.mocked(subjectsApi.setImageStatus).mock.calls[0][7]).toBe("breeder");
   });
 
   it("never rewrites a confirmed negative to partial, even when the save adds content", async () => {
@@ -311,7 +311,7 @@ describe("AnnotateTab save/load race", () => {
     pressSave();
     await flush();
 
-    expect(classesApi.setImageStatus).not.toHaveBeenCalled();
+    expect(subjectsApi.setImageStatus).not.toHaveBeenCalled();
     expect(useStore.getState().imageStatus.byImage["img1.jpg"]).toBe("negative");
   });
 });
@@ -349,7 +349,7 @@ describe("AnnotateTab audit-gap handling", () => {
     await flush();
 
     const message = "gui_set_image_status completed and its audit entry could not be written";
-    vi.spyOn(classesApi, "setImageStatus").mockRejectedValue(
+    vi.spyOn(subjectsApi, "setImageStatus").mockRejectedValue(
       new StructuredRefusalError(
         { error: "audit_entry_not_written", message, committed: { status: "ok" } },
         409,
@@ -368,7 +368,7 @@ describe("AnnotateTab audit-gap handling", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    vi.spyOn(classesApi, "setImageStatus").mockRejectedValue(new Error("network down"));
+    vi.spyOn(subjectsApi, "setImageStatus").mockRejectedValue(new Error("network down"));
     const before = useStore.getState().toasts.length;
     act(addBox);
     pressSave();
@@ -843,12 +843,12 @@ describe("AnnotateTab AttributePanel authoring", () => {
     });
   }
 
-  it("posts the grown registry through classesApi.save with the loaded version and installs it", async () => {
+  it("posts the grown registry through subjectsApi.save with the loaded version and installs it", async () => {
     await openPanelOnASelectedBox();
-    const saveSpy = vi.spyOn(classesApi, "save").mockResolvedValue({
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue({
       status: "ok",
       n_subjects: 1,
-      classes_path: "C:/data/classes.json",
+      subjects_path: "C:/data/subjects.json",
       version: "v2",
       schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
@@ -869,8 +869,8 @@ describe("AnnotateTab AttributePanel authoring", () => {
 
   it("reloads the registry from the server when the save is refused, same as the subject add", async () => {
     await openPanelOnASelectedBox();
-    vi.spyOn(classesApi, "save").mockRejectedValue(new Error("409 stale version"));
-    vi.spyOn(classesApi, "load").mockResolvedValue({
+    vi.spyOn(subjectsApi, "save").mockRejectedValue(new Error("409 stale version"));
+    vi.spyOn(subjectsApi, "load").mockResolvedValue({
       subjects: { subject_a: {} },
       version: "v3",
       unreadable: [],
@@ -884,10 +884,10 @@ describe("AnnotateTab AttributePanel authoring", () => {
 
   it("toasts the schema_change_sweep the save response carries, naming the subject and count", async () => {
     await openPanelOnASelectedBox();
-    vi.spyOn(classesApi, "save").mockResolvedValue({
+    vi.spyOn(subjectsApi, "save").mockResolvedValue({
       status: "ok",
       n_subjects: 1,
-      classes_path: "C:/data/classes.json",
+      subjects_path: "C:/data/subjects.json",
       version: "v2",
       schema_change_sweep: {
         newly_stamped: { subject_a: 4 },
@@ -905,10 +905,10 @@ describe("AnnotateTab AttributePanel authoring", () => {
 
   it("counts the active subject's shapes carrying no value for each declared attribute", async () => {
     await openPanelOnASelectedBox();
-    vi.spyOn(classesApi, "save").mockResolvedValue({
+    vi.spyOn(subjectsApi, "save").mockResolvedValue({
       status: "ok",
       n_subjects: 1,
-      classes_path: "C:/data/classes.json",
+      subjects_path: "C:/data/subjects.json",
       version: "v2",
       schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
@@ -923,7 +923,7 @@ describe("AnnotateTab AttributePanel authoring", () => {
 
   it("refuses a name the subject already declares, inline, and posts nothing", async () => {
     await openPanelOnASelectedBox();
-    const saveSpy = vi.spyOn(classesApi, "save");
+    const saveSpy = vi.spyOn(subjectsApi, "save");
     act(() => {
       useStore
         .getState()

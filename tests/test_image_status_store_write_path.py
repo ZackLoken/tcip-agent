@@ -35,7 +35,7 @@ def _single(client: TestClient, root: Path, image_name: str, status: str, subjec
             "status": status, "subject": subject}
     if date:
         body["date"] = date
-    resp = client.post("/api/classes/image_status", json=body)
+    resp = client.post("/api/subjects/image_status", json=body)
     assert resp.status_code == 200, resp.text
 
 
@@ -45,7 +45,7 @@ def _bulk(client: TestClient, root: Path, statuses: dict[str, str], subject: str
             "statuses": statuses}
     if date:
         body["date"] = date
-    resp = client.post("/api/classes/image_status/bulk", json=body)
+    resp = client.post("/api/subjects/image_status/bulk", json=body)
     assert resp.status_code == 200, resp.text
 
 
@@ -121,7 +121,7 @@ def test_the_read_route_returns_the_bucket_the_write_routes_built(
                   "subject": subject}
         if date:
             params["date"] = date
-        resp = client.get("/api/classes/image_status", params=params)
+        resp = client.get("/api/subjects/image_status", params=params)
         assert resp.status_code == 200, resp.text
         return resp.json()["statuses"]
 
@@ -193,7 +193,7 @@ def test_the_gui_route_records_the_person_whose_confirmation_it_is(
     body = {"project_root": str(tmp_path), "dataset_root": str(tmp_path),
             "image_name": "IMG_0009.JPG", "status": "negative", "subject": "bud",
             "user": "rowan"}
-    assert client.post("/api/classes/image_status", json=body).status_code == 200
+    assert client.post("/api/subjects/image_status", json=body).status_code == 200
 
     stored = tcip_store.read(image_status_key(tmp_path))
     record = stored["bud"]["IMG_0009.JPG"]

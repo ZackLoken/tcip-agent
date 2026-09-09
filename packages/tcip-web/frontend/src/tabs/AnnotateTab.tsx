@@ -3,7 +3,7 @@ import { Rect } from "react-konva";
 import Konva from "konva";
 
 import { api } from "@/api/client";
-import { classesApi, subjectColor, type ImageStatus } from "@/api/classes";
+import { subjectsApi, subjectColor, type ImageStatus } from "@/api/subjects";
 import { isAuditEntryNotWritten } from "@/api/http";
 import { sessionsApi } from "@/api/sessions";
 import { AnnotateLegend } from "@/components/annotate/AnnotateLegend";
@@ -530,7 +530,7 @@ export function AnnotateTab() {
           setImageStatus(name, newStatus);
           if (dataset.subject) {
             // Best-effort status write; the labels are already saved.
-            void classesApi
+            void subjectsApi
               .setImageStatus(
                 projectRoot,
                 name,

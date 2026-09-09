@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import type { ImageBandsResponse } from "@/api/client";
 import { api } from "@/api/client";
-import { classesApi, type ImageStatus } from "@/api/classes";
+import { subjectsApi, type ImageStatus } from "@/api/subjects";
 import { StructuredRefusalError } from "@/api/http";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
@@ -265,10 +265,10 @@ describe("AnnotateToolbar subject authoring", () => {
     // An untrimmed registry key would open a second subject that reads as the first.
     seedDataset();
     act(() => useStore.getState().setRegistry({ leaf: {} }));
-    const saveSpy = vi.spyOn(classesApi, "save").mockResolvedValue({
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue({
       status: "ok",
       n_subjects: 2,
-      classes_path: "C:/data/classes.json",
+      subjects_path: "C:/data/subjects.json",
       version: "v1",
       schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
@@ -292,10 +292,10 @@ describe("AnnotateToolbar subject authoring", () => {
       attributes: { stage: { type: "ordinal" as const, values: ["early", "late"] } },
     };
     act(() => useStore.getState().setRegistry({ leaf: leafDef, husk: {} }));
-    const saveSpy = vi.spyOn(classesApi, "save").mockResolvedValue({
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue({
       status: "ok",
       n_subjects: 2,
-      classes_path: "C:/data/classes.json",
+      subjects_path: "C:/data/subjects.json",
       version: "v1",
       schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
@@ -315,10 +315,10 @@ describe("AnnotateToolbar subject authoring", () => {
   it("adds nothing when the prompt is dismissed or answered with only whitespace", async () => {
     seedDataset();
     act(() => useStore.getState().setRegistry({ leaf: {} }));
-    const saveSpy = vi.spyOn(classesApi, "save").mockResolvedValue({
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue({
       status: "ok",
       n_subjects: 1,
-      classes_path: "C:/data/classes.json",
+      subjects_path: "C:/data/subjects.json",
       version: "v1",
       schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
@@ -345,10 +345,10 @@ describe("AnnotateToolbar subject authoring", () => {
   it("posts the loaded registry version and stores the version the save returns", async () => {
     seedDataset();
     act(() => useStore.getState().setRegistry({ leaf: {} }, "v1"));
-    const saveSpy = vi.spyOn(classesApi, "save").mockResolvedValue({
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue({
       status: "ok",
       n_subjects: 2,
-      classes_path: "C:/data/classes.json",
+      subjects_path: "C:/data/subjects.json",
       version: "v2",
       schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
@@ -367,8 +367,8 @@ describe("AnnotateToolbar subject authoring", () => {
   it("reloads the registry from the server when the save is refused", async () => {
     seedDataset();
     act(() => useStore.getState().setRegistry({ leaf: {} }, "v1"));
-    vi.spyOn(classesApi, "save").mockRejectedValue(new Error("409 stale version"));
-    vi.spyOn(classesApi, "load").mockResolvedValue({
+    vi.spyOn(subjectsApi, "save").mockRejectedValue(new Error("409 stale version"));
+    vi.spyOn(subjectsApi, "load").mockResolvedValue({
       subjects: { leaf: {} },
       version: "v3",
       unreadable: [],
@@ -392,8 +392,8 @@ describe("AnnotateToolbar subject authoring", () => {
       useStore.getState().setRegistry({ leaf: {} }, "v1");
       useStore.getState().setActiveSubject("leaf");
     });
-    vi.spyOn(classesApi, "save").mockRejectedValue(new Error("409 stale version"));
-    vi.spyOn(classesApi, "load").mockResolvedValue({
+    vi.spyOn(subjectsApi, "save").mockRejectedValue(new Error("409 stale version"));
+    vi.spyOn(subjectsApi, "load").mockResolvedValue({
       subjects: { leaf: {} },
       version: "v3",
       unreadable: [],
@@ -420,12 +420,12 @@ describe("AnnotateToolbar subject authoring", () => {
     const committed = {
       status: "ok",
       n_subjects: 2,
-      classes_path: "C:/data/classes.json",
+      subjects_path: "C:/data/subjects.json",
       version: "v2",
       schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     };
-    const message = "gui_save_classes completed and its audit entry could not be written";
-    vi.spyOn(classesApi, "save").mockRejectedValue(
+    const message = "gui_save_subjects completed and its audit entry could not be written";
+    vi.spyOn(subjectsApi, "save").mockRejectedValue(
       new StructuredRefusalError(
         { error: "audit_entry_not_written", message, committed },
         409,
@@ -450,10 +450,10 @@ describe("AnnotateToolbar subject authoring", () => {
   it("toasts the schema_change_sweep's predating_vocabulary count, same as the attribute panel's", async () => {
     seedDataset();
     act(() => useStore.getState().setRegistry({ leaf: {} }, "v1"));
-    vi.spyOn(classesApi, "save").mockResolvedValue({
+    vi.spyOn(subjectsApi, "save").mockResolvedValue({
       status: "ok",
       n_subjects: 2,
-      classes_path: "C:/data/classes.json",
+      subjects_path: "C:/data/subjects.json",
       version: "v2",
       schema_change_sweep: {
         newly_stamped: { leaf: 3 },
@@ -477,10 +477,10 @@ describe("AnnotateToolbar subject authoring", () => {
   it("reports the predating count once even though newly_stamped counts the same confirmations", async () => {
     seedDataset();
     act(() => useStore.getState().setRegistry({ leaf: {} }, "v1"));
-    vi.spyOn(classesApi, "save").mockResolvedValue({
+    vi.spyOn(subjectsApi, "save").mockResolvedValue({
       status: "ok",
       n_subjects: 2,
-      classes_path: "C:/data/classes.json",
+      subjects_path: "C:/data/subjects.json",
       version: "v2",
       schema_change_sweep: {
         newly_stamped: { leaf: 5 },
@@ -576,7 +576,7 @@ describe("AnnotateToolbar Complete toggle, subject-scoped", () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects(["subject_b"]);
     const setStatus = vi
-      .spyOn(classesApi, "setImageStatus")
+      .spyOn(subjectsApi, "setImageStatus")
       .mockResolvedValue({ status: "ok", digest_stamped: true });
     renderToolbar();
 
@@ -600,7 +600,7 @@ describe("AnnotateToolbar Complete toggle, subject-scoped", () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects(["subject_a"]);
     const setStatus = vi
-      .spyOn(classesApi, "setImageStatus")
+      .spyOn(subjectsApi, "setImageStatus")
       .mockResolvedValue({ status: "ok", digest_stamped: true });
     renderToolbar();
 
@@ -623,7 +623,7 @@ describe("AnnotateToolbar Complete toggle, subject-scoped", () => {
   it("does not restore a mark on a failed stamp when unchecking Complete (not a finished status)", async () => {
     seedImageDataset({ subject: "subject_a", currentStatus: "complete" });
     setCanvasBoxSubjects([]);
-    const setStatus = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({
+    const setStatus = vi.spyOn(subjectsApi, "setImageStatus").mockResolvedValue({
       status: "ok",
       digest_stamped: false,
     });
@@ -651,7 +651,7 @@ describe("AnnotateToolbar Complete toggle, subject-scoped", () => {
     setCanvasBoxSubjects(["subject_a"]);
     const committed = { status: "ok", digest_stamped: false };
     const message = "gui_set_image_status completed and its audit entry could not be written";
-    vi.spyOn(classesApi, "setImageStatus").mockRejectedValue(
+    vi.spyOn(subjectsApi, "setImageStatus").mockRejectedValue(
       new StructuredRefusalError(
         { error: "audit_entry_not_written", message, committed },
         409,
@@ -701,7 +701,7 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects(["subject_a"]);
     const setStatus = vi
-      .spyOn(classesApi, "setImageStatus")
+      .spyOn(subjectsApi, "setImageStatus")
       .mockResolvedValue({ status: "ok", digest_stamped: true });
     renderToolbar(undefined, undefined, {
       completeWarning: () => "Complete: 2 of 6 grid cells have not had every part on screen",
@@ -725,7 +725,7 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects([]);
     const setStatus = vi
-      .spyOn(classesApi, "setImageStatus")
+      .spyOn(subjectsApi, "setImageStatus")
       .mockResolvedValue({ status: "ok", digest_stamped: true });
     renderToolbar(undefined, undefined, {
       completeWarning: () => null,
@@ -751,7 +751,7 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects([]);
     const setStatus = vi
-      .spyOn(classesApi, "setImageStatus")
+      .spyOn(subjectsApi, "setImageStatus")
       .mockResolvedValue({ status: "ok", digest_stamped: true });
     renderToolbar(undefined, undefined, {
       completeWarning: () => null,
@@ -778,7 +778,7 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects([]);
     const setStatus = vi
-      .spyOn(classesApi, "setImageStatus")
+      .spyOn(subjectsApi, "setImageStatus")
       .mockResolvedValue({ status: "ok", digest_stamped: true });
     renderToolbar(undefined, undefined, {
       completeWarning: () => null,
@@ -801,7 +801,7 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects([]);
     const setStatus = vi
-      .spyOn(classesApi, "setImageStatus")
+      .spyOn(subjectsApi, "setImageStatus")
       .mockResolvedValue({ status: "ok", digest_stamped: true });
     const toastsBefore = useStore.getState().toasts.length;
     renderToolbar(undefined, undefined, {
@@ -823,7 +823,7 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects(["subject_a"]);
     const setStatus = vi
-      .spyOn(classesApi, "setImageStatus")
+      .spyOn(subjectsApi, "setImageStatus")
       .mockResolvedValue({ status: "ok", digest_stamped: true });
     const toastsBefore = useStore.getState().toasts.length;
     renderToolbar(undefined, undefined, {
@@ -844,7 +844,7 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects(["subject_a"]);
     const setStatus = vi
-      .spyOn(classesApi, "setImageStatus")
+      .spyOn(subjectsApi, "setImageStatus")
       .mockResolvedValue({ status: "ok", digest_stamped: true });
     renderToolbar(undefined, undefined, {
       completeWarning: () => "Complete: 2 of 6 grid cells have not had every part on screen",
@@ -869,7 +869,7 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects(["subject_a"]);
     const setStatus = vi
-      .spyOn(classesApi, "setImageStatus")
+      .spyOn(subjectsApi, "setImageStatus")
       .mockResolvedValue({ status: "ok", digest_stamped: true });
     renderToolbar(undefined, undefined, {
       completeWarning: () => null,
@@ -895,7 +895,7 @@ describe("AnnotateToolbar stale re-confirm", () => {
     seedImageDataset({ subject: "subject_a", currentStatus: "complete", stale: true });
     setCanvasBoxSubjects(["subject_b"]);
     const setStatus = vi
-      .spyOn(classesApi, "setImageStatus")
+      .spyOn(subjectsApi, "setImageStatus")
       .mockResolvedValue({ status: "ok", digest_stamped: true });
     renderToolbar();
 
@@ -920,7 +920,7 @@ describe("AnnotateToolbar stale re-confirm", () => {
     seedImageDataset({ subject: "subject_a", currentStatus: "complete", stale: true });
     setCanvasBoxSubjects(["subject_a"]);
     const setStatus = vi
-      .spyOn(classesApi, "setImageStatus")
+      .spyOn(subjectsApi, "setImageStatus")
       .mockResolvedValue({ status: "ok", digest_stamped: true });
     renderToolbar();
 
@@ -946,7 +946,7 @@ describe("AnnotateToolbar stale re-confirm", () => {
     useStore.setState((s) => ({ canvas: { ...s.canvas, loadedImagePath: null } }));
     setCanvasBoxSubjects(["subject_a"]);
     const setStatus = vi
-      .spyOn(classesApi, "setImageStatus")
+      .spyOn(subjectsApi, "setImageStatus")
       .mockResolvedValue({ status: "ok", digest_stamped: true });
     renderToolbar();
 
@@ -961,7 +961,7 @@ describe("AnnotateToolbar stale re-confirm", () => {
   it("restores the stale mark when the re-confirm write fails to persist", async () => {
     seedImageDataset({ subject: "subject_a", currentStatus: "complete", stale: true });
     setCanvasBoxSubjects(["subject_a"]);
-    vi.spyOn(classesApi, "setImageStatus").mockRejectedValue(new Error("network error"));
+    vi.spyOn(subjectsApi, "setImageStatus").mockRejectedValue(new Error("network error"));
     renderToolbar();
 
     await act(async () => {
@@ -974,7 +974,7 @@ describe("AnnotateToolbar stale re-confirm", () => {
   it("restores the stale mark and toasts the image when the digest stamp did not land", async () => {
     seedImageDataset({ subject: "subject_a", currentStatus: "complete", stale: true });
     setCanvasBoxSubjects(["subject_a"]);
-    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({
+    vi.spyOn(subjectsApi, "setImageStatus").mockResolvedValue({
       status: "ok",
       digest_stamped: false,
     });

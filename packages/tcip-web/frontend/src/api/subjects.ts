@@ -1,4 +1,4 @@
-/** Dataset class-registry + per-image-status API helpers.
+/** Dataset subject-registry + per-image-status API helpers.
  *
  * The registry is one nested mapping per dataset: subject -> {description?, attributes?}. It
  * carries no integer ids and no colors: a label references names, an id is a per-training-run
@@ -50,17 +50,18 @@ export interface SchemaChangeSweep {
   warning: string | null;
 }
 
-export const classesApi = {
-  // The registry lives in the dataset (not the project), so a shared image set carries its own
-  // subject names; pass the dataset_root.
+export const subjectsApi = {
+  // The registry lives in the dataset (not the project); pass dataset_root so a shared image
+  // set carries its own subject names.
+
   // The annotations dir lets the server derive a draft registry (detection-only, no attributes)
-  // from the labels when no classes.json is saved yet.
+  // from the labels when no subjects.json is saved yet.
   load: (project_root: string, dataset_root?: string | null, annotations_dir?: string | null) => {
     const params = new URLSearchParams({ project_root });
     if (dataset_root) params.set("dataset_root", dataset_root);
     if (annotations_dir) params.set("annotations_dir", annotations_dir);
     return getJson<{ subjects: Registry; version: string | null; unreadable: string[] }>(
-      `${ROUTES.getClassesLoad}?${params.toString()}`,
+      `${ROUTES.getSubjectsLoad}?${params.toString()}`,
     );
   },
 
@@ -76,16 +77,16 @@ export const classesApi = {
     postJson<{
       status: string;
       n_subjects: number;
-      classes_path: string;
+      subjects_path: string;
       version: string;
       schema_change_sweep: SchemaChangeSweep;
-    }>(ROUTES.postClassesSave, { project_root, subjects, dataset_root, annotations_dir, version }),
+    }>(ROUTES.postSubjectsSave, { project_root, subjects, dataset_root, annotations_dir, version }),
 
-  // A Complete is a statement about one subject on one date. Every read and write is scoped to it,
-  // so confirming an image while annotating leaf cannot mark it negative for a disease subject
-  // nobody has looked at yet. Confirmations are dataset-native (like the registry) rather than
-  // project-private, so dataset_root/annotations_dir resolve where the store actually lives,
-  // same as classesApi.load/save above.
+  // A Complete is a statement about one subject on one date, read and written scoped to it, so
+  // confirming while annotating leaf cannot mark an image negative for a subject nobody saw.
+
+  // Confirmations are dataset-native (like the registry), not project-private, so
+  // dataset_root/annotations_dir resolve where the store lives, same as subjectsApi.load/save.
   loadImageStatus: (
     project_root: string,
     subject: string | null,
@@ -99,7 +100,7 @@ export const classesApi = {
     if (dataset_root) params.set("dataset_root", dataset_root);
     if (annotations_dir) params.set("annotations_dir", annotations_dir);
     return getJson<{ statuses: Record<string, ImageStatus>; stale_definition: string[] }>(
-      `${ROUTES.getClassesImageStatus}?${params.toString()}`,
+      `${ROUTES.getSubjectsImageStatus}?${params.toString()}`,
     );
   },
 
@@ -114,7 +115,7 @@ export const classesApi = {
     annotations_dir?: string | null,
     user?: string,
   ) =>
-    postJson<{ status: string; digest_stamped: boolean }>(ROUTES.postClassesImageStatus, {
+    postJson<{ status: string; digest_stamped: boolean }>(ROUTES.postSubjectsImageStatus, {
       project_root,
       image_name,
       status,
@@ -137,7 +138,7 @@ export const classesApi = {
     // digest_unstamped names the statuses passed whose digest stamp did not land, empty once
     // every one does.
     postJson<{ status: string; n: number; digest_unstamped: string[] }>(
-      ROUTES.postClassesImageStatusBulk,
+      ROUTES.postSubjectsImageStatusBulk,
       { project_root, statuses, subject, date, dataset_root, annotations_dir, user },
     ),
 
@@ -149,7 +150,7 @@ export const classesApi = {
     complete_override?: string[];
   }) =>
     postJson<{ statuses: Record<string, ImageStatus>; unreadable: string[] }>(
-      ROUTES.postClassesImageStatusDerive,
+      ROUTES.postSubjectsImageStatusDerive,
       body,
     ),
 };

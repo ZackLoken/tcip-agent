@@ -12,12 +12,12 @@ import { useCallback, useMemo, useRef, useState } from "react";
 
 import type { ImageBandsResponse } from "@/api/client";
 import {
-  classesApi,
+  subjectsApi,
   FINISHED_STATUSES,
   subjectColor,
   type ImageStatus,
   type SchemaChangeSweep,
-} from "@/api/classes";
+} from "@/api/subjects";
 import { committedOf } from "@/api/http";
 import { BandPicker } from "@/components/BandPicker";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
@@ -204,7 +204,7 @@ export function AnnotateToolbar({
     setActiveSubject(trimmed);
     if (dataset.project_root) {
       try {
-        const saved = await classesApi.save(
+        const saved = await subjectsApi.save(
           dataset.project_root,
           next,
           dataset.dataset_root,
@@ -218,7 +218,7 @@ export function AnnotateToolbar({
         const saved = committedOf<{
           status: string;
           n_subjects: number;
-          classes_path: string;
+          subjects_path: string;
           version: string;
           schema_change_sweep: SchemaChangeSweep;
         }>(e);
@@ -235,7 +235,7 @@ export function AnnotateToolbar({
           .pushToast(`Could not add subject: ${e instanceof Error ? e.message : String(e)}`);
         setActiveSubject(previousSubject);
         try {
-          const fresh = await classesApi.load(
+          const fresh = await subjectsApi.load(
             dataset.project_root,
             dataset.dataset_root,
             dataset.annotations_dir,
@@ -255,7 +255,7 @@ export function AnnotateToolbar({
     const wasStale = staleMarks.includes(currentImage);
     setImageStatus(currentImage, newStatus);
     try {
-      const result = await classesApi.setImageStatus(
+      const result = await subjectsApi.setImageStatus(
         dataset.project_root,
         currentImage,
         newStatus,

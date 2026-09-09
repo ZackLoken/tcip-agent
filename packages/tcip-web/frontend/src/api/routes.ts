@@ -8,8 +8,6 @@
 
 export const ROUTES = {
   getAnnotateLabels: "/api/annotate/labels",
-  getClassesImageStatus: "/api/classes/image_status",
-  getClassesLoad: "/api/classes/load",
   getCoverage: "/api/coverage",
   getCoverageCompleteness: "/api/coverage/completeness",
   getCoverageGrid: "/api/coverage/grid",
@@ -39,6 +37,8 @@ export const ROUTES = {
   getRoot: "/",
   getSessionsLoad: "/api/sessions/load",
   getState: "/api/state",
+  getSubjectsImageStatus: "/api/subjects/image_status",
+  getSubjectsLoad: "/api/subjects/load",
   getTerminalStatus: "/api/terminal/status",
   getTrainingConfigs: "/api/training/configs",
   getTrainingConfigsByExperimentIdSplits: (experimentId: string) =>
@@ -57,10 +57,6 @@ export const ROUTES = {
     `/api/tuning/sweeps/${encodeURIComponent(sweepId)}/trials/${encodeURIComponent(trialId)}/metrics`,
   postAnnotateLabels: "/api/annotate/labels",
   postCanvasState: "/api/canvas/state",
-  postClassesImageStatus: "/api/classes/image_status",
-  postClassesImageStatusBulk: "/api/classes/image_status/bulk",
-  postClassesImageStatusDerive: "/api/classes/image_status/derive",
-  postClassesSave: "/api/classes/save",
   postCoverage: "/api/coverage",
   postCoverageCompleteness: "/api/coverage/completeness",
   postCoverageGridZoom: "/api/coverage/grid_zoom",
@@ -92,6 +88,10 @@ export const ROUTES = {
   postSessionsImageEvent: "/api/sessions/image_event",
   postSessionsStart: "/api/sessions/start",
   postStateTab: "/api/state/tab",
+  postSubjectsImageStatus: "/api/subjects/image_status",
+  postSubjectsImageStatusBulk: "/api/subjects/image_status/bulk",
+  postSubjectsImageStatusDerive: "/api/subjects/image_status/derive",
+  postSubjectsSave: "/api/subjects/save",
   postTerminalSessions: "/api/terminal/sessions",
   postTerminalSessionsBySessionIdRestart: (sessionId: string) =>
     `/api/terminal/sessions/${encodeURIComponent(sessionId)}/restart`,

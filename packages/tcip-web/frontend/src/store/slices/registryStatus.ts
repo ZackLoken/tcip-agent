@@ -1,7 +1,7 @@
 import type { StateCreator } from "zustand";
 
-import { setSubjectColorRegistry } from "@/api/classes";
-import type { AttributeDef, ImageStatus, Registry } from "@/api/classes";
+import { setSubjectColorRegistry } from "@/api/subjects";
+import type { AttributeDef, ImageStatus, Registry } from "@/api/subjects";
 import type { AppState } from "@/store/appState";
 import type { ReviewImageStatus, ReviewStatusFilter } from "@/store/types";
 

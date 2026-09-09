@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { AttributeDef } from "@/api/classes";
+import type { AttributeDef } from "@/api/subjects";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 
 /** One `<select>` per declared attribute of the subject; empty resets the value. Each row also

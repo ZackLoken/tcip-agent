@@ -110,8 +110,8 @@ def _subjects_by_date(root: Path, dates: list[str]) -> tuple[dict[str, list[str]
     A date whose labels won't read, or whose annotations directory the path guard refuses,
     reports an empty subject list for that date rather than aborting the scan: every other
     date's own labels are unaffected by one date's corrupt file or disallowed storage. The guard
-    checked here is the one ``routes/classes.py``'s ``load_classes`` applies to the same
-    directory, so a dataset the class registry route 403s never lists its subjects here instead.
+    checked here is the one ``routes/subjects.py``'s ``load_subjects`` applies to the same
+    directory, so a dataset the subject registry route 403s never lists its subjects here instead.
     """
     from tcip_annotation.json_io import UnreadableLabelDocument
 
@@ -357,7 +357,7 @@ async def select_dataset(req: SelectionRequest) -> dict:
 
         labels_this_date: list[str] = []
         try:
-            # The one guard load_classes and the dataset tree apply to this directory: a
+            # The one guard load_subjects and the dataset tree apply to this directory: a
             # directory they refuse is reported here, never scanned.
             assert_path_allowed(annotations_dir or "")
         except ValueError as exc:
