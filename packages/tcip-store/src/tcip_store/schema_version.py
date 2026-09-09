@@ -1,10 +1,10 @@
 """The version-field accept rule every frozen store's reader applies.
 
-Absence in an existing document reads as version 1, the frozen default (``owner-decisions.md``
-Part 17 Q1: the field stays lazy, so nothing rewrites an existing document just to stamp it).
-A present ``1`` accepts. A present version above ``descriptor.schema_version`` (the ceiling
-this reader knows) refuses by name, naming the document's number, the ceiling and the store;
-so does a present version that is not a plain integer. The rule applies only to a frozen store
+Absence in an existing document reads as version 1, the frozen default; the field stays lazy,
+so nothing rewrites an existing document just to stamp it. A present ``1`` accepts. A present
+version above ``descriptor.schema_version`` (the ceiling this reader knows) refuses by name,
+naming the document's number, the ceiling and the store; so does a present version that is
+not a plain integer. The rule applies only to a frozen store
 whose documents can carry the field at all: an unstable-by-design store's shape is still
 moving, so no ceiling exists to enforce, and a cannot-carry store's documents (raw bytes, a
 single text primitive, a heading-parsed markdown file) have no field to inspect in the first
