@@ -186,9 +186,8 @@ def _read_captures(project_root: Path) -> list[dict]:
 
     Importing ``tcip_mcp.web_client`` registers the log's store descriptor as a side effect,
     the same way ``tcip_mcp.store_catalogue`` does for the commands that must cover every store.
-    An undecodable entry is excluded from what ``read_log`` returns here exactly as the old
-    direct file read skipped one it could not parse; that page also carries a `corrupt` count
-    of such entries this worksheet does not otherwise surface.
+    An undecodable entry is excluded from what ``read_log`` returns here; that page also
+    carries a `corrupt` count of such entries this worksheet does not otherwise surface.
     """
     from tcip_store import read_log
     from tcip_mcp.web_client import learning_capture_key

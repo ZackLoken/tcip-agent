@@ -107,7 +107,7 @@ class CoverageRecord(BaseModel):
     sub-cell of that cell has, across any number of viewport moments this session or an earlier
     one, been fully on screen at or above it (``coverageTracker.ts``'s ``subCellScale``, the
     tightest bound the tracker knows). Whether a cell counts as "swept" is derived against a
-    working-scale bar the record no longer carries (see ``routes/coverage.py``'s docstring and
+    working-scale bar the record does not carry (see ``routes/coverage.py``'s docstring and
     ``lib/coverage.ts``'s ``meetsBar``), never stored here.
     """
 
