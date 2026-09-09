@@ -1412,7 +1412,7 @@ Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:283`
 `tcip_mcp.class_registry._sweep_schema_change`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:287`, called through `replace_registry`
 (`packages/tcip-mcp/src/tcip_mcp/class_registry.py:381`) by both registry writers,
-`save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:165`) and `write_class_map`
+`save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:165`) and `write_subject_registry`
 (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:513`), before the new registry lands.
 A status and its stamp are two transactions, status first, so unstamped confirmations
 legitimately exist; the outgoing registry is the last moment their digest is recoverable, so the
@@ -1512,7 +1512,7 @@ store.
 demoted from them): bare, a platform event; `@audited(scope_arg=...)` names the argument carrying
 a dataset or project location, resolved via `dataset_scope_of` (`audit.py:266`) (through the tool's own
 canonicalizer when the declaration passes one as `scope_via`). Ten doors declare one: eight
-dataset-scoped (`save_annotations`, `tools/annotation_tools.py:147`; `write_class_map`,
+dataset-scoped (`save_annotations`, `tools/annotation_tools.py:147`; `write_subject_registry`,
 `tools/annotation_tools.py:513`; `redraw_calibration_holdout`, `tools/calibration_tools.py:25`;
 `materialize_review_dataset`, `tools/feedback_tools.py:167`; `run_inference`,
 `tools/inference_tools.py:279`; `register_dataset`, `tools/project_tools.py:189`;
