@@ -96,6 +96,7 @@ def resolve_registry_id_map(labels_dir, subject: str | None, attribute: str | No
     registry to order its values, and refuses when there is none.
     """
     from tcip_mcp import subject_registry
+    from tcip_mcp.dataset_layout import dataset_root_of
 
     if not subject:
         raise ValueError(
@@ -105,6 +106,13 @@ def resolve_registry_id_map(labels_dir, subject: str | None, attribute: str | No
     if cp is not None:
         registry = subject_registry.read_registry(cp)
     elif attribute is not None:
+        root = dataset_root_of(labels_dir)
+        stale = subject_registry.retired_document(root) if root is not None else None
+        if stale is not None:
+            raise ValueError(
+                f"attribute {attribute!r} classification needs a subjects.json to order its "
+                f"values, but {labels_dir} resolves only the retired registry at {stale}; "
+                "conform it first (tcip rename-subject-registry).")
         raise ValueError(
             f"attribute {attribute!r} classification needs a subjects.json to order its values, "
             f"but none was found for {labels_dir}.")

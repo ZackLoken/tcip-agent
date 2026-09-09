@@ -462,6 +462,24 @@ def account_for(tree: str | Path) -> BundleAccounting:
     )
 
 
+def retired_registry_document(accounting: BundleAccounting) -> Path | None:
+    """The retired ``classes.json`` among ``accounting.unaccounted``, at the bundle's tree root
+    alone, or ``None``.
+
+    A bundle carries a registry at its tree root only (:func:`_blob_files` recognizes no other,
+    :func:`blob_home` the same); a derived root's own registry copy is never bundled by
+    ``archive_project`` under either name and stays unaccounted on import both before and after
+    the subject-registry rename, a scope this leaves as it was rather than widening. Named, not
+    merely counted, so ``archive_project`` and ``import_project`` can each refuse by path.
+    """
+    from tcip_mcp.dataset_layout import RETIRED_SUBJECTS_FILENAME
+
+    for path in accounting.unaccounted:
+        if path.parent == accounting.tree and path.name == RETIRED_SUBJECTS_FILENAME:
+            return path
+    return None
+
+
 __all__ = [
     "AnchorMisplaced",
     "BLOB_CHECKPOINTS",
@@ -479,5 +497,6 @@ __all__ = [
     "blob_home",
     "derive_roots",
     "external_registered_checkpoints",
+    "retired_registry_document",
     "unresolved_registered_checkpoints",
 ]
