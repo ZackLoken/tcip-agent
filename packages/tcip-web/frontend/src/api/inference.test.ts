@@ -29,8 +29,8 @@ describe("results api error handling (asJson)", () => {
   });
 
   it("throws on a non-2xx instead of silently returning the error body", async () => {
-    // Regression: a 404 error body ({detail}) used to be returned as-is, so callers
-    // read `.models`/`.rows` off undefined and crashed on the next render.
+    // A 404 error body ({detail}) must not be returned as-is: a caller reading `.models`/
+    // `.rows` off it would get undefined and crash on the next render.
     stubFetch(404, { detail: "no plant mapping" });
     await expect(resultsApi.registeredModels("/proj")).rejects.toThrow("no plant mapping");
   });

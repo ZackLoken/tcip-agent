@@ -16,8 +16,8 @@ describe("mergeMetric (training stream de-dup)", () => {
   });
 
   it("upserts a replayed epoch instead of duplicating it", () => {
-    // Regression: a WS reconnect replays row 0 from the start; the old plain-append
-    // (and the removed seed-GET) double-plotted these. Upsert keeps one point per epoch.
+    // A WS reconnect replays row 0 from the start: upsert keeps one point per epoch
+    // instead of double-plotting it.
     let rows: Parameters<typeof mergeMetric>[0] = [
       { epoch: 0, train_loss: 1 },
       { epoch: 1, train_loss: 0.5 },

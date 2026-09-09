@@ -130,8 +130,8 @@ export function AnnotateTab() {
 
   // I/O safety. The canvas belongs to exactly the image last loaded from disk:
   //  - loadedPathsRef: the (image, label) the current shapes came from. save() writes there,
-  //    never to a path recomputed from a since-changed dataset, which is how the old code could
-  //    write one image's shapes onto another's file.
+  //    never to a path recomputed from a since-changed dataset, which could write one
+  //    image's shapes onto another's file.
   //  - loadedKeyRef: gates reloads to a genuine image-identity change, so unrelated store updates
   //    (a WS snapshot, a mode/subject toggle) don't re-read disk and clobber unsaved edits.
   //  - saveBlocked: set when a load failed, so a blank canvas can't overwrite the labels on disk.
@@ -740,7 +740,7 @@ export function AnnotateTab() {
   }
 
   function selectSubjectByIndex(idx: number) {
-    // Number keys pick the Nth declared subject (0-based), mirroring the old class-number keys.
+    // Number keys pick the Nth declared subject (0-based).
     const names = Object.keys(useStore.getState().registry.subjects);
     if (names[idx]) setActiveSubject(names[idx]);
   }

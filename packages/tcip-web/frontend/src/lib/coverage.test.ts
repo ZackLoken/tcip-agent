@@ -159,7 +159,7 @@ describe("subCellDivisionsFor", () => {
     const smallSubEdge = (small.x1 - small.x0) / smallDivisions;
     const largeSubEdge = (large.x1 - large.x0) / largeDivisions;
     expect(smallSubEdge).toBeLessThanOrEqual(128);
-    expect(largeSubEdge).toBeLessThanOrEqual(128); // no longer ~469px: the bug this fixes
+    expect(largeSubEdge).toBeLessThanOrEqual(128); // bounded even on the long edge of a large-raster lattice
   });
 
   it("never returns fewer than 1 division, even for a cell smaller than the target", () => {

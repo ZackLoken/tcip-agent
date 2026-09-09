@@ -214,7 +214,7 @@ describe("AnnotateTab save/load race", () => {
 
     // Dirty img1, then navigate. flushLeaving() fires the save without awaiting
     // it; hold its response so the img2 load resolves first (slow label write vs
-    // cached read): the exact interleaving that used to corrupt cross-image GT.
+    // cached read): this interleaving must never corrupt cross-image GT.
     act(addBox);
     let resolveFlushSave!: (r: SaveResult) => void;
     saveSpy.mockImplementationOnce(
@@ -2090,8 +2090,8 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
     triggerBelowNativeBaseFacts();
     await waitFor(() => expect(api.coverage.grid).toHaveBeenCalled());
     await flush();
-    // The attest control is offered only while the overlay is on (ruling: no writing about an
-    // unseen cell); these tests exercise the control itself, so switch it on first.
+    // The attest control is offered only while the overlay is on: no writing about an unseen
+    // cell. These tests exercise the control itself, so switch it on first.
     fireEvent.click(screen.getByRole("button", { name: /Overlay off/ }));
   }
 

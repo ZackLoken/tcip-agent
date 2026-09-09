@@ -13,7 +13,7 @@ const sourceFiles = import.meta.glob("/src/**/*.tsx", {
 }) as Record<string, string>;
 
 describe("UNSET_GLYPH", () => {
-  it("is the owner's chosen colon, never an em dash or a hyphen", () => {
+  it("is a colon, never an em dash or a hyphen", () => {
     expect(UNSET_GLYPH).toBe(":");
   });
 });
