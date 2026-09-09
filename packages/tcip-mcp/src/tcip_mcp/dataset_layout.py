@@ -893,7 +893,7 @@ FINISHED_STATUSES = ("complete", CONFIRMED_NEGATIVE)
 :func:`status_confirmations`'s wider sense of every stored record: a ``partial`` or
 ``unannotated`` status is not a person's assertion about the subject. ``is_finished_status`` is
 the membership predicate; the same pair the frontend declares as ``FINISHED_STATUSES`` in
-``api/classes.ts``, held equal to this one by ``tests/test_frontend_dataset_vocabulary.py``.
+``api/subjects.ts``, held equal to this one by ``tests/test_frontend_dataset_vocabulary.py``.
 """
 
 

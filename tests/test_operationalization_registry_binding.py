@@ -26,24 +26,24 @@ def project(tmp_path: Path) -> Path:
 # ── the predicate ─────────────────────────────────────────────────────────────
 
 
-def test_positive_class_problem_is_none_when_the_registry_declares_it(project: Path) -> None:
+def test_positive_value_problem_is_none_when_the_registry_declares_it(project: Path) -> None:
     registry = cr.registry_for_dataset_root(project)
     assert cr.positive_value_problem(registry, "flower", "open") is None
 
 
-def test_positive_class_problem_names_an_unknown_subject(project: Path) -> None:
+def test_positive_value_problem_names_an_unknown_subject(project: Path) -> None:
     registry = cr.registry_for_dataset_root(project)
     problem = cr.positive_value_problem(registry, "no_such_subject", "open")
     assert problem is not None and "no subject" in problem
 
 
-def test_positive_class_problem_names_a_subject_with_no_attributes() -> None:
+def test_positive_value_problem_names_a_subject_with_no_attributes() -> None:
     registry = cr.SubjectRegistry(subjects=(cr.Subject(name="bush"),))
     problem = cr.positive_value_problem(registry, "bush", "open")
     assert problem is not None and "no attributes" in problem
 
 
-def test_positive_class_problem_names_the_value_not_among_the_attributes(project: Path) -> None:
+def test_positive_value_problem_names_the_value_not_among_the_attributes(project: Path) -> None:
     registry = cr.registry_for_dataset_root(project)
     problem = cr.positive_value_problem(registry, "flower", "shed")
     assert problem is not None and "'shed'" in problem and "'flower'" in problem
