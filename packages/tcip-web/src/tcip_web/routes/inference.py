@@ -396,7 +396,7 @@ def _worker(job: InferenceJob) -> None:
     finally:
         from tcip_mcp.audit import AuditEntryNotWritten
         from tcip_mcp.dataset_layout import dataset_root_of
-        from tcip_web.routes.classes import _audit_dataset_write
+        from tcip_web.routes.subjects import _audit_dataset_write
 
         try:
             # output_dir is resolved under the launch's dataset root by the layout resolver, so

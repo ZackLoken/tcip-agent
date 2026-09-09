@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 /** Per-browser subject colour overrides: a subject name -> hex, never written to the registry
- *  (`classes.json` stores no colour; see `api/classes.ts`'s `subjectColor`). Shaped after
+ *  (`subjects.json` stores no colour; see `api/subjects.ts`'s `subjectColor`). Shaped after
  *  `lib/reviewColors.ts`'s persisted palette: a `localStorage` map plus a same-tab event, so a
  *  recolour reaches every consumer of `subjectColor` without a page reload. */
 export type SubjectColorOverrides = Record<string, string>;

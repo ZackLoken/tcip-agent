@@ -1,6 +1,6 @@
 import { memo } from "react";
 
-import { subjectColor } from "@/api/classes";
+import { subjectColor } from "@/api/subjects";
 import { BoxOverlay } from "@/components/annotate/BoxOverlay";
 import { PointOverlay } from "@/components/annotate/PointOverlay";
 import { PolygonOverlay } from "@/components/annotate/PolygonOverlay";

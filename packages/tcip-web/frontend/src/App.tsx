@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useRef, type ReactNode } from "react";
 
-import { classesApi } from "@/api/classes";
+import { subjectsApi } from "@/api/subjects";
 import { ROUTES } from "@/api/routes";
 import {
   PANEL_EVENT_ACTIVE_PROJECT_CHANGED,
@@ -258,7 +258,7 @@ function App() {
     if (!projectRoot || imageList.length === 0) return;
     void (async () => {
       try {
-        const reg = await classesApi.load(projectRoot, datasetRoot, annotationsDir);
+        const reg = await subjectsApi.load(projectRoot, datasetRoot, annotationsDir);
         setRegistry(reg.subjects, reg.version);
         if (reg.unreadable.length) {
           useStore

@@ -13,7 +13,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
-STATUS_DECLARATION = FRONTEND_SRC / "api" / "classes.ts"
+STATUS_DECLARATION = FRONTEND_SRC / "api" / "subjects.ts"
 PATH_DECLARATION = FRONTEND_SRC / "lib" / "paths.ts"
 
 _STATUS_UNION_RE = re.compile(r"export type ImageStatus = ([^;]+);")

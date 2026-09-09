@@ -31,7 +31,7 @@ Also here: the grid-zoom store itself (``coverage_grid_zoom.json``, advisory, on
 subject) and region-completeness routes, a different store on the same grid. An attestation ("I
 found every instance of this subject in these cells") gates a scientific claim (block
 calibration's completeness check), so unlike view coverage it is written with the same discipline
-as ``routes/classes.py``'s image-status store, and a stale attestation (a cell's annotation
+as ``routes/subjects.py``'s image-status store, and a stale attestation (a cell's annotation
 content edited or deleted since it was attested) is detected on every read, not trusted forever.
 An attestation also records its own scale provenance (``cells_attested_view``): the view scale
 the breeder pressed at, the working scale (the set zoom) in effect at write time, and
@@ -55,7 +55,7 @@ import tcip_store
 from tcip_web.paths import assert_path_allowed
 from tcip_web.routes._coverage_models import CoverageRecord, CoverageViewing, GridGeometry
 from tcip_web.routes.audit_gap import AUDIT_ENTRY_NOT_WRITTEN
-from tcip_web.routes.classes import _guard_dataset_root
+from tcip_web.routes.subjects import _guard_dataset_root
 from tcip_web.routes.images import _checked
 
 router = APIRouter(prefix="/api/coverage", tags=["coverage"])

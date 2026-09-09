@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import { classesApi, FINISHED_STATUSES } from "@/api/classes";
+import { subjectsApi, FINISHED_STATUSES } from "@/api/subjects";
 import { isAuditEntryNotWritten } from "@/api/http";
 import { reconcileImageStatuses } from "@/lib/imageStatus";
 import { useStore } from "@/store";
@@ -44,7 +44,7 @@ export function useImageStatusHydrate({
     let cancelled = false;
     void (async () => {
       try {
-        const saved = await classesApi.loadImageStatus(
+        const saved = await subjectsApi.loadImageStatus(
           projectRoot,
           subject,
           datasetDate,
@@ -54,7 +54,7 @@ export function useImageStatusHydrate({
         const stored = saved.statuses ?? {};
         const confirmed = imageList.filter((name) => FINISHED_STATUSES.includes(stored[name]));
         const digestStale = new Set(saved.stale_definition ?? []);
-        const derivedRes = await classesApi.deriveImageStatus({
+        const derivedRes = await subjectsApi.deriveImageStatus({
           project_root: projectRoot,
           annotations_dir: annotationsDir,
           subject,
@@ -80,7 +80,7 @@ export function useImageStatusHydrate({
         }
         if (Object.keys(writes).length) {
           try {
-            await classesApi.setImageStatusBulk(
+            await subjectsApi.setImageStatusBulk(
               projectRoot,
               writes,
               subject,

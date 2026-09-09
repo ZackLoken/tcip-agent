@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type Konva from "konva";
 
 import { api } from "@/api/client";
-import { classesApi, subjectColor, type ImageStatus } from "@/api/classes";
+import { subjectsApi, subjectColor, type ImageStatus } from "@/api/subjects";
 import { committedOf, isAuditEntryNotWritten } from "@/api/http";
 import { resultsApi, type RegisteredModel } from "@/api/inference";
 import type { ActionPayload } from "@/api/types.generated";
@@ -1128,7 +1128,7 @@ export function ReviewTab() {
         setStoreImageStatus(imgName, res.annotation_status);
         // The registry this status is mirrored into is the project's, not the review store's.
         if (dataset.project_root) {
-          void classesApi
+          void subjectsApi
             .setImageStatus(
               dataset.project_root,
               imgName,
@@ -1154,7 +1154,7 @@ export function ReviewTab() {
         if (committed.annotation_status) {
           setStoreImageStatus(imgName, committed.annotation_status);
           if (dataset.project_root) {
-            void classesApi
+            void subjectsApi
               .setImageStatus(
                 dataset.project_root,
                 imgName,

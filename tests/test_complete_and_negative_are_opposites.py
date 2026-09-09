@@ -46,7 +46,7 @@ def labelled_dataset(tmp_path: Path) -> Path:
 def _derive(client: TestClient, root: Path, subject: str, images: list[str],
             done: list[str]) -> dict[str, str]:
     resp = client.post(
-        "/api/classes/image_status/derive",
+        "/api/subjects/image_status/derive",
         json={"project_root": str(root), "annotations_dir": str(root / "annotations"),
               "subject": subject, "image_list": images, "complete_override": done},
     )
@@ -56,7 +56,7 @@ def _derive(client: TestClient, root: Path, subject: str, images: list[str],
 
 def _store(client: TestClient, root: Path, subject: str, statuses: dict[str, str]) -> None:
     resp = client.post(
-        "/api/classes/image_status/bulk",
+        "/api/subjects/image_status/bulk",
         json={"project_root": str(root), "dataset_root": str(root), "subject": subject,
               "statuses": statuses},
     )
@@ -65,7 +65,7 @@ def _store(client: TestClient, root: Path, subject: str, statuses: dict[str, str
 
 def _read_back(client: TestClient, root: Path, subject: str) -> dict[str, str]:
     resp = client.get(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         params={"project_root": str(root), "dataset_root": str(root), "subject": subject},
     )
     assert resp.status_code == 200, resp.text
@@ -118,7 +118,7 @@ def test_confirmations_recorded_under_different_dates_stay_separate(
     negative recorded on one date can never overwrite a finished image on the other."""
     for date, status in (("2026-03-02", "negative"), ("2026-03-09", "complete")):
         resp = client.post(
-            "/api/classes/image_status",
+            "/api/subjects/image_status",
             json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
                   "image_name": "IMG_0007.JPG", "status": status, "subject": "bud",
                   "date": date},
@@ -130,7 +130,7 @@ def test_confirmations_recorded_under_different_dates_stay_separate(
                   "subject": "bud"}
         if date:
             params["date"] = date
-        return client.get("/api/classes/image_status", params=params).json()["statuses"]
+        return client.get("/api/subjects/image_status", params=params).json()["statuses"]
 
     assert read("2026-03-02") == {"IMG_0007.JPG": "negative"}
     assert read("2026-03-09") == {"IMG_0007.JPG": "complete"}

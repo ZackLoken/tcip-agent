@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  classesApi,
+  subjectsApi,
   type AttributeDef,
   type Registry,
   type SchemaChangeSweep,
-} from "@/api/classes";
+} from "@/api/subjects";
 import { committedOf } from "@/api/http";
 import { AttributeEditors } from "@/components/annotate/AttributeEditors";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
@@ -84,7 +84,7 @@ export function AttributePanel({
     setRegistry(next, registryVersion);
     if (!dataset.project_root) return;
     try {
-      const saved = await classesApi.save(
+      const saved = await subjectsApi.save(
         dataset.project_root,
         next,
         dataset.dataset_root,
@@ -98,7 +98,7 @@ export function AttributePanel({
       const saved = committedOf<{
         status: string;
         n_subjects: number;
-        classes_path: string;
+        subjects_path: string;
         version: string;
         schema_change_sweep: SchemaChangeSweep;
       }>(e);
@@ -114,7 +114,7 @@ export function AttributePanel({
         .getState()
         .pushToast(`Could not update attributes: ${e instanceof Error ? e.message : String(e)}`);
       try {
-        const fresh = await classesApi.load(
+        const fresh = await subjectsApi.load(
           dataset.project_root,
           dataset.dataset_root,
           dataset.annotations_dir,

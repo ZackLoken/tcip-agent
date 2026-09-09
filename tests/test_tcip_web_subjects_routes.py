@@ -1,4 +1,4 @@
-"""Tests for the class-registry / per-image-status routes."""
+"""Tests for the subject-registry / per-image-status routes."""
 
 from __future__ import annotations
 
@@ -32,15 +32,15 @@ def _status_store_exists(dataset_root: Path) -> bool:
 
 
 def test_load_empty_registry(client: TestClient, tmp_path: Path) -> None:
-    resp = client.get("/api/classes/load", params={"project_root": str(tmp_path)})
+    resp = client.get("/api/subjects/load", params={"project_root": str(tmp_path)})
     assert resp.status_code == 200
     assert resp.json() == {"subjects": {}, "version": None, "unreadable": []}
 
 
 def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
-    # The registry is one nested classes.json in the DATASET; it travels with the image set.
+    # The registry is one nested subjects.json in the DATASET; it travels with the image set.
     save = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={
             "project_root": str(tmp_path),
             "dataset_root": str(tmp_path),
@@ -60,33 +60,33 @@ def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
     assert save.json()["n_subjects"] == 2
 
     load = client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
     ).json()
     subjects = load["subjects"]
     assert set(subjects) == {"bud", "bush"}
     assert subjects["bud"]["attributes"]["opening"]["values"] == ["closed", "open"]
-    # Lands in the dataset as one nested classes.json (no per-subject files, no numeric ids).
-    on_disk = json.loads((tmp_path / "classes.json").read_text())
+    # Lands in the dataset as one nested subjects.json (no per-subject files, no numeric ids).
+    on_disk = json.loads((tmp_path / "subjects.json").read_text())
     assert set(on_disk) == {"bud", "bush"}
 
 
 def test_save_refuses_an_empty_registry(client: TestClient, tmp_path: Path) -> None:
     """A registry write states subjects; it never clears them, at either door."""
     r = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subjects": {},
               "version": None},
     )
     assert r.status_code == 400
-    assert not (tmp_path / "classes.json").exists()
+    assert not (tmp_path / "subjects.json").exists()
 
 
 def test_save_refuses_dropping_a_declared_subject(client: TestClient, tmp_path: Path) -> None:
     """A stale browser posting a subset of the stored registry is refused by name, not silently
     written: the additive-only toolbar makes a drop arriving here a sign of staleness."""
     first = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"leaf": {"description": "one leaf"}, "bush": {"description": "b"}},
               "version": None},
@@ -94,13 +94,13 @@ def test_save_refuses_dropping_a_declared_subject(client: TestClient, tmp_path: 
     assert first.status_code == 200
 
     dropped = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"bush": {"description": "b"}}, "version": first.json()["version"]},
     )
     assert dropped.status_code == 400
     assert "leaf" in dropped.text
-    on_disk = json.loads((tmp_path / "classes.json").read_text())
+    on_disk = json.loads((tmp_path / "subjects.json").read_text())
     assert "leaf" in on_disk  # the refused write never landed
 
 
@@ -110,20 +110,20 @@ def test_load_returns_the_version_and_save_round_trips_it(
     """The toolbar carries the version it loaded back into its next save, the shape that lets a
     stale browser be told apart from a caller with nothing to assert."""
     save = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"leaf": {"description": "one leaf"}}, "version": None},
     )
     assert save.status_code == 200
 
     load = client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
     ).json()
     assert load["version"]
 
     grown = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"leaf": {"description": "one leaf"}, "bush": {}},
               "version": load["version"]},
@@ -136,23 +136,23 @@ def test_save_refuses_a_stale_version(client: TestClient, tmp_path: Path) -> Non
     """A save carrying a version the store has moved past since is refused with 409, naming the
     conflict, rather than silently overwriting a registry the browser never saw."""
     client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"leaf": {"description": "one leaf"}}, "version": None},
     )
     stale_load = client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
     ).json()
     client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"leaf": {"description": "one leaf"}, "bush": {}},
               "version": stale_load["version"]},
     )
 
     conflicted = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"leaf": {"description": "one leaf"}, "bush": {}, "tip": {}},
               "version": stale_load["version"]},
@@ -173,14 +173,14 @@ def test_save_with_a_null_version_refuses_over_a_registry_written_meanwhile(
 
     # Additive (keeps "leaf"), so only the version check can refuse this, not the by-name drop rail.
     resp = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"leaf": {"description": "written by the agent"},
                            "bush": {"description": "written by the browser"}},
               "version": None},
     )
     assert resp.status_code == 409
-    assert read_registry(tmp_path / "classes.json").subject("bush") is None
+    assert read_registry(tmp_path / "subjects.json").subject("bush") is None
 
 
 def test_save_with_a_null_version_succeeds_over_a_still_absent_registry(
@@ -189,7 +189,7 @@ def test_save_with_a_null_version_succeeds_over_a_still_absent_registry(
     """A null version asserts the registry is still absent; over an actually absent one the write
     lands rather than being treated as unconditional."""
     resp = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"bush": {"description": "first write"}}, "version": None},
     )
@@ -200,7 +200,7 @@ def test_save_refuses_a_same_values_attribute_type_flip(client: TestClient, tmp_
     """The route passes neither allow_removals nor allow_type_changes, so a type flip has no door
     here at all, in either direction: only a values-only growth or a same-type re-save lands."""
     first = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"bud": {"attributes": {
                   "opening": {"type": "categorical", "values": ["closed", "open"]}}}},
@@ -209,7 +209,7 @@ def test_save_refuses_a_same_values_attribute_type_flip(client: TestClient, tmp_
     assert first.status_code == 200
 
     flipped = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"bud": {"attributes": {
                   "opening": {"type": "ordinal", "values": ["closed", "open"]}}}},
@@ -225,7 +225,7 @@ def test_save_refuses_the_reverse_attribute_type_flip_too(
     client: TestClient, tmp_path: Path
 ) -> None:
     first = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"bud": {"attributes": {
                   "opening": {"type": "ordinal", "values": ["closed", "open"]}}}},
@@ -234,7 +234,7 @@ def test_save_refuses_the_reverse_attribute_type_flip_too(
     assert first.status_code == 200
 
     flipped = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"bud": {"attributes": {
                   "opening": {"type": "categorical", "values": ["closed", "open"]}}}},
@@ -248,7 +248,7 @@ def test_save_refuses_malformed_registry(client: TestClient, tmp_path: Path) -> 
     """A malformed registry (here: an attribute with no ``values``) is refused, not silently
     written: a bad registry would assign ids over garbage."""
     r = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"bud": {"attributes": {"opening": {"type": "categorical"}}}},
               "version": None},
@@ -259,7 +259,7 @@ def test_save_refuses_malformed_registry(client: TestClient, tmp_path: Path) -> 
 def test_registry_holds_multiple_subjects(client: TestClient, tmp_path: Path) -> None:
     # bud and bush each name their own object; the one nested registry keeps them distinct.
     save = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={
             "project_root": str(tmp_path),
             "dataset_root": str(tmp_path),
@@ -273,12 +273,12 @@ def test_registry_holds_multiple_subjects(client: TestClient, tmp_path: Path) ->
     assert save.status_code == 200
 
     load = client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
     ).json()
     assert load["subjects"]["bud"]["description"] == "a bud"
     assert load["subjects"]["bush"]["description"] == "a bush"
-    assert (tmp_path / "classes.json").is_file()
+    assert (tmp_path / "subjects.json").is_file()
 
 
 def test_dataset_root_derived_from_annotation_dir(client: TestClient, tmp_path: Path) -> None:
@@ -286,12 +286,12 @@ def test_dataset_root_derived_from_annotation_dir(client: TestClient, tmp_path: 
     ann = tmp_path / "annotations" / "2026-03-02"
     ann.mkdir(parents=True)
     r = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "annotations_dir": str(ann),
               "subjects": {"bud": {"description": "a bud"}}, "version": None},
     )
     assert r.status_code == 200
-    assert (tmp_path / "classes.json").is_file()
+    assert (tmp_path / "subjects.json").is_file()
 
 
 def test_load_derives_subjects_from_labels_when_registry_absent(
@@ -307,7 +307,7 @@ def test_load_derives_subjects_from_labels_when_registry_absent(
         100, 100,
     )
     load = client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(tmp_path), "annotations_dir": str(ann)},
     ).json()
     assert set(load["subjects"]) == {"bush", "bud"}
@@ -324,7 +324,7 @@ def test_load_reports_an_unreadable_label_and_still_derives_the_rest(
     (ann / "IMG_B.json").write_text("not json {][", encoding="utf-8")
 
     load = client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(tmp_path), "annotations_dir": str(ann)},
     ).json()
     assert set(load["subjects"]) == {"bud"}
@@ -334,7 +334,7 @@ def test_load_reports_an_unreadable_label_and_still_derives_the_rest(
 def test_load_reports_an_unreadable_label_beside_a_saved_registry(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A saved classes.json answers the subject list, but a corrupt label file under
+    """A saved subjects.json answers the subject list, but a corrupt label file under
     annotations_dir is still worth surfacing: the registry load must not stop scanning for
     unreadable documents just because a registry was found."""
     ann = tmp_path / "annotations" / "d"
@@ -343,14 +343,14 @@ def test_load_reports_an_unreadable_label_beside_a_saved_registry(
     (ann / "IMG_B.json").write_text("not json {][", encoding="utf-8")
 
     save = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"bud": {"description": "a bud"}}, "version": None},
     )
     assert save.status_code == 200
 
     load = client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
                 "annotations_dir": str(ann)},
     ).json()
@@ -371,7 +371,7 @@ def test_load_reports_the_guards_resolved_path_not_the_clients_spelling(
     assert raw != str(ann)
 
     load = client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(tmp_path), "annotations_dir": raw},
     ).json()
     assert load["unreadable"] == [str(ann.resolve() / "IMG_B.json")]
@@ -463,13 +463,13 @@ def test_cached_label_annotations_hands_out_the_same_records_on_a_hit(tmp_path: 
 def test_image_status_round_trip(client: TestClient, tmp_path: Path) -> None:
     # Confirmations are dataset-native: a write must locate dataset_root.
     post = client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
     )
     assert post.status_code == 200
     resp = client.get(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud"},
     )
     body = resp.json()
@@ -483,19 +483,19 @@ def test_get_image_status_reports_stale_definition_after_a_schema_change(
     """A finished confirmation stamped under a since-grown vocabulary shows up as stale, and
     re-confirming through the status route (which restamps) clears it."""
     save = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"bud": {"attributes": {
                   "opening": {"type": "categorical", "values": ["closed", "open"]}}}},
               "version": None},
     )
     client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
     )
     grown = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"bud": {"attributes": {
                   "opening": {"type": "categorical", "values": ["closed", "partial", "open"]}}}},
@@ -504,21 +504,21 @@ def test_get_image_status_reports_stale_definition_after_a_schema_change(
     assert grown.status_code == 200
 
     body = client.get(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud"},
     ).json()
     assert "stale_definition" in body
     assert body["stale_definition"] == ["IMG_0001.JPG"]
 
     reconfirm = client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
     )
     assert reconfirm.json()["digest_stamped"] is True
 
     after = client.get(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud"},
     ).json()
     assert after["stale_definition"] == []
@@ -534,19 +534,19 @@ def test_reconfirm_with_the_digest_store_obstructed_answers_digest_stamped_false
     from tcip_mcp import dataset_layout
 
     save = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"bud": {"attributes": {
                   "opening": {"type": "categorical", "values": ["closed", "open"]}}}},
               "version": None},
     )
     client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
     )
     client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"bud": {"attributes": {
                   "opening": {"type": "categorical", "values": ["closed", "partial", "open"]}}}},
@@ -561,14 +561,14 @@ def test_reconfirm_with_the_digest_store_obstructed_answers_digest_stamped_false
     monkeypatch.setattr(dataset_layout, "stamp_image_status_digests", _raise)
 
     reconfirm = client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
     )
     assert reconfirm.json()["digest_stamped"] is False
 
     body = client.get(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
                 "subject": "bud"},
     ).json()
@@ -578,18 +578,18 @@ def test_reconfirm_with_the_digest_store_obstructed_answers_digest_stamped_false
 def test_set_image_status_reports_digest_stamped_true_for_a_subject_the_registry_does_not_declare(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A subject absent from classes.json earns no digest to stamp against; that is nothing to
+    """A subject absent from subjects.json earns no digest to stamp against; that is nothing to
     stamp, not a failed write, so the confirmation must not read back as needing
     re-confirmation."""
     client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"leaf": {"attributes": {}}},
               "version": None},
     )
 
     resp = client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
     )
@@ -598,7 +598,7 @@ def test_set_image_status_reports_digest_stamped_true_for_a_subject_the_registry
 
 def test_image_status_rejects_invalid(client: TestClient, tmp_path: Path) -> None:
     resp = client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "image_name": "x", "status": "bogus"},
     )
@@ -609,9 +609,9 @@ def test_image_status_write_refuses_without_a_locatable_dataset(
     client: TestClient, tmp_path: Path
 ) -> None:
     """A write that can't locate dataset_root must fail loudly, not silently write nowhere anyone
-    reads (mirrors save_classes' same refusal)."""
+    reads (mirrors save_subjects' same refusal)."""
     resp = client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(tmp_path), "image_name": "IMG_0001.JPG",
               "status": "complete", "subject": "bud"},
     )
@@ -624,7 +624,7 @@ def test_image_status_write_refuses_without_a_subject(
     """A write with no subject must fail loudly rather than land in the "" bucket, which
     ``get_image_status`` never returns anything meaningful for."""
     resp = client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "image_name": "IMG_0001.JPG", "status": "complete"},
     )
@@ -637,7 +637,7 @@ def test_image_status_bulk_write_refuses_without_a_subject(
     """A bulk write with no subject must fail loudly rather than land in the "" bucket, which
     ``get_image_status`` never returns anything meaningful for."""
     resp = client.post(
-        "/api/classes/image_status/bulk",
+        "/api/subjects/image_status/bulk",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "statuses": {"IMG_0001.JPG": "complete"}},
     )
@@ -655,7 +655,7 @@ def test_image_status_lands_at_dataset_root_not_an_unrelated_project(
     dataset_root.mkdir()
 
     client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(project_root), "dataset_root": str(dataset_root),
               "image_name": "IMG_0001.JPG", "status": "negative", "subject": "bud"},
     )
@@ -674,7 +674,7 @@ def test_derive_statuses_negatives_are_intentional(client: TestClient, tmp_path:
     # IMG_C.json missing; IMG_D completed but has no file (empty)
 
     resp = client.post(
-        "/api/classes/image_status/derive",
+        "/api/subjects/image_status/derive",
         json={
             "project_root": str(tmp_path),
             "annotations_dir": str(ann),
@@ -701,7 +701,7 @@ def test_derive_statuses_reports_an_unreadable_label_and_still_derives_the_rest(
     (ann / "IMG_B.json").write_text("not json {][", encoding="utf-8")
 
     resp = client.post(
-        "/api/classes/image_status/derive",
+        "/api/subjects/image_status/derive",
         json={
             "project_root": str(tmp_path), "annotations_dir": str(ann), "subject": "bud",
             "image_list": ["IMG_A.JPG", "IMG_B.JPG"], "complete_override": [],
@@ -728,13 +728,13 @@ def test_derive_statuses_cache_invalidates_on_label_write(client: TestClient, tm
         "image_list": ["IMG_A.JPG"],
         "complete_override": [],
     }
-    first = client.post("/api/classes/image_status/derive", json=req).json()
+    first = client.post("/api/subjects/image_status/derive", json=req).json()
     assert first["statuses"]["IMG_A.JPG"] == "unannotated"
 
     write_annotations(str(label), [_bud(50, 50, 60, 60)], 100, 100)
     os.utime(label, (2_000_000, 2_000_000))  # force a distinct mtime_ns from the first write
 
-    second = client.post("/api/classes/image_status/derive", json=req).json()
+    second = client.post("/api/subjects/image_status/derive", json=req).json()
     assert second["statuses"]["IMG_A.JPG"] == "partial"
 
 
@@ -753,7 +753,7 @@ def test_load_derives_subjects_excludes_a_bucket_sidecar(
                        "subject": "bud", "attribute": None})
 
     load = client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(tmp_path), "annotations_dir": str(ann)},
     ).json()
     assert set(load["subjects"]) == {"bud"}
@@ -763,7 +763,7 @@ def test_load_derives_subjects_excludes_a_bucket_sidecar(
 def test_load_derived_registry_cache_invalidates_on_label_write(
     client: TestClient, tmp_path: Path
 ) -> None:
-    # Same memo, exercised through load_classes' label-derived subject list.
+    # Same memo, exercised through load_subjects' label-derived subject list.
     ann = tmp_path / "annotations" / "d"
     ann.mkdir(parents=True)
     label = ann / "IMG_A.json"
@@ -771,7 +771,7 @@ def test_load_derived_registry_cache_invalidates_on_label_write(
     os.utime(label, (1_000_000, 1_000_000))
 
     params = {"project_root": str(tmp_path), "annotations_dir": str(ann)}
-    first = client.get("/api/classes/load", params=params).json()
+    first = client.get("/api/subjects/load", params=params).json()
     assert set(first["subjects"]) == {"bud"}
 
     write_annotations(
@@ -779,16 +779,16 @@ def test_load_derived_registry_cache_invalidates_on_label_write(
     )
     os.utime(label, (2_000_000, 2_000_000))
 
-    second = client.get("/api/classes/load", params=params).json()
+    second = client.get("/api/subjects/load", params=params).json()
     assert set(second["subjects"]) == {"bush", "bud"}
 
 
-def test_save_classes_confines_dataset_root_to_allowed_roots(
+def test_save_subjects_confines_dataset_root_to_allowed_roots(
     client: TestClient, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
     outside = tmp_path_factory.mktemp("outside")
     resp = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(outside), "dataset_root": str(outside),
               "subjects": {"bud": {"description": "a bud"}}, "version": None},
     )
@@ -800,7 +800,7 @@ def test_image_status_confines_dataset_root_to_allowed_roots(
 ) -> None:
     outside = tmp_path_factory.mktemp("outside")
     resp = client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(outside), "dataset_root": str(outside),
               "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
     )
@@ -812,7 +812,7 @@ def test_image_status_bulk_confines_dataset_root_to_allowed_roots(
 ) -> None:
     outside = tmp_path_factory.mktemp("outside")
     resp = client.post(
-        "/api/classes/image_status/bulk",
+        "/api/subjects/image_status/bulk",
         json={"project_root": str(outside), "dataset_root": str(outside),
               "subject": "bud", "statuses": {"A.JPG": "complete"}},
     )
@@ -824,7 +824,7 @@ def test_get_image_status_confines_dataset_root_to_allowed_roots(
 ) -> None:
     outside = tmp_path_factory.mktemp("outside")
     resp = client.get(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         params={"project_root": str(outside), "dataset_root": str(outside), "subject": "bud"},
     )
     assert resp.status_code == 403
@@ -836,14 +836,14 @@ def test_derive_image_status_confines_annotations_dir_to_allowed_roots(
     outside = tmp_path_factory.mktemp("outside") / "annotations"
     outside.mkdir()
     resp = client.post(
-        "/api/classes/image_status/derive",
+        "/api/subjects/image_status/derive",
         json={"project_root": str(tmp_path), "annotations_dir": str(outside),
               "subject": "bud", "image_list": ["IMG_A.JPG"]},
     )
     assert resp.status_code == 403
 
 
-def test_load_classes_confines_annotations_dir_before_scanning_it(
+def test_load_subjects_confines_annotations_dir_before_scanning_it(
     client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch,
 ) -> None:
     """The guard runs before the scan: a refused annotations_dir is never parsed, so a request
@@ -861,7 +861,7 @@ def test_load_classes_confines_annotations_dir_before_scanning_it(
     monkeypatch.setattr(json_io, "read_annotations", _must_not_be_called)
 
     resp = client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(tmp_path), "dataset_root": str(outside),
                 "annotations_dir": str(ann)},
     )
@@ -874,7 +874,7 @@ def test_a_dataset_root_inside_the_workspace_clears_the_confinement_guard(
     """The rail must admit valid work, not only reject invalid work: with no additive
     TCIP_IMAGE_ROOTS set, a dataset root under the workspace is still admitted."""
     resp = client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
     )
@@ -900,7 +900,7 @@ def test_set_image_status_writes_a_dataset_scoped_audit_entry(
     project_root.mkdir()
     dataset_root.mkdir()
     client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(project_root), "dataset_root": str(dataset_root),
               "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
     )
@@ -921,7 +921,7 @@ def test_set_image_status_bulk_audit_entry_records_only_what_was_applied(
     project_root.mkdir()
     dataset_root.mkdir()
     client.post(
-        "/api/classes/image_status/bulk",
+        "/api/subjects/image_status/bulk",
         json={
             "project_root": str(project_root), "dataset_root": str(dataset_root), "subject": "bud",
             "statuses": {"A.JPG": "complete", "B.JPG": "invalid_ignored"},
@@ -935,19 +935,19 @@ def test_set_image_status_bulk_audit_entry_records_only_what_was_applied(
     assert _read_audit_entries(project_root) == []
 
 
-def test_save_classes_writes_a_dataset_scoped_audit_entry(client: TestClient, tmp_path: Path) -> None:
+def test_save_subjects_writes_a_dataset_scoped_audit_entry(client: TestClient, tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     dataset_root = tmp_path / "shared_dataset"
     project_root.mkdir()
     dataset_root.mkdir()
     client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(project_root), "dataset_root": str(dataset_root),
               "subjects": {"bud": {"description": "a bud"}}, "version": None},
     )
     entries = _read_audit_entries(dataset_root)
     assert len(entries) == 1
-    assert entries[0]["tool"] == "gui_save_classes"
+    assert entries[0]["tool"] == "gui_save_subjects"
     assert entries[0]["arguments"]["n_subjects"] == 1
     assert _read_audit_entries(project_root) == []
 
@@ -957,7 +957,7 @@ def test_image_status_bulk_writes_no_audit_entry_when_every_status_is_invalid(
 ) -> None:
     """No real write happened, so no audit entry should claim one did."""
     client.post(
-        "/api/classes/image_status/bulk",
+        "/api/subjects/image_status/bulk",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud",
               "statuses": {"A.JPG": "invalid_ignored"}},
     )
@@ -966,7 +966,7 @@ def test_image_status_bulk_writes_no_audit_entry_when_every_status_is_invalid(
 
 def test_image_status_bulk(client: TestClient, tmp_path: Path) -> None:
     resp = client.post(
-        "/api/classes/image_status/bulk",
+        "/api/subjects/image_status/bulk",
         json={
             "project_root": str(tmp_path),
             "dataset_root": str(tmp_path),
@@ -980,7 +980,7 @@ def test_image_status_bulk(client: TestClient, tmp_path: Path) -> None:
     )
     assert resp.json()["n"] == 3
     loaded = client.get(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud"},
     ).json()
     assert loaded["statuses"]["A.JPG"] == "complete"
@@ -999,7 +999,7 @@ def _refuse_append(*args: object, **kwargs: object) -> None:
     raise _AppendRefused("the audit log could not be appended to")
 
 
-def test_save_classes_answers_409_with_the_committed_body_on_a_lost_audit_line(
+def test_save_subjects_answers_409_with_the_committed_body_on_a_lost_audit_line(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The registry write already committed; a lost audit line answers the gap, not a 200. An
@@ -1009,7 +1009,7 @@ def test_save_classes_answers_409_with_the_committed_body_on_a_lost_audit_line(
     import tcip_mcp.audit as audit_module
 
     healthy = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"bud": {"description": "a bud"}}, "version": None},
     )
@@ -1018,7 +1018,7 @@ def test_save_classes_answers_409_with_the_committed_body_on_a_lost_audit_line(
 
     monkeypatch.setattr(audit_module, "append", _refuse_append)
     resp = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"bud": {"description": "a bud"}}, "version": healthy_body["version"]},
     )
@@ -1028,11 +1028,11 @@ def test_save_classes_answers_409_with_the_committed_body_on_a_lost_audit_line(
     committed = detail["committed"]
     assert committed["status"] == "ok"
     assert committed["n_subjects"] == 1
-    assert committed["subjects_path"] == str(tmp_path / "classes.json")
+    assert committed["subjects_path"] == str(tmp_path / "subjects.json")
     assert {k: v for k, v in committed.items() if k != "version"} == {
         k: v for k, v in healthy_body.items() if k != "version"
     }
-    on_disk = json.loads((tmp_path / "classes.json").read_text())
+    on_disk = json.loads((tmp_path / "subjects.json").read_text())
     assert set(on_disk) == {"bud"}
 
 
@@ -1045,19 +1045,19 @@ def test_set_image_status_answers_409_with_the_committed_body_on_a_lost_audit_li
 
     payload = {"project_root": str(tmp_path), "dataset_root": str(tmp_path),
                "image_name": "A.JPG", "status": "complete", "subject": "bud"}
-    healthy = client.post("/api/classes/image_status", json=payload)
+    healthy = client.post("/api/subjects/image_status", json=payload)
     assert healthy.status_code == 200, healthy.text
     healthy_body = healthy.json()
 
     monkeypatch.setattr(audit_module, "append", _refuse_append)
-    resp = client.post("/api/classes/image_status", json=payload)
+    resp = client.post("/api/subjects/image_status", json=payload)
     assert resp.status_code == 409
     detail = resp.json()["detail"]
     assert detail["error"] == "audit_entry_not_written"
     assert detail["committed"]["status"] == "ok"
     assert detail["committed"] == healthy_body
     loaded = client.get(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud"},
     ).json()
     assert loaded["statuses"]["A.JPG"] == "complete"
@@ -1073,19 +1073,19 @@ def test_set_image_status_bulk_answers_409_with_the_committed_body_on_a_lost_aud
 
     payload = {"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud",
                "statuses": {"A.JPG": "complete"}}
-    healthy = client.post("/api/classes/image_status/bulk", json=payload)
+    healthy = client.post("/api/subjects/image_status/bulk", json=payload)
     assert healthy.status_code == 200, healthy.text
     healthy_body = healthy.json()
 
     monkeypatch.setattr(audit_module, "append", _refuse_append)
-    resp = client.post("/api/classes/image_status/bulk", json=payload)
+    resp = client.post("/api/subjects/image_status/bulk", json=payload)
     assert resp.status_code == 409
     detail = resp.json()["detail"]
     assert detail["error"] == "audit_entry_not_written"
     assert detail["committed"]["n"] == 1
     assert detail["committed"] == healthy_body
     loaded = client.get(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud"},
     ).json()
     assert loaded["statuses"]["A.JPG"] == "complete"

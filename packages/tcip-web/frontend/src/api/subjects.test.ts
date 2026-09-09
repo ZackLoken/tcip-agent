@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { classesApi, derivedSubjectColor, setSubjectColorRegistry } from "@/api/classes";
-import { SUBJECT_COLORS, subjectColor } from "@/api/classes";
+import { subjectsApi, derivedSubjectColor, setSubjectColorRegistry } from "@/api/subjects";
+import { SUBJECT_COLORS, subjectColor } from "@/api/subjects";
 
 function stubFetch(body: unknown = { status: "ok" }) {
   vi.stubGlobal(
@@ -48,7 +48,7 @@ describe("image-status writes carry the app-set identity", () => {
 
   it("names the person in the single-image body, so the backend stamps them and not itself", async () => {
     stubFetch();
-    await classesApi.setImageStatus(
+    await subjectsApi.setImageStatus(
       "C:/proj",
       "img1.jpg",
       "negative",
@@ -65,7 +65,7 @@ describe("image-status writes carry the app-set identity", () => {
 
   it("names the person in the bulk body, which writes the same store one call wider", async () => {
     stubFetch();
-    await classesApi.setImageStatusBulk(
+    await subjectsApi.setImageStatusBulk(
       "C:/proj",
       { "img1.jpg": "partial" },
       "subject_a",
@@ -81,7 +81,7 @@ describe("image-status writes carry the app-set identity", () => {
 
   it("leaves the field out when no name is set, which is what the backend fallback answers", async () => {
     stubFetch();
-    await classesApi.setImageStatus(
+    await subjectsApi.setImageStatus(
       "C:/proj",
       "img1.jpg",
       "complete",

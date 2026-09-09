@@ -44,11 +44,11 @@ def _save_registry(client: TestClient, root: Path, bud_attributes: dict) -> None
     route last reported: bud carries an attribute vocabulary, bush is detection-only, so the
     two subjects have different schemas."""
     version = client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(root), "dataset_root": str(root)},
     ).json()["version"]
     resp = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={
             "project_root": str(root),
             "dataset_root": str(root),
@@ -64,7 +64,7 @@ def _save_registry(client: TestClient, root: Path, bud_attributes: dict) -> None
 
 def _confirm_negative(client: TestClient, root: Path, image_name: str, subject: str) -> None:
     resp = client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(root), "dataset_root": str(root), "image_name": image_name,
               "status": "negative", "subject": subject},
     )
@@ -121,7 +121,7 @@ def test_a_bulk_write_stamps_only_the_statuses_it_applied(
     confirmation that is still standing rather than being re-dated by a write it took no part in."""
     _save_registry(client, dataset, BUD_TWO_STATES)
     first = client.post(
-        "/api/classes/image_status/bulk",
+        "/api/subjects/image_status/bulk",
         json={"project_root": str(dataset), "dataset_root": str(dataset), "subject": "bud",
               "statuses": {"img_one.jpg": "negative"}},
     )
@@ -129,7 +129,7 @@ def test_a_bulk_write_stamps_only_the_statuses_it_applied(
 
     _save_registry(client, dataset, BUD_THREE_STATES)
     second = client.post(
-        "/api/classes/image_status/bulk",
+        "/api/subjects/image_status/bulk",
         json={"project_root": str(dataset), "dataset_root": str(dataset), "subject": "bud",
               "statuses": {"img_two.jpg": "negative", "img_one.jpg": "not_a_status"}},
     )

@@ -3,7 +3,7 @@
  * All routes hit /api/* and return typed payloads.
  */
 
-import type { ImageStatus } from "@/api/classes";
+import type { ImageStatus } from "@/api/subjects";
 import { AUDIT_ENTRY_NOT_WRITTEN, asJson } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import { stateSocket } from "@/api/ws";

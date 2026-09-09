@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { subjectColor } from "@/api/classes";
+import { subjectColor } from "@/api/subjects";
 import type { AppState } from "@/store/appState";
 import { createAgentActivitySlice } from "@/store/slices/agentActivity";
 import { createBandSelectionSlice } from "@/store/slices/bandSelection";

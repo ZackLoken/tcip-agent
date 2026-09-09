@@ -69,11 +69,11 @@ def _save_via_route(client: TestClient, root: Path, bud_attributes: dict,
     """Save through the route, carrying forward the version the route itself last reported, the
     way the toolbar carries what it loaded rather than defaulting to an unconditional write."""
     version = client.get(
-        "/api/classes/load",
+        "/api/subjects/load",
         params={"project_root": str(root), "dataset_root": str(root)},
     ).json()["version"]
     resp = client.post(
-        "/api/classes/save",
+        "/api/subjects/save",
         json={"project_root": str(root), "dataset_root": str(root),
               "subjects": _subjects(bud_attributes, bush_attributes), "version": version},
     )
@@ -92,7 +92,7 @@ def _confirm_negative_stamped(client: TestClient, root: Path, image_name: str,
                               subject: str) -> None:
     """A confirmation through the GUI route, which stamps the schema in effect at confirm time."""
     resp = client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(root), "dataset_root": str(root), "image_name": image_name,
               "status": "negative", "subject": subject},
     )
@@ -104,7 +104,7 @@ def _confirm_complete_stamped(client: TestClient, root: Path, image_name: str,
     """A Complete confirmation through the GUI route: the sweep's predating-vocabulary count
     covers every status a bucket holds, not the negatives alone."""
     resp = client.post(
-        "/api/classes/image_status",
+        "/api/subjects/image_status",
         json={"project_root": str(root), "dataset_root": str(root), "image_name": image_name,
               "status": "complete", "subject": subject},
     )
@@ -385,6 +385,6 @@ def test_the_save_route_records_predating_vocabulary_in_its_audit_line(
     _save_via_route(client, dataset, BUD_THREE_STATES)
 
     entries = _audit_entries(dataset)
-    save_entries = [e for e in entries if e["tool"] == "gui_save_classes"]
+    save_entries = [e for e in entries if e["tool"] == "gui_save_subjects"]
     assert save_entries[-1]["arguments"]["confirmations_predating_vocabulary"] == {"bud": 1}
     assert save_entries[-1]["arguments"]["confirmations_stamped_with_outgoing_schema"] == {}

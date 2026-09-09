@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { ImageStatus } from "@/api/classes";
+import type { ImageStatus } from "@/api/subjects";
 import { canvasHoldsSubject, reconcileImageStatuses } from "@/lib/imageStatus";
 
 function statuses(pairs: [string, ImageStatus][]): Record<string, ImageStatus> {

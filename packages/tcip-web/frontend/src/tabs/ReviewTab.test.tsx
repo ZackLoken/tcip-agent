@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { api } from "@/api/client";
-import { classesApi, subjectColor } from "@/api/classes";
+import { subjectsApi, subjectColor } from "@/api/subjects";
 import { StructuredRefusalError } from "@/api/http";
 import { resultsApi } from "@/api/inference";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
@@ -515,7 +515,7 @@ describe("ReviewTab audit-gap handling", () => {
         gapMessage,
       ),
     );
-    const mirrorSpy = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({
+    const mirrorSpy = vi.spyOn(subjectsApi, "setImageStatus").mockResolvedValue({
       status: "ok",
       digest_stamped: true,
     });
