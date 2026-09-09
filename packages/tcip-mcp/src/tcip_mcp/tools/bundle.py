@@ -290,7 +290,7 @@ def _blob_files(
     moved away from where it was registered (a staged import) still has to find it.
     """
     from tcip_mcp.dataset_layout import annotation_root as _annotation_root
-    from tcip_mcp.dataset_layout import classes_path, dataset_identity_path
+    from tcip_mcp.dataset_layout import dataset_identity_path, subjects_path
     from tcip_mcp.dataset_layout import image_root as _image_root
     from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
 
@@ -314,7 +314,7 @@ def _blob_files(
         for f in ann_dir.rglob("*"):
             if f.is_file() and f.suffix.lower() in LABEL_EXTS:
                 _add(f)
-    _add(classes_path(tree))
+    _add(subjects_path(tree))
     _add(dataset_identity_path(tree))
 
     experiments = tree / ".tcip" / "experiments"
@@ -337,14 +337,14 @@ def _blob_files(
 
 BLOB_IMAGERY = "imagery"
 BLOB_LABELS = "labels"
-BLOB_CLASS_REGISTRY = "class_registry"
+BLOB_SUBJECT_REGISTRY = "subject_registry"
 BLOB_DATASET_IDENTITY = "dataset_identity"
 BLOB_MODEL_SRC = "model_src"
 BLOB_CHECKPOINTS = "checkpoints"
 BLOB_OTHER = "other"
 
 BLOB_HOMES = (
-    BLOB_IMAGERY, BLOB_LABELS, BLOB_CLASS_REGISTRY, BLOB_DATASET_IDENTITY, BLOB_MODEL_SRC,
+    BLOB_IMAGERY, BLOB_LABELS, BLOB_SUBJECT_REGISTRY, BLOB_DATASET_IDENTITY, BLOB_MODEL_SRC,
     BLOB_CHECKPOINTS, BLOB_OTHER,
 )
 """Every home a blob :func:`account_for` finds can belong to, in the same terms
@@ -378,11 +378,11 @@ def blob_home(
     a checkpoint instead.
     """
     from tcip_mcp.dataset_layout import annotation_root as _annotation_root
-    from tcip_mcp.dataset_layout import classes_path, dataset_identity_path
+    from tcip_mcp.dataset_layout import dataset_identity_path, subjects_path
     from tcip_mcp.dataset_layout import image_root as _image_root
 
-    if path == classes_path(tree):
-        return BLOB_CLASS_REGISTRY
+    if path == subjects_path(tree):
+        return BLOB_SUBJECT_REGISTRY
     if path == dataset_identity_path(tree):
         return BLOB_DATASET_IDENTITY
     if _is_at_or_under(path, _image_root(tree)):
@@ -465,13 +465,13 @@ def account_for(tree: str | Path) -> BundleAccounting:
 __all__ = [
     "AnchorMisplaced",
     "BLOB_CHECKPOINTS",
-    "BLOB_CLASS_REGISTRY",
     "BLOB_DATASET_IDENTITY",
     "BLOB_HOMES",
     "BLOB_IMAGERY",
     "BLOB_LABELS",
     "BLOB_MODEL_SRC",
     "BLOB_OTHER",
+    "BLOB_SUBJECT_REGISTRY",
     "BundleAccounting",
     "CrossRootCollision",
     "DerivedRoot",

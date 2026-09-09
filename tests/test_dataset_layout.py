@@ -136,11 +136,11 @@ def test_models_with_predictions_is_per_date(tmp_path: Path) -> None:
     assert models_with_predictions(root, "2026-03-02") == []
 
 
-def test_classes_path_is_the_single_dataset_registry():
-    from tcip_mcp.dataset_layout import classes_path
+def test_subjects_path_is_the_single_dataset_registry():
+    from tcip_mcp.dataset_layout import subjects_path
 
     # One nested registry at the dataset root: no per-subject classes/<x>.json anymore.
-    assert classes_path("/ds") == Path("/ds/classes.json")
+    assert subjects_path("/ds") == Path("/ds/subjects.json")
 
 
 def test_dataset_root_of_recovers_the_root_from_any_layout_dir():

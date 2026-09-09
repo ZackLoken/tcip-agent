@@ -163,14 +163,14 @@ def _bucket(tmp_path: Path, date: str) -> Path:
 
 
 def _write_bud_opening_registry(root: Path) -> None:
-    """A ``classes.json`` declaring ``bud``'s ``opening`` axis at ``root``: the vocabulary
+    """A ``subjects.json`` declaring ``bud``'s ``opening`` axis at ``root``: the vocabulary
     ``_classification_items`` resolves for a prediction bucket recording no ``id_map`` of its own.
     """
-    from tcip_mcp import class_registry
+    from tcip_mcp import subject_registry
 
-    class_registry.write_registry(root / "classes.json", class_registry.ClassRegistry(subjects=(
-        class_registry.Subject(name="bud", attributes=(
-            class_registry.Attribute(name="opening", type="categorical",
+    subject_registry.write_registry(root / "subjects.json", subject_registry.SubjectRegistry(subjects=(
+        subject_registry.Subject(name="bud", attributes=(
+            subject_registry.Attribute(name="opening", type="categorical",
                                      values=("open", "closed")),
         )),
     )))
@@ -453,7 +453,7 @@ def test_deliver_phenology_milestones_re_reads_the_registry_at_the_second_check(
 ) -> None:
     """The registry is re-resolved immediately before the write, not reused from the first check:
     a registry edit racing the delivery is exactly the mid-run move that check exists to catch."""
-    from tcip_mcp import class_registry as cr
+    from tcip_mcp import subject_registry as cr
 
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
@@ -469,23 +469,23 @@ def test_deliver_phenology_milestones_re_reads_the_registry_at_the_second_check(
     })
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
-    declares_it = cr.ClassRegistry(subjects=(
+    declares_it = cr.SubjectRegistry(subjects=(
         cr.Subject(name="bud", attributes=(
             cr.Attribute(name="state", type="categorical", values=("closed", "open")),
         )),
     ))
-    drops_it = cr.ClassRegistry(subjects=(
+    drops_it = cr.SubjectRegistry(subjects=(
         cr.Subject(name="bud", attributes=(
             cr.Attribute(name="state", type="categorical", values=("closed",)),
         )),
     ))
     calls = {"n": 0}
 
-    def racing_registry(pred_dirs: object) -> cr.ClassRegistry:
+    def racing_registry(pred_dirs: object) -> cr.SubjectRegistry:
         calls["n"] += 1
         return declares_it if calls["n"] == 1 else drops_it
 
-    monkeypatch.setattr("tcip_mcp.class_registry.registry_for_pred_dirs", racing_registry)
+    monkeypatch.setattr("tcip_mcp.subject_registry.registry_for_pred_dirs", racing_registry)
 
     res = deliver_phenology_milestones(
         trait="bud_opening",
@@ -1831,12 +1831,12 @@ def test_classification_items_refuses_a_registry_not_declaring_the_positive_valu
     """The declared values a classifier is calibrated against must include the trait's own
     positive value: nothing else checks for it, since require_classified_record only checks
     predictions against whatever the registry happens to declare."""
-    from tcip_mcp import class_registry
+    from tcip_mcp import subject_registry
 
     root = _ds_root(tmp_path)
-    class_registry.write_registry(root / "classes.json", class_registry.ClassRegistry(subjects=(
-        class_registry.Subject(name="bud", attributes=(
-            class_registry.Attribute(name="opening", type="categorical",
+    subject_registry.write_registry(root / "subjects.json", subject_registry.SubjectRegistry(subjects=(
+        subject_registry.Subject(name="bud", attributes=(
+            subject_registry.Attribute(name="opening", type="categorical",
                                      values=("closed", "other")),
         )),
     )))

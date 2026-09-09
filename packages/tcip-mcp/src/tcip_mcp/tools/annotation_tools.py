@@ -514,13 +514,13 @@ def write_class_map(
     dataset_root: str, subjects: dict, output_path: str = "", allow_removals: bool = False,
     allow_type_changes: bool = False,
 ) -> dict:
-    """Author the dataset's nested class registry, a thin wrapper over ``class_registry``.
+    """Author the dataset's nested class registry, a thin wrapper over ``subject_registry``.
 
     ``subjects`` is the nested registry mapping the expert defines, subjects to their
     ``description`` / provenance and zero or more ``attributes`` (each ``categorical`` | ``ordinal``
-    with ordered ``values``). It is validated through :func:`class_registry.registry_from_dict` (a
+    with ordered ``values``). It is validated through :func:`subject_registry.registry_from_dict` (a
     malformed shape refuses loudly) and written to ``<dataset_root>/classes.json`` via
-    :func:`class_registry.replace_registry`, which reads the current version and passes it straight
+    :func:`subject_registry.replace_registry`, which reads the current version and passes it straight
     back in as that same call's own ``expect``. This call holds no version of its own to carry, the
     way the GUI holds the one its last load returned: the read and the put happen back to back
     inside this one call, so it guards only the store's own window between them, never a window
@@ -558,23 +558,23 @@ def write_class_map(
     """
     from tcip_store import VersionConflict
 
-    from tcip_mcp import class_registry
-    from tcip_mcp.dataset_layout import classes_path
+    from tcip_mcp import subject_registry
+    from tcip_mcp.dataset_layout import subjects_path
 
     if not isinstance(subjects, dict) or not subjects:
         return {"error": "subjects must be a non-empty nested registry mapping"}
     try:
-        registry = class_registry.registry_from_dict(subjects)
-    except class_registry.RegistryError as exc:
+        registry = subject_registry.registry_from_dict(subjects)
+    except subject_registry.RegistryError as exc:
         return {"error": f"invalid registry: {exc}"}
 
-    out = Path(output_path) if output_path else classes_path(dataset_root)
-    expect = class_registry.read_version(out)
+    out = Path(output_path) if output_path else subjects_path(dataset_root)
+    expect = subject_registry.read_version(out)
     try:
-        result = class_registry.replace_registry(
+        result = subject_registry.replace_registry(
             out, registry, expect=expect, allow_removals=allow_removals,
             allow_type_changes=allow_type_changes)
-    except (class_registry.RegistryError, VersionConflict) as exc:
+    except (subject_registry.RegistryError, VersionConflict) as exc:
         return {"error": str(exc)}
-    return {"classes_path": str(out), "subjects": [s.name for s in registry.subjects],
+    return {"subjects_path": str(out), "subjects": [s.name for s in registry.subjects],
             "schema_change_sweep": result["schema_change_sweep"]}

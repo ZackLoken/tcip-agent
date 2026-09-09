@@ -1821,7 +1821,7 @@ IMAGE_EXT = ".JPG"
 
 CHECKPOINT_BYTES = b"PK\x03\x04not a real archive, only bytes handed to the store\x00\xff"
 
-CLASS_REGISTRY_BYTES = (
+SUBJECT_REGISTRY_BYTES = (
     '{\n'
     '  "bud": {\n'
     '    "description": "a männlich flower",\n'
@@ -2036,8 +2036,8 @@ REGISTERED = {
         {"bud/orthö": {"r1c1": "3ab9"}},
         dataset_layout.region_completeness_digest_key,
         ".tcip/state/region_completeness_digest.json"),
-    "class_registry": Registered(
-        CLASS_REGISTRY_BYTES, dataset_layout.class_registry_key, "classes.json"),
+    "subject_registry": Registered(
+        SUBJECT_REGISTRY_BYTES, dataset_layout.subject_registry_key, "subjects.json"),
     "dataset_identity": Registered(
         DATASET_IDENTITY_BYTES,
         dataset_layout.dataset_identity_key, "dataset.json", pin=_pin_platform_root),

@@ -4,7 +4,7 @@ deleted inside an attested cell after attestation.
 
 One digest per ``(subject, stem, cell)``: a hash of the subject's annotations whose geometry
 centers inside that cell's own rect, canonically serialized the same way
-``class_registry.attribute_schema_digest`` hashes an attribute vocabulary. Recomputing it from the
+``subject_registry.attribute_schema_digest`` hashes an attribute vocabulary. Recomputing it from the
 label file currently on disk and comparing against the stamp taken at attestation time
 (:func:`tcip_mcp.dataset_layout.region_completeness_digest_path`) is the store's staleness check.
 """
@@ -59,7 +59,7 @@ def _annotation_record(a: Annotation) -> dict:
 
 
 def _digest_of_records(records: list[dict]) -> str:
-    """Canonical-json + sha256[:16] recipe ``class_registry.attribute_schema_digest`` also uses,
+    """Canonical-json + sha256[:16] recipe ``subject_registry.attribute_schema_digest`` also uses,
     shared by :func:`cell_annotation_digest` and :func:`cell_annotation_digests` so the two never
     drift into computing "the same" digest two different ways."""
     ordered = sorted(records, key=lambda r: json.dumps(r, sort_keys=True))

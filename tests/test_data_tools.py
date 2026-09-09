@@ -175,12 +175,12 @@ def test_draw_splits_basic(data_dir: Path, tmp_path: Path):
     assert set(manifest["splits"]) == {"train", "val", "calibration"}
 
 
-def test_draw_splits_refuses_a_version_refused_class_registry_as_an_error(data_dir: Path, tmp_path: Path):
-    from tcip_mcp.dataset_layout import class_registry_key
+def test_draw_splits_refuses_a_version_refused_subject_registry_as_an_error(data_dir: Path, tmp_path: Path):
+    from tcip_mcp.dataset_layout import subject_registry_key
 
     _add_extra_bud_groups(data_dir, 1)
     ts.put_blob(
-        class_registry_key(data_dir), ts.RECORD_JSON.encode({"schema_version": 99})
+        subject_registry_key(data_dir), ts.RECORD_JSON.encode({"schema_version": 99})
     )
     result = draw_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
@@ -646,7 +646,7 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
     floor of four), the same tree an unscoped counter would have read as four and written."""
     from PIL import Image
 
-    from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
     from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
 
     root = tmp_path / "ds"
@@ -654,7 +654,7 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
     images_dir, labels_dir = root / "images" / date, root / "annotations" / date
     images_dir.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(
         Subject(name="leaf"), Subject(name="bud"),
     )))
     for stem in ("p1", "p2", "p3"):
@@ -880,14 +880,14 @@ def _two_subject_dataset(root: Path) -> Path:
     stem carries both; four ``leaf`` stems clear a leaf-scoped manifest write's foreground floor."""
     from PIL import Image
 
-    from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
 
     date = "2-11-26"
     images_dir = root / "images" / date
     labels_dir = root / "annotations" / date
     images_dir.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(
         Subject(name="leaf"), Subject(name="bud"),
     )))
     for stem, subject in (
@@ -920,14 +920,14 @@ def _attribute_scoped_dataset(root: Path) -> Path:
     never assessed for it."""
     from PIL import Image
 
-    from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, write_registry
 
     date = "2-11-26"
     images_dir = root / "images" / date
     labels_dir = root / "annotations" / date
     images_dir.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(
         Subject(name="leaf", attributes=(
             Attribute(name="condition", type="categorical", values=("healthy", "damaged")),
         )),

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from tcip_mcp import class_registry as cr
+from tcip_mcp import subject_registry as cr
 from tcip_mcp import operationalization as op
 from tests import _operationalization_fixtures as fx
 
@@ -28,24 +28,24 @@ def project(tmp_path: Path) -> Path:
 
 def test_positive_class_problem_is_none_when_the_registry_declares_it(project: Path) -> None:
     registry = cr.registry_for_dataset_root(project)
-    assert cr.positive_class_problem(registry, "flower", "open") is None
+    assert cr.positive_value_problem(registry, "flower", "open") is None
 
 
 def test_positive_class_problem_names_an_unknown_subject(project: Path) -> None:
     registry = cr.registry_for_dataset_root(project)
-    problem = cr.positive_class_problem(registry, "no_such_subject", "open")
+    problem = cr.positive_value_problem(registry, "no_such_subject", "open")
     assert problem is not None and "no subject" in problem
 
 
 def test_positive_class_problem_names_a_subject_with_no_attributes() -> None:
-    registry = cr.ClassRegistry(subjects=(cr.Subject(name="bush"),))
-    problem = cr.positive_class_problem(registry, "bush", "open")
+    registry = cr.SubjectRegistry(subjects=(cr.Subject(name="bush"),))
+    problem = cr.positive_value_problem(registry, "bush", "open")
     assert problem is not None and "no attributes" in problem
 
 
 def test_positive_class_problem_names_the_value_not_among_the_attributes(project: Path) -> None:
     registry = cr.registry_for_dataset_root(project)
-    problem = cr.positive_class_problem(registry, "flower", "shed")
+    problem = cr.positive_value_problem(registry, "flower", "shed")
     assert problem is not None and "'shed'" in problem and "'flower'" in problem
 
 
@@ -62,7 +62,7 @@ def test_a_crossing_statement_with_no_registry_refuses_by_name(project: Path) ->
 
 
 def test_a_crossing_statement_naming_a_class_absent_from_the_registry_refuses(project: Path) -> None:
-    registry = cr.ClassRegistry(subjects=(
+    registry = cr.SubjectRegistry(subjects=(
         cr.Subject(name="flower", attributes=(
             cr.Attribute(name="state", type="categorical", values=("closed",)),
         )),
@@ -95,7 +95,7 @@ def test_other_delivery_kinds_ignore_the_registry_keyword(project: Path) -> None
     record = op.state_operationalization(
         project, fx.COUNT_TRAIT, op.PER_IMAGE_COUNT,
         statement="s", mechanism="m", measured_subject=fx.COUNT_SUBJECT,
-        delivered_phenotypes=[], registry=cr.ClassRegistry(),
+        delivered_phenotypes=[], registry=cr.SubjectRegistry(),
     )
 
     assert record["measured_subject"] == fx.COUNT_SUBJECT
@@ -171,7 +171,7 @@ def test_the_tool_resolves_an_explicit_dataset_root_over_the_project_roots_own(
 def test_the_tool_refuses_an_explicit_dataset_root_with_no_registry_by_name(
     tmp_path: Path,
 ) -> None:
-    """An explicit dataset_root with no classes.json refuses through the tool's own error
+    """An explicit dataset_root with no subjects.json refuses through the tool's own error
     channel rather than raising FileNotFoundError out of it."""
     from tcip_mcp.tools.operationalization_tools import state_trait_operationalization
 
@@ -189,7 +189,7 @@ def test_the_tool_refuses_an_explicit_dataset_root_with_no_registry_by_name(
 
     assert "error" in result
     assert bare_dataset.name in result["error"]
-    assert "no class registry" in result["error"]
+    assert "no subject registry" in result["error"]
 
 
 # ── the delivery-time supersession ────────────────────────────────────────────
@@ -201,7 +201,7 @@ def test_a_confirmed_crossing_delivery_whose_registry_lost_the_class_reports_a_r
     record = fx.state_crossing(project)
     fx.confirm(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES, record)
     spec, stored, _ = fx.resolve(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES)
-    registry_without_class = cr.ClassRegistry(subjects=(
+    registry_without_class = cr.SubjectRegistry(subjects=(
         cr.Subject(name="flower", attributes=(
             cr.Attribute(name="state", type="categorical", values=("closed",)),
         )),
@@ -214,14 +214,14 @@ def test_a_confirmed_crossing_delivery_whose_registry_lost_the_class_reports_a_r
     assert not check.ok
     assert check.state is None
     assert check.superseded == ()
-    assert check.registry_problem == cr.positive_class_problem(
+    assert check.registry_problem == cr.positive_value_problem(
         registry_without_class, "flower", "open")
 
 
 def test_reconfirming_does_not_clear_a_live_registry_problem(project: Path) -> None:
     record = fx.state_crossing(project)
     fx.confirm(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES, record)
-    registry_without_class = cr.ClassRegistry(subjects=(
+    registry_without_class = cr.SubjectRegistry(subjects=(
         cr.Subject(name="flower", attributes=(
             cr.Attribute(name="state", type="categorical", values=("closed",)),
         )),
@@ -260,12 +260,12 @@ def test_a_confirmed_crossing_delivery_whose_registry_still_declares_the_class_i
 def test_the_results_panel_reports_a_registry_dropped_class_as_not_current(project: Path) -> None:
     from fastapi.testclient import TestClient
 
-    from tcip_mcp.dataset_layout import classes_path
+    from tcip_mcp.dataset_layout import subjects_path
     from tcip_web.app import app
 
     record = fx.state_crossing(project)
     fx.confirm(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES, record)
-    cr.write_registry(classes_path(project), cr.ClassRegistry(subjects=(
+    cr.write_registry(subjects_path(project), cr.SubjectRegistry(subjects=(
         cr.Subject(name="flower", attributes=(
             cr.Attribute(name="state", type="categorical", values=("closed",)),
         )),
@@ -304,7 +304,7 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_deliver_phenology_
     """deliver_phenology_milestones resolves its registry from the buckets it delivers
     (registry_for_pred_dirs), not from the project root: a registry written where the buckets
     actually resolve to is what a crossing delivery's positive-class check reads."""
-    from tcip_mcp.dataset_layout import classes_path
+    from tcip_mcp.dataset_layout import subjects_path
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
     from tests.test_phenology_tools import _bucket, _ds_root, _write_op_sidecar, _write_preds
 
@@ -317,7 +317,7 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_deliver_phenology_
     id_map = {"closed": 0, "open": 1}
     _write_op_sidecar(bucket, dataset_root=ds_root, validated=False, id_map=id_map,
                       trait=fx.CROSSING_TRAIT)
-    cr.write_registry(classes_path(ds_root), cr.ClassRegistry(subjects=(
+    cr.write_registry(subjects_path(ds_root), cr.SubjectRegistry(subjects=(
         cr.Subject(name="flower", attributes=(
             cr.Attribute(name="state", type="categorical", values=("closed", "open")),
         )),
@@ -344,7 +344,7 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_deliver_phenology_
     assert not (tmp_path / "out.csv").exists()
 
     # A registry at the same resolved root that drops the class refuses at the earlier check.
-    cr.write_registry(classes_path(ds_root), cr.ClassRegistry(subjects=(
+    cr.write_registry(subjects_path(ds_root), cr.SubjectRegistry(subjects=(
         cr.Subject(name="flower", attributes=(
             cr.Attribute(name="state", type="categorical", values=("closed",)),
         )),

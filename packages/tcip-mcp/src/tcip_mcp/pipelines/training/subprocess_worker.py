@@ -135,7 +135,7 @@ def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dic
     ``getattr``-off-the-dataset read was silently a no-op on the default and every tiled run.
     ``assign_class_ids`` is a pure function of
     ``(registry, subject, attribute)``, "same registry + scope -> identical map, every call"
-    (``class_registry.py``), so re-resolving it here from ``data_cfg``'s own
+    (``subject_registry.py``), so re-resolving it here from ``data_cfg``'s own
     subject/attribute/labels_dir, the same inputs ``auto_train_val`` already resolved it from
     internally (``training_tools.py``'s own COCO-assembly branch calls this exact function),
     reproduces the identical map without depending on which internal dataset shape got built.

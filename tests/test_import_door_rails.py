@@ -34,8 +34,8 @@ def bound(backend):
 
 def _project(root: Path) -> Path:
     """A dataset root with one image, one empty label, and the registry that decodes it."""
-    from tcip_mcp import class_registry
-    from tcip_mcp.class_registry import ClassRegistry, Subject
+    from tcip_mcp import subject_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject
 
     (root / "images" / "2026-03-04").mkdir(parents=True, exist_ok=True)
     (root / "images" / "2026-03-04" / "a_1.jpg").write_bytes(b"\xff\xd8\xff")
@@ -43,8 +43,8 @@ def _project(root: Path) -> Path:
     (root / "annotations" / "2026-03-04" / "a_1.json").write_text(
         '{"annotations": []}', encoding="utf-8"
     )
-    class_registry.write_registry(
-        root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),))
+    subject_registry.write_registry(
+        root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),))
     )
     return root
 
@@ -67,7 +67,7 @@ def test_import_refuses_a_non_empty_destination_and_changes_nothing(tmp_path, mo
 
     dest = tmp_path / "dest"
     dest.mkdir()
-    (dest / "classes.json").write_bytes(b"already here")
+    (dest / "subjects.json").write_bytes(b"already here")
     # A scratch platform root for import_project's own audit entry, off tmp_path.
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "scratch_platform_root"))
     with bound(SqliteBackend()):
@@ -81,7 +81,7 @@ def test_import_refuses_a_non_empty_destination_and_changes_nothing(tmp_path, mo
 
         assert "error" in result
         assert str(dest) in result["error"]
-        assert (dest / "classes.json").read_bytes() == b"already here"
+        assert (dest / "subjects.json").read_bytes() == b"already here"
         assert ts.read(dataset_layout.image_status_key(dest)) == {
             "bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:x"}}
         }
@@ -98,7 +98,7 @@ def test_import_admits_a_pre_existing_empty_destination(tmp_path):
     result = import_project(str(zip_path), str(dest))
 
     assert "error" not in result
-    assert (dest / "classes.json").is_file()
+    assert (dest / "subjects.json").is_file()
 
 
 # ── rail 3: an unaccounted member refuses the whole import, naming it ──────────────────────
@@ -426,8 +426,8 @@ def _annotated_dataset(root: Path, n: int) -> None:
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp import class_registry
-    from tcip_mcp.class_registry import ClassRegistry, Subject
+    from tcip_mcp import subject_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject
 
     images_dir = root / "images" / "2026-03-04"
     labels_dir = root / "annotations" / "2026-03-04"
@@ -440,8 +440,8 @@ def _annotated_dataset(root: Path, n: int) -> None:
             labels_dir / f"{stem}.json",
             [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))], 640, 480,
         )
-    class_registry.write_registry(
-        root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),))
+    subject_registry.write_registry(
+        root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),))
     )
 
 

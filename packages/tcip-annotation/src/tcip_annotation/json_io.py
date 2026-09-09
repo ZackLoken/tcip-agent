@@ -21,7 +21,7 @@ Schema::
           "accepted_by_rule": "<experiment_id>:<record_digest>" } ] }
 
 Integer class ids never appear on disk; a name→id assignment is a per-training-run artifact
-(:mod:`tcip_mcp.class_registry`). :func:`to_coco_dataset` takes that run's ``id_map`` (a plain dict,
+(:mod:`tcip_mcp.subject_registry`). :func:`to_coco_dataset` takes that run's ``id_map`` (a plain dict,
 so this package never imports tcip-mcp) and assigns COCO ``category_id`` from it.
 
 Negative invariant: a missing file is unannotated, and a present file with ``"annotations": []`` is
@@ -977,7 +977,7 @@ def to_coco_dataset(
     """Concatenate per-image JSON files into one COCO dataset dict, scoped to one subject.
 
     ``entries``: ``[(label_json_path, image_file_name), ...]``. ``id_map`` is the run's name→id
-    assignment (``tcip_mcp.class_registry.assign_class_ids``): keyed by the ``attribute``'s value names
+    assignment (``tcip_mcp.subject_registry.assign_class_ids``): keyed by the ``attribute``'s value names
     when ``attribute`` is set, else by the ``subject`` itself. Each kept annotation's ``category_id`` is
     ``id_map[key]`` where ``key`` is its attribute value (``attribute`` set) or the subject.
 

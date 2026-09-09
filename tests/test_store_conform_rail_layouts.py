@@ -76,7 +76,7 @@ def test_a_project_root_holding_a_stray_csv_and_a_nested_dataset_is_admitted(tmp
     (dataset / "annotations" / "2026-03-04").mkdir(parents=True)
     (dataset / "images" / "2026-03-04" / "a_1.jpg").write_bytes(b"\xff\xd8\xff")
     (dataset / "annotations" / "2026-03-04" / "a_1.json").write_text("[]", encoding="utf-8")
-    (dataset / "classes.json").write_text('{"subjects": []}', encoding="utf-8")
+    (dataset / "subjects.json").write_text('{"subjects": []}', encoding="utf-8")
     (dataset / "dataset.json").write_text('{"identity": "ü"}', encoding="utf-8")
 
     with bound(SqliteBackend()):

@@ -62,14 +62,14 @@ def _real_detection_item(tmp_path):
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
     from tcip_mcp.pipelines.data.datasets import DetectionDataset
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
     images_dir.mkdir()
     labels_dir.mkdir()
-    write_registry(tmp_path / "classes.json",
-                   ClassRegistry((Subject("bush"), Subject("bud"))))
+    write_registry(tmp_path / "subjects.json",
+                   SubjectRegistry((Subject("bush"), Subject("bud"))))
     Image.new("RGB", (96, 48)).save(images_dir / "a.png")
     json_io.write_annotations(str(labels_dir / "a.json"),
                               [Annotation(subject="bud", geometry=BBox(4, 6, 40, 19))], 96, 48)

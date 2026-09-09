@@ -128,7 +128,7 @@ def write_predictions_json(
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.class_registry import decode_class_ids
+    from tcip_mcp.subject_registry import decode_class_ids
 
     p = Path(json_path)
     if json_io.is_sidecar_name(p.name):

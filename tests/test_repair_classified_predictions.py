@@ -132,7 +132,7 @@ def _register(project_root: Path, dataset_root: Path, *, dataset_id: str = "ds-1
 
 def _classes_json(dataset_root: Path) -> None:
     dataset_root.mkdir(parents=True, exist_ok=True)
-    (dataset_root / "classes.json").write_text(
+    (dataset_root / "subjects.json").write_text(
         '{"leaf": {"attributes": {"condition": {"type": "categorical", '
         '"values": ["healthy", "diseased"]}}}}',
         encoding="utf-8",

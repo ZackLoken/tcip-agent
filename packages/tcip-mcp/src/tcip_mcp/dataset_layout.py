@@ -10,13 +10,13 @@ inside the file, resolved through the dataset's single class registry::
         images/<date>/<stem>.<imgext>
         annotations/<date>/<stem>.json      # ground truth (all subjects for the image)
         predictions/<model>/<date>/<stem>.json   # model outputs
-        classes.json                         # the nested registry: subjects -> attributes -> values
+        subjects.json                        # the nested registry: subjects -> attributes -> values
 
-The class registry lives in the dataset and travels with the labels: a name-based label
+The subject registry lives in the dataset and travels with the labels: a name-based label
 (``subject``, attribute value) is undecodable without it. A second project opening the same image
-set reads the same names. This module never parses ``classes.json`` (its contents belong to
-:mod:`tcip_mcp.class_registry`); it only delegates to that module to list subjects. It does own the
-dataset-root stores it registers below, so their status vocabulary, their derivation and their
+set reads the same names. This module never parses ``subjects.json`` (its contents belong to
+:mod:`tcip_mcp.subject_registry`); it only delegates to that module to list subjects. It does own
+the dataset-root stores it registers below, so their status vocabulary, their derivation and their
 writers live here beside the locators rather than in each caller.
 
 ``<date>`` of ``None`` (non-dated datasets) simply omits that segment. This is the single source of
@@ -48,7 +48,12 @@ _ANY_EXTS = (".json",)
 DEFAULT_MODEL = "live"
 #: Geometry kinds a task authors, kept as a selector, not a label-path segment.
 TASKS = ("detect", "segment")
-CLASSES_FILENAME = "classes.json"
+SUBJECTS_FILENAME = "subjects.json"
+RETIRED_SUBJECTS_FILENAME = "classes.json"
+"""The subject registry's name before the rename that gave it one of its own. No writer places a
+document under this name; it is read only by :func:`tcip_mcp.subject_registry.retired_document`
+(a dataset still holding it and no ``subjects.json`` is pre-rename data, never a fresh write) and
+by the doctor, the conform command and the two bundle doors that answer that fact."""
 
 UNDATED_BUCKET = "undated"
 """The bucket a dateless capture lands in: ``ingest_images`` writes it, and any store key that
@@ -315,20 +320,20 @@ def dataset_root_of(path: str | Path) -> Optional[Path]:
     return Path(*parts[:i]) if i > 0 else None
 
 
-def classes_path(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/classes.json``: the one nested registry that decodes the dataset's labels.
+def subjects_path(dataset_root: str | Path) -> Path:
+    """``<dataset_root>/subjects.json``: the one nested registry that decodes the dataset's labels.
 
     In the dataset (not a project's private state) and shared across every subject, so it travels
     with the image set. A name-based label means nothing without it, so it is part of the data.
     """
-    return _entry_path(_DATASET_DOC, dataset_root, _CLASS_REGISTRY_PARTS)
+    return _entry_path(_DATASET_DOC, dataset_root, _SUBJECT_REGISTRY_PARTS)
 
 
-CLASS_REGISTRY_STORE = "class_registry"
-_CLASS_REGISTRY_PARTS = _document_of(CLASSES_FILENAME)
+SUBJECT_REGISTRY_STORE = "subject_registry"
+_SUBJECT_REGISTRY_PARTS = _document_of(SUBJECTS_FILENAME)
 register_store(
     StoreDescriptor(
-        name=CLASS_REGISTRY_STORE,
+        name=SUBJECT_REGISTRY_STORE,
         kind="blob",
         key_fields=("document",),
         frozen=True,
@@ -337,21 +342,21 @@ register_store(
 )
 
 
-def class_registry_key(dataset_root: str | Path) -> Key:
-    """The dataset's class registry.
+def subject_registry_key(dataset_root: str | Path) -> Key:
+    """The dataset's subject registry.
 
-    A blob because ``classes.json`` is part of the data: it travels with the image set, a
-    breeder may open it, and an archive carries it as a file. ``class_registry`` encodes and
+    A blob because ``subjects.json`` is part of the data: it travels with the image set, a
+    breeder may open it, and an archive carries it as a file. ``subject_registry`` encodes and
     decodes it through the canonical ``RECORD_JSON`` codec, whose ``sort_keys=False`` is what
     keeps the subject and attribute sequences in the order they were declared.
     """
-    return Key(CLASS_REGISTRY_STORE, str(dataset_root), _CLASS_REGISTRY_PARTS)
+    return Key(SUBJECT_REGISTRY_STORE, str(dataset_root), _SUBJECT_REGISTRY_PARTS)
 
 
 def dataset_identity_path(dataset_root: str | Path) -> Path:
     """``<dataset_root>/dataset.json``: the dataset's identity ({crop, id, fingerprint}).
 
-    Sibling of ``classes.json``: identity is part of the data, so it travels with the image set. The
+    Sibling of ``subjects.json``: identity is part of the data, so it travels with the image set. The
     stored fingerprint is a cache; recompute-on-read (``dataset_fingerprint.dataset_fingerprint``)
     is authority.
     """
@@ -482,7 +487,7 @@ def image_status_path(dataset_root: str | Path) -> Path:
     :func:`status_bucket`. Each record says who set the status and when, so a person's Complete and
     a status a harvest wrote are distinguishable here rather than only in an audit log.
 
-    Sibling of ``classes_path``/``dataset_identity_path``: a Complete is a fact about the dataset's
+    Sibling of ``subjects_path``/``dataset_identity_path``: a Complete is a fact about the dataset's
     content (what actually trains), so it travels with the dataset rather than living in whichever
     project's private ``.tcip/`` happens to be an ancestor. The single locator every writer
     (the GUI's review flow, ``materialize_dataset``, ``draw_splits``) and every reader
@@ -586,7 +591,7 @@ def image_status_digest_path(dataset_root: str | Path) -> Path:
     """``<dataset_root>/.tcip/state/image_status_digest.json``: ``{bucket: {image_name: digest}}``.
 
     Sibling of :func:`image_status_path`, stamped by the same writers at confirmation time with the
-    subject's attribute-schema digest in effect (:func:`tcip_mcp.class_registry.attribute_schema_digest`).
+    subject's attribute-schema digest in effect (:func:`tcip_mcp.subject_registry.attribute_schema_digest`).
     Stamped per image, not per bucket: a bucket holds every image a human has ever touched under
     one subject/date, so a bucket-wide stamp would be silently overwritten by the next unrelated
     write to that bucket, un-quarantining a stale confirmation nobody re-reviewed. Lets a reader tell
@@ -1238,20 +1243,20 @@ def prediction_path(
 
 
 def list_subjects(dataset_root: str | Path) -> list[str]:
-    """The dataset's subjects, in the registry's declared order (delegated to ``class_registry``;
-    this module never parses ``classes.json`` itself). ``[]`` when there is no registry.
+    """The dataset's subjects, in the registry's declared order (delegated to ``subject_registry``;
+    this module never parses ``subjects.json`` itself). ``[]`` when there is no registry.
 
     A registry that is present but unreadable raises rather than reading as no subjects: every
     name-based label under it is undecodable without it, so absence and corruption are
     different answers here.
     """
-    from tcip_mcp import class_registry
+    from tcip_mcp import subject_registry
 
-    cp = classes_path(dataset_root)
-    if not cp.is_file():
+    sp = subjects_path(dataset_root)
+    if not sp.is_file():
         return []
     try:
-        registry = class_registry.read_registry(cp)
+        registry = subject_registry.read_registry(sp)
     except OSError:
         return []
     return [s.name for s in registry.subjects]

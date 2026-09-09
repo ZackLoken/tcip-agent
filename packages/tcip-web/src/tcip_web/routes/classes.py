@@ -11,7 +11,7 @@ these names; an id is a per-training-run artifact and a color is GUI-local). Sha
                                                     "values": ["<value1>", "<value2>"]}}}
     }
 
-Read/written through :mod:`tcip_mcp.class_registry` (the one registry authority), so the GUI and the
+Read/written through :mod:`tcip_mcp.subject_registry` (the one registry authority), so the GUI and the
 agent tools agree by construction. The registry travels with the image set: a name-based label is
 undecodable without it.
 """
@@ -117,15 +117,15 @@ def load_classes(
     registry has moved on since; a save posting ``None`` is an unconditional write, since it names
     no version to assert against.
     """
-    from tcip_mcp.class_registry import (
-        ClassRegistry,
+    from tcip_mcp.subject_registry import (
         RegistryError,
         Subject,
+        SubjectRegistry,
         read_registry,
         read_version,
         registry_to_dict,
     )
-    from tcip_mcp.dataset_layout import classes_path
+    from tcip_mcp.dataset_layout import subjects_path
 
     guarded_dir = _guard_dataset_root(annotations_dir) if annotations_dir else None
     root = _resolve_dataset_root(dataset_root, annotations_dir)
@@ -136,7 +136,7 @@ def load_classes(
         subjects, unreadable = _subjects_in_dir(Path(guarded_dir))
 
     if root:
-        p = classes_path(root)
+        p = subjects_path(root)
         if p.exists():
             try:
                 registry = read_registry(p)
@@ -146,7 +146,7 @@ def load_classes(
                     "unreadable": unreadable}
 
     if subjects:
-        reg = ClassRegistry(subjects=tuple(Subject(name=s) for s in sorted(subjects)))
+        reg = SubjectRegistry(subjects=tuple(Subject(name=s) for s in sorted(subjects)))
         return {"subjects": registry_to_dict(reg), "version": None, "unreadable": unreadable}
     return {"subjects": {}, "version": None, "unreadable": unreadable}
 
@@ -163,14 +163,14 @@ class SaveClassesPayload(BaseModel):
 
 @router.post("/save")
 def save_classes(payload: SaveClassesPayload) -> dict:
-    """Write the dataset's class registry through :func:`class_registry.replace_registry`.
+    """Write the dataset's class registry through :func:`subject_registry.replace_registry`.
 
     Refuses (400) a write dropping a subject, attribute or attribute value the stored registry
     declares: the GUI's own save is additive by construction (see ``AnnotateToolbar``), so a drop
     arriving here means the browser held a stale registry, and the refusal names what it would
     have lost. Also refuses (400) a same-values attribute type change (categorical to ordinal or
     back): this route never passes ``allow_type_changes`` (nor ``allow_removals``) to
-    :func:`~tcip_mcp.class_registry.replace_registry`, so the GUI has no door for either and
+    :func:`~tcip_mcp.subject_registry.replace_registry`, so the GUI has no door for either and
     always refuses; a deliberate flip is stated through ``write_class_map`` instead. Refuses
     (409) a stale ``version``. Changing a subject's attribute vocabulary
     invalidates the confirmations made under the old one, so once the write lands the outgoing
@@ -182,8 +182,8 @@ def save_classes(payload: SaveClassesPayload) -> dict:
     """
     from tcip_store import Version, VersionConflict
 
-    from tcip_mcp.class_registry import RegistryError, registry_from_dict, replace_registry
-    from tcip_mcp.dataset_layout import classes_path
+    from tcip_mcp.subject_registry import RegistryError, registry_from_dict, replace_registry
+    from tcip_mcp.dataset_layout import subjects_path
 
     root = _resolve_dataset_root(payload.dataset_root, payload.annotations_dir)
     if not root:
@@ -193,7 +193,7 @@ def save_classes(payload: SaveClassesPayload) -> dict:
         registry = registry_from_dict(payload.subjects)
     except RegistryError as exc:
         raise HTTPException(400, f"invalid class registry: {exc}") from exc
-    path = classes_path(root)
+    path = subjects_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     expect = Version(payload.version) if payload.version is not None else Version.ABSENT
     try:
@@ -207,7 +207,7 @@ def save_classes(payload: SaveClassesPayload) -> dict:
     sweep = result["schema_change_sweep"]
     if sweep["warning"]:
         logger.warning("%s", sweep["warning"])
-    committed = {"status": "ok", "n_subjects": len(registry.subjects), "classes_path": str(path),
+    committed = {"status": "ok", "n_subjects": len(registry.subjects), "subjects_path": str(path),
                  "version": result["version"].token, "schema_change_sweep": sweep}
     from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_web.routes.audit_gap import audit_gap_409
@@ -215,7 +215,7 @@ def save_classes(payload: SaveClassesPayload) -> dict:
     try:
         _audit_dataset_write(
             root, "gui_save_classes",
-            {"classes_path": str(path), "n_subjects": len(registry.subjects),
+            {"subjects_path": str(path), "n_subjects": len(registry.subjects),
              "confirmations_stamped_with_outgoing_schema": sweep["newly_stamped"],
              "confirmations_predating_vocabulary": sweep["predating_vocabulary"]},
         )
@@ -288,22 +288,22 @@ def _stamp_digest(dataset_root: str, bucket: str, subject: str | None,
     sidecar itself just leaves these images unstamped (admitted, not quarantined, on read; see
     ``stale_finished_names``), because the status the human recorded is already committed by the
     time this runs. Returns ``None`` when there was nothing to stamp (no subject, no
-    ``classes.json``, an unreadable or subject-less registry) -- not a failure, since no
+    ``subjects.json``, an unreadable or subject-less registry) -- not a failure, since no
     confirmation was ever asserted against a schema that says nothing about this subject --
     ``True`` once the stamp lands, and ``False`` only when the write itself raised, so a caller
     can tell a mark it is about to clear still describes reality."""
     if not subject:
         return None
-    from tcip_mcp.class_registry import attribute_schema_digest, read_registry
-    from tcip_mcp.dataset_layout import classes_path, stamp_image_status_digests
+    from tcip_mcp.subject_registry import attribute_schema_digest, read_registry
+    from tcip_mcp.dataset_layout import stamp_image_status_digests, subjects_path
 
-    cp = classes_path(dataset_root)
+    cp = subjects_path(dataset_root)
     if not cp.is_file():
         return None
     try:
         digest = attribute_schema_digest(read_registry(cp), subject)
     except (OSError, ValueError):
-        # ValueError covers json.JSONDecodeError and class_registry.RegistryError (its subclass).
+        # ValueError covers json.JSONDecodeError and subject_registry.RegistryError (its subclass).
         return None
     if digest is None:
         return None

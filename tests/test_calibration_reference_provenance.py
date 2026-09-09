@@ -306,13 +306,13 @@ def test_a_rule_admitted_record_with_a_persons_sign_off_still_calibrates(tmp_pat
 
 def test_the_classifier_reference_admits_ground_truth_beside_a_scored_prediction_bucket(tmp_path):
     """Only the GT side is held to the rule: the prediction side is predictions by definition."""
-    from tcip_mcp import class_registry
+    from tcip_mcp import subject_registry
 
     stems = ["a", "b"]
     gt_root = tmp_path / "gt"
-    class_registry.write_registry(gt_root / "classes.json", class_registry.ClassRegistry(subjects=(
-        class_registry.Subject(name="bud", attributes=(
-            class_registry.Attribute(name="state", type="categorical", values=("open", "closed")),
+    subject_registry.write_registry(gt_root / "subjects.json", subject_registry.SubjectRegistry(subjects=(
+        subject_registry.Subject(name="bud", attributes=(
+            subject_registry.Attribute(name="state", type="categorical", values=("open", "closed")),
         )),
     )))
     gt_dir = gt_root / "labels"

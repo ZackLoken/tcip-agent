@@ -1,5 +1,5 @@
 """The label-store and registry query library: reads a dataset's per-image JSON or assembled
-COCO labels, its ``classes.json`` registry, and its confirmed-negative image-status store, and
+COCO labels, its ``subjects.json`` registry, and its confirmed-negative image-status store, and
 assembles them into the boxes/labels/COCO shapes the dataset classes in ``datasets.py`` and the
 outside-layer tools (calibration, evaluation, inference, training) consume. Holds no ``Dataset``
 subclass and no tensor conversion; those stay in ``datasets.py``.
@@ -50,7 +50,7 @@ def authored_frame(stem: str, labels_dir, fmt: str, coco=None,
 
 
 def targets_registry_derived(data_cfg: dict) -> bool:
-    """Whether a run's targets are registry-derived: an image folder plus ``classes.json``, the
+    """Whether a run's targets are registry-derived: an image folder plus ``subjects.json``, the
     one shape a run's own recorded ``id_map`` can be trusted to have come from this
     ``(labels_dir, subject, attribute)`` triple.
 
@@ -70,47 +70,48 @@ def targets_registry_derived(data_cfg: dict) -> bool:
     )
 
 
-def resolved_classes_path(dataset_dir) -> Path | None:
-    """The real ``classes.json`` path for the dataset containing ``dataset_dir``, or ``None`` if it
+def resolved_subjects_path(dataset_dir) -> Path | None:
+    """The real ``subjects.json`` path for the dataset containing ``dataset_dir``, or ``None`` if it
     doesn't exist. The one fact ``resolve_registry_id_map``'s attribute-without-registry refusal
     and any caller wanting to precheck it (``inference_tools.run_inference`` precondition-checks
     this before attempting resolution, so a legitimately absent registry degrades to an honest
     ``id_map=None`` instead of a caught-and-swallowed exception) both need, computed once, never
     two independent implementations of the same "does a registry exist" fact.
     """
-    from tcip_mcp.dataset_layout import classes_path, dataset_root_of
+    from tcip_mcp.dataset_layout import dataset_root_of, subjects_path
 
     root = dataset_root_of(dataset_dir)
-    cp = classes_path(root) if root is not None else None
+    cp = subjects_path(root) if root is not None else None
     return Path(cp) if cp is not None and Path(cp).is_file() else None
 
 
 def resolve_registry_id_map(labels_dir, subject: str | None, attribute: str | None):
-    """``(registry, id_map)`` for a training scope from the dataset's ``classes.json``.
+    """``(registry, id_map)`` for a training scope from the dataset's ``subjects.json``.
 
-    The single name→id derivation is :func:`class_registry.assign_class_ids`; the loader below,
+    The single name→id derivation is :func:`subject_registry.assign_class_ids`; the loader below,
     ``assemble_coco``, and the contract dims all read *this* map, never a second one. A plain
     single-class detector (``attribute`` is ``None``) needs no registry file, the subject *is* the
     class, so it is derived from a synthesized single-subject registry through the same
     ``assign_class_ids``, not a local ``{subject: 0}`` literal. Attribute classification needs the
     registry to order its values, and refuses when there is none.
     """
-    from tcip_mcp import class_registry
+    from tcip_mcp import subject_registry
 
     if not subject:
         raise ValueError(
             "a detection/instance_seg run needs an explicit subject to read name-based labels; "
             "none was threaded through build_dataset.")
-    cp = resolved_classes_path(labels_dir)
+    cp = resolved_subjects_path(labels_dir)
     if cp is not None:
-        registry = class_registry.read_registry(cp)
+        registry = subject_registry.read_registry(cp)
     elif attribute is not None:
         raise ValueError(
-            f"attribute {attribute!r} classification needs a classes.json to order its values, "
+            f"attribute {attribute!r} classification needs a subjects.json to order its values, "
             f"but none was found for {labels_dir}.")
     else:
-        registry = class_registry.ClassRegistry(subjects=(class_registry.Subject(name=subject),))
-    return registry, class_registry.assign_class_ids(registry, subject, attribute)
+        registry = subject_registry.SubjectRegistry(
+            subjects=(subject_registry.Subject(name=subject),))
+    return registry, subject_registry.assign_class_ids(registry, subject, attribute)
 
 
 def coco_det_targets(coco, file_name):
@@ -478,7 +479,7 @@ def stale_stamped_names(
     The one comparison a stamped confirmation is measured against a schema for: shared by
     :func:`_stale_finished` (the quarantine both :func:`confirmed_negative_records` and
     :func:`stale_finished_names` read) and
-    :func:`tcip_mcp.class_registry._sweep_schema_change`'s count of confirmations a vocabulary
+    :func:`tcip_mcp.subject_registry._sweep_schema_change`'s count of confirmations a vocabulary
     change left predating the new schema, so the definition of "stale" cannot drift between the
     two readers. Absence of a stamp is never stale (a rail admits valid work, not only rejects
     it): only an explicit stamp that disagrees is grounds to call a name out.
@@ -508,10 +509,10 @@ def _stale_finished(
     """
     import tcip_store
 
-    from tcip_mcp.class_registry import attribute_schema_digest, read_registry
+    from tcip_mcp.subject_registry import attribute_schema_digest, read_registry
     from tcip_mcp.dataset_layout import (
-        bucket_digest_stamps, classes_path, image_status_digest_key, is_finished_status,
-        status_of,
+        bucket_digest_stamps, image_status_digest_key, is_finished_status,
+        status_of, subjects_path,
     )
 
     finished = {name for name, record in records.items() if is_finished_status(status_of(record))}
@@ -524,7 +525,7 @@ def _stale_finished(
     stamped_by_image = bucket_digest_stamps(stamps, bucket_key)
     if not stamped_by_image:
         return set()
-    cp = classes_path(root)
+    cp = subjects_path(root)
     if not cp.is_file():
         return set()
     try:
@@ -619,7 +620,7 @@ def confirmed_negative_records(
     re-attributing them to itself.
 
     Reads the dataset-native store ``image_status_key`` names, keyed by the dataset root the way
-    ``classes.json`` is, so confirmations travel with the dataset rather than living in whichever
+    ``subjects.json`` is, so confirmations travel with the dataset rather than living in whichever
     project's private ``.tcip/`` happened to be an ancestor, and returns only the
     ``status_bucket(subject, date)`` bucket. A confirmation is
     a human's statement about one subject on one image; a store keyed by image name alone re-applies
@@ -647,7 +648,7 @@ def confirmed_negative_records(
     bucket, a bucket holds every image ever touched under the subject/date, so a bucket-wide stamp
     would be silently overwritten by the next unrelated write and un-quarantine a stale confirmation
     nobody re-reviewed) and it no longer matches the subject's current
-    :func:`~tcip_mcp.class_registry.attribute_schema_digest`: positive, provable evidence the
+    :func:`~tcip_mcp.subject_registry.attribute_schema_digest`: positive, provable evidence the
     subject's classification schema changed since that confirmation was made. Absence of a stamp,
     no sidecar, no stamp for that image, or a dataset that predates this mechanism entirely, is
     not quarantined: a rail must admit valid work, not only reject it, and treating "nobody

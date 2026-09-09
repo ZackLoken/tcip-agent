@@ -477,7 +477,7 @@ def test_backup_sweep_and_per_file_capture_share_one_baseline(
 
 def test_plain_compute_matches_can_never_produce_a_tp_for_a_classified_trait() -> None:
     # The reproduced defect: an attribute-scoped detector's predictions carry the classified VALUE
-    # on `subject` (a joint detect-and-classify class space, class_registry.assign_class_ids), while
+    # on `subject` (a joint detect-and-classify class space, subject_registry.assign_class_ids), while
     # GT keeps the real object type on `subject` and the confirmed value in `attributes[attribute]`.
     # Plain compute_matches groups strictly by identical `subject`, so these two vocabularies never
     # intersect -- a correctly classified instance could never register as a match, regardless of

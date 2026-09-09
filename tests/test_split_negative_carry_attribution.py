@@ -36,13 +36,13 @@ def _dataset_with_one_confirmed_negative(root: Path) -> Path:
     """
     from PIL import Image
 
-    from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
 
     images_dir = root / "images" / DATE
     labels_dir = root / "annotations" / DATE
     images_dir.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(
         Subject(name=SUBJECT, description="a currant bud"),
     )))
 
@@ -139,14 +139,14 @@ def test_carried_schema_stamp_is_recorded_per_image_not_per_bucket(tmp_path: Pat
     """The stamp travels alongside the confirmation, per image, and matches the digest of the
     registry copied in beside it. A bucket-wide stamp would be overwritten by the next unrelated
     write to that bucket."""
-    from tcip_mcp.class_registry import attribute_schema_digest, read_registry
+    from tcip_mcp.subject_registry import attribute_schema_digest, read_registry
 
     out, _ = _materialize(tmp_path, subject=SUBJECT)
     holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")
     split_root = out / holder
 
-    assert (split_root / "classes.json").is_file()
-    expected = attribute_schema_digest(read_registry(split_root / "classes.json"), SUBJECT)
+    assert (split_root / "subjects.json").is_file()
+    expected = attribute_schema_digest(read_registry(split_root / "subjects.json"), SUBJECT)
     assert expected is not None
     stamps = ts.read(image_status_digest_key(split_root))
 
@@ -186,7 +186,7 @@ def test_carried_registry_declares_the_same_document_as_the_source(tmp_path: Pat
     assert "error" not in result
     holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")
 
-    assert (out / holder / "classes.json").read_bytes() == (root / "classes.json").read_bytes()
+    assert (out / holder / "subjects.json").read_bytes() == (root / "subjects.json").read_bytes()
 
 
 def test_a_contradicted_negative_is_excluded_from_the_carry_and_named_in_the_result(

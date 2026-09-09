@@ -29,12 +29,12 @@ def test_write_predictions_json_roundtrip_and_negative(tmp_path):
     import json
 
     from tcip_annotation import json_io
-    from tcip_mcp import class_registry
-    from tcip_mcp.class_registry import ClassRegistry, Subject
+    from tcip_mcp import subject_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
-    id_map = class_registry.assign_class_ids(
-        ClassRegistry(subjects=(Subject(name="bud"),)), "bud")  # {bud: 0}
+    id_map = subject_registry.assign_class_ids(
+        SubjectRegistry(subjects=(Subject(name="bud"),)), "bud")  # {bud: 0}
     p = tmp_path / "img.json"
     write_predictions_json(p, {
         "width": 100, "height": 100,
@@ -130,7 +130,7 @@ def test_web_worker_resolves_id_map_from_predictor_config(tmp_path, monkeypatch)
 
     class FakePredictor:
         # A single-subject detector's config, the same shape run_inference reads
-        # (predictor.config["data"]["subject"]), no classes.json needed, resolve_registry_id_map
+        # (predictor.config["data"]["subject"]), no subjects.json needed, resolve_registry_id_map
         # synthesizes {subject: 0} for a plain single-class run.
         config = {"data": {"subject": "bud"}}
 
@@ -177,7 +177,7 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
 
     class FakePredictor:
         # A recorded id_map naming class 1 "open", deliberately not what a live registry at
-        # images_dir would derive (there is no classes.json under images_dir at all), so a pass
+        # images_dir would derive (there is no subjects.json under images_dir at all), so a pass
         # here can only mean the recorded map was used, never a registry fallback.
         config = {"data": {"subject": "bud", "attribute": "opening",
                            "id_map": {"closed": 0, "open": 1}}}

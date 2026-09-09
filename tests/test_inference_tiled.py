@@ -179,7 +179,7 @@ def test_predict_tiled_whole_decode_admits_a_photographic_rgba_file_at_in_chans_
 def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkeypatch):
     """When the checkpoint's own config carries a recorded id_map (stamped at train time by
     subprocess_worker.py), run_inference's decode/record map uses it, never re-derived from a
-    live registry, and reachable with no images_dir/classes.json at all (proving it is not
+    live registry, and reachable with no images_dir/subjects.json at all (proving it is not
     falling through to the registry-derivation branch)."""
     import torch as _torch
 

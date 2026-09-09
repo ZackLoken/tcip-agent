@@ -42,7 +42,7 @@ from tcip_web.paths import assert_path_allowed, assert_project_root_allowed, exp
 from tcip_web.state import store
 
 if TYPE_CHECKING:
-    from tcip_mcp.class_registry import ClassRegistry
+    from tcip_mcp.subject_registry import SubjectRegistry
     from tcip_mcp.pipelines.resolution import DeliveryRefused
 
 logger = logging.getLogger(__name__)
@@ -474,8 +474,8 @@ class _PhenologyMeasurement:
         return [{k: v for k, v in row.items() if k != "series"} for row in self.plants["rows"]]
 
 
-def _delivered_registry(pred_dirs: Sequence[str]) -> "ClassRegistry | None":
-    """The class registry for the single dataset this delivery's prediction buckets belong to.
+def _delivered_registry(pred_dirs: Sequence[str]) -> "SubjectRegistry | None":
+    """The subject registry for the single dataset this delivery's prediction buckets belong to.
 
     Resolved from the buckets themselves, the way ``deliver_phenology_milestones`` resolves it, never from the
     open project's own root: a project's dataset commonly lives outside its own tree. ``None`` when
@@ -487,7 +487,7 @@ def _delivered_registry(pred_dirs: Sequence[str]) -> "ClassRegistry | None":
     """
     if not pred_dirs:
         return None
-    from tcip_mcp.class_registry import RegistryError, registry_for_pred_dirs
+    from tcip_mcp.subject_registry import RegistryError, registry_for_pred_dirs
 
     try:
         registry = registry_for_pred_dirs(pred_dirs)

@@ -49,12 +49,12 @@ def project_dir(tmp_path: Path) -> Path:
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp import class_registry
-    from tcip_mcp.class_registry import ClassRegistry, Subject
+    from tcip_mcp import subject_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject
 
-    class_registry.write_registry(
-        root / "classes.json",
-        ClassRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
+    subject_registry.write_registry(
+        root / "subjects.json",
+        SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
 
     # 5 synthetic images (640x480 grey) with GT labels and predictions
     for i in range(5):

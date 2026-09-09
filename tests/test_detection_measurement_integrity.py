@@ -320,8 +320,8 @@ def test_evaluate_scores_a_contradicted_negative_on_its_actual_content_and_names
 def test_attribute_registry_refusal_reaches_the_caller(tmp_path, monkeypatch):
     """run_full_frame_evaluation must not let a bare `except Exception` around
     resolve_registry_id_map swallow an attribute-classification registry refusal and silently
-    score against zero ground truth instead of refusing. An attribute needs a real classes.json
-    to order its values (resolve_registry_id_map's own deliberate ValueError); no classes.json
+    score against zero ground truth instead of refusing. An attribute needs a real subjects.json
+    to order its values (resolve_registry_id_map's own deliberate ValueError); no subjects.json
     exists here, so this must propagate as a real refusal, not a quietly-empty GT read."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
@@ -344,7 +344,7 @@ def test_attribute_registry_refusal_reaches_the_caller(tmp_path, monkeypatch):
                     "boxes": [], "scores": [], "labels": [], "count": 0}
 
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
-    with pytest.raises(ValueError, match="classes.json"):
+    with pytest.raises(ValueError, match="subjects.json"):
         run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir), str(tmp_path / "out"),
                                   subject="bud", attribute="opening", tile_size=64, overlap=0.2)
 
@@ -495,14 +495,14 @@ def test_gate_derives_tile_geometry_from_checkpoint(tmp_path):
 
 
 def test_run_inference_no_registry_refuses_naming_write_class_map(tmp_path, monkeypatch):
-    """An attribute-scoped run against a dataset with no classes.json refuses before the pass
+    """An attribute-scoped run against a dataset with no subjects.json refuses before the pass
     runs, naming write_class_map as the remedy: a classified run with an unresolvable id_map can
     no longer fall back to a raw-index name, since a value outside any vocabulary is worse than a
     refusal."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
-    images_dir = tmp_path / "images"  # no classes.json anywhere under this root
+    images_dir = tmp_path / "images"  # no subjects.json anywhere under this root
     images_dir.mkdir()
     from PIL import Image
     Image.new("RGB", (100, 100)).save(images_dir / "a.png")
@@ -525,8 +525,8 @@ def test_run_inference_no_registry_refuses_naming_write_class_map(tmp_path, monk
 
 
 def test_run_inference_corrupted_registry_still_propagates(tmp_path, monkeypatch):
-    """The precondition check (resolved_classes_path) only short-circuits the legitimate
-    no-registry case: a classes.json that exists but is corrupted is a real, unexpected failure
+    """The precondition check (resolved_subjects_path) only short-circuits the legitimate
+    no-registry case: a subjects.json that exists but is corrupted is a real, unexpected failure
     and must still raise loudly, not be silently absorbed by the same precondition that admits
     the honest degraded case."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
@@ -535,7 +535,7 @@ def test_run_inference_corrupted_registry_still_propagates(tmp_path, monkeypatch
     root = tmp_path / "ds"
     images_dir = root / "images"
     images_dir.mkdir(parents=True)
-    (root / "classes.json").write_text("{not valid json", encoding="utf-8")
+    (root / "subjects.json").write_text("{not valid json", encoding="utf-8")
     from PIL import Image
     Image.new("RGB", (100, 100)).save(images_dir / "a.png")
 

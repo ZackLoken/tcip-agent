@@ -127,10 +127,10 @@ def _currant_bloom_fixture(
         preds[date_str] = str(bucket)
     # The Results doors resolve the registry from the delivered buckets' own dataset root, not from
     # the project root the spec and the confirmed record live under.
-    from tcip_mcp.class_registry import copy_registry
-    from tcip_mcp.dataset_layout import classes_path
+    from tcip_mcp.subject_registry import copy_registry
+    from tcip_mcp.dataset_layout import subjects_path
 
-    copy_registry(classes_path(tmp_path), classes_path(root))
+    copy_registry(subjects_path(tmp_path), subjects_path(root))
     from tests._binding_fixtures import write_plant_mapping
 
     mapping_name = "valley"

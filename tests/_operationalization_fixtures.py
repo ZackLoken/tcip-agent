@@ -18,7 +18,7 @@ from typing import Any
 
 from tcip_store import Version, read_versioned
 
-from tcip_mcp import class_registry as cr
+from tcip_mcp import subject_registry as cr
 from tcip_mcp import operationalization as op
 from tcip_mcp import traits
 from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec, trait_spec_key, trait_specs_dir
@@ -132,7 +132,7 @@ def confirm_spec_statement(project_root: Path, trait: str) -> dict[str, Any]:
     )
 
 
-def seed_positive_class(project_root: Path, subject_name: str, positive_class_name: str) -> cr.ClassRegistry:
+def seed_positive_class(project_root: Path, subject_name: str, positive_class_name: str) -> cr.SubjectRegistry:
     """Ensure the project's class registry declares ``positive_class_name`` as a value of
     ``subject_name``'s own attribute, adding both the subject and the value on first mention and
     leaving an existing declaration alone; returns the registry as stored.
@@ -141,9 +141,9 @@ def seed_positive_class(project_root: Path, subject_name: str, positive_class_na
     whatever attributes it already carries, never an empty-string value, since the registry
     invariant forbids one and there is nothing yet to declare.
     """
-    from tcip_mcp.dataset_layout import classes_path
+    from tcip_mcp.dataset_layout import subjects_path
 
-    registry = cr.registry_for_dataset_root(project_root) or cr.ClassRegistry()
+    registry = cr.registry_for_dataset_root(project_root) or cr.SubjectRegistry()
     subjects = {s.name: s for s in registry.subjects}
     existing = subjects.get(subject_name)
     attrs = list(existing.attributes) if existing else []
@@ -156,8 +156,8 @@ def seed_positive_class(project_root: Path, subject_name: str, positive_class_na
         else:
             attrs = [cr.Attribute(name="state", type="categorical", values=(positive_class_name,))]
     subjects[subject_name] = cr.Subject(name=subject_name, attributes=tuple(attrs))
-    updated = cr.ClassRegistry(subjects=tuple(subjects.values()))
-    cr.write_registry(classes_path(project_root), updated)
+    updated = cr.SubjectRegistry(subjects=tuple(subjects.values()))
+    cr.write_registry(subjects_path(project_root), updated)
     return updated
 
 

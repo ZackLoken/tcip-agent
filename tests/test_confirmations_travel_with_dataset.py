@@ -1,7 +1,7 @@
 """Confirmations travel with the dataset, quarantined on subject-definition mismatch.
 
 Confirmed negatives now live dataset-native (``<dataset_root>/.tcip/state/image_status.json``, a
-sibling of ``classes.json``) rather than in whichever project's private ``.tcip/`` happened to be an
+sibling of ``subjects.json``) rather than in whichever project's private ``.tcip/`` happened to be an
 ancestor of the labels dir. ``dataset_fingerprint`` folds this store in as a 4th term (it previously
 could not detect confirming/un-confirming a negative at all). A confirmation is quarantined only when
 a stamped attribute-schema digest positively disagrees with the subject's current schema: an
@@ -15,8 +15,8 @@ from pathlib import Path
 from PIL import Image
 
 from tcip_annotation import json_io
-from tcip_mcp import class_registry
-from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject
+from tcip_mcp import subject_registry
+from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
 from tcip_mcp.dataset_layout import stamp_image_status_digests, status_bucket
 
 
@@ -25,9 +25,9 @@ def _write_image(images_dir: Path, stem: str, size=(64, 64)) -> None:
     Image.new("RGB", size, color=(100, 100, 100)).save(images_dir / f"{stem}.jpg")
 
 
-def _write_registry(root: Path, *subjects: Subject) -> ClassRegistry:
-    registry = ClassRegistry(subjects=tuple(subjects))
-    class_registry.write_registry(root / "classes.json", registry)
+def _write_registry(root: Path, *subjects: Subject) -> SubjectRegistry:
+    registry = SubjectRegistry(subjects=tuple(subjects))
+    subject_registry.write_registry(root / "subjects.json", registry)
     return registry
 
 
@@ -111,7 +111,7 @@ def test_confirmed_negative_names_ignores_an_unrelated_ancestor_store(tmp_path):
 
 # (c) quarantine: a stamped digest that no longer matches the current schema is excluded.
 def test_quarantine_excludes_a_confirmation_stamped_under_a_since_changed_schema(tmp_path):
-    from tcip_mcp.class_registry import attribute_schema_digest
+    from tcip_mcp.subject_registry import attribute_schema_digest
     from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     root = _dataset(tmp_path, negative=False, subjects=(
@@ -119,7 +119,7 @@ def test_quarantine_excludes_a_confirmation_stamped_under_a_since_changed_schema
             Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
-    old_registry = class_registry.read_registry(root / "classes.json")
+    old_registry = subject_registry.read_registry(root / "subjects.json")
     old_digest = attribute_schema_digest(old_registry, "bud")
     _confirm_negative(root, "bud", "img_001.jpg", digest=old_digest)
 
@@ -137,7 +137,7 @@ def test_quarantine_excludes_a_confirmation_stamped_under_a_since_changed_schema
 
 
 def test_quarantine_does_not_fire_when_schema_is_unchanged(tmp_path):
-    from tcip_mcp.class_registry import attribute_schema_digest
+    from tcip_mcp.subject_registry import attribute_schema_digest
     from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     root = _dataset(tmp_path, negative=False, subjects=(
@@ -145,7 +145,7 @@ def test_quarantine_does_not_fire_when_schema_is_unchanged(tmp_path):
             Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
-    digest = attribute_schema_digest(class_registry.read_registry(root / "classes.json"), "bud")
+    digest = attribute_schema_digest(subject_registry.read_registry(root / "subjects.json"), "bud")
     _confirm_negative(root, "bud", "img_001.jpg", digest=digest)
 
     quarantined: set[str] = set()
@@ -175,7 +175,7 @@ def test_unstamped_confirmation_is_admitted_not_quarantined(tmp_path):
 
 # (e) trainable_stems surfaces a quarantine event as its own count, distinct from unconfirmed-empty.
 def test_trainable_stems_reports_quarantined_stale_definition(tmp_path):
-    from tcip_mcp.class_registry import attribute_schema_digest
+    from tcip_mcp.subject_registry import attribute_schema_digest
     from tcip_mcp.pipelines.data.label_queries import trainable_stems
 
     root = _dataset(tmp_path, negative=False, subjects=(
@@ -184,7 +184,7 @@ def test_trainable_stems_reports_quarantined_stale_definition(tmp_path):
         )),
     ))
     old_digest = attribute_schema_digest(
-        class_registry.read_registry(root / "classes.json"), "bud")
+        subject_registry.read_registry(root / "subjects.json"), "bud")
     _confirm_negative(root, "bud", "img_001.jpg", digest=old_digest)
     _write_registry(root, Subject(name="bud", attributes=(
         Attribute(name="opening", type="categorical",
@@ -200,7 +200,7 @@ def test_trainable_stems_reports_quarantined_stale_definition(tmp_path):
 # (f) quarantine is per-image, not per-bucket: a later, unrelated write to the same bucket must
 # never resurrect a different image's stale, never-re-reviewed confirmation.
 def test_quarantine_is_per_image_not_per_bucket(tmp_path):
-    from tcip_mcp.class_registry import attribute_schema_digest
+    from tcip_mcp.subject_registry import attribute_schema_digest
     from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     root = _dataset(tmp_path, negative=False, subjects=(
@@ -209,7 +209,7 @@ def test_quarantine_is_per_image_not_per_bucket(tmp_path):
         )),
     ))
     old_digest = attribute_schema_digest(
-        class_registry.read_registry(root / "classes.json"), "bud")
+        subject_registry.read_registry(root / "subjects.json"), "bud")
     _confirm_negative(root, "bud", "img_001.jpg", digest=old_digest)
 
     # The schema changes after img_001's confirmation.
@@ -218,7 +218,7 @@ def test_quarantine_is_per_image_not_per_bucket(tmp_path):
                  values=("closed", "partial", "open")),
     )))
     new_digest = attribute_schema_digest(
-        class_registry.read_registry(root / "classes.json"), "bud")
+        subject_registry.read_registry(root / "subjects.json"), "bud")
 
     # An unrelated image is confirmed under the new (current) schema, into the same bucket; the
     # re-stamp must not silently un-quarantine img_001 too.
@@ -234,7 +234,7 @@ def test_quarantine_is_per_image_not_per_bucket(tmp_path):
 
 
 # (g) materialize_dataset's review-harvested negatives must be quarantine-capable, not a permanent
-# no-op for lack of any classes.json to compare against.
+# no-op for lack of any subjects.json to compare against.
 def test_materialize_dataset_carries_a_quarantine_capable_stamp(tmp_path):
     import tcip_store
     from tcip_mcp.dataset_layout import image_status_digest_key
@@ -246,8 +246,8 @@ def test_materialize_dataset_carries_a_quarantine_capable_stamp(tmp_path):
     )))
     src_images = src_root / "images"
     _write_image(src_images, "imgB")
-    expected_digest = class_registry.attribute_schema_digest(
-        class_registry.read_registry(src_root / "classes.json"), "bud")
+    expected_digest = subject_registry.attribute_schema_digest(
+        subject_registry.read_registry(src_root / "subjects.json"), "bud")
 
     review_state = {"image": {
         "imgB.jpg": {"img_status": "completed", "detections": [
@@ -257,6 +257,6 @@ def test_materialize_dataset_carries_a_quarantine_capable_stamp(tmp_path):
     out = tmp_path / "out"
     materialize_dataset(review_state, str(src_images), str(out), subject="bud")
 
-    assert (out / "classes.json").is_file(), "the materialized dataset must be self-describing"
+    assert (out / "subjects.json").is_file(), "the materialized dataset must be self-describing"
     stamps = tcip_store.read(image_status_digest_key(out), default={}).get("bud", {})
     assert stamps.get("imgB.jpg") == expected_digest

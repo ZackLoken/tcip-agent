@@ -15,7 +15,7 @@ torch = pytest.importorskip("torch")
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, write_registry
+from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, write_registry
 from tcip_mcp.tools.data_tools import draw_splits
 
 SUBJECT = "leaf"
@@ -37,7 +37,7 @@ def _two_subject_two_date_dataset(root: Path) -> Path:
     clearing a leaf-scoped manifest write's floor), and four of the six also carry the unrelated
     ``bud`` (eight foreground groups, clearing a bud-scoped write's floor too), so a manifest
     drawn for either subject binds to a real, differently-sized draw over the identical tree."""
-    write_registry(root / "classes.json", ClassRegistry(subjects=(
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(
         Subject(name=SUBJECT), Subject(name=OTHER_SUBJECT),
     )))
     for date in DATES:
@@ -57,7 +57,7 @@ def _attribute_scoped_dataset(root: Path) -> Path:
     """One date, five stems: four have their instance assessed for ``condition`` (clearing an
     attribute-scoped manifest write's floor), the fifth carries an instance never assessed for
     it."""
-    write_registry(root / "classes.json", ClassRegistry(subjects=(
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(
         Subject(name=SUBJECT, attributes=(
             Attribute(name="condition", type="categorical", values=("healthy", "damaged")),
         )),
@@ -164,7 +164,7 @@ def test_bind_manifest_stems_refuses_a_manifest_member_the_run_does_not_admit(tm
 def _quarantine_manifest_dataset(root: Path) -> Path:
     """Six leaf stems under one date, an attribute vocabulary on leaf: enough to clear
     ``draw_splits``' floor, one of which will be confirmed and quarantined by a schema change."""
-    write_registry(root / "classes.json", ClassRegistry(subjects=(
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(
         Subject(name=SUBJECT, attributes=(
             Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
@@ -181,8 +181,8 @@ def _draw_then_quarantine_a(tmp_path: Path):
     """A manifest drawn while ``a`` still admits normally, then a vocabulary growth that
     quarantines ``a``'s already-stamped complete confirmation. Returns ``(manifest, root,
     admitted, counts)`` for the run's own current (post-quarantine) admission."""
-    from tcip_mcp import class_registry as cr
-    from tcip_mcp.class_registry import read_registry, replace_registry
+    from tcip_mcp import subject_registry as cr
+    from tcip_mcp.subject_registry import read_registry, replace_registry
     from tcip_mcp.dataset_layout import (
         record_image_statuses, stamp_image_status_digests, status_bucket,
     )
@@ -191,17 +191,17 @@ def _draw_then_quarantine_a(tmp_path: Path):
     root = _quarantine_manifest_dataset(tmp_path / "ds")
     manifest = _draw(root, tmp_path / "m")
 
-    old_digest = cr.attribute_schema_digest(read_registry(root / "classes.json"), SUBJECT)
+    old_digest = cr.attribute_schema_digest(read_registry(root / "subjects.json"), SUBJECT)
     record_image_statuses(root, status_bucket(SUBJECT, DATES[0]), {"a.jpg": "complete"},
                           recorded_by="user:breeder")
     stamp_image_status_digests(root, status_bucket(SUBJECT, DATES[0]), ["a.jpg"], old_digest)
 
-    grown = ClassRegistry(subjects=(
+    grown = SubjectRegistry(subjects=(
         Subject(name=SUBJECT, attributes=(
             Attribute(name="opening", type="categorical", values=("closed", "partial", "open")),
         )),
     ))
-    replace_registry(root / "classes.json", grown, expect=None)
+    replace_registry(root / "subjects.json", grown, expect=None)
 
     admitted, counts = trainable_stems(
         str(root / "annotations" / DATES[0]), str(root / "images" / DATES[0]),
@@ -266,8 +266,8 @@ def test_bind_manifest_stems_launches_when_the_quarantined_member_sits_on_calibr
 def test_bind_manifest_stems_admits_the_quarantined_member_once_reconfirmed(tmp_path: Path):
     """Re-confirming restamps the current digest, admitting the same image the manifest already
     placed on the train side."""
-    from tcip_mcp import class_registry as cr
-    from tcip_mcp.class_registry import read_registry
+    from tcip_mcp import subject_registry as cr
+    from tcip_mcp.subject_registry import read_registry
     from tcip_mcp.dataset_layout import (
         record_image_statuses, stamp_image_status_digests, status_bucket,
     )
@@ -277,7 +277,7 @@ def test_bind_manifest_stems_admits_the_quarantined_member_once_reconfirmed(tmp_
     manifest, root, _admitted, _counts = _draw_then_quarantine_a(tmp_path)
     _place_member_on(manifest, DATES[0], "a", "train")
 
-    current_digest = cr.attribute_schema_digest(read_registry(root / "classes.json"), SUBJECT)
+    current_digest = cr.attribute_schema_digest(read_registry(root / "subjects.json"), SUBJECT)
     record_image_statuses(root, status_bucket(SUBJECT, DATES[0]), {"a.jpg": "complete"},
                           recorded_by="user:breeder")
     stamp_image_status_digests(root, status_bucket(SUBJECT, DATES[0]), ["a.jpg"], current_digest)
@@ -430,7 +430,7 @@ def _run_data_cfg(root: Path, manifest_dir: Path, date: str, *, subject: str = S
 def _dataset_with_a_confirmed_negative(root: Path) -> Path:
     """One date, four annotated stems (clearing a manifest write's foreground floor) plus a
     fifth confirmed negative for ``SUBJECT``."""
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name=SUBJECT),)))
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
     for stem in ("a", "b", "c", "d"):
         _write_stem(images_dir, labels_dir, stem,
@@ -449,7 +449,7 @@ def _dataset_with_one_foreground_group_and_negatives(root: Path) -> Path:
     write-time floor. Verified deterministic across seeds 0-11 by direct draw."""
     from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
 
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name=SUBJECT),)))
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     images0, labels0 = root / "images" / DATES[0], root / "annotations" / DATES[0]
     _write_stem(images0, labels0, "fa", [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))])
     negatives = ("na", "nb", "nc")
@@ -475,7 +475,7 @@ def _single_source_mosaic_dataset(root: Path) -> tuple[Path, Path]:
     images_dir, labels_dir = root / "images", root / "labels"
     images_dir.mkdir(parents=True, exist_ok=True)
     labels_dir.mkdir(parents=True, exist_ok=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name=SUBJECT),)))
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     w, h = 4000, 3000
     Image.new("RGB", (w, h), color=(90, 90, 90)).save(images_dir / "mosaic.png")
     boxes = [Annotation(subject=SUBJECT, geometry=BBox(x, y, x + 20, y + 20))
@@ -1492,7 +1492,7 @@ def test_evaluate_model_reads_confirmed_negatives_under_the_universes_own_date(
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     root = tmp_path / "ds"
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name=SUBJECT),)))
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
     for i in range(4):
         _write_stem(images_dir, labels_dir, f"p{i}",

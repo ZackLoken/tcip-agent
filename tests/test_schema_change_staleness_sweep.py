@@ -19,9 +19,9 @@ from fastapi.testclient import TestClient
 
 import tcip_store as ts
 from tcip_annotation.json_io import write_annotations
-from tcip_mcp.class_registry import attribute_schema_digest, registry_from_dict
+from tcip_mcp.subject_registry import attribute_schema_digest, registry_from_dict
 from tcip_mcp.dataset_layout import (
-    classes_path, image_status_digest_key, image_status_digest_path, record_image_statuses,
+    subjects_path, image_status_digest_key, image_status_digest_path, record_image_statuses,
     stamp_image_status_digests, status_bucket,
 )
 from tcip_store.file_backend import FileBackend
@@ -218,7 +218,7 @@ def test_a_schema_change_with_nothing_to_stamp_writes_the_registry_and_no_digest
     assert response["schema_change_sweep"] == {
         "newly_stamped": {}, "predating_vocabulary": {}, "warning": None}
     assert not image_status_digest_path(dataset).exists()
-    saved = json.loads(classes_path(dataset).read_text(encoding="utf-8"))
+    saved = json.loads(subjects_path(dataset).read_text(encoding="utf-8"))
     assert saved["bud"]["attributes"]["opening"]["values"] == \
         ["closed", "partial", "open"]
 
@@ -250,7 +250,7 @@ def test_the_save_route_writes_the_registry_and_reports_a_sweep_it_could_not_com
     assert response["status"] == "ok"
     assert response["schema_change_sweep"]["newly_stamped"] == {}
     assert "re-review them before they train" in response["schema_change_sweep"]["warning"]
-    saved = json.loads(classes_path(dataset).read_text(encoding="utf-8"))
+    saved = json.loads(subjects_path(dataset).read_text(encoding="utf-8"))
     assert saved["bud"]["attributes"]["opening"]["values"] == \
         ["closed", "partial", "open"]
 
@@ -272,7 +272,7 @@ def test_the_class_map_tool_writes_the_registry_and_reports_a_sweep_it_could_not
 
     assert result["schema_change_sweep"]["newly_stamped"] == {}
     assert "re-review them before they train" in result["schema_change_sweep"]["warning"]
-    saved = json.loads(classes_path(dataset).read_text(encoding="utf-8"))
+    saved = json.loads(subjects_path(dataset).read_text(encoding="utf-8"))
     assert saved["bud"]["attributes"]["opening"]["values"] == \
         ["closed", "partial", "open"]
 
@@ -295,7 +295,7 @@ def test_a_confirmation_stamped_under_current_code_reads_as_predating_the_next_c
 def test_the_class_map_tool_reports_predating_vocabulary_the_same_way(dataset: Path) -> None:
     """One implementation: the tool's own writer reports the same count for the same case."""
     _save_via_tool(dataset, BUD_TWO_STATES)
-    from tcip_mcp.class_registry import attribute_schema_digest, registry_from_dict
+    from tcip_mcp.subject_registry import attribute_schema_digest, registry_from_dict
     from tcip_mcp.dataset_layout import stamp_image_status_digests
 
     record_image_statuses(dataset, status_bucket("bud", None), {"img_alpha.jpg": "negative"},

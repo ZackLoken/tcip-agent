@@ -13,10 +13,10 @@ import pytest
 
 import tcip_store as ts
 from tcip_store import SchemaVersionRefused
-from tcip_mcp import class_registry
-from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject
+from tcip_mcp import subject_registry
+from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
 from tcip_mcp.dataset_layout import (
-    class_registry_key,
+    subject_registry_key,
     dataset_identity_key,
     require_dataset_identity,
 )
@@ -78,15 +78,15 @@ def test_a_coco_documents_own_schema_version_is_never_checked_against_annotation
 # ── the class registry ───────────────────────────────────────────────────────
 
 def test_a_version_one_registry_reads_back_through_the_platforms_own_writer(tmp_path):
-    registry = ClassRegistry(subjects=(
+    registry = SubjectRegistry(subjects=(
         Subject(name="bur", description="one chestnut bur", defined_by="user:breeder"),
         Subject(name="leaf", attributes=(
             Attribute(name="condition", type="categorical", values=("healthy", "diseased")),
         )),
     ))
-    path = tmp_path / "classes.json"
-    class_registry.write_registry(path, registry)
-    assert class_registry.read_registry(path) == registry
+    path = tmp_path / "subjects.json"
+    subject_registry.write_registry(path, registry)
+    assert subject_registry.read_registry(path) == registry
 
 
 def test_a_registry_above_the_ceiling_refuses_as_a_schema_version_refusal(tmp_path):
@@ -95,28 +95,28 @@ def test_a_registry_above_the_ceiling_refuses_as_a_schema_version_refusal(tmp_pa
     ``schema_version: 2`` incidentally failing to parse as a subject body (the wrong reason this
     test used to pass for, when ``2`` is not a dict and trips the shape parser before the version
     check ever runs)."""
-    key = class_registry_key(tmp_path)
+    key = subject_registry_key(tmp_path)
     document = {"bur": {"description": "", "defined_by": "", "defined_at": ""},
                 "leaf": {"description": "", "defined_by": "", "defined_at": ""},
                 "schema_version": 2}
     ts.put_blob(key, ts.RECORD_JSON.encode(document))
 
     with pytest.raises(SchemaVersionRefused, match="schema_version"):
-        class_registry.read_registry(tmp_path / "classes.json")
+        subject_registry.read_registry(tmp_path / "subjects.json")
 
 
 def test_a_registry_above_the_ceiling_refuses_replace_registry_rather_than_repairing_it(tmp_path):
     """replace_registry's allow_removals repair path is for a registry that will not decode, never
     for one that decodes fine but names a newer schema_version: that document must not be treated
     as a broken registry a repair write is entitled to overwrite."""
-    key = class_registry_key(tmp_path)
+    key = subject_registry_key(tmp_path)
     document = {"bur": {"description": "", "defined_by": "", "defined_at": ""},
                 "schema_version": 2}
     ts.put_blob(key, ts.RECORD_JSON.encode(document))
 
-    incoming = ClassRegistry(subjects=(Subject(name="leaf"),))
+    incoming = SubjectRegistry(subjects=(Subject(name="leaf"),))
     with pytest.raises(SchemaVersionRefused):
-        class_registry.replace_registry(tmp_path / "classes.json", incoming, expect=None,
+        subject_registry.replace_registry(tmp_path / "subjects.json", incoming, expect=None,
                                         allow_removals=True)
     # Nothing was overwritten: the newer document is still exactly what was stored.
     assert ts.RECORD_JSON.decode(ts.read_blob_versioned(key).value) == document
@@ -133,7 +133,7 @@ def test_a_registry_above_the_ceiling_refuses_the_dataset_fingerprint(tmp_path):
     labels_dir.mkdir(parents=True)
     write_annotations(labels_dir / "a.json", [Annotation(subject="leaf")], 10, 10)
 
-    key = class_registry_key(tmp_path)
+    key = subject_registry_key(tmp_path)
     document = {"bur": {"description": "", "defined_by": "", "defined_at": ""},
                 "schema_version": 2}
     ts.put_blob(key, ts.RECORD_JSON.encode(document))

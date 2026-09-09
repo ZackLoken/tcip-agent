@@ -16,8 +16,8 @@ from PIL import Image
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp import class_registry
-from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject
+from tcip_mcp import subject_registry
+from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
 from tcip_mcp.pipelines import resolution
 from tcip_mcp.pipelines.data import dataset_fingerprint as fingerprint_mod
 from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
@@ -32,9 +32,9 @@ def _make_dataset(root: Path, *, pixel=(120, 120, 120), bud_box=(10, 10, 40, 40)
     json_io.write_annotations(
         root / "annotations" / date / "IMG_1.json",
         [Annotation(subject="bud", geometry=BBox(*bud_box))], 64, 64)
-    class_registry.write_registry(
-        root / "classes.json",
-        ClassRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
+    subject_registry.write_registry(
+        root / "subjects.json",
+        SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
 
 
 def test_fingerprint_reuses_dataset_hash_for_labels(tmp_path, monkeypatch):
@@ -87,21 +87,21 @@ def test_pixel_reencode_under_same_filename_changes_the_fingerprint(tmp_path):
 def test_registry_value_order_matters_but_whitespace_does_not(tmp_path):
     _make_dataset(tmp_path)
     # add an ordered attribute -> registry (and thus fingerprint) changes
-    reg2 = ClassRegistry(subjects=(Subject(
+    reg2 = SubjectRegistry(subjects=(Subject(
         name="bud", description="a currant bud",
         attributes=(Attribute(name="opening", type="categorical", values=("closed", "open")),)),))
-    class_registry.write_registry(tmp_path / "classes.json", reg2)
+    subject_registry.write_registry(tmp_path / "subjects.json", reg2)
     with_attr = dataset_fingerprint(tmp_path)
     _make_dataset(tmp_path)  # reset registry to no-attr
     assert dataset_fingerprint(tmp_path) != with_attr
 
-    # a whitespace-only reformat of classes.json must not change identity (canonical re-serialization)
-    reg2_again = ClassRegistry(subjects=(Subject(
+    # a whitespace-only reformat of subjects.json must not change identity (canonical re-serialization)
+    reg2_again = SubjectRegistry(subjects=(Subject(
         name="bud", description="a currant bud",
         attributes=(Attribute(name="opening", type="categorical", values=("closed", "open")),)),))
-    class_registry.write_registry(tmp_path / "classes.json", reg2_again)
+    subject_registry.write_registry(tmp_path / "subjects.json", reg2_again)
     fp_a = dataset_fingerprint(tmp_path)
-    cp = tmp_path / "classes.json"
+    cp = tmp_path / "subjects.json"
     cp.write_text(json.dumps(json.loads(cp.read_text()), indent=4) + "\n\n", encoding="utf-8")  # reformat
     assert dataset_fingerprint(tmp_path) == fp_a
 
@@ -174,9 +174,9 @@ def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_
     json_io.write_annotations(
         tmp_path / "annotations" / date / "IMG_1.json",
         [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 64, 64)
-    class_registry.write_registry(
-        tmp_path / "classes.json",
-        ClassRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
+    subject_registry.write_registry(
+        tmp_path / "subjects.json",
+        SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
 
     assert dataset_fingerprint(tmp_path) == "v1:2b72f04cd064379a"
 
@@ -197,9 +197,9 @@ def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(tmp_
     json_io.write_annotations(
         tmp_path / "annotations" / date / "capture_1.json",
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 16, 16)
-    class_registry.write_registry(
-        tmp_path / "classes.json",
-        ClassRegistry(subjects=(Subject(name="bud"),)))
+    subject_registry.write_registry(
+        tmp_path / "subjects.json",
+        SubjectRegistry(subjects=(Subject(name="bud"),)))
 
     fp1 = dataset_fingerprint(tmp_path)
     assert fp1 is not None

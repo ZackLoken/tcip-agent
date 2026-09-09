@@ -165,7 +165,7 @@ def test_save_with_a_null_version_refuses_over_a_registry_written_meanwhile(
 ) -> None:
     """A null version names an absent registry, not an unconditional write: a browser that never
     loaded a registry still refuses when an agent has written one in the meantime."""
-    from tcip_mcp.class_registry import read_registry
+    from tcip_mcp.subject_registry import read_registry
     from tcip_mcp.tools.annotation_tools import write_class_map
 
     result = write_class_map(str(tmp_path), {"leaf": {"description": "written by the agent"}})
@@ -1028,7 +1028,7 @@ def test_save_classes_answers_409_with_the_committed_body_on_a_lost_audit_line(
     committed = detail["committed"]
     assert committed["status"] == "ok"
     assert committed["n_subjects"] == 1
-    assert committed["classes_path"] == str(tmp_path / "classes.json")
+    assert committed["subjects_path"] == str(tmp_path / "classes.json")
     assert {k: v for k, v in committed.items() if k != "version"} == {
         k: v for k, v in healthy_body.items() if k != "version"
     }

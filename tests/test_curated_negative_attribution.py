@@ -17,8 +17,8 @@ import json
 from PIL import Image
 
 import tcip_store as ts
-from tcip_mcp import class_registry
-from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, attribute_schema_digest
+from tcip_mcp import subject_registry
+from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, attribute_schema_digest
 from tcip_mcp.dataset_layout import image_status_digest_key, image_status_key, status_bucket
 from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 from tcip_mcp.pipelines.feedback.materialize import curated_manifest_key, materialize_dataset
@@ -140,9 +140,9 @@ def test_multi_subject_review_leaves_negatives_unattributed(tmp_path):
 def test_negative_stamps_match_the_source_registry_schema(tmp_path):
     """Each harvested negative is stamped with its own subject's current attribute-schema digest."""
     root = tmp_path / "dataset"
-    registry = ClassRegistry(subjects=_TWO_SUBJECTS)
+    registry = SubjectRegistry(subjects=_TWO_SUBJECTS)
     root.mkdir()
-    class_registry.write_registry(root / "classes.json", registry)
+    subject_registry.write_registry(root / "subjects.json", registry)
     images = root / "images"
     _image(images, "pos.png", (130, 45))
     _image(images, "neg_a.png", (45, 130))
@@ -172,11 +172,11 @@ def test_negative_stamps_match_the_source_registry_schema(tmp_path):
 
 
 def test_materialized_dataset_carries_its_own_registry_copy(tmp_path):
-    """The output gets a classes.json of its own, so a later schema change is detectable here."""
+    """The output gets a subjects.json of its own, so a later schema change is detectable here."""
     root = tmp_path / "dataset"
-    registry = ClassRegistry(subjects=_TWO_SUBJECTS)
+    registry = SubjectRegistry(subjects=_TWO_SUBJECTS)
     root.mkdir()
-    class_registry.write_registry(root / "classes.json", registry)
+    subject_registry.write_registry(root / "subjects.json", registry)
     images = root / "images"
     _image(images, "pos.png", (110, 55))
     _image(images, "neg.png", (55, 110))
@@ -188,8 +188,8 @@ def test_materialized_dataset_carries_its_own_registry_copy(tmp_path):
 
     materialize_dataset(state, str(images), str(out))
 
-    assert (out / "classes.json").is_file()
-    copied = class_registry.read_registry(out / "classes.json")
+    assert (out / "subjects.json").is_file()
+    copied = subject_registry.read_registry(out / "subjects.json")
     assert {s.name for s in copied.subjects} == {"bud", "leaf"}
     assert attribute_schema_digest(copied, "bud") == attribute_schema_digest(registry, "bud")
 
@@ -272,9 +272,9 @@ def test_classified_scope_never_confirms_a_negative_even_when_a_value_names_the_
     from tcip_mcp.pipelines.resolution import BucketScope
 
     root = tmp_path / "dataset"
-    registry = ClassRegistry(subjects=_TWO_SUBJECTS)
+    registry = SubjectRegistry(subjects=_TWO_SUBJECTS)
     root.mkdir()
-    class_registry.write_registry(root / "classes.json", registry)
+    subject_registry.write_registry(root / "subjects.json", registry)
     images = root / "images"
     _image(images, "pos.png", (100, 30))
     _image(images, "neg.png", (30, 100))
@@ -304,9 +304,9 @@ def test_classified_scope_refuses_a_confirmed_value_outside_the_bucket_vocabular
     from tcip_mcp.pipelines.resolution import BucketScope
 
     root = tmp_path / "dataset"
-    registry = ClassRegistry(subjects=_TWO_SUBJECTS)
+    registry = SubjectRegistry(subjects=_TWO_SUBJECTS)
     root.mkdir()
-    class_registry.write_registry(root / "classes.json", registry)
+    subject_registry.write_registry(root / "subjects.json", registry)
     images = root / "images"
     _image(images, "pos.png", (100, 30))
     out = tmp_path / "out"
@@ -331,9 +331,9 @@ def test_a_classified_scope_with_no_vocabulary_refuses_rather_than_writing_unche
     from tcip_mcp.pipelines.resolution import BucketScope
 
     root = tmp_path / "dataset"
-    registry = ClassRegistry(subjects=_TWO_SUBJECTS)
+    registry = SubjectRegistry(subjects=_TWO_SUBJECTS)
     root.mkdir()
-    class_registry.write_registry(root / "classes.json", registry)
+    subject_registry.write_registry(root / "subjects.json", registry)
     images = root / "images"
     _image(images, "pos.png", (100, 30))
     out = tmp_path / "out"
@@ -356,9 +356,9 @@ def test_a_classified_scope_with_its_vocabulary_admits_a_value_it_declares(tmp_p
     from tcip_mcp.pipelines.resolution import BucketScope
 
     root = tmp_path / "dataset"
-    registry = ClassRegistry(subjects=_TWO_SUBJECTS)
+    registry = SubjectRegistry(subjects=_TWO_SUBJECTS)
     root.mkdir()
-    class_registry.write_registry(root / "classes.json", registry)
+    subject_registry.write_registry(root / "subjects.json", registry)
     images = root / "images"
     _image(images, "pos.png", (100, 30))
     out = tmp_path / "out"

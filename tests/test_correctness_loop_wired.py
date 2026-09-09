@@ -109,14 +109,14 @@ def test_resolve_contract_dims_attribute_without_registry_raises_not_silently_fa
     """A bare `except Exception: pass` around resolve_registry_id_map
     must not fall open to the head's declared num_classes for any read failure, only the legitimate
     "no subject in scope" case: falling open more broadly would mask a real problem (an
-    attribute-classification config with no classes.json to order its values) as a healthy
+    attribute-classification config with no subjects.json to order its values) as a healthy
     smoke-test dims resolution. No subject at all still legitimately falls back (test above); a
     subject that is given, with an attribute and no registry, must raise."""
     cfg = {
         "model_source": {"builder_kwargs": {"num_classes": 5}},
         "data": {"subject": "bud", "attribute": "opening", "labels_dir": str(tmp_path / "labels")},
     }
-    with pytest.raises(ValueError, match="classes.json"):
+    with pytest.raises(ValueError, match="subjects.json"):
         resolve_contract_dims(cfg, "detection")
 
 

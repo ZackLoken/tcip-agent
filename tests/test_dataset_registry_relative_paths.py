@@ -17,8 +17,8 @@ from PIL import Image
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp import class_registry
-from tcip_mcp.class_registry import ClassRegistry, Subject
+from tcip_mcp import subject_registry
+from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tcip_mcp.tools.project_tools import read_datasets, register_dataset
 
 # dataset_entry_path is imported inside each test that needs it, not at module scope, so this
@@ -33,8 +33,8 @@ def _make_dataset(root: Path) -> None:
     json_io.write_annotations(
         str(root / "annotations" / "2-11-26" / "img_000.json"),
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
-    class_registry.write_registry(
-        root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
+    subject_registry.write_registry(
+        root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
 
 
 def _run_check(*args: str) -> subprocess.CompletedProcess:

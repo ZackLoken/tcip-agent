@@ -443,9 +443,9 @@ def _leaf_dataset(root, *, date: str | None):
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
 
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="leaf"),)))
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="leaf"),)))
     images_dir = root / "images" / date if date else root / "images"
     labels_dir = root / "annotations" / date if date else root / "annotations"
     images_dir.mkdir(parents=True)

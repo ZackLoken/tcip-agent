@@ -10,10 +10,10 @@ import pytest
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 
-from tcip_mcp.class_registry import ClassRegistry, RegistryError, Subject, write_registry
+from tcip_mcp.subject_registry import SubjectRegistry, RegistryError, Subject, write_registry
 from tcip_mcp.dataset_layout import (
     annotation_dir,
-    classes_path,
+    subjects_path,
     list_dates,
     list_models,
     list_subjects,
@@ -65,8 +65,8 @@ def test_capture_dates_are_the_bucket_directories_not_loose_images(tmp_path: Pat
 def _registry(root: Path) -> None:
     """A registry declaring three subjects in an order that is not alphabetical."""
     write_registry(
-        classes_path(root),
-        ClassRegistry(subjects=(Subject(name="leaf"), Subject(name="bush"), Subject(name="bud"))),
+        subjects_path(root),
+        SubjectRegistry(subjects=(Subject(name="leaf"), Subject(name="bush"), Subject(name="bud"))),
     )
 
 
@@ -88,7 +88,7 @@ def test_a_registry_that_will_not_decode_is_not_reported_as_no_subjects(tmp_path
     """
     root = tmp_path
     _registry(root)
-    classes_path(root).write_bytes(b"{ this is not a registry")
+    subjects_path(root).write_bytes(b"{ this is not a registry")
 
     with pytest.raises(RegistryError):
         list_subjects(root)

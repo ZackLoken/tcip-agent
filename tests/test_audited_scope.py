@@ -192,12 +192,12 @@ def test_relative_output_dir_records_where_the_tool_anchors_it_not_where_the_pro
     pinned_root = tmp_path / "pinned_project"
     anchored = pinned_root / "curated_dataset"
     anchored.mkdir(parents=True)
-    (anchored / "classes.json").write_text("{}", encoding="utf-8")
+    (anchored / "subjects.json").write_text("{}", encoding="utf-8")
 
     process_cwd = tmp_path / "process_cwd"
     decoy = process_cwd / "curated_dataset"
     decoy.mkdir(parents=True)
-    (decoy / "classes.json").write_text("{}", encoding="utf-8")
+    (decoy / "subjects.json").write_text("{}", encoding="utf-8")
 
     monkeypatch.chdir(process_cwd)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(pinned_root))

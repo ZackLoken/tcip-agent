@@ -20,15 +20,15 @@ def _two_subject_dataset(root: Path) -> tuple[Path, Path]:
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp import class_registry
-    from tcip_mcp.class_registry import ClassRegistry, Subject
+    from tcip_mcp import subject_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject
 
     images_dir, labels_dir = root / "images", root / "labels"
     images_dir.mkdir(parents=True, exist_ok=True)
     labels_dir.mkdir(parents=True, exist_ok=True)
-    class_registry.write_registry(
-        root / "classes.json",
-        ClassRegistry(subjects=(Subject(name="bud"), Subject(name="leaf"))))
+    subject_registry.write_registry(
+        root / "subjects.json",
+        SubjectRegistry(subjects=(Subject(name="bud"), Subject(name="leaf"))))
     for i in range(3):
         Image.new("RGB", (160, 96), color=(100, 130, 90)).save(images_dir / f"img{i}.png")
         buds = [Annotation(subject="bud", geometry=BBox(5 + 12 * k, 5, 15 + 12 * k, 20))

@@ -11,8 +11,8 @@ from PIL import Image
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp import class_registry
-from tcip_mcp.class_registry import ClassRegistry, Subject
+from tcip_mcp import subject_registry
+from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tcip_mcp.tools.bundle import AnchorMisplaced, account_for
 
 
@@ -23,7 +23,7 @@ def _dataset_tree(root: Path) -> None:
     json_io.write_annotations(
         str(root / "annotations" / "2026-03-04" / "a_1.json"),
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 16, 16)
-    class_registry.write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
+    subject_registry.write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
     (root / "dataset.json").write_text('{"crop": "currant", "id": "x", "fingerprint": "y"}',
                                        encoding="utf-8")
 
@@ -44,7 +44,7 @@ def test_a_plain_dataset_tree_is_all_blob_and_nothing_unaccounted(tmp_path: Path
     assert all(entry.name.endswith(".lock") for entry in accounting.bookkeeping)
     assert not _plan_paths(accounting)
     blobs = {p.name for p in accounting.blobs}
-    assert {"a_1.jpg", "a_1.json", "classes.json", "dataset.json"} <= blobs
+    assert {"a_1.jpg", "a_1.json", "subjects.json", "dataset.json"} <= blobs
 
 
 def test_a_state_record_is_claimed_under_the_state_root(tmp_path: Path):

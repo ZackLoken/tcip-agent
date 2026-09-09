@@ -4,7 +4,7 @@ An :class:`Annotation` is the unit: *what* it is (``subject`` plus attribute val
 optionally *where* (``geometry``), and its provenance.  A geometry-less annotation is an image- or
 plant-level label (e.g. a whole-plant rating).  ``score`` is set for a model prediction and ``None``
 for ground truth.  Integer class ids do not live here: a name→id assignment is a per-training-run
-artifact (see :mod:`tcip_mcp.class_registry`), never stored on an annotation.
+artifact (see :mod:`tcip_mcp.subject_registry`), never stored on an annotation.
 """
 
 from __future__ import annotations
