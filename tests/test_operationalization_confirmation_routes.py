@@ -641,8 +641,12 @@ def test_the_statement_read_route_answers_for_a_trait_nothing_is_stated_for(
 
     directory = traits.trait_specs_dir(str(tmp_path))
     key = traits.trait_spec_key(directory, "unstated_trait")
-    ts.replace(key, {"name": "unstated_trait", "delivers": ["astringency"]},
-               expect=ts.Version.ABSENT)
+    ts.replace(
+        key,
+        {"name": "unstated_trait", "delivers": ["astringency"],
+         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
+        expect=ts.Version.ABSENT,
+    )
 
     resp = _read_statement(client, tmp_path, "unstated_trait")
     body = resp.json()
@@ -685,8 +689,12 @@ def test_confirm_statement_route_refuses_when_a_registered_spec_has_no_statement
 
     directory = traits.trait_specs_dir(str(tmp_path))
     key = traits.trait_spec_key(directory, "unstated_trait")
-    ts.replace(key, {"name": "unstated_trait", "delivers": ["astringency"]},
-               expect=ts.Version.ABSENT)
+    ts.replace(
+        key,
+        {"name": "unstated_trait", "delivers": ["astringency"],
+         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
+        expect=ts.Version.ABSENT,
+    )
 
     resp = _confirm_statement(client, tmp_path, "unstated_trait", "a hash of nothing")
 

@@ -36,12 +36,13 @@ def _seed_trait_spec(project_root: Path) -> None:
     spec = {
         "name": TRAIT, "count_objective": "count_unbiased", "localization": "center_match",
         "localization_tolerance": "half_class_avg_size", "localization_tolerance_frac": 0.5,
-        "holdout_match_quality_floor": 0.5, "positive_class_name": "", "milestone_fractions": [],
+        "holdout_match_quality_floor": 0.5, "positive_value": "", "milestone_fractions": [],
         "milestone_on": "", "majority_milestone": "", "majority_provisional": False,
         "phenology_prefix": "leaf_out", "majority_label": "", "sliver_policy": "class_avg_size",
         "sliver_frac": 0.5, "count_bias_tolerance_frac": 0.01,
         "delivers": ["leaf_out_05per_date", "leaf_out_50per_date"],
         "notes": "Test-only, not a domain-expert-confirmed measurement.",
+        "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION,
     }
     ts.replace(traits.trait_spec_key(specs_dir, TRAIT), spec, expect=ts.Version.ABSENT)
 

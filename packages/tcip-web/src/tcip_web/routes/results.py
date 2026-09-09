@@ -586,7 +586,7 @@ def _measure_phenology(
     try:
         plants = phenology.per_plant_phenology(
             mapping_raw, predictions_by_date,
-            positive_class_name=spec.positive_class_name, spec=spec,
+            positive_value=spec.positive_value, spec=spec,
         )
     except (UnreadableLabelDocument, StampScopeUnstated, ClassifiedRecordRefused,
             StoreError) as exc:
@@ -816,7 +816,7 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     if not measurement.positive_class_assessed:
         raise HTTPException(
             400,
-            f"predictions carry no {measurement.spec.positive_class_name!r} class anywhere in this "
+            f"predictions carry no {measurement.spec.positive_value!r} class anywhere in this "
             "delivery. The classifier that produced them never assessed this trait's positive "
             "class, so the positive fraction is not a valid measurement. Run and validate the "
             "classifier first.",

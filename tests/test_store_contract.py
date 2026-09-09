@@ -2189,7 +2189,8 @@ REGISTERED = {
         "predictions/live/2026-03-04/.tcip/raster_pass_progress/identity.json",
         root_of=_stamp_bucket),
     "trait_specs": Registered(
-        {"name": TRAIT_UNDER_TEST, "delivers": ["measure_one"], "notes": "ü"},
+        {"name": TRAIT_UNDER_TEST, "delivers": ["measure_one"], "notes": "ü",
+         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
         _trait_spec_key, f".tcip/state/trait_specs/{TRAIT_UNDER_TEST}.json",
         root_of=_trait_specs_root),
     "annotation_records": Registered(
@@ -2369,7 +2370,7 @@ REGISTERED = {
     # the spec record itself
     "trait_spec_statements": Registered(
         {"trait": TRAIT_UNDER_TEST,
-         "statement_fields": {"delivers": ["measure_one"], "positive_class_name": "büsch"},
+         "statement_fields": {"delivers": ["measure_one"], "positive_value": "büsch"},
          "rationale": "the breeder described the state directly", "stated_by": "author_trait_spec",
          "stated_at": "2026-03-04T12:00:00+00:00", "relayed_note": "",
          "confirmed_by": "user:ü", "confirmed_at": "2026-03-04T12:30:00+00:00",

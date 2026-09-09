@@ -629,8 +629,8 @@ def calibrate_classifier_operating_point(
         spec = get_trait(trait_name)
     except TraitUnknownError as e:
         return {"error": str(e)}
-    if not spec.positive_class_name:
-        return {"error": f"trait {trait_name!r} defines no positive_class_name to calibrate"}
+    if not spec.positive_value:
+        return {"error": f"trait {trait_name!r} defines no positive_value to calibrate"}
     disagreement = _stated_root_disagreement(
         dataset_root, {"calibration_gt_dir": calibration_gt_dir, "holdout_gt_dir": holdout_gt_dir})
     if disagreement:
@@ -641,10 +641,10 @@ def calibrate_classifier_operating_point(
 
     try:
         cal_items = _classification_items(calibration_gt_dir, calibration_pred_dir, trait_name=trait_name,
-                                          subject=subject, positive_value=spec.positive_class_name,
+                                          subject=subject, positive_value=spec.positive_value,
                                           attribute=attribute)
         hold_items = _classification_items(holdout_gt_dir, holdout_pred_dir, trait_name=trait_name,
-                                           subject=subject, positive_value=spec.positive_class_name,
+                                           subject=subject, positive_value=spec.positive_value,
                                            attribute=attribute)
     except (ValueError, UnreadableLabelDocument, StoreError) as exc:
         return {"error": str(exc)}
@@ -663,7 +663,7 @@ def calibrate_classifier_operating_point(
     checkpoint_sha256 = _agreed_checkpoint_identity([calibration_pred_dir, holdout_pred_dir])
     stamp = {
         "operating_point": {"classifier": {"validated_against": result["validated_against"],
-                                           "value": spec.positive_class_name}},
+                                           "value": spec.positive_value}},
         "validated": result["passed"],
         "validated_by": None,
         "failures": result["failures"],
@@ -728,7 +728,7 @@ def deliver_phenology_milestones(
     Args:
         trait: A registered trait name (``registered_traits()``), required, no default. The
             positive class id is resolved from the prediction buckets' own recorded ``id_map`` by
-            this trait's ``positive_class_name`` (a mapping fact read from the labels the run
+            this trait's ``positive_value`` (a mapping fact read from the labels the run
             actually decoded through, never a pinned default or a separate registry re-derivation
             that could disagree with it).
         mapping_name: Name of a plant mapping persisted under this project (``{date:
@@ -793,7 +793,7 @@ def deliver_phenology_milestones(
     stated = check_operationalization(spec, record, STATE_CROSSING_DATES, registry=registry)
     if not stated.ok:
         return {"error": stated.message, "n_plants": 0}
-    pos = spec.positive_class_name
+    pos = spec.positive_value
 
     from tcip_mcp.pipelines.postprocessing import plant_mapping
     from tcip_mcp.project_paths import platform_state_root
@@ -821,7 +821,7 @@ def deliver_phenology_milestones(
 
     try:
         result = phenology.per_plant_phenology(
-            mapping, predictions_by_date, positive_class_name=pos, spec=spec,
+            mapping, predictions_by_date, positive_value=pos, spec=spec,
         )
     except (UnreadableLabelDocument, StampScopeUnstated, ClassifiedRecordRefused,
             StoreError) as exc:

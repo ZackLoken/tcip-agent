@@ -73,12 +73,12 @@ def test_doctor_reports_a_version_refused_trait_spec_as_a_warning_not_a_crash(tm
     (root / "images").mkdir(parents=True)
 
     _plant(trait_spec_key(trait_specs_dir(root), "sometrait"),
-           {"schema_version": 2, "name": "sometrait"})
+           {"schema_version": 3, "name": "sometrait"})
 
     res = _run(root)
 
     assert "sometrait" in res.stdout
-    assert "schema_version 2, above the 1 this reader knows" in res.stdout
+    assert "schema_version 3, above the 2 this reader knows" in res.stdout
     assert "Traceback" not in res.stderr
     assert res.returncode != 2
 

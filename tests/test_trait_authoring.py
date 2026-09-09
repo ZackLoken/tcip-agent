@@ -34,9 +34,16 @@ pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 # ── R1: config-driven authoring, crops.yml-cross-checked ──────────────────
 
 def _write_spec(directory: Path, name: str, spec: dict) -> None:
+    """Write a raw trait-spec record, stamped at the current schema ceiling: most call sites here
+    exercise validation the config parser itself performs, which needs a stamped record on read
+    to reach at all, not the version-conform rail (:func:`traits.trait_spec_unconformed`)."""
     import tcip_store as ts
 
-    ts.replace(traits.trait_spec_key(directory, name), {"name": name, **spec}, expect=ts.Version.ABSENT)
+    ts.replace(
+        traits.trait_spec_key(directory, name),
+        {"name": name, "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION, **spec},
+        expect=ts.Version.ABSENT,
+    )
 
 
 def test_load_trait_specs_reads_vocab_checked_config(tmp_path: Path):
@@ -108,20 +115,29 @@ def test_config_spec_unknown_field_is_rejected(tmp_path: Path):
 
 
 def test_config_spec_stamped_with_schema_version_still_loads(tmp_path: Path):
-    # frozen-formats.json declares trait_specs able to carry schema_version; the stamp is a
-    # store concern (the seam's read path already enforces its ceiling), not an unknown field.
+    # frozen-formats.json declares trait_specs at ceiling 2; a record carrying that stamp loads.
     specs_dir = tmp_path / "trait_specs"
-    _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"], "schema_version": 1})
+    _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"], "schema_version": 2})
     specs = load_trait_specs(specs_dir=specs_dir)
     assert [s.name for s in specs] == ["leaf"]
     assert specs[0].delivers == ("leaf_length",)
 
 
-def test_config_spec_unstamped_still_loads(tmp_path: Path):
+def test_config_spec_unstamped_is_reported_unconformed(tmp_path: Path):
+    # No schema_version key names a record that predates the subject-registry rename; conform it
+    # with `tcip rename-subject-registry`, or a hand-authored file with `"schema_version": 2`.
+    import tcip_store as ts
+
     specs_dir = tmp_path / "trait_specs"
-    _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"]})
-    specs = load_trait_specs(specs_dir=specs_dir)
-    assert [s.name for s in specs] == ["leaf"]
+    ts.replace(
+        traits.trait_spec_key(specs_dir, "leaf"),
+        {"name": "leaf", "delivers": ["leaf_length"]},
+        expect=ts.Version.ABSENT,
+    )
+    specs, errors = load_trait_specs_with_errors(specs_dir=specs_dir)
+    assert specs == []
+    assert errors[0]["kind"] == "unconformed"
+    assert "rename-subject-registry" in errors[0]["reason"]
 
 
 # ── count_objective is validated against the registry, not a hardcoded whitelist ─
@@ -332,6 +348,7 @@ def test_get_trait_load_trait_specs_and_registered_traits_agree_on_a_record_conf
     specs_dir = tmp_path / "trait_specs"
     data = {k: (list(v) if isinstance(v, tuple) else v)
             for k, v in dataclasses.asdict(BUD_OPENING).items()}
+    data["schema_version"] = traits.TRAIT_SPEC_SCHEMA_VERSION
     ts.replace(traits.trait_spec_key(specs_dir, "bud_opening"), data, expect=ts.Version.ABSENT)
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
 
@@ -346,7 +363,7 @@ def test_bud_opening_config_semantics_match_reference_fixture():
     # config-loaded specs are rebuilt fresh per call (traits.py), never module-load singletons.
     t = get_trait("bud_opening")
     assert t == BUD_OPENING
-    assert t.positive_class_name == "open"
+    assert t.positive_value == "open"
     assert t.localization_tolerance_frac == 0.5
     assert t.sliver_frac == 0.5
     assert t.majority_milestone == "95per"

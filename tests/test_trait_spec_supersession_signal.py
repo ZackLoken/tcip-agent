@@ -31,13 +31,13 @@ def test_moving_a_constituting_field_reports_the_superseded_confirmation(project
     _confirmed_crossing(project)
 
     result = revise_trait_spec(
-        str(project), fx.CROSSING_TRAIT, {"positive_class_name": "shed"},
+        str(project), fx.CROSSING_TRAIT, {"positive_value": "shed"},
         rationale="the breeder corrected which state counts as the positive call",
     )
 
-    assert result["positive_class_name"] == "shed"
+    assert result["positive_value"] == "shed"
     assert result["superseded"] == [
-        {"delivery_kind": op.STATE_CROSSING_DATES, "field": "positive_class_name",
+        {"delivery_kind": op.STATE_CROSSING_DATES, "field": "positive_value",
          "confirmed_value": "open", "current_value": "shed"},
     ]
 
@@ -57,7 +57,7 @@ def test_an_unconfirmed_statement_is_not_reported_as_superseded(project: Path):
     fx.state_crossing(project)
 
     result = revise_trait_spec(
-        str(project), fx.CROSSING_TRAIT, {"positive_class_name": "shed"},
+        str(project), fx.CROSSING_TRAIT, {"positive_value": "shed"},
         rationale="the breeder corrected which state counts as the positive call",
     )
 
@@ -86,19 +86,19 @@ def test_the_spec_is_written_to_the_project_the_call_names(project: Path, tmp_pa
     other = fx.seed_project(tmp_path / "other_project")
 
     revise_trait_spec(
-        str(project), fx.CROSSING_TRAIT, {"positive_class_name": "shed"},
+        str(project), fx.CROSSING_TRAIT, {"positive_value": "shed"},
         rationale="the breeder corrected which state counts as the positive call",
     )
 
-    assert fx.resolve(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES).spec.positive_class_name == "shed"
-    assert fx.resolve(other, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES).spec.positive_class_name == "open"
+    assert fx.resolve(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES).spec.positive_value == "shed"
+    assert fx.resolve(other, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES).spec.positive_value == "open"
 
 
 def test_the_reported_supersession_is_what_the_delivery_precondition_then_refuses_on(project: Path):
     _confirmed_crossing(project)
 
     reported = revise_trait_spec(
-        str(project), fx.CROSSING_TRAIT, {"positive_class_name": "shed"},
+        str(project), fx.CROSSING_TRAIT, {"positive_value": "shed"},
         rationale="the breeder corrected which state counts as the positive call",
     )["superseded"]
     spec, record, _ = fx.resolve(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES)

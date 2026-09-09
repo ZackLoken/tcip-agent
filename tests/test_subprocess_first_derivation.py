@@ -42,11 +42,14 @@ def _seed_dataset(root: Path) -> tuple[Path, Path, Path, Path]:
 def _seed_bare_trait(name: str) -> None:
     import tcip_store as ts
     from tcip_mcp.project_paths import resolve_state
-    from tcip_mcp.traits import _TRAIT_SPECS_RELPATH, trait_spec_key
+    from tcip_mcp.traits import _TRAIT_SPECS_RELPATH, TRAIT_SPEC_SCHEMA_VERSION, trait_spec_key
 
     specs_dir = resolve_state(_TRAIT_SPECS_RELPATH)
-    ts.replace(trait_spec_key(specs_dir, name), {"name": name, "delivers": ["leaf_length"]},
-               expect=ts.Version.ABSENT)
+    ts.replace(
+        trait_spec_key(specs_dir, name),
+        {"name": name, "delivers": ["leaf_length"], "schema_version": TRAIT_SPEC_SCHEMA_VERSION},
+        expect=ts.Version.ABSENT,
+    )
 
 
 def _wait_terminal(run_id: str, seconds: float) -> str:

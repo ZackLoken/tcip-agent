@@ -204,7 +204,7 @@ def test_a_trait_spec_authored_through_a_handshake_names_the_harness(tmp_path: P
         "project_root": str(tmp_path),
         "trait": "bloom_authored",
         "delivers": ["bloom_05per_date"],
-        "positive_class_name": "open",
+        "positive_value": "open",
         "milestone_fractions": [0.05],
         "milestone_on": "positive_fraction",
         "rationale": "the breeder described the state directly, in their own field-scoring terms",

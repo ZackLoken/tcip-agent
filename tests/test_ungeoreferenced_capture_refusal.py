@@ -320,7 +320,7 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(tmp_path: Path)
     assert build.unattributed() == 1
 
     per_plant = phenology.per_plant_series(
-        {DATE: [blank, named]}, {}, positive_class_name="open")
+        {DATE: [blank, named]}, {}, positive_value="open")
     assert list(per_plant) == ["P1"]
 
 

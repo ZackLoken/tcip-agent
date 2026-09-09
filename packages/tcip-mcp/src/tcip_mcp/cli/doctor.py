@@ -655,9 +655,8 @@ def check_trait_specs(root: Path, findings: list) -> None:
 
     _specs, errors = load_trait_specs_with_errors(project_root=root)
     for e in errors:
-        # A version refusal is a soft-rail finding, the doctor's own posture; every other reason
-        # (malformed JSON, an invalid config) still blocks, unchanged from before this family.
-        level = "warn" if e.get("kind") == "version_refused" else "error"
+        # A version refusal or an unconformed (pre-rename) record is the doctor's own soft rail.
+        level = "warn" if e.get("kind") in ("version_refused", "unconformed") else "error"
         findings.append((level, f"trait spec {e['file']} failed to load: {e['reason']}"))
 
 

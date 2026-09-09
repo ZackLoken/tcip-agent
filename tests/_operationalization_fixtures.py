@@ -28,7 +28,7 @@ COUNT_TRAIT = "stem"
 
 CROSSING_SPEC = TraitSpec(
     name=CROSSING_TRAIT,
-    positive_class_name="open",
+    positive_value="open",
     milestone_fractions=(0.05, 0.50),
     milestone_on="positive_fraction",
     phenology_prefix="bloom",
@@ -132,12 +132,12 @@ def confirm_spec_statement(project_root: Path, trait: str) -> dict[str, Any]:
     )
 
 
-def seed_positive_class(project_root: Path, subject_name: str, positive_class_name: str) -> cr.SubjectRegistry:
-    """Ensure the project's class registry declares ``positive_class_name`` as a value of
+def seed_positive_class(project_root: Path, subject_name: str, positive_value: str) -> cr.SubjectRegistry:
+    """Ensure the project's subject registry declares ``positive_value`` as a value of
     ``subject_name``'s own attribute, adding both the subject and the value on first mention and
     leaving an existing declaration alone; returns the registry as stored.
 
-    An empty ``positive_class_name`` (a spec whose field is not yet authored) adds the subject with
+    An empty ``positive_value`` (a spec whose field is not yet authored) adds the subject with
     whatever attributes it already carries, never an empty-string value, since the registry
     invariant forbids one and there is nothing yet to declare.
     """
@@ -147,14 +147,14 @@ def seed_positive_class(project_root: Path, subject_name: str, positive_class_na
     subjects = {s.name: s for s in registry.subjects}
     existing = subjects.get(subject_name)
     attrs = list(existing.attributes) if existing else []
-    if positive_class_name:
+    if positive_value:
         if attrs:
             attr = attrs[0]
-            if positive_class_name not in attr.values:
+            if positive_value not in attr.values:
                 attrs[0] = cr.Attribute(name=attr.name, type=attr.type,
-                                        values=(*attr.values, positive_class_name))
+                                        values=(*attr.values, positive_value))
         else:
-            attrs = [cr.Attribute(name="state", type="categorical", values=(positive_class_name,))]
+            attrs = [cr.Attribute(name="state", type="categorical", values=(positive_value,))]
     subjects[subject_name] = cr.Subject(name=subject_name, attributes=tuple(attrs))
     updated = cr.SubjectRegistry(subjects=tuple(subjects.values()))
     cr.write_registry(subjects_path(project_root), updated)
@@ -168,7 +168,7 @@ def seed_project(project_root: Path) -> Path:
     confirm_spec_statement(project_root, CROSSING_TRAIT)
     write_spec(project_root, COUNT_SPEC)
     confirm_spec_statement(project_root, COUNT_TRAIT)
-    seed_positive_class(project_root, "flower", CROSSING_SPEC.positive_class_name)
+    seed_positive_class(project_root, "flower", CROSSING_SPEC.positive_value)
     return Path(project_root)
 
 
@@ -345,12 +345,12 @@ def seed_confirmed_crossing(project_root: Path, trait: str, **overrides: Any) ->
     spec = get_trait_for(trait, project_root)
     fields: dict[str, Any] = {
         "statement": f"the date each plant reached the state {trait} scores in the field",
-        "mechanism": f"the calibrated {spec.positive_class_name} classifier over one plant's objects",
+        "mechanism": f"the calibrated {spec.positive_value} classifier over one plant's objects",
         "measured_subject": trait,
         "delivered_phenotypes": list(spec.delivers),
     }
     fields.update(overrides)
-    registry = seed_positive_class(project_root, fields["measured_subject"], spec.positive_class_name)
+    registry = seed_positive_class(project_root, fields["measured_subject"], spec.positive_value)
     record = op.state_operationalization(
         project_root, trait, op.STATE_CROSSING_DATES, registry=registry, **fields
     )

@@ -23,7 +23,7 @@ silently inherit another trait's value. ``resolve_operating_point``
 stamps whether a given run's ``count_objective`` was trait-authored or the platform default, so the
 distinction is never silently lost downstream.
 
-Everything else in ``TraitSpec`` says: which class in ``classes.json`` is the positive/target state,
+Everything else in ``TraitSpec`` says: which subject in ``subjects.json`` is the positive/target state,
 the milestone convention, and the tile-seam sliver policy, genuinely authored-once breeder facts.
 Operating-point *values* (conf, IoU, tolerances) and the CV task / pipeline decomposition (detection
 vs classification, one model vs detect-then-classify) are deliberately absent from this whole class,
@@ -109,9 +109,9 @@ class TraitSpec:
     # value comes from ``derivations.derive_localization_tolerance_frac`` at runtime).
     localization_tolerance: str = "half_class_avg_size"
     localization_tolerance_frac: float = 0.5  # fallback only, see derive_localization_tolerance_frac
-    # The class the positive call resolves to in classes.json, by name (the id is a mapping
-    # fact derived from the labels, not a pinned magic number). Empty = the trait has no positive class.
-    positive_class_name: str = ""
+    # The subject the positive call resolves to in subjects.json, by name (the id is a mapping
+    # fact derived from the labels, not a pinned magic number). Empty = the trait has no positive value.
+    positive_value: str = ""
     # Milestone crossing fractions and the quantity they cross.
     milestone_fractions: tuple[float, ...] = ()
     milestone_on: str = ""  # e.g. "positive_fraction"
@@ -397,6 +397,9 @@ def _trait_specs_state_root(specs_dir: Path) -> Path:
 
 
 TRAIT_SPECS_STORE = "trait_specs"
+# The record's shape moved (positive_class_name renamed to positive_value): every write stamps
+# this ceiling, and trait_spec_unconformed refuses a stored record with no stamp or 1.
+TRAIT_SPEC_SCHEMA_VERSION = 2
 _SPEC_FILE = RootedFileLocator(prefix=("trait_specs",), suffix=SPEC_SUFFIX)
 register_store(
     StoreDescriptor(
@@ -408,6 +411,7 @@ register_store(
         concurrency="cas",
         enumerable=True,
         locator=_SPEC_FILE,
+        schema_version=TRAIT_SPEC_SCHEMA_VERSION,
     )
 )
 
@@ -428,6 +432,28 @@ def trait_spec_key(specs_dir: str | Path, trait_name: str) -> Key:
 def _spec_filename(specs_dir: Path, trait_name: str) -> str:
     """The spec's file name, taken from the store's own locator rather than spelled again."""
     return _SPEC_FILE.relative_path(str(specs_dir), (trait_name,)).name
+
+
+def trait_spec_unconformed(document: dict) -> str | None:
+    """Why a stored ``trait_specs`` record predates the subject-registry rename, else ``None``.
+
+    A mapping with no ``schema_version`` key, or with ``1``, was never written by ``_encode_spec``'s
+    unconditional stamp: either a record written before the rename (``positive_class_name`` is now
+    ``positive_value``), conformed by ``tcip rename-subject-registry <project_root>``, or a
+    hand-authored file with no stamp, conformed by hand (``"schema_version": 2``). Distinct from the
+    seam's own too-new refusal (``SchemaVersionRefused``, ``kind: "version_refused"``): that is a
+    document above this store's declared ceiling; this is a document at or under it whose shape the
+    ceiling alone does not describe, since a field renamed rather than the store gaining a version.
+    """
+    version = document.get("schema_version")
+    if version is None or version == 1:
+        return (
+            "this trait spec record predates the subject-registry rename (positive_class_name is "
+            "now positive_value) and carries no schema_version: 2 stamp; conform it with `tcip "
+            'rename-subject-registry <project_root>`, or, for a hand-authored file, add '
+            '"schema_version": 2 to it'
+        )
+    return None
 
 
 def load_trait_specs_with_errors(
@@ -462,6 +488,11 @@ def load_trait_specs_with_errors(
             reason: str | None = "not a mapping"
             logger.warning("trait spec %s skipped: %s", filename, reason)
             errors.append({"file": filename, "reason": reason})
+            continue
+        unconformed_reason = trait_spec_unconformed(data)
+        if unconformed_reason is not None:
+            logger.warning("trait spec %s skipped: %s", filename, unconformed_reason)
+            errors.append({"file": filename, "reason": unconformed_reason, "kind": "unconformed"})
             continue
         spec, reason = _spec_from_config(data, vocab)
         if spec is not None:
@@ -524,9 +555,10 @@ def revise_trait_spec_fields(
     Refuses (raises ``ValueError``) if the trait has no spec record on file: creating one is
     ``author_trait_spec``'s job. Refuses a caller-supplied ``schema_version`` in ``fields_``: it
     is not a ``TraitSpec`` field, no caller sets it directly, and merging it in would let a
-    config editor stamp a version the store seam never validated; the stamp already on record,
-    if any, survives every field edit unchanged. A ``rationale`` that is given must say
-    something, checked before any read.
+    config editor stamp a version the store seam never validated; the encoder stamps the current
+    ceiling on every write regardless, so no caller-supplied value could ride through anyway.
+    Refuses a stored record :func:`trait_spec_unconformed` answers a reason for, before any merge.
+    A ``rationale`` that is given must say something, checked before any read.
 
     The statements scope this reads and writes is :func:`trait_spec_statements_scope` (project_root)
     whenever ``project_root`` is given or neither argument is (the pinned root, where
@@ -603,6 +635,11 @@ def revise_trait_spec_fields(
         if not isinstance(data, dict):
             filename = _spec_filename(directory, trait_name)
             raise ValueError(f"{directory / filename} is not a valid trait spec (not a mapping)")
+        unconformed_reason = trait_spec_unconformed(data)
+        if unconformed_reason is not None:
+            raise ValueError(
+                f"update to trait spec {trait_name!r} refused: {unconformed_reason}"
+            )
 
         merged = dict(data)
         merged.update(fields_)
@@ -643,7 +680,7 @@ def revise_trait_spec_fields(
 
         try:
             written_spec, write_reason = _validate_and_write_spec(
-                spec_key, merged, expect=stored.version, schema_version=data.get("schema_version"),
+                spec_key, merged, expect=stored.version,
             )
         except VersionConflict:
             continue
@@ -687,9 +724,12 @@ def revise_trait_spec_fields(
         except VersionConflict:
             spec_reread = ts.read_versioned(spec_key, default=None)
             reread_data = spec_reread.value
+            # This call's own write just stamped reread_data, so trait_spec_unconformed(reread_data)
+            # cannot answer a reason here; called anyway for symmetry with the other stored reads.
             reread_spec = (
                 _spec_from_config(reread_data, vocab)[0]
-                if isinstance(reread_data, dict) else None
+                if isinstance(reread_data, dict) and trait_spec_unconformed(reread_data) is None
+                else None
             )
             if (
                 reread_spec is None
@@ -705,35 +745,32 @@ def revise_trait_spec_fields(
         return TraitSpecRevision(written_spec, new_statement, note)
 
 
-def _encode_spec(spec: TraitSpec, *, schema_version: Any = None) -> dict[str, Any]:
+def _encode_spec(spec: TraitSpec) -> dict[str, Any]:
     """An already-valid ``TraitSpec`` as the JSON-safe mapping the store's codec accepts: every
-    tuple field becomes a list. The one encoding every trait-spec writer and reader shares.
+    tuple field becomes a list, plus the current ``schema_version`` stamp. The one encoding every
+    trait-spec writer and reader shares.
 
-    ``TraitSpec`` carries no ``schema_version`` field: the store seam's ceiling check runs on
-    the raw document, not the dataclass. Passing ``schema_version`` re-attaches a stamp a caller
-    read off the prior record, so a rewrite through this encoding cannot silently drop it; the
-    default of ``None`` omits the key, which is what a fresh, never-stamped spec writes.
+    ``TraitSpec`` itself carries no ``schema_version`` field: the store seam's ceiling check runs
+    on the raw document, not the dataclass. Every write stamps ``TRAIT_SPEC_SCHEMA_VERSION``
+    unconditionally, so a record this encoder ever touches always carries the current ceiling;
+    :func:`trait_spec_unconformed` is what refuses one that predates this encoder.
     """
     encoded = {
         k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(spec).items()
     }
-    if schema_version is not None:
-        encoded["schema_version"] = schema_version
+    encoded["schema_version"] = TRAIT_SPEC_SCHEMA_VERSION
     return encoded
 
 
-def _write_spec_record(
-    key: Key, spec: TraitSpec, *, expect: ts.Version | None, schema_version: Any = None,
-) -> None:
+def _write_spec_record(key: Key, spec: TraitSpec, *, expect: ts.Version | None) -> None:
     """Encode an already-valid ``TraitSpec`` and write it to ``key`` under compare-and-set at
     ``expect``. Never validates: the caller either built ``spec`` through ``_spec_from_config``
-    already or otherwise guarantees it is legal. ``schema_version``, when given, is re-attached
-    to the encoded record rather than left to fall out of the rewrite."""
-    ts.replace(key, _encode_spec(spec, schema_version=schema_version), expect=expect)
+    already or otherwise guarantees it is legal."""
+    ts.replace(key, _encode_spec(spec), expect=expect)
 
 
 def _validate_and_write_spec(
-    key: Key, data: dict, *, expect: ts.Version | None, schema_version: Any = None,
+    key: Key, data: dict, *, expect: ts.Version | None,
 ) -> tuple[TraitSpec | None, str | None]:
     """Validate ``data`` as a trait spec against the crops.yml vocabulary and, if legal, encode
     and write it to ``key`` under compare-and-set at ``expect``.
@@ -743,9 +780,6 @@ def _validate_and_write_spec(
     function picking one wording for all of them. Raises ``VersionConflict`` if another writer
     landed at ``key`` since ``expect`` was read.
 
-    ``schema_version``, when given, rides through to the write unchanged; omitting it (the
-    default) writes an unstamped record, which is what a fresh authoring means to do.
-
     The one write every trait-spec writer shares: ``revise_trait_spec_fields``'s compare-and-set
     loop, ``author_trait_spec``'s single cas attempt, and the test producer
     ``_operationalization_fixtures.write_spec`` all call this rather than repeating the
@@ -754,7 +788,7 @@ def _validate_and_write_spec(
     spec, reason = _spec_from_config(data, _crops_vocab())
     if spec is None:
         return None, reason
-    _write_spec_record(key, spec, expect=expect, schema_version=schema_version)
+    _write_spec_record(key, spec, expect=expect)
     return spec, None
 
 
@@ -769,7 +803,7 @@ def _no_spec_error(trait_name: str, directory: Path) -> ValueError:
 # ── the trait-spec authoring statement store ─────────────────────────────────
 
 _AUTHORED_SPEC_FIELDS = (
-    "delivers", "positive_class_name", "milestone_fractions", "milestone_on", "majority_milestone",
+    "delivers", "positive_value", "milestone_fractions", "milestone_on", "majority_milestone",
     "majority_provisional", "phenology_prefix", "majority_label", "count_objective",
     "count_bias_tolerance_frac", "count_error_tolerance", "classifier_agreement_floor",
     "ordinal_agreement_floor", "regression_skill_floor", "scale_tolerance_frac",
@@ -892,7 +926,7 @@ def author_trait_spec(
     trait: str,
     *,
     delivers: Sequence[str],
-    positive_class_name: str = "",
+    positive_value: str = "",
     milestone_fractions: Sequence[float] = (),
     milestone_on: str = "",
     majority_milestone: str = "",
@@ -957,7 +991,7 @@ def author_trait_spec(
     authored: dict[str, Any] = {
         "name": trait,
         "delivers": tuple(delivers),
-        "positive_class_name": positive_class_name,
+        "positive_value": positive_value,
         "milestone_fractions": tuple(milestone_fractions),
         "milestone_on": milestone_on,
         "majority_milestone": majority_milestone,
@@ -975,6 +1009,11 @@ def author_trait_spec(
         "notes": notes,
     }
     if existing_spec.value is not None:
+        unconformed_reason = trait_spec_unconformed(existing_spec.value)
+        if unconformed_reason is not None:
+            raise ValueError(
+                f"author_trait_spec cannot restate trait {trait!r}: {unconformed_reason}"
+            )
         authored.update({
             field: existing_spec.value[field]
             for field in _CARRIED_FORWARD_SPEC_FIELDS

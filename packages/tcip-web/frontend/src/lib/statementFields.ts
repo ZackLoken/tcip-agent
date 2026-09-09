@@ -35,7 +35,7 @@ export const STATEMENT_FIELD_LABELS: Record<string, string> = {
   statement_fields: "Authored fields",
   rationale: "Why the agent chose this",
   delivers: "Delivers",
-  positive_class_name: "Positive class",
+  positive_value: "Positive value",
   milestone_fractions: "Milestone fractions",
   milestone_on: "Milestone read on",
   majority_milestone: "Majority milestone",
