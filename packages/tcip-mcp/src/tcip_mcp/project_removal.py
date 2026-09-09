@@ -1,7 +1,7 @@
 """Project removal: archive now, mark for removal, move at the next backend start.
 
 Three doors, GUI-only (the picker's "Remove..." dialog; the agent has no MCP tool for any of
-this, per the owner's ruling): :func:`request_project_removal` (phase one, run from the removal
+this): :func:`request_project_removal` (phase one, run from the removal
 route), :func:`complete_pending_removals` (phase two, run once at backend startup, after
 ``bind_startup_root``'s early return, or through ``tcip complete-removals``), and
 :func:`release_project_binding` (clears the marker and/or marks the canvas-open binding
@@ -59,8 +59,9 @@ operator identifies by hand.
 
 MCP tools and console commands addressed by path (``inspect_project``, ``tcip doctor``,
 ``archive_project`` itself, ``initialize_project``, ``register_dataset``) still reach a pending
-project's tree until phase two moves it: the ruling's openers are the workspace adopters and the
-GUI, not every path-addressed door. A write the agent's MCP process makes into the target
+project's tree until phase two moves it: only the workspace adopters and the GUI are restricted
+from opening a marked project, not every path-addressed door. A write the agent's MCP process
+makes into the target
 (``run_inference``, which leaves no experiment status and no backend job) is invisible to every
 refusal here; on Windows under the database backend its held connection denies phase two's
 rename and is reported; on POSIX or under the file backend the move lands under that writer.

@@ -26,11 +26,11 @@ attribute)`` scope: each record's ``subject`` is whatever the caller named
 and every reader below reads a staged bucket's records under the caller's own statement rather
 than a stamp's.
 
-A third change reaches every caller regardless of that keyword: when every ``<name>@r<n>``
-variant up to the search's ceiling already carries a verdict, the resolver no longer falls back
-to an unchecked, never-searched ``<name>@r100``; it raises :class:`BucketHasVerdicts` naming no
-suggestion. ``stage_prediction_shapes``, the one caller left that never opts into the document
-guard, meets this same refusal on exhaustion where it previously wrote into ``@r100`` unchecked.
+Exhaustion is refused for every caller regardless of that keyword: when every ``<name>@r<n>``
+variant up to the search's ceiling already carries a verdict, the resolver raises
+:class:`BucketHasVerdicts` naming no suggestion rather than falling back to an unchecked,
+never-searched ``<name>@r100``. ``stage_prediction_shapes``, the one caller that never opts into
+the document guard, meets this same refusal on exhaustion.
 
 A bucket's documents leave it through exactly one audited door,
 :func:`~tcip_mcp.tools.inference_tools.clear_prediction_bucket`, which moves a terminal
