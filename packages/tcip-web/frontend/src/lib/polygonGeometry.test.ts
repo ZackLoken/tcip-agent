@@ -167,8 +167,8 @@ describe("findHoveredPolygon (bbox-prefiltered hover scan)", () => {
   });
 
   it("hovers a multi-ring shape from any of its parts", () => {
-    // One annotation, two disjoint regions: pointing at the second must select the same shape,
-    // not read as empty canvas (which is how a click on a part-2 region used to deselect).
+    // One annotation, two disjoint regions: pointing at either part must select the same
+    // shape, never read as empty canvas.
     const multi = [{ rings: [SQUARE, FAR_SQUARE] }];
     const bb = computePolygonBboxes(multi);
     expect(findHoveredPolygon([5, 5], multi, bb)).toBe(0);

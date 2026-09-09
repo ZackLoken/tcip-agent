@@ -146,9 +146,8 @@ describe("buildAnnotateShapes", () => {
   });
 
   it("an in-progress drawing rides along as a dashed polyline in the active subject's colour", () => {
-    // Regression: the mirror used to hardcode amber here while the real canvas's
-    // InProgressPolygon stroke already used the active subject's colour, a divergence the
-    // agent's capture_live_canvas view would show that the breeder's own screen never did.
+    // The mirror must match the real canvas's InProgressPolygon stroke, the active subject's colour:
+    // a divergence here is what capture_live_canvas would show that the breeder's own screen does not.
     const shapes = buildAnnotateShapes({
       ...base,
       currentPolygon: [

@@ -119,8 +119,8 @@ export function defaultChartSeries(metricKeys: string[], rows: MetricRow[]): Cha
 /**
  * Upsert a streamed metric row by epoch/step instead of appending. The training WS
  * replays every row from the start on each (re)connect, so a plain append would
- * double-plot points after a reconnect (and the old seed-GET + replay double-loaded
- * on first open). Rows without an epoch/step key can't be deduped, so they append.
+ * double-plot points after a reconnect. Rows without an epoch/step key can't be
+ * deduped, so they append.
  */
 export function mergeMetric(prev: MetricRow[], row: MetricRow): MetricRow[] {
   const key = metricKey(row);

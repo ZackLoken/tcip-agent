@@ -1,9 +1,8 @@
 /**
  * Single source of truth for image navigation. Arrow keys, the TopBar Prev/Next +
  * jump counter, and the Review tab's image nav all go through this so they share one
- * traversal order that honors the status filter: previously arrows walked the filtered
- * list while TopBar/jump walked raw indices with an unfiltered denominator (three
- * controls, three orders). The pure helpers are exported for unit testing.
+ * traversal order that honors the status filter. The pure helpers are exported for
+ * unit testing.
  */
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
