@@ -171,7 +171,7 @@ def save_classes(payload: SaveClassesPayload) -> dict:
     have lost. Also refuses (400) a same-values attribute type change (categorical to ordinal or
     back): this route never passes ``allow_type_changes`` (nor ``allow_removals``) to
     :func:`~tcip_mcp.subject_registry.replace_registry`, so the GUI has no door for either and
-    always refuses; a deliberate flip is stated through ``write_class_map`` instead. Refuses
+    always refuses; a deliberate flip is stated through ``write_subject_registry`` instead. Refuses
     (409) a stale ``version``. Changing a subject's attribute vocabulary
     invalidates the confirmations made under the old one, so once the write lands the outgoing
     digest is recorded onto that subject's still-unstamped confirmations; they then read as

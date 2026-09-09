@@ -118,12 +118,12 @@ def test_write_registry_admits_valid_work_with_no_registry_at_all(tmp_path):
 # ── write_subject_registry's tool door answers {"error": ...} ──────────────────────────────
 
 
-def test_write_class_map_tool_answers_error_beside_the_retired_document(tmp_path):
-    from tcip_mcp.tools.annotation_tools import write_class_map
+def test_write_subject_registry_tool_answers_error_beside_the_retired_document(tmp_path):
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     _dataset(tmp_path)
     _retire(tmp_path)
-    result = write_class_map(str(tmp_path), {"bud": {}})
+    result = write_subject_registry(str(tmp_path), {"bud": {}})
     assert "error" in result
     assert "classes.json" in result["error"]
 
@@ -265,6 +265,66 @@ def test_doctor_reports_nothing_with_no_registry_at_all(tmp_path):
     findings: list = []
     check_retired_subject_registry(root, findings)
     assert findings == []
+
+
+# ── draw_splits' own precondition over each materialized destination ───────────────────────
+
+
+def _splittable_dataset(root: Path) -> Path:
+    """Enough foreground groups (four distinct stems) for a materializing draw_splits call to
+    succeed at its default minimums (one train, one val, two calibration)."""
+    from PIL import Image
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
+
+    images_dir = root / "images" / "2026-03-04"
+    labels_dir = root / "annotations" / "2026-03-04"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
+    for i, stem in enumerate(("a", "b", "c", "d")):
+        Image.new("RGB", (64, 48), (10, 20, 30)).save(images_dir / f"{stem}.jpg")
+        json_io.write_annotations(
+            labels_dir / f"{stem}.json",
+            [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9)) for _ in range(i + 1)], 64, 48)
+    return root
+
+
+def test_draw_splits_refuses_naming_a_retired_document_at_a_split_destination_nothing_written(tmp_path):
+    from tcip_mcp.tools.data_tools import draw_splits
+
+    root = _splittable_dataset(tmp_path / "ds")
+    out = tmp_path / "splits"
+    (out / "train").mkdir(parents=True)
+    (out / "train" / "classes.json").write_bytes((root / "subjects.json").read_bytes())
+
+    result = draw_splits(
+        str(root), output_path=str(out), materialize=True, subject="bud",
+        train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=3,
+    )
+    assert "error" in result
+    assert "classes.json" in result["error"]
+    assert "tcip rename-subject-registry" in result["error"]
+    # Nothing written: no manifest, no materialized image/label tree.
+    assert not (out / "split_manifest.json").exists()
+    assert not (out / "train" / "images").exists()
+    assert not (out / "val").exists()
+
+
+def test_draw_splits_materializes_fine_with_no_registry_at_any_destination(tmp_path):
+    """The rail's other half: nothing retired at any destination, nothing to refuse."""
+    from tcip_mcp.tools.data_tools import draw_splits
+
+    root = _splittable_dataset(tmp_path / "ds")
+    out = tmp_path / "splits"
+    result = draw_splits(
+        str(root), output_path=str(out), materialize=True, subject="bud",
+        train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=3,
+    )
+    assert "error" not in result, result
+    assert (out / "train" / "images").is_dir() or (out / "val" / "images").is_dir()
 
 
 # ── dataset_scope_of still resolves the root ────────────────────────────────────────────────

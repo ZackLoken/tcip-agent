@@ -1015,6 +1015,17 @@ def draw_splits(
                          f"(attribute={attribute!r}): {admission_counts}. Searched {searched}."
                          f"{remedy} Annotate an instance or confirm a negative before splitting."}
 
+    if materialize:
+        from tcip_mcp.subject_registry import retired_document
+
+        for split_name in kept_splits:
+            stale = retired_document(out_dir / split_name)
+            if stale is not None:
+                return {"error": f"{out_dir / split_name} still carries the retired registry "
+                                 f"at {stale}; conform it first (tcip rename-subject-registry) "
+                                 "before materializing this split, since a registry copy lands "
+                                 "beside it and nothing was written for this call"}
+
     try:
         fingerprint = dataset_fingerprint(folder_path)
     except tcip_store.SchemaVersionRefused as exc:

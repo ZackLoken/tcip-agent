@@ -60,11 +60,11 @@ def test_unmapped_classified_run_names_images_dir_for_a_registry_derived_run_cal
     assert "bud_opening" in message and "bud" in message
 
 
-def test_unmapped_classified_run_names_write_class_map_for_a_registry_derived_run_with_no_registry() -> None:
+def test_unmapped_classified_run_names_write_subject_registry_for_a_registry_derived_run_with_no_registry() -> None:
     data_cfg = {"subject": "bud", "attribute": "bud_opening"}
     message = unmapped_classified_run(data_cfg, None, images_dir="/data/images")
     assert message is not None
-    assert "write_class_map" in message
+    assert "write_subject_registry" in message
     assert "/data/images" in message
 
 
@@ -73,7 +73,7 @@ def test_unmapped_classified_run_names_retrain_for_a_bespoke_dataset_source() ->
     message = unmapped_classified_run(data_cfg, None, images_dir="/data/images")
     assert message is not None
     assert "data.id_map" in message and "retrain" in message
-    assert "write_class_map" not in message
+    assert "write_subject_registry" not in message
 
 
 def test_unmapped_classified_run_names_retrain_for_a_coco_sourced_run() -> None:
@@ -87,7 +87,7 @@ def test_unmapped_classified_run_a_non_registry_derived_run_names_retrain_even_w
     """A bespoke or COCO-sourced run's remedy never depends on ``images_dir`` at all (the raster
     regime, which always calls with ``images_dir=None``, reaches exactly this branch when its own
     targets are not registry-derived): the message names the retrain route, never the
-    registry-derived branch's ``images_dir``/``write_class_map`` text."""
+    registry-derived branch's ``images_dir``/``write_subject_registry`` text."""
     data_cfg = {"subject": "bud", "attribute": "bud_opening", "dataset_source": "pkg.mod:build"}
     message = unmapped_classified_run(data_cfg, None, images_dir=None)
     assert message is not None

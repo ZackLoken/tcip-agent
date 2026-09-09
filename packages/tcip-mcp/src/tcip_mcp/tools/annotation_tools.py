@@ -510,16 +510,16 @@ def score_predictions(
 
 @mcp.tool()
 @audited(scope_arg="dataset_root")
-def write_class_map(
+def write_subject_registry(
     dataset_root: str, subjects: dict, output_path: str = "", allow_removals: bool = False,
     allow_type_changes: bool = False,
 ) -> dict:
-    """Author the dataset's nested class registry, a thin wrapper over ``subject_registry``.
+    """Author the dataset's nested subject registry, a thin wrapper over ``subject_registry``.
 
     ``subjects`` is the nested registry mapping the expert defines, subjects to their
     ``description`` / provenance and zero or more ``attributes`` (each ``categorical`` | ``ordinal``
     with ordered ``values``). It is validated through :func:`subject_registry.registry_from_dict` (a
-    malformed shape refuses loudly) and written to ``<dataset_root>/classes.json`` via
+    malformed shape refuses loudly) and written to ``<dataset_root>/subjects.json`` via
     :func:`subject_registry.replace_registry`, which reads the current version and passes it straight
     back in as that same call's own ``expect``. This call holds no version of its own to carry, the
     way the GUI holds the one its last load returned: the read and the put happen back to back
@@ -548,9 +548,9 @@ def write_class_map(
     under ``schema_change_sweep``.
 
     Args:
-        dataset_root: Dataset root; the registry is written to ``<dataset_root>/classes.json``.
+        dataset_root: Dataset root; the registry is written to ``<dataset_root>/subjects.json``.
         subjects: Nested ``{subject: {description?, defined_by?, defined_at?, attributes?}}`` dict.
-        output_path: Optional explicit path (overrides ``<dataset_root>/classes.json``).
+        output_path: Optional explicit path (overrides ``<dataset_root>/subjects.json``).
         allow_removals: State a dropped name, or a stored registry that will not decode, as a
             deliberate removal/repair rather than refusing it.
         allow_type_changes: State a same-values attribute type flip (categorical to ordinal or

@@ -188,7 +188,7 @@ def unmapped_classified_run(
 
     The remedy names the run's own shape, decided by :func:`~tcip_mcp.pipelines.data.label_queries.
     targets_registry_derived`: a registry-derived run with an ``images_dir`` whose dataset holds
-    no ``subjects.json`` is told to run ``write_class_map`` for that dataset; a registry-derived run
+    no ``subjects.json`` is told to run ``write_subject_registry`` for that dataset; a registry-derived run
     called with no ``images_dir`` at all (an ``image_paths``-only call) is told to pass one, since
     no dataset can otherwise be named to decode it against; any other run (a bespoke
     ``dataset_source``, a COCO-sourced run, or one with no registry to derive from) is told to
@@ -228,7 +228,7 @@ def unmapped_classified_run(
         return (
             f"this run decoded along attribute {attribute!r} of subject {subject!r} from a "
             f"registry-derived dataset, but {images_dir!r} holds no subjects.json to decode it "
-            "with. Run write_class_map for that dataset, then retry."
+            "with. Run write_subject_registry for that dataset, then retry."
         )
     return (
         f"this run decoded along attribute {attribute!r} of subject {subject!r}, but its launch "

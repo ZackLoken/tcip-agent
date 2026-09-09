@@ -191,6 +191,7 @@ def test_consolidated_tools_present_and_removed_absent():
         "claude_reports", "project_retrospective", "domain_knowledge",
         "force_redraw_cal_holdout_split", "push_panel_data", "update_trait_spec_fields",
         "compute_phenology", "check_training_status", "init_project", "set_active_project",
+        "write_class_map",
         # Merged away: list_experiments(launched_only=True) serves the launched-runs view.
         "list_training_runs",
         # Merged away: rank_registered_models(metric="") serves the listing view.

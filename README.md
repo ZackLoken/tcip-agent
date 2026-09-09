@@ -126,7 +126,7 @@ platform's own tools, in the order a first run needs them.
 | `initialize_project(project_path, site)` | Scaffolds `.tcip/` under the project directory and records the breeder-stated `site` (the orchard or station the plants stand in, asked of the breeder). `site` is a required argument; there is no default. |
 | `ingest_images(source, name, site)` | Copies a raw folder of photos into the canonical `images/<YYYY-MM-DD>/` layout under a workspace project. |
 | `register_dataset(dataset_root, crop)` | Records the dataset's identity (crop, id, content fingerprint) so a later delivered number can be traced back to the exact data behind it. |
-| `write_class_map(dataset_root, subjects)` | Authors the dataset's class registry: the subjects (object classes to isolate) and their attributes, the expert's own vocabulary, never inferred from labels. |
+| `write_subject_registry(dataset_root, subjects)` | Authors the dataset's subject registry: the subjects (object classes to isolate) and their attributes, the expert's own vocabulary, never inferred from labels. |
 
 Annotation itself happens in the GUI's Annotate tab: a human labels a sample of images, and an
 image with nothing to label is marked done as a negative there, never inferred from an empty
