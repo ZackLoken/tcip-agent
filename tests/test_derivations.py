@@ -356,15 +356,15 @@ def test_derive_block_scale_px_truncated_raster_refuses_named(tmp_path):
             raster_path=str(raster_path))
 
 
-def test_write_class_map(tmp_path):
+def test_write_subject_registry(tmp_path):
     import json
 
     from tcip_mcp import subject_registry
-    from tcip_mcp.tools.annotation_tools import write_class_map
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     out = tmp_path / "subjects.json"
     # The expert authors the nested registry: two ordered values of a categorical attribute.
-    res = write_class_map(
+    res = write_subject_registry(
         str(tmp_path),
         subjects={"bud": {"description": "a currant bud",
                              "attributes": {"opening": {"type": "categorical",
@@ -382,10 +382,10 @@ def test_write_class_map(tmp_path):
         ["closed", "open"]
 
 
-def test_write_class_map_no_labels(tmp_path):
-    from tcip_mcp.tools.annotation_tools import write_class_map
+def test_write_subject_registry_no_labels(tmp_path):
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
     # An empty registry mapping is not authorable: the tool refuses rather than writing nothing.
-    res = write_class_map(str(tmp_path), subjects={}, output_path=str(tmp_path / "c.json"))
+    res = write_subject_registry(str(tmp_path), subjects={}, output_path=str(tmp_path / "c.json"))
     assert "error" in res
 
 
@@ -421,11 +421,11 @@ def test_run_inference_dry_run_unset_tile_is_pending_not_a_default(tmp_path):
     assert op["overlap"] == "pending-checkpoint-derivation"
 
 
-def test_write_class_map_defaults_into_the_dataset(tmp_path):
+def test_write_subject_registry_defaults_into_the_dataset(tmp_path):
     """No output_path: the registry lands at the dataset's canonical subjects.json."""
-    from tcip_mcp.tools.annotation_tools import write_class_map
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
 
-    res = write_class_map(
+    res = write_subject_registry(
         str(tmp_path),
         subjects={"bud": {"description": "a currant bud",
                              "attributes": {"opening": {"type": "categorical",

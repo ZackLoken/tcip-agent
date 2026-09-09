@@ -166,9 +166,9 @@ def test_save_with_a_null_version_refuses_over_a_registry_written_meanwhile(
     """A null version names an absent registry, not an unconditional write: a browser that never
     loaded a registry still refuses when an agent has written one in the meantime."""
     from tcip_mcp.subject_registry import read_registry
-    from tcip_mcp.tools.annotation_tools import write_class_map
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
 
-    result = write_class_map(str(tmp_path), {"leaf": {"description": "written by the agent"}})
+    result = write_subject_registry(str(tmp_path), {"leaf": {"description": "written by the agent"}})
     assert "error" not in result
 
     # Additive (keeps "leaf"), so only the version check can refuse this, not the by-name drop rail.

@@ -494,9 +494,9 @@ def test_gate_derives_tile_geometry_from_checkpoint(tmp_path):
     assert r["overlap"] == pytest.approx(0.1) and r["overlap_source"] == "derived"
 
 
-def test_run_inference_no_registry_refuses_naming_write_class_map(tmp_path, monkeypatch):
+def test_run_inference_no_registry_refuses_naming_write_subject_registry(tmp_path, monkeypatch):
     """An attribute-scoped run against a dataset with no subjects.json refuses before the pass
-    runs, naming write_class_map as the remedy: a classified run with an unresolvable id_map can
+    runs, naming write_subject_registry as the remedy: a classified run with an unresolvable id_map can
     no longer fall back to a raw-index name, since a value outside any vocabulary is worse than a
     refusal."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
@@ -521,7 +521,7 @@ def test_run_inference_no_registry_refuses_naming_write_class_map(tmp_path, monk
 
     r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu")
     assert "error" in r
-    assert "write_class_map" in r["error"]
+    assert "write_subject_registry" in r["error"]
 
 
 def test_run_inference_corrupted_registry_still_propagates(tmp_path, monkeypatch):

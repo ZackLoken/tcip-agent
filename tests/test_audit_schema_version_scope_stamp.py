@@ -33,9 +33,9 @@ def platform_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_dataset_scoped_decorator_write_carries_the_version_stamp_and_resolved_scope(
     platform_root: Path, tmp_path: Path,
 ) -> None:
-    """``write_class_map`` (``@audited(scope_arg="dataset_root")``) is a real production door,
+    """``write_subject_registry`` (``@audited(scope_arg="dataset_root")``) is a real production door,
     reached with a ``..``-carrying spelling of its own root."""
-    from tcip_mcp.tools.annotation_tools import write_class_map
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     dataset_root = tmp_path / "orchard_dataset"
     dataset_root.mkdir()
@@ -43,10 +43,10 @@ def test_dataset_scoped_decorator_write_carries_the_version_stamp_and_resolved_s
     assert ".." in noncanonical
 
     subjects = {"bud": {"description": "a currant bud"}}
-    assert "error" not in write_class_map(noncanonical, subjects=subjects)
+    assert "error" not in write_subject_registry(noncanonical, subjects=subjects)
 
     rows = list(ts.read_log(audit_module.audit_log_key(dataset_root)).records)
-    matches = [r for r in rows if r["tool"] == "write_class_map"]
+    matches = [r for r in rows if r["tool"] == "write_subject_registry"]
     assert len(matches) == 1, rows
     assert "schema_version" not in matches[0]
     assert matches[0]["scope"] == str(dataset_root.resolve())

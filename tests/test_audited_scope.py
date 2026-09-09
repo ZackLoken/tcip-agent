@@ -55,14 +55,14 @@ def _subjects() -> dict:
 def test_registry_write_records_in_the_dataset_named_by_its_root_argument(
     platform_root: Path, dataset_root: Path
 ) -> None:
-    from tcip_mcp.tools.annotation_tools import write_class_map
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
 
-    assert "error" not in write_class_map(str(dataset_root), subjects=_subjects())
+    assert "error" not in write_subject_registry(str(dataset_root), subjects=_subjects())
 
-    rows = _rows_for(dataset_root, "write_class_map")
+    rows = _rows_for(dataset_root, "write_subject_registry")
     assert len(rows) == 1, _entries(dataset_root)
     assert rows[0]["scope"] == str(dataset_root.resolve())
-    assert _rows_for(platform_root, "write_class_map") == []
+    assert _rows_for(platform_root, "write_subject_registry") == []
 
 
 def test_label_write_records_in_the_dataset_holding_the_image_it_names(

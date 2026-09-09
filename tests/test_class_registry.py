@@ -452,12 +452,12 @@ def test_replace_registry_admits_a_values_only_growth_and_a_same_type_resave(tmp
     assert read_registry(path) == grown
 
 
-def test_write_class_map_refuses_a_type_flip_without_the_flag(tmp_path):
-    from tcip_mcp.tools.annotation_tools import write_class_map
+def test_write_subject_registry_refuses_a_type_flip_without_the_flag(tmp_path):
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
 
-    write_class_map(str(tmp_path), {"bud": {"attributes": {
+    write_subject_registry(str(tmp_path), {"bud": {"attributes": {
         "opening": {"type": "categorical", "values": ["closed", "open"]}}}})
-    result = write_class_map(str(tmp_path), {"bud": {"attributes": {
+    result = write_subject_registry(str(tmp_path), {"bud": {"attributes": {
         "opening": {"type": "ordinal", "values": ["closed", "open"]}}}})
 
     assert "error" in result and "allow_type_changes" in result["error"]
@@ -465,23 +465,23 @@ def test_write_class_map_refuses_a_type_flip_without_the_flag(tmp_path):
         "categorical"
 
 
-def test_write_class_map_allow_removals_alone_still_refuses_a_type_flip(tmp_path):
-    from tcip_mcp.tools.annotation_tools import write_class_map
+def test_write_subject_registry_allow_removals_alone_still_refuses_a_type_flip(tmp_path):
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
 
-    write_class_map(str(tmp_path), {"bud": {"attributes": {
+    write_subject_registry(str(tmp_path), {"bud": {"attributes": {
         "opening": {"type": "categorical", "values": ["closed", "open"]}}}})
-    result = write_class_map(str(tmp_path), {"bud": {"attributes": {
+    result = write_subject_registry(str(tmp_path), {"bud": {"attributes": {
         "opening": {"type": "ordinal", "values": ["closed", "open"]}}}}, allow_removals=True)
 
     assert "error" in result and "allow_type_changes" in result["error"]
 
 
-def test_write_class_map_admits_a_type_flip_with_allow_type_changes(tmp_path):
-    from tcip_mcp.tools.annotation_tools import write_class_map
+def test_write_subject_registry_admits_a_type_flip_with_allow_type_changes(tmp_path):
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
 
-    write_class_map(str(tmp_path), {"bud": {"attributes": {
+    write_subject_registry(str(tmp_path), {"bud": {"attributes": {
         "opening": {"type": "categorical", "values": ["closed", "open"]}}}})
-    result = write_class_map(str(tmp_path), {"bud": {"attributes": {
+    result = write_subject_registry(str(tmp_path), {"bud": {"attributes": {
         "opening": {"type": "ordinal", "values": ["closed", "open"]}}}}, allow_type_changes=True)
 
     assert "error" not in result
@@ -489,37 +489,37 @@ def test_write_class_map_admits_a_type_flip_with_allow_type_changes(tmp_path):
         "ordinal"
 
 
-def test_write_class_map_refuses_dropping_a_declared_subject_without_allow_removals(tmp_path):
-    from tcip_mcp.tools.annotation_tools import write_class_map
+def test_write_subject_registry_refuses_dropping_a_declared_subject_without_allow_removals(tmp_path):
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
 
-    write_class_map(str(tmp_path), {"leaf": {"description": "one leaf"}, "bush": {}})
-    result = write_class_map(str(tmp_path), {"bush": {}})  # drops leaf
+    write_subject_registry(str(tmp_path), {"leaf": {"description": "one leaf"}, "bush": {}})
+    result = write_subject_registry(str(tmp_path), {"bush": {}})  # drops leaf
 
     assert "error" in result and "leaf" in result["error"]
     assert read_registry(tmp_path / "subjects.json").subject("leaf") is not None
 
 
-def test_write_class_map_admits_a_removal_stated_as_deliberate(tmp_path):
-    from tcip_mcp.tools.annotation_tools import write_class_map
+def test_write_subject_registry_admits_a_removal_stated_as_deliberate(tmp_path):
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
 
-    write_class_map(str(tmp_path), {"leaf": {"description": "one leaf"}, "bush": {}})
-    result = write_class_map(str(tmp_path), {"bush": {}}, allow_removals=True)
+    write_subject_registry(str(tmp_path), {"leaf": {"description": "one leaf"}, "bush": {}})
+    result = write_subject_registry(str(tmp_path), {"bush": {}}, allow_removals=True)
 
     assert "error" not in result
     assert read_registry(tmp_path / "subjects.json").subject("leaf") is None
 
 
-def test_write_class_map_refuses_undecodable_existing_bytes_without_allow_removals(tmp_path):
-    from tcip_mcp.tools.annotation_tools import write_class_map
+def test_write_subject_registry_refuses_undecodable_existing_bytes_without_allow_removals(tmp_path):
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     path = tmp_path / "subjects.json"
     path.write_bytes(b'{"leaf": {"description": "one leaf"')  # truncated mid-object
 
-    result = write_class_map(str(tmp_path), {"bush": {}})
+    result = write_subject_registry(str(tmp_path), {"bush": {}})
 
     assert "error" in result
     assert path.read_bytes() == b'{"leaf": {"description": "one leaf"'
 
-    repaired = write_class_map(str(tmp_path), {"bush": {}}, allow_removals=True)
+    repaired = write_subject_registry(str(tmp_path), {"bush": {}}, allow_removals=True)
     assert "error" not in repaired
     assert read_registry(path) == SubjectRegistry(subjects=(Subject(name="bush"),))

@@ -265,7 +265,7 @@ def _copy_source_registry_for_classified_scope(source_images_dir: str, output_di
             f"{source_images_dir} names no dataset root with a class registry to copy: a "
             "classified scope's output cannot train without the registry that decodes it. "
             "Register the source dataset (register_dataset) and author its class map "
-            "(write_class_map) first."
+            "(write_subject_registry) first."
         )
     try:
         read_registry(src_classes)

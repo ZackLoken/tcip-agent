@@ -62,6 +62,7 @@ RENAMES = [
     ("check_training_status", "monitor_training"),
     ("init_project", "initialize_project"),
     ("set_active_project", "activate_project"),
+    ("write_class_map", "write_subject_registry"),
 ]
 
 # A merge retires the absorbed door's name outright (the surviving door serves its view under an

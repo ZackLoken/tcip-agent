@@ -26,7 +26,7 @@ from tcip_mcp.dataset_layout import (
 )
 from tcip_store.file_backend import FileBackend
 from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
-from tcip_mcp.tools.annotation_tools import write_class_map
+from tcip_mcp.tools.annotation_tools import write_subject_registry
 from tcip_web.app import app
 
 BUD_TWO_STATES = {"opening": {"type": "categorical", "values": ["closed", "open"]}}
@@ -83,7 +83,7 @@ def _save_via_route(client: TestClient, root: Path, bud_attributes: dict,
 
 def _save_via_tool(root: Path, bud_attributes: dict,
                    bush_attributes: dict | None = None) -> dict:
-    res = write_class_map(str(root), subjects=_subjects(bud_attributes, bush_attributes))
+    res = write_subject_registry(str(root), subjects=_subjects(bud_attributes, bush_attributes))
     assert "error" not in res, res
     return res
 
