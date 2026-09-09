@@ -333,7 +333,7 @@ class TiledDetectionDataset(BaseImageDataset):
 
         # Pass 1: read every image's upright dims + full-image-px boxes, and accumulate GT box sizes
         # so the seam-sliver cutoff is derived from this dataset's class-average object size, not a
-        # fixed fraction (Q5 / derive-don't-pin). skip_empty defaults False: empty tiles are valid
+        # fixed fraction (derive-don't-pin). skip_empty defaults False: empty tiles are valid
         # negatives.
         stems_data: list[tuple[str, np.ndarray, np.ndarray, int, int]] = []
         # xywh per image (char_sizes_from_boxes's own expected shape), converted from the xyxy boxes
