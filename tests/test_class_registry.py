@@ -1,4 +1,4 @@
-"""The nested class registry and its deterministic name→id assignment.
+"""The nested subject registry and its deterministic name→id assignment.
 
 The assignment is the measurement apex: a non-deterministic or reordered map ships predictions that
 decode to the wrong class: a confident-wrong phenotype that passes every downstream test. These

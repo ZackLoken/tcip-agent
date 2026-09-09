@@ -247,7 +247,7 @@ def _attribute_negatives(
 
 
 def _copy_source_registry_for_classified_scope(source_images_dir: str, output_dir: str) -> None:
-    """Copy the source dataset's own class registry onto ``output_dir``, before anything else is
+    """Copy the source dataset's own subject registry onto ``output_dir``, before anything else is
     written: a classified scope's output cannot train without the registry that decodes it,
     unlike a detector harvest's best-effort copy inside its own confirmed-negatives branch.
 
@@ -262,22 +262,22 @@ def _copy_source_registry_for_classified_scope(source_images_dir: str, output_di
     src_classes = subjects_path(src_root) if src_root is not None else None
     if src_classes is None or not src_classes.is_file():
         raise ValueError(
-            f"{source_images_dir} names no dataset root with a class registry to copy: a "
+            f"{source_images_dir} names no dataset root with a subject registry to copy: a "
             "classified scope's output cannot train without the registry that decodes it. "
-            "Register the source dataset (register_dataset) and author its class map "
+            "Register the source dataset (register_dataset) and author its subject registry "
             "(write_subject_registry) first."
         )
     try:
         read_registry(src_classes)
     except (OSError, RegistryError) as exc:
         raise ValueError(
-            f"{src_classes} does not decode as a class registry ({exc}); repair it before "
+            f"{src_classes} does not decode as a subject registry ({exc}); repair it before "
             "materializing this classified review."
         ) from exc
     out_classes = subjects_path(output_dir)
     if out_classes.is_file():
         raise ValueError(
-            f"{output_dir} already holds a class registry at {out_classes}; materializing a "
+            f"{output_dir} already holds a subject registry at {out_classes}; materializing a "
             "classified review into it again would silently overwrite the registry an earlier "
             "harvest wrote there."
         )

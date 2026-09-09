@@ -162,7 +162,7 @@ def seed_positive_class(project_root: Path, subject_name: str, positive_value: s
 
 
 def seed_project(project_root: Path) -> Path:
-    """A project whose registry carries both fixture traits, and whose class registry declares the
+    """A project whose registry carries both fixture traits, and whose subject registry declares the
     crossing fixture's positive class for the subject it states its crossing operationalization of."""
     write_spec(project_root, CROSSING_SPEC)
     confirm_spec_statement(project_root, CROSSING_TRAIT)
@@ -175,7 +175,7 @@ def seed_project(project_root: Path) -> Path:
 def state_crossing(project_root: Path, **overrides: Any) -> dict[str, Any]:
     """A stated, unconfirmed crossing record for the fixture crossing trait.
 
-    Passes the project's own class registry (as :func:`seed_project` left it, or as a caller
+    Passes the project's own subject registry (as :func:`seed_project` left it, or as a caller
     updated it since) to the writer, the registry a crossing statement is checked against.
     """
     confirm_spec_statement(project_root, CROSSING_TRAIT)
@@ -335,7 +335,7 @@ def seed_confirmed_crossing(project_root: Path, trait: str, **overrides: Any) ->
     doors refuse without a confirmed record, so a module whose subject predates that rail seeds one
     and keeps testing what it was written to test. The delivered phenotypes come from the
     registered spec's own ``delivers``, so this works for any trait a test authors. Declares the
-    spec's positive class for the measured subject in the project's own class registry, adding
+    spec's positive class for the measured subject in the project's own subject registry, adding
     both on first mention (see :func:`seed_positive_class`), so the registry the writer now
     requires is never a hole a test-only trait falls through.
     """

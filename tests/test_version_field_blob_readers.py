@@ -75,7 +75,7 @@ def test_a_coco_documents_own_schema_version_is_never_checked_against_annotation
     assert coco["schema_version"] == 999
 
 
-# ── the class registry ───────────────────────────────────────────────────────
+# ── the subject registry ───────────────────────────────────────────────────────
 
 def test_a_version_one_registry_reads_back_through_the_platforms_own_writer(tmp_path):
     registry = SubjectRegistry(subjects=(

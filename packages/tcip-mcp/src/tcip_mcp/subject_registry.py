@@ -261,7 +261,7 @@ def read_registry(path: str | Path) -> SubjectRegistry:
     try:
         data = tcip_store.read_blob_versioned(_registry_key(path)).value
     except tcip_store.NotFound as exc:
-        raise FileNotFoundError(f"no class registry at {path}") from exc
+        raise FileNotFoundError(f"no subject registry at {path}") from exc
     document = _checked_registry_document(data, path=path)
     return registry_from_dict(document)
 
@@ -295,7 +295,7 @@ def write_registry(path: str | Path, registry: SubjectRegistry) -> None:
 
 
 def read_version(path: str | Path) -> "Version":
-    """The class registry blob's current version token (``Version.ABSENT`` if it does not exist).
+    """The subject registry blob's current version token (``Version.ABSENT`` if it does not exist).
 
     Reads the version alone, never the content, so it never raises on bytes that will not
     decode: a caller that only wants a version to pass as :func:`replace_registry`'s ``expect``
@@ -466,7 +466,7 @@ def replace_registry(
     import tcip_store
 
     if not registry.subjects:
-        raise RegistryError("a class registry write must declare at least one subject")
+        raise RegistryError("a subject registry write must declare at least one subject")
 
     root = Path(path).absolute().parent
     stale = retired_document(root)
@@ -559,7 +559,7 @@ def copy_registry(source: str | Path, destination: str | Path) -> None:
         )
     except tcip_store.VersionConflict as exc:
         raise RegistryError(
-            f"a class registry already exists at {destination}; copy_registry places a first "
+            f"a subject registry already exists at {destination}; copy_registry places a first "
             "copy only and never replaces one"
         ) from exc
 

@@ -3,7 +3,7 @@
 ``ingest_images`` is the missing structuring primitive. It copies (or moves) raw
 images into the canonical layout (``images/<YYYY-MM-DD>/<stem><ext>``) under a
 workspace project, bucketing by the capture date each file states. It does not annotate, split,
-choose a task, or write ``classes.json``; those are later steps in the project-setup
+choose a task, or write ``subjects.json``; those are later steps in the project-setup
 arc (see ``packages/tcip-mcp/src/tcip_mcp/knowledge/project-setup.md``). Keeping it thin is
 deliberate: one auditable primitive the agent composes, instead of improvising file ops per
 project.
@@ -236,7 +236,7 @@ def ingest_images(
     create a second logical image under a key another source, an existing raw file, or an
     existing band-group manifest already holds in that bucket; re-ingesting the exact same
     destination file is not a second identity and is skipped instead, recorded in
-    ``skipped_collisions``. Does not annotate, split, choose a task, or write ``classes.json``.
+    ``skipped_collisions``. Does not annotate, split, choose a task, or write ``subjects.json``.
 
     The capture date never gates ingestion: a file whose date cannot be read is copied and counted
     like any other, lands in ``undated/``, and is listed in ``unreadable_dates`` so the difference

@@ -149,7 +149,7 @@ def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dic
     trained on, exactly the class of error class-aware admission exists to prevent; ``build_dataset``
     itself only calls ``resolve_registry_id_map`` on the same predicate, datasets.py's own
     ``has_coco``/``dataset_source`` branch), or the one legitimate degraded case
-    ``resolve_registry_id_map`` itself names (an attribute scope with no ``classes.json`` for this
+    ``resolve_registry_id_map`` itself names (an attribute scope with no ``subjects.json`` for this
     labels dir), honest: no map recorded, decode falls through to its own live-registry
     re-derivation.
     """
@@ -265,7 +265,7 @@ def _prepare_run_context(experiment_id: str, output_dir: str, resume_from: str,
     # into every checkpoint; GenericPredictor reads it back as predictor.config) as well as the
     # durable experiment record (_patch_experiment_config_id_map). Decode/record at inference time
     # (inference_tools.py::run_inference) then prefers this recorded map over re-deriving from the
-    # inference dataset's live registry, so a classes.json whose declared attribute-value order
+    # inference dataset's live registry, so a subjects.json whose declared attribute-value order
     # changes between train and inference can't silently mis-decode. See _resolve_run_id_map's own
     # docstring for why this is resolved independently of train_ds's own attributes.
     _resolved = _resolve_run_id_map(task, data_cfg)

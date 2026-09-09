@@ -104,8 +104,8 @@ definition, change it there; never fork a second copy. So the agent composes too
 Once a real localization-kind derivation (from actual GT box geometry) or a real breeder-answered
 count objective exists for this trait, persist it with `revise_trait_spec(project_root,
 trait_name, fields, rationale=...)`, the one audited write path for a `TraitSpec`'s fields
-(`count_objective`, `localization`, `positive_value`, ...; the positive class must be a value
-one of the measured subject's attributes declares in the delivered dataset's own class registry,
+(`count_objective`, `localization`, `positive_value`, ...; the positive value must be a value
+one of the measured subject's attributes declares in the delivered dataset's own subject registry,
 checked when the crossing statement is made and again at every delivery). It refuses if the trait
 has no existing spec file; register one first with `author_trait_spec(project_root, trait,
 delivers, rationale, ...)`, which records the breeder's own account of the trait's measurement for

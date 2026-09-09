@@ -4,7 +4,7 @@ image's ground-truth labels and model predictions live on disk.
 Canonical layout (the label tree mirrors ``images/<date>/`` so stem-pairing is trivial and capture
 dates never collide). Labels are one file per image, holding every subject's annotations by name;
 the on-disk path carries no subject or task segment: those are properties of the records
-inside the file, resolved through the dataset's single class registry::
+inside the file, resolved through the dataset's single subject registry::
 
     <dataset_root>/
         images/<date>/<stem>.<imgext>
@@ -307,7 +307,7 @@ def dataset_root_of(path: str | Path) -> Optional[Path]:
     """The ``<dataset_root>`` a canonical sub-path lives under, or ``None`` if it is not one.
 
     ``<dataset_root>/{annotations|predictions|images}/...`` -> ``<dataset_root>``. Lets a consumer
-    that holds only a label or prediction dir locate the dataset-level ``classes.json`` that decodes
+    that holds only a label or prediction dir locate the dataset-level ``subjects.json`` that decodes
     those names. Anchors on the *last* dataset segment in the path, so a dataset physically nested
     under an ancestor named ``images`` (or another segment) still resolves to the real root rather
     than the ancestor. A bare segment with nothing above it is not inside a dataset -> ``None``.
@@ -379,7 +379,7 @@ register_store(
 def dataset_identity_key(dataset_root: str | Path) -> Key:
     """The dataset's identity document.
 
-    A blob for the same reason ``classes.json`` is one: identity is part of the data and
+    A blob for the same reason ``subjects.json`` is one: identity is part of the data and
     travels with the image set as a file. ``register_dataset`` writes it compare-and-set
     against the version it read, so the id is minted once even when two registrations race,
     and encodes it through the canonical ``RECORD_JSON`` codec.

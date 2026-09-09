@@ -664,7 +664,7 @@ def archive_project(
     (:func:`tcip_mcp.tools.bundle.account_for`), the same one ``import_project`` judges by: every
     record or log a derived root of this tree claims (images under ``<root>/images/<date>/``,
     ground truth under ``<root>/annotations/<date>/<stem>.json``, the nested registry
-    ``<root>/classes.json``, ``.tcip`` state, experiments, sweeps and their claimed manifests),
+    ``<root>/subjects.json``, ``.tcip`` state, experiments, sweeps and their claimed manifests),
     plus every recognized blob home. ``include_models`` narrows checkpoint blobs wherever
     :func:`~tcip_mcp.tools.bundle.blob_home` recognizes one (a registry-named path, ``.tcip/models``,
     or a ``.pt`` file shaped as a run's own under ``.tcip/experiments``); a bespoke run's

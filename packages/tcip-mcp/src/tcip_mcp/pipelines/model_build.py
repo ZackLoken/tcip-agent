@@ -152,7 +152,7 @@ def resolve_contract_dims(config: dict, task: str) -> dict:
     valid model false-fails. ``img_size`` is the tile edge when detection tiling is on (the real
     training input), else a safe non-tiny fallback that clears typical stride-32 backbones.
     ``in_chans`` comes from ``model_source`` / ``builder_kwargs``. ``num_classes`` is reconciled with
-    the dataset's ``classes.json``: a detection/instance_seg scope resolves it through the same
+    the dataset's ``subjects.json``: a detection/instance_seg scope resolves it through the same
     ``assign_class_ids`` map the loader uses (so the smoke forwards at the count that will actually
     train), and fails open to the head's ``builder_kwargs`` count when no registry/subject is in
     scope (a bespoke ``dataset_source`` or a registry-less build). The +1 background offset lives
@@ -176,7 +176,7 @@ def resolve_contract_dims(config: dict, task: str) -> dict:
     # Precondition check, not a broad except: a config with no subject in scope (a bespoke
     # dataset_source, or a registry-less build) legitimately fails open to the head's declared
     # count below, that is the one real "no registry in scope" case. A subject that is given but
-    # whose read fails for a real reason (corrupted classes.json, an attribute needing a registry
+    # whose read fails for a real reason (corrupted subjects.json, an attribute needing a registry
     # that isn't there) must not be silently swallowed into the same fallback.
     if task in ("detection", "instance_seg") and data.get("subject"):
         from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map

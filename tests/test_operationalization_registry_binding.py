@@ -340,7 +340,7 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_deliver_phenology_
     # registry at ds_root, resolved from the bucket itself, declared the positive class.
     assert "error" in res
     assert "validated" in res["error"]
-    assert "no class registry" not in res["error"]
+    assert "no subject registry" not in res["error"]
     assert not (tmp_path / "out.csv").exists()
 
     # A registry at the same resolved root that drops the class refuses at the earlier check.

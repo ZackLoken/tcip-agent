@@ -100,7 +100,7 @@ def format_project_name(crop: str, subject: str, phenotype: str) -> str:
     phenotype, three lowercase segments joined by underscores with hyphens allowed inside
     a segment. No segment is checked against a vocabulary: the ruling forbids validating
     the phenotype against ``crops.yml``'s trait names, a subject is governed by the
-    project's own class registry rather than by ``crops.yml``, and the platform holds no
+    project's own subject registry rather than by ``crops.yml``, and the platform holds no
     crop-name vocabulary to check the first segment against. Raises, naming the segment,
     when one does not fit that shape.
     """

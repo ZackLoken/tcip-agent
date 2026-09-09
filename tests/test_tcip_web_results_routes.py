@@ -1915,4 +1915,4 @@ def test_phenology_measurement_refuses_when_the_delivered_dataset_carries_no_reg
     })
 
     assert resp.status_code == 400
-    assert "no class registry is reachable" in resp.json()["detail"]
+    assert "no subject registry is reachable" in resp.json()["detail"]

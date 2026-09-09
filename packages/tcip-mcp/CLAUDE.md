@@ -31,8 +31,8 @@ src/tcip_mcp/
                                  # conf/NMS/max_dets/tile path) among them, plus resolve_classifier_operating_point, _resolve_scalar_operating_point, resolve_ordinal_operating_point and resolve_regression_operating_point; resolution.py's raw and block-calibrated-export paths are the other two regimes, the latter carrying conf and cross_tile_nms straight from the calibrated bundle and sharing resolve_tile_size_param with the others for tile scale
     schemas.py, image_utils.py
   dataset_layout.py      # the single path resolver on the backend: where an image's
-                          # labels/predictions live on disk. The frontend cannot import it, so paths.ts's RECORD_EXT and classes.ts's ImageStatus union each restate a fact of it, held equal by tests/test_frontend_dataset_vocabulary.py
-  class_registry.py      # classes.json: subjects, attributes, the name<->id assignment
+                          # labels/predictions live on disk. The frontend cannot import it, so paths.ts's RECORD_EXT and subjects.ts's ImageStatus union each restate a fact of it, held equal by tests/test_frontend_dataset_vocabulary.py
+  subject_registry.py    # subjects.json: subjects, attributes, the name<->id assignment
   traits.py               # the trait registry: human-defined measurement semantics per trait
   operationalization.py    # per-project records of what a trait's delivered number means, who
                             # confirmed it, and the precondition every delivery door checks

@@ -80,7 +80,7 @@ def test_registry_subjects_keep_their_declared_order(tmp_path: Path) -> None:
 
 
 def test_a_registry_that_will_not_decode_is_not_reported_as_no_subjects(tmp_path: Path) -> None:
-    """Absence and corruption are different answers on the class registry.
+    """Absence and corruption are different answers on the subject registry.
 
     Reading unreadable bytes as an empty registry hands every caller a dataset that declares
     no subjects, which is indistinguishable from one that genuinely has none: the labels under

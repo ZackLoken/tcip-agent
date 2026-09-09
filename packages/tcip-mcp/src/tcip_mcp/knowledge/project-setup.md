@@ -1,6 +1,6 @@
 ---
 name: project-setup
-description: "The front-door arc: turn a breeder's raw pile of photos plus a stated goal into a structured, trainable TCIP project. Covers project naming, ingest_images (capture-date bucketing), translating a goal into a trait/task/classes.json, SAM-assisted bootstrap annotation, splitting, bespoke model design, training, inference, and review handoff. Load this when someone arrives with unstructured images and a phenotyping goal rather than a prepared dataset."
+description: "The front-door arc: turn a breeder's raw pile of photos plus a stated goal into a structured, trainable TCIP project. Covers project naming, ingest_images (capture-date bucketing), translating a goal into a trait/task/subjects.json, SAM-assisted bootstrap annotation, splitting, bespoke model design, training, inference, and review handoff. Load this when someone arrives with unstructured images and a phenotyping goal rather than a prepared dataset."
 ---
 
 # Project setup: from raw photos to a trainable project
@@ -73,7 +73,7 @@ ingest_images(source="<raw folder or glob>", name="black-locust_tree_trunk-diame
   container could not be read at all from files that simply state no date. Every admitted
   file is ingested either way; the date never gates ingestion.
 
-`ingest_images` does not annotate, split, choose a task, or write `classes.json`; the
+`ingest_images` does not annotate, split, choose a task, or write `subjects.json`; the
 next steps do. After it, `inspect_project` reports the capture dates and image count.
 
 `ingest_images` scaffolds `.tcip/` (`artifacts/`, `models/`) as a side effect of
@@ -88,9 +88,9 @@ After ingest, `register_dataset(dataset_root, crop)` records the dataset's ident
 `.tcip/datasets.json`, so a later delivered number can be traced back to the exact data behind
 it. `crop` is required and is never inferred from the path or a slug.
 
-## 3. Translate the goal into a trait, task, and `classes.json`
+## 3. Translate the goal into a trait, task, and `subjects.json`
 
-Turn the breeder's sentence into a trait and the classes they distinguish. The CV task is yours to
+Turn the breeder's sentence into a trait and the subjects they distinguish. The CV task is yours to
 derive from the data, not from the phrasing (see
 `packages/tcip-mcp/src/tcip_mcp/knowledge/pipeline-design.md`):
 
@@ -102,13 +102,13 @@ derive from the data, not from the phrasing (see
 - Subject: the object class the annotations isolate (e.g. `catkin`, `bush`), not a path
   segment. Labels are one file per image (`annotations/<date>/<stem>.json`; see
   `dataset_layout.py`), holding every subject's annotation records for that image; `subject` is a
-  field inside each record, resolved through the dataset's `classes.json` registry. Multiple
+  field inside each record, resolved through the dataset's `subjects.json` registry. Multiple
   subjects coexist in the same file (a bush isolated alongside its catkins).
-- Classes: register the subject/attribute vocabulary in `classes.json` via the audited
-  `write_class_map(dataset_root, subjects)` tool (never hand-edit the file) for what the breeder
-  actually distinguishes: it validates the nested subject/attribute shape and writes the file plus
-  an audit record. Keep it minimal first (progressive disclosure); class semantics live in
-  `classes.json`, never in filenames. Verify crop traits against
+- Subjects: register the subject/attribute vocabulary in `subjects.json` via the audited
+  `write_subject_registry(dataset_root, subjects)` tool (never hand-edit the file) for what the
+  breeder actually distinguishes: it validates the nested subject/attribute shape and writes the
+  file plus an audit record. Keep it minimal first (progressive disclosure); subject semantics
+  live in `subjects.json`, never in filenames. Verify crop traits against
   `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/` before asserting them.
 
 ## 4. Bootstrap annotation (engine-assisted)

@@ -251,7 +251,7 @@ def resolve_decode_id_map(predictor, images_dir: str | None, *,
     ``subprocess_worker.py::run`` right after the dataset is built, so it travels on the checkpoint
     the same way ``subject``/``attribute`` already do) over re-deriving one from the inference
     dataset's live registry, the model can only speak the vocabulary it was trained on, so the
-    training map is the correct decode map by definition, and it is immune to a ``classes.json``
+    training map is the correct decode map by definition, and it is immune to a ``subjects.json``
     whose declared attribute-value order was edited after training. A checkpoint with no recorded
     map (a bespoke ``dataset_source`` with no registry scope, or a run trained from a pre-built COCO
     source whose id space isn't registry-derived, ``_resolve_run_id_map`` deliberately does not

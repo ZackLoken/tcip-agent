@@ -736,7 +736,7 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `save_annotations` | `annotation_tools.py:147` | yes | Write an image's annotations to its single per-image label file (all subjects, one file). |
-| `write_class_map` | `annotation_tools.py:513` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
+| `write_subject_registry` | `annotation_tools.py:513` | yes | Author the dataset's nested subject registry, a thin wrapper over ``subject_registry``. |
 
 ### data_tools.py (2 tools)
 
@@ -953,16 +953,16 @@ registered at HEAD.
 |---|---|---|---|
 | POST | `/state` | `push_canvas_state` | `routes/canvas.py:89` |
 
-### routes/classes.py, prefix `/api/classes` (6 routes)
+### routes/subjects.py, prefix `/api/subjects` (6 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/load` | `load_classes` | `routes/classes.py:101` |
-| POST | `/save` | `save_classes` | `routes/classes.py:165` |
-| GET | `/image_status` | `get_image_status` | `routes/classes.py:319` |
-| POST | `/image_status` | `set_image_status` | `routes/classes.py:334` |
-| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/classes.py:375` |
-| POST | `/image_status/derive` | `derive_image_status` | `routes/classes.py:415` |
+| GET | `/load` | `load_subjects` | `routes/subjects.py:101` |
+| POST | `/save` | `save_subjects` | `routes/subjects.py:165` |
+| GET | `/image_status` | `get_image_status` | `routes/subjects.py:319` |
+| POST | `/image_status` | `set_image_status` | `routes/subjects.py:334` |
+| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/subjects.py:375` |
+| POST | `/image_status/derive` | `derive_image_status` | `routes/subjects.py:415` |
 
 ### routes/coverage.py, prefix `/api/coverage` (6 routes)
 
@@ -1312,32 +1312,34 @@ only `detect_format`'s refusal behavior on an unrecognized store, not COCO write
 agreement; `phase0_implementation: once, shared` for S19 (`tests/test_mcp_tools_integration.py:185`,
 `tests/test_format_io.py:198,209`).
 
-## 3. `classes.json`, class registry
+## 3. `subjects.json`, subject registry
 
-Path: `<dataset_root>/classes.json`.
+Path: `<dataset_root>/subjects.json`. A dataset root still carrying the pre-rename
+`classes.json` and no `subjects.json` is pre-rename data, conformed by
+`tcip rename-subject-registry`; see S20 below.
 
-Writer: `tcip_mcp.class_registry.replace_registry`,
-`packages/tcip-mcp/src/tcip_mcp/class_registry.py:381`, the one write both registry doors call
-(the GUI's `save_classes` and the tool's `write_class_map`,
+Writer: `tcip_mcp.subject_registry.replace_registry`,
+`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:423`, the one write both registry doors call
+(the GUI's `save_subjects` and the tool's `write_subject_registry`,
 `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:513`).
 
-Readers: `tcip_mcp.class_registry.read_registry`, `class_registry.py:216`;
-`tcip_mcp.dataset_layout.list_subjects` (delegates to `class_registry`),
+Readers: `tcip_mcp.subject_registry.read_registry`, `subject_registry.py:246`;
+`tcip_mcp.dataset_layout.list_subjects` (delegates to `subject_registry`),
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:744`.
 
-`assign_class_ids`, `class_registry.py:509`, derives the training-time name-to-id map from this
+`assign_class_ids`, `subject_registry.py:567`, derives the training-time name-to-id map from this
 file's declared attribute order; no integer id is stored in the file itself.
-`attribute_schema_digest`, `class_registry.py:165`, hashes a subject's attribute
+`attribute_schema_digest`, `subject_registry.py:195`, hashes a subject's attribute
 name/type/values for the `image_status_digest.json` staleness stamp (format 6).
 
-Seam S20 ("classes.json class registry"), verdict `both-sides-one-implementation`,
+Seam S20 ("subjects.json subject registry"), verdict `both-sides-one-implementation`,
 `phase0_implementation: once, shared`: `tests/test_name_based_annotation_schema.py:84` writes the
 registry through the real `write_registry` and reads `num_classes` back through the real training
-loader's call to `class_registry.assign_class_ids`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:113`
-(`return registry, class_registry.assign_class_ids(registry, subject, attribute)`).
-Gap: no test drives the actual `/api/classes/save` HTTP route in the same test as the training-side
-read.
+loader's call to `subject_registry.assign_class_ids`,
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:122`
+(`return registry, subject_registry.assign_class_ids(registry, subject, attribute)`).
+Gap: no test drives the actual `/api/subjects/save` HTTP route in the same test as the
+training-side read.
 
 ## 4. `dataset.json`, dataset identity
 
@@ -2394,11 +2396,11 @@ Side A: `packages/tcip-annotation/src/tcip_annotation/format_io.py:70` (`def det
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:120` (`file_fmt = fmt or detect_format(str(gt_path))`).
 Phase 3 verdict: single.
 
-## S20. classes.json class registry
+## S20. subjects.json subject registry
 
 Must agree: the GUI editor, the path resolver, and the training loader read one registry shape.
-Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:4` (`The on-disk registry (`` `<dataset_root>/classes.json` ``) is self-describing and name-based::`).
-Side B: `packages/tcip-web/src/tcip_web/routes/classes.py:186` (`from tcip_mcp.dataset_layout import classes_path`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/subject_registry.py:4` (`The on-disk registry (`` `<dataset_root>/subjects.json` ``) is self-describing and name-based::`).
+Side B: `packages/tcip-web/src/tcip_web/routes/subjects.py:128` (`from tcip_mcp.dataset_layout import subjects_path`).
 Phase 3 verdict: single.
 
 ## S21. Training name-to-id assignment versus inference decode map

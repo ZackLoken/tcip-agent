@@ -87,7 +87,7 @@ Your default failure is pushing through friction by guessing.
   a GUI that guides the breeder without stranding them, at equal weight.
 - A subject is an object class to isolate, not a trait; subject names are not validated against
   `crops.yml`. Labels are one file per image (`annotations/<date>/<stem>.json`), `subject` a
-  field in each record resolved through the dataset's `classes.json`.
+  field in each record resolved through the dataset's `subjects.json`.
 - No pilot vocabulary as framing: a trait's own name, state or column prefix never names a
   general mechanism in identifiers, comments or docs; thread the real trait through as data from
   the project's registry. A concrete trait is fine as one marked example.

@@ -496,9 +496,9 @@ def _delivered_registry(pred_dirs: Sequence[str]) -> "SubjectRegistry | None":
     if registry is None:
         raise HTTPException(
             400,
-            f"no class registry is reachable for the dataset behind {list(pred_dirs)}: register "
-            "the dataset (register_dataset) or write its classes.json before a state_crossing_dates "
-            "delivery can check the positive class",
+            f"no subject registry is reachable for the dataset behind {list(pred_dirs)}: register "
+            "the dataset (register_dataset) or write its subjects.json before a state_crossing_dates "
+            "delivery can check the positive value",
         )
     return registry
 

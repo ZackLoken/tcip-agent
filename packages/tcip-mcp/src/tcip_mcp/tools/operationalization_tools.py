@@ -54,7 +54,7 @@ def state_trait_operationalization(
         statement: What the delivered number means, in the breeder's own words.
         mechanism: What produces the call or the number: which subject, which attribute, which
             model decides the state. Prose, read by a breeder, not parsed.
-        measured_subject: The `classes.json` subject the number is about.
+        measured_subject: The `subjects.json` subject the number is about.
         delivered_phenotypes: Which of the trait's own `delivers` entries this record covers.
             Required empty for `per_image_count`, whose CSV names no phenotype in any column.
         delivered_value_keys: The value keys delivered rows may carry. Required for the three
