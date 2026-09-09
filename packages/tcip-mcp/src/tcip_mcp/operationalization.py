@@ -867,7 +867,7 @@ def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> S
     datasets and the ``dataset_root`` parameter, rather than guess which dataset a multi-dataset
     project means.
     """
-    from tcip_mcp.subject_registry import read_registry
+    from tcip_mcp.subject_registry import read_registry, retired_document
     from tcip_mcp.dataset_layout import subjects_path
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
@@ -875,6 +875,13 @@ def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> S
         try:
             return read_registry(subjects_path(dataset_root))
         except FileNotFoundError as exc:
+            stale = retired_document(dataset_root)
+            if stale is not None:
+                raise ValueError(
+                    f"dataset_root {dataset_root!r} carries only the retired registry at {stale}; "
+                    "conform it first (tcip rename-subject-registry) before a statement's classes "
+                    "can be checked against it."
+                ) from exc
             raise ValueError(
                 f"dataset_root {dataset_root!r} carries no subject registry of its own. Write one "
                 "(write_class_map) before a statement's classes can be checked against it."
@@ -891,6 +898,13 @@ def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> S
     try:
         return read_registry(subjects_path(project_root))
     except FileNotFoundError as exc:
+        stale = retired_document(project_root)
+        if stale is not None:
+            raise ValueError(
+                f"project root {project_root!r} carries only the retired registry at {stale}; "
+                "conform it first (tcip rename-subject-registry) before a statement's classes "
+                "can be checked against it."
+            ) from exc
         raise ValueError(
             f"project root {project_root!r} carries no subject registry of its own (registered "
             f"datasets: {roots}). Pass dataset_root naming the dataset this statement's classes "

@@ -103,6 +103,36 @@ class RegistryError(ValueError):
     """A registry that cannot be read as a valid subject registry, or a scope it does not contain."""
 
 
+class SubjectRegistryUnconformed(RegistryError):
+    """A dataset root still carries the retired ``classes.json`` and no registry write may land
+    beside it: conform it first (``tcip rename-subject-registry``)."""
+
+
+def retired_document(dataset_root: str | Path) -> Path | None:
+    """The path of ``<dataset_root>/classes.json`` when it exists and decodes as a registry
+    through :func:`registry_from_dict`, else ``None``.
+
+    Whether or not ``subjects.json`` exists beside it: a fresh write to ``subjects.json`` next to
+    a still-present retired copy would manufacture the divergent pair the conform command refuses,
+    so this answers present regardless. Decoding is what makes the file evidence the platform
+    wrote a registry there; a third-party file named ``classes.json`` that is not a registry is no
+    claim at all, and is never mistaken for the retired document here (the doctor reports it
+    separately, as a stray file).
+    """
+    import tcip_store
+
+    from tcip_mcp.dataset_layout import RETIRED_SUBJECTS_FILENAME
+
+    candidate = Path(dataset_root) / RETIRED_SUBJECTS_FILENAME
+    if not candidate.is_file():
+        return None
+    try:
+        registry_from_dict(tcip_store.RECORD_JSON.decode(candidate.read_bytes()))
+    except ValueError:
+        return None
+    return candidate
+
+
 def registry_from_dict(data: object) -> SubjectRegistry:
     """Parse the nested registry mapping into a :class:`SubjectRegistry`, preserving declared order.
 
@@ -244,9 +274,21 @@ def write_registry(path: str | Path, registry: SubjectRegistry) -> None:
     A plain overwrite, with no compare-and-set and no refusal for a dropped name: a fixture or a
     repair that means to place a registry outright uses this; the two doors a breeder or agent
     actually authors a registry through call :func:`replace_registry` instead.
+
+    Refuses (:class:`SubjectRegistryUnconformed`) when the dataset root still carries the retired
+    ``classes.json`` (:func:`retired_document`): no registry write lands beside it, since a fresh
+    ``subjects.json`` next to a still-present retired copy is the divergent pair the conform
+    command (``tcip rename-subject-registry``) refuses to reconcile.
     """
     import tcip_store
 
+    root = Path(path).absolute().parent
+    stale = retired_document(root)
+    if stale is not None:
+        raise SubjectRegistryUnconformed(
+            f"{root} still carries the retired registry at {stale}; conform it first "
+            "(tcip rename-subject-registry) before writing subjects.json beside it"
+        )
     tcip_store.put_blob(
         _registry_key(path), tcip_store.RECORD_JSON.encode(registry_to_dict(registry))
     )
@@ -426,6 +468,14 @@ def replace_registry(
     if not registry.subjects:
         raise RegistryError("a class registry write must declare at least one subject")
 
+    root = Path(path).absolute().parent
+    stale = retired_document(root)
+    if stale is not None:
+        raise SubjectRegistryUnconformed(
+            f"{root} still carries the retired registry at {stale}; conform it first "
+            "(tcip rename-subject-registry) before writing subjects.json beside it"
+        )
+
     key = _registry_key(path)
     versioned = tcip_store.read_blob_versioned(key, default=None)
     outgoing: SubjectRegistry | None = None
@@ -491,6 +541,14 @@ def copy_registry(source: str | Path, destination: str | Path) -> None:
     not replace a registry silently, since a breeder or a later write may have changed it since.
     """
     import tcip_store
+
+    dest_root = Path(destination).absolute().parent
+    stale = retired_document(dest_root)
+    if stale is not None:
+        raise SubjectRegistryUnconformed(
+            f"{dest_root} still carries the retired registry at {stale}; conform it first "
+            "(tcip rename-subject-registry) before writing subjects.json beside it"
+        )
 
     dest_key = _registry_key(destination)
     try:

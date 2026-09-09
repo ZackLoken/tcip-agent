@@ -209,7 +209,7 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
     renamed in place, needs no operator rewrite of its own registry.
 
     Args:
-        dataset_root: Root of the dataset (holds ``images/``, ``annotations/``, ``classes.json``).
+        dataset_root: Root of the dataset (holds ``images/``, ``annotations/``, ``subjects.json``).
         crop: The crop this dataset's imagery is of (e.g. ``hazelnut``). Required; the expert's fact.
         project_root: Project to register the dataset under. Empty defaults to ``dataset_root``.
     """
@@ -217,12 +217,17 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
 
     from tcip_mcp.dataset_layout import decode_dataset_identity_document, dataset_identity_key
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
+    from tcip_mcp.subject_registry import retired_document
 
     root = Path(dataset_root)
     if not root.is_dir():
         return {"error": f"dataset_root not found: {dataset_root}"}
     if not crop:
         return {"error": "crop is required (the expert's fact; never inferred from a path or slug)"}
+    stale = retired_document(root)
+    if stale is not None:
+        return {"error": f"{root} still carries the retired registry at {stale}; conform it "
+                          "first (tcip rename-subject-registry) before registering this dataset"}
 
     ident_key = dataset_identity_key(root)
     try:
@@ -744,12 +749,20 @@ def archive_project(
     from tcip_store import SchemaVersionRefused
 
     from tcip_mcp.model_registry import RegistryVersionRefused
-    from tcip_mcp.tools.bundle import BLOB_CHECKPOINTS, AnchorMisplaced, account_for, blob_home
+    from tcip_mcp.tools.bundle import (
+        BLOB_CHECKPOINTS, AnchorMisplaced, account_for, blob_home, retired_registry_document,
+    )
 
     try:
         accounting = account_for(root)
     except (AnchorMisplaced, RegistryVersionRefused, SchemaVersionRefused) as exc:
         return {"error": str(exc)}
+
+    stale = retired_registry_document(accounting)
+    if stale is not None:
+        return {"error": f"{root} still carries the retired registry at {stale}; conform it "
+                          "first (tcip rename-subject-registry) so the archive carries the "
+                          "document that decodes its labels"}
 
     # A registered checkpoint is not confined to .tcip/models; blob_home is the one recognizer.
     is_checkpoint = {
@@ -1074,7 +1087,7 @@ def _run_import_into_staging(bp: Path, staging: Path, dest: Path) -> dict:
     from tcip_mcp.model_registry import RegistryVersionRefused, conform_registry_paths_on_disk
     from tcip_mcp.tools.bundle import (
         AnchorMisplaced, account_for, blob_home, external_registered_checkpoints,
-        unresolved_registered_checkpoints,
+        retired_registry_document, unresolved_registered_checkpoints,
     )
 
     try:
@@ -1101,6 +1114,13 @@ def _run_import_into_staging(bp: Path, staging: Path, dest: Path) -> dict:
         named = ", ".join(str(p.relative_to(tree)) for p in accounting.collisions)
         return {"error": f"{named} would be claimed by more than one derived root of this "
                          "project at once; refusing rather than guessing which one owns it"}
+    stale = retired_registry_document(accounting)
+    if stale is not None:
+        return {"error": f"{stale} is the retired registry, carried into the archive from "
+                         "before the subject-registry rename; rename it to subjects.json by "
+                         "hand at the extracted bundle's root and import the directory, or "
+                         "archive the source project again after conforming it (tcip "
+                         "rename-subject-registry)"}
     if accounting.unaccounted:
         named = ", ".join(str(p.relative_to(tree)) for p in accounting.unaccounted)
         return {"error": f"the archive carries member(s) no store or blob home claims ({named}); "

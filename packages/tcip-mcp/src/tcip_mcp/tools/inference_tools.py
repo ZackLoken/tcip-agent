@@ -188,7 +188,7 @@ def unmapped_classified_run(
 
     The remedy names the run's own shape, decided by :func:`~tcip_mcp.pipelines.data.label_queries.
     targets_registry_derived`: a registry-derived run with an ``images_dir`` whose dataset holds
-    no ``classes.json`` is told to run ``write_class_map`` for that dataset; a registry-derived run
+    no ``subjects.json`` is told to run ``write_class_map`` for that dataset; a registry-derived run
     called with no ``images_dir`` at all (an ``image_paths``-only call) is told to pass one, since
     no dataset can otherwise be named to decode it against; any other run (a bespoke
     ``dataset_source``, a COCO-sourced run, or one with no registry to derive from) is told to
@@ -210,12 +210,24 @@ def unmapped_classified_run(
             return (
                 f"this run decoded along attribute {attribute!r} of subject {subject!r} from a "
                 "registry-derived dataset, but no images_dir was given to read the decoding "
-                "dataset's classes.json from. Pass images_dir naming the dataset whose "
-                "classes.json decodes this run."
+                "dataset's subjects.json from. Pass images_dir naming the dataset whose "
+                "subjects.json decodes this run."
+            )
+        from tcip_mcp.dataset_layout import dataset_root_of
+        from tcip_mcp.subject_registry import retired_document
+
+        root = dataset_root_of(images_dir)
+        stale = retired_document(root) if root is not None else None
+        if stale is not None:
+            return (
+                f"this run decoded along attribute {attribute!r} of subject {subject!r} from a "
+                f"registry-derived dataset, but {images_dir!r} resolves only the retired "
+                f"registry at {stale}. Conform it first (tcip rename-subject-registry), then "
+                "retry."
             )
         return (
             f"this run decoded along attribute {attribute!r} of subject {subject!r} from a "
-            f"registry-derived dataset, but {images_dir!r} holds no classes.json to decode it "
+            f"registry-derived dataset, but {images_dir!r} holds no subjects.json to decode it "
             "with. Run write_class_map for that dataset, then retry."
         )
     return (

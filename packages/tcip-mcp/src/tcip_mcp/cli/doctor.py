@@ -581,6 +581,71 @@ def check_region_completeness(root: Path, findings: list) -> None:
                             "changed since attestation; re-attest"))
 
 
+def check_retired_subject_registry(root: Path, findings: list) -> None:
+    """A dataset root still carrying the pre-rename ``classes.json`` (:func:`subject_registry.
+    retired_document`), at every root the project's own records reach, so an operator learns of
+    it without a door having to hit the write refusal first.
+
+    Enumerates roots through :func:`store_catalogue.project_roots` (the project's own registered
+    dataset roots and every other root a run's records name) plus, under each ``SPLITS``-layout
+    root, each of its ``SPLIT_NAMES`` subdirectories: the split materializer places its registry
+    copy one level below the manifest directory ``project_roots`` reports
+    (``draw_splits``, ``split_root = out_dir / split_name``). Absent from :func:`gated_stores`
+    because the retired document is no store's document under either backend: a loose file the
+    seam does not address, so the database backend's staleness gate does not apply to it, and
+    this always reads straight off disk.
+
+    ``warn``, the level a version refusal gets: a document a reader refuses whole is the soft
+    rail, the operator's next step being the conform command, never a defect in the project's
+    own data. A ``classes.json`` present but not decodable as a registry is a second, distinct
+    ``warn`` line: a stray file of that name, never mistaken for the retired document.
+
+    The enumeration itself reads several other stores over the roots it walks (an experiment's
+    own status, an HPO sweep's manifest); a root holding those as loose records under the
+    database backend cannot be enumerated, a fact about that unrelated store, not this check's
+    own subject, so it is reported at the soft level and the walk stops there rather than
+    guessing the roots it could not read.
+    """
+    from tcip_store import StoreError
+    from tcip_store.layout_claims import ROOT, SPLITS
+
+    from tcip_mcp.dataset_layout import RETIRED_SUBJECTS_FILENAME
+    from tcip_mcp.pipelines.data.splits import SPLIT_NAMES
+    from tcip_mcp.subject_registry import retired_document
+    from tcip_mcp.store_catalogue import project_roots
+
+    try:
+        roots = project_roots(root)
+    except StoreError as exc:
+        findings.append(("warn", f"the retired-registry check could not enumerate this "
+                         f"project's roots: {exc}"))
+        return
+
+    candidates: list[Path] = []
+    for path, layout in roots:
+        if layout == ROOT:
+            candidates.append(Path(path))
+        elif layout == SPLITS:
+            candidates.extend(Path(path) / name for name in SPLIT_NAMES)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen or not candidate.is_dir():
+            continue
+        seen.add(key)
+        retired_path = candidate / RETIRED_SUBJECTS_FILENAME
+        if not retired_path.is_file():
+            continue
+        stale = retired_document(candidate)
+        if stale is not None:
+            findings.append(("warn", f"{candidate} still carries the retired registry at "
+                            f"{stale}; conform it with tcip rename-subject-registry"))
+        else:
+            findings.append(("warn", f"{retired_path} exists but does not decode as a subject "
+                            "registry; it is a stray file, not the retired document"))
+
+
 def check_trait_specs(root: Path, findings: list) -> None:
     """Deliberately absent from ``gated_stores()``: this reads entirely through the storage seam
     (``load_trait_specs_with_errors``), which resolves to whichever backend the process is bound
@@ -747,7 +812,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     checks_taking_seen = (check_negatives, check_data_quality, check_state)
     for check in (check_negatives, check_data_quality, check_status_tokens, check_reserved_names,
                  check_registry, check_provenance, check_state, check_region_completeness,
-                 check_trait_specs, check_trait_spec_statements, check_project_record):
+                 check_retired_subject_registry, check_trait_specs, check_trait_spec_statements,
+                 check_project_record):
         reason = invalid.get(check.__name__)
         if reason:
             findings.append(("error", f"{check.__name__} reads state as files and those files "
