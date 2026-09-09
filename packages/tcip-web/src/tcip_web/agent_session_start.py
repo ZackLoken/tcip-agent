@@ -10,16 +10,13 @@ has no MCP client, so it cannot run those calls itself, it makes them salient an
 prose in a large always-on file does not. ``additionalContext`` lands as a fresh session-start
 reminder at the top of context.
 
-It once also counted open reports/retrospectives by globbing the project's own directories, which
-undercounts to zero once a project's state moves to a database backend. Re-pointing that count
-through the storage seam was tried and rejected: the seam's own enumeration of those two record
-kinds lives in ``tcip_mcp.tools.meta_tools``, and importing it pulls in the MCP server's full tool
-registration (measured at several seconds, not the milliseconds a SessionStart hook gets), the
-same regression this module's own import test stands guard against. Calling ``tcip_store.keys``
-directly needs a store descriptor only that same module registers, so doing it here without that
-import would mean re-declaring the report/retrospective file layout a second time, the drift this
-platform's own seam discipline forbids. So the count is dropped rather than served wrong or
-duplicated: this hook now only names the active project.
+This hook does not count open reports or retrospectives: the seam's own enumeration of those two
+record kinds lives in ``tcip_mcp.tools.meta_tools``, and importing it pulls in the MCP server's
+full tool registration (several seconds, not the milliseconds a SessionStart hook gets), a budget
+this module's own import test guards. Calling ``tcip_store.keys`` directly needs a store
+descriptor only that same module registers, so doing it here without that import would mean
+re-declaring the report/retrospective file layout a second time, the drift this platform's own
+seam discipline forbids. This hook only names the active project.
 
 Measured on this machine: importing ``tcip_mcp.workspace`` (plus the ``tcip_store`` imports it
 pulls in) costs ~57ms; a fresh process that imports it, binds the backend and reads the marker
@@ -29,7 +26,7 @@ costs 152-168ms wall clock over five runs, against 38-42ms for this hook with no
 for anywhere near that long.
 
 Best-effort: every path swallows its error and exits 0. A session-start hook must never break the
-session, and (the reason the earlier subprocess version was reverted) must never slow its spawn.
+session, and must never slow its spawn.
 """
 
 from __future__ import annotations

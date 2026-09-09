@@ -89,8 +89,8 @@ def _materialize_fence_settings() -> Optional[Path]:
     (``python packages/tcip-web/src/tcip_web/agent_bash_guard.py``) for readability, but a
     PreToolUse hook runs from an unpredictable cwd: the Bash/PowerShell tool's persistent
     ``cd`` moves it, so a relative path fails to even *locate* the script: the interpreter
-    exits 2, which Claude Code reads as a *block*, denying every command after a ``cd`` (the
-    reported "guard blocks all listings after cd"). We rewrite each guard command to an
+    exits 2, which Claude Code reads as a *block*, denying every command after a ``cd``.
+    We rewrite each guard command to an
     absolute ``"<python>" "<guard_dir>/agent_*_guard.py"`` (this process's ``sys.executable``
     + the guard directory) and hand that file to ``--settings``. Python, not the shell,
     resolves the path, so there is no cwd dependency and no ``$VAR`` cross-platform hazard.

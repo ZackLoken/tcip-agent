@@ -2,9 +2,8 @@
 recorded to the audit log.
 
 Not ``_audit``, which already names two route-local helpers (``review.py``'s and ``results.py``'s
-own best-effort writers before this module existed); this is the one place the marker, the
-raising call and the 409 body are built, so every route that answers this gap composes it the
-same way.
+own best-effort writers); this is the one place the marker, the raising call and the 409 body are
+built, so every route that answers this gap composes it the same way.
 """
 
 from __future__ import annotations
@@ -16,8 +15,8 @@ from fastapi.encoders import jsonable_encoder
 
 from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
 
-# Also coverage.py's own marker for its analogous 500: moved here and imported back, so every
-# route names the same literal for the same fact.
+# Also coverage.py's own marker for its analogous 500, imported from here, so every route
+# names the same literal for the same fact.
 AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written"
 
 
