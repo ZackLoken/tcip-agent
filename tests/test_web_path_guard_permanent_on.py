@@ -267,7 +267,7 @@ def test_dataset_routes_refuse_an_outside_root_and_serve_an_inside_one(
 def test_an_annotations_link_inside_an_allowed_root_loads_in_both_routes(
     client: TestClient, tmp_path: Path, closed_project,
 ) -> None:
-    """The class registry route and the dataset tree's per-date scan read one directory under
+    """The subject registry route and the dataset tree's per-date scan read one directory under
     one guard: a symlink whose target genuinely sits inside the allow-set is admitted by both."""
     from tcip_annotation.json_io import write_annotations
     from tcip_annotation.state import Annotation, BBox
@@ -304,7 +304,7 @@ def test_an_annotations_link_inside_an_allowed_root_loads_in_both_routes(
 def test_an_annotations_link_outside_every_allowed_root_is_refused_by_both_routes(
     client: TestClient, tmp_path: Path, outside: Path, closed_project,
 ) -> None:
-    """The same directory 403s the class registry route and is reported as this date's problem
+    """The same directory 403s the subject registry route and is reported as this date's problem
     by the dataset tree, rather than the tree quietly listing what the registry route refuses."""
     from tcip_annotation.json_io import write_annotations
     from tcip_annotation.state import Annotation, BBox

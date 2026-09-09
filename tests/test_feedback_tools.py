@@ -841,7 +841,7 @@ def _stamp_classified_bucket(dataset_root: Path, bucket_rel: str = CLASSIFIED_BU
 
 
 def _source_dataset_with_registry(root: Path) -> Path:
-    """A dataset root carrying a real class registry, with the two reviewed images under its
+    """A dataset root carrying a real subject registry, with the two reviewed images under its
     own images/ (the segment dataset_root_of needs to locate the root back from it)."""
     dataset_root = root / "source_dataset"
     images = dataset_root / "images"
@@ -995,7 +995,7 @@ def test_materialize_refuses_a_classified_scope_into_a_populated_output(tmp_path
         str(dataset_root), str(source / "images"), str(out), bucket=CLASSIFIED_BUCKET)
 
     assert "error" in r
-    assert "already holds a class registry" in r["error"]
+    assert "already holds a subject registry" in r["error"]
     assert (out / "subjects.json").read_text(encoding="utf-8") == '{"other": {}}'
 
 

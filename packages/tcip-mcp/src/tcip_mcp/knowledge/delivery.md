@@ -130,9 +130,9 @@ uncharacterized, which is a claim about a quantity that has been defined.
   ordinal and a regression aggregate rest on three different spec floors and are three separate
   confirmations. Every row carries a value key and every one has to be inside the confirmed set.
 - A `state_crossing_dates` statement and every delivery under it are checked against the delivered
-  dataset's own class registry, never a bare spec value: `state_trait_operationalization` resolves
+  dataset's own subject registry, never a bare spec value: `state_trait_operationalization` resolves
   it from `dataset_root` (given explicitly, or the project root's own registry when that project is
-  unambiguously one dataset), and a positive class the registry does not declare for the measured
+  unambiguously one dataset), and a positive value the registry does not declare for the measured
   subject refuses at the statement, or supersedes an existing confirmation at delivery.
 - Before any of that, `state_trait_operationalization` refuses unless the trait's own trait-spec
   statement (what the trait itself measures, authored with `author_trait_spec` and revised with

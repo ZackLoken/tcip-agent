@@ -350,7 +350,7 @@ turns a measurement into a string that reads as valid forever after, so the enco
 and the writer converts the value explicitly instead. ``allow_nan=False`` because NaN and
 Infinity are not JSON and no strict parser, the breeder's browser included, will read them;
 a non-finite measurement is represented by its producer with a reason attached.
-``sort_keys=False`` because two records carry meaning in their key order: ``classes.json``'s
+``sort_keys=False`` because two records carry meaning in their key order: ``subjects.json``'s
 subject and attribute sequences are read back as ordered tuples, and re-ordering them would
 be the codec changing content rather than spelling.
 """

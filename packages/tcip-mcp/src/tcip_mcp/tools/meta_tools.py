@@ -398,7 +398,8 @@ def read_audit_log(
     itself calls to file a writer's own entry: a path under a dataset's canonical segment
     (``annotations``, ``predictions``, ``images``, ``labels``) resolves up to its dataset root,
     and a bare directory counts as a root only when it carries its own ``.tcip`` directory or a
-    registered dataset marker (``classes.json``), which a project root does too. ``scope=None``
+    registered dataset marker (``subjects.json``, or the retired ``classes.json``, either one
+    counting as evidence), which a project root does too. ``scope=None``
     is the platform default. A ``scope`` that resolves to none of these refuses by name, naming
     what was passed, rather than answering from whichever log a typo or an unrecognized inner
     path happened to resolve to (indistinguishable from an empty log otherwise). The whole log is
@@ -454,7 +455,7 @@ def read_audit_log(
                     f"scope '{scope}' names no dataset root, project root, or path under "
                     "either: pass the platform default (omit scope), a dataset root, a "
                     "project root, or a path under one; a project root must carry its own "
-                    ".tcip directory or classes.json for this to resolve it"
+                    ".tcip directory or subjects.json for this to resolve it"
                 ),
             }
         key = audit_log_key(resolved_scope)

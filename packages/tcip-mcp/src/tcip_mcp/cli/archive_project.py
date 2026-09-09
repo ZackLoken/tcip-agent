@@ -1,7 +1,7 @@
 """Export an annotation project as a portable bundle: a ZIP archive, or, with --output-dir, the
 identical bundle written as a directory tree.
 
-The operator/agent entry point for packaging a project (images, ground truth, class registry,
+The operator/agent entry point for packaging a project (images, ground truth, subject registry,
 ``.tcip`` state, experiments and their claimed manifests, plus every recognized blob home) into
 one bundle an ``import-project`` run can restore from elsewhere. Wraps
 ``tcip_mcp.tools.project_tools.archive_project`` with no MCP tool registration.

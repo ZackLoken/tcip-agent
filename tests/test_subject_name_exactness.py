@@ -1,4 +1,4 @@
-"""Subject names in the class registry are exact and are never normalized or folded together.
+"""Subject names in the subject registry are exact and are never normalized or folded together.
 
 A label references its subject by name, so two names that differ at all name two subjects: the
 registry keeps them apart rather than merging them, a record carrying no usable name contributes

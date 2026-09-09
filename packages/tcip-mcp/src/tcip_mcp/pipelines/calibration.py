@@ -130,7 +130,7 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
             "the checkpoint was never trained or chosen with."
         )
     # Prefers the training run's own recorded map over a fresh registry read: the model only
-    # speaks its training vocabulary, so an edited classes.json must not silently relabel the GT.
+    # speaks its training vocabulary, so an edited subjects.json must not silently relabel the GT.
     _cal_id_map = None
     if _subject:
         _cal_id_map = _recorded_training_id_map(predictor)

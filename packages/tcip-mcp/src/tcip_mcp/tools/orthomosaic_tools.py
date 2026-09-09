@@ -178,7 +178,7 @@ def orthomosaic_plant_counts(
             the plant grid's own spacing (:func:`~tcip_mcp.pipelines.postprocessing.
             orthomosaic_mapping.resolve_nn_tolerance_m`), never a pinned constant. Refused
             alongside ``canopy_subject``.
-        canopy_subject: The class registry subject naming a canopy boundary in the raster's own
+        canopy_subject: The subject registry's subject naming a canopy boundary in the raster's own
             label document. Empty (default) runs the nearest-neighbour regime; set, this door
             attributes by segment containment instead, and no model architecture is prescribed
             for how the boundary itself was produced (a hand trace, an accepted SAM proposal, or

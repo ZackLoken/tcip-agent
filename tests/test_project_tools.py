@@ -418,7 +418,7 @@ def test_export_import_roundtrip(tmp_path: Path):
 
     npz_image = images / "cap_002.npz"
     np.savez(npz_image, bands=np.zeros((2, 64, 64), dtype=np.uint16))
-    # The class registry decodes the labels' names: a self-contained bundle must carry it, or the
+    # The subject registry decodes the labels' names: a self-contained bundle must carry it, or the
     # archived annotations are unreadable on the other end. One nested subjects.json at the root.
     subject_registry.write_registry(
         src / "subjects.json",

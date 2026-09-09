@@ -877,7 +877,7 @@ def draw_splits(
     try:
         _, id_map = resolve_registry_id_map(date_dirs[0][1], subject, attribute)
     except tcip_store.SchemaVersionRefused as exc:
-        return {"error": f"cannot resolve the class registry for the split: {exc}"}
+        return {"error": f"cannot resolve the subject registry for the split: {exc}"}
     except ValueError as exc:
         return {"error": str(exc)}
 

@@ -230,12 +230,12 @@ def main() -> int:
 
             crop = sorted(registered_crops())[0]
             register_dataset(str(dataset_root), crop=crop, project_root=str(root))
-            # The web export route resolves the class registry from the delivered dataset's own
+            # The web export route resolves the subject registry from the delivered dataset's own
             # root, never the project's; the MCP tool never checks one (it reads the bucket's id_map).
-            from tcip_mcp.class_registry import copy_registry
-            from tcip_mcp.dataset_layout import classes_path
+            from tcip_mcp.subject_registry import copy_registry
+            from tcip_mcp.dataset_layout import subjects_path
 
-            copy_registry(classes_path(root), classes_path(dataset_root))
+            copy_registry(subjects_path(root), subjects_path(dataset_root))
 
             preds_by_date = {d: str(preds_root / d) for d in DATES}
 

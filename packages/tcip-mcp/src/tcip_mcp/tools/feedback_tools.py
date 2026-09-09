@@ -190,7 +190,7 @@ def materialize_review_dataset(
     never an absence of the object), landing in ``unconfirmed_negatives`` instead. The output then
     needs the source dataset's own registry to train under that scope, copied over whether or not
     any negative was confirmed; refuses by name when the source names no dataset root, that root
-    has no ``classes.json``, or the output already holds a registry. A bare directory or a detector
+    has no ``subjects.json``, or the output already holds a registry. A bare directory or a detector
     scope keeps today's behavior. No prediction file at all (a ground-truth-only review) reads no
     scope, same as before.
 

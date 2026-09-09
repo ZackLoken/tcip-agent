@@ -132,7 +132,7 @@ def calibrate_physical_scale(
             the stems alone) to bind the claim to the imagery it was earned on.
         unit: The physical unit every reference (and the stamped scale) is in; a reference CSV row
             in a different unit refuses rather than being silently converted.
-        reference_subject: The ``classes.json`` subject the reference object is annotated as.
+        reference_subject: The ``subjects.json`` subject the reference object is annotated as.
         labels_dir: Directory holding one ``<stem>.json`` annotation file per reference image.
         reference_csv: The breeder's own physical-measurement CSV.
         capture_id: The capture this scale is scoped to, when it is capture-specific (a handheld
