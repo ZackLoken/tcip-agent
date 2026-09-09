@@ -227,7 +227,7 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
     }
     res = PH.per_plant_phenology(
         mapping, {"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        positive_class_name="open", spec=BUD_OPENING)
+        positive_value="open", spec=BUD_OPENING)
 
     # Both buckets are fully classified, so the fraction is produced and delivered.
     assert res["positive_class_assessed"] is True

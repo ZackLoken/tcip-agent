@@ -218,7 +218,10 @@ def seed_bud_trait_spec(tmp_path: Path, _pin_platform_root):
     specs_dir = tmp_path / ".tcip" / "state" / "trait_specs"
     data = {k: (list(v) if isinstance(v, tuple) else v)
             for k, v in dataclasses.asdict(BUD_OPENING).items()}
-    ts.replace(traits.trait_spec_key(specs_dir, "bud_opening"), data, expect=ts.Version.ABSENT)
+    spec, reason = traits._validate_and_write_spec(
+        traits.trait_spec_key(specs_dir, "bud_opening"), data, expect=ts.Version.ABSENT,
+    )
+    assert spec is not None, reason
 
 
 @pytest.fixture

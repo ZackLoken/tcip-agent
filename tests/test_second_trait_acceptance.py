@@ -40,7 +40,7 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
         "localization": "center_match",
         "localization_tolerance": "half_class_avg_size",
         "localization_tolerance_frac": 0.5,
-        "positive_class_name": "open",
+        "positive_value": "open",
         "milestone_fractions": [0.05, 0.50, 0.95],
         "milestone_on": "positive_fraction",
         # No majority alias: crops.yml names no single "most blooms open" date for currant, unlike
@@ -55,6 +55,7 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
         "delivers": ["bloom_05per_date", "bloom_50per_date", "bloom_95per_date"],
         "notes": "Test-only, provisional: proves the delivery mechanism "
                  "generalizes to a second trait. Not a domain-expert-confirmed measurement.",
+        "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION,
     }
     ts.replace(traits.trait_spec_key(specs_dir, "currant_bloom"), spec, expect=ts.Version.ABSENT)
     # A second trait needs its own confirmed meaning too: nothing about the record is bud_opening-shaped.

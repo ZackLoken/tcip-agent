@@ -98,16 +98,16 @@ def test_a_relayed_note_is_surfaced_and_does_not_clear_the_refusal(project: Path
 
 def test_a_moved_constituting_field_refuses_and_names_it_with_both_values(project: Path):
     _confirmed_crossing(project)
-    fx.write_spec(project, dataclasses.replace(fx.CROSSING_SPEC, positive_class_name="shed"))
+    fx.write_spec(project, dataclasses.replace(fx.CROSSING_SPEC, positive_value="shed"))
     spec, record, _ = fx.resolve(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES)
 
     result = op.check_operationalization(spec, record, op.STATE_CROSSING_DATES)
 
     assert result.state == 3
-    assert "positive_class_name" in result.message
+    assert "positive_value" in result.message
     assert "'open'" in result.message and "'shed'" in result.message
     assert result.superseded == (
-        {"field": "positive_class_name", "confirmed_value": "open", "current_value": "shed"},
+        {"field": "positive_value", "confirmed_value": "open", "current_value": "shed"},
     )
 
 
@@ -234,7 +234,7 @@ def test_an_unconfirmed_record_reports_state_two_rather_than_an_empty_field_or_a
 
 def test_a_moved_field_reports_state_three_rather_than_the_binding_that_also_fails(project: Path):
     _confirmed_crossing(project)
-    fx.write_spec(project, dataclasses.replace(fx.CROSSING_SPEC, positive_class_name="shed"))
+    fx.write_spec(project, dataclasses.replace(fx.CROSSING_SPEC, positive_value="shed"))
     spec, record, _ = fx.resolve(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES)
 
     result = op.check_operationalization(
@@ -330,7 +330,7 @@ def _unconfirmed_project(tmp_path: Path) -> Path:
     statement: write_spec bypasses both authoring doors and the statement they carry."""
     root = tmp_path / "unconfirmed"
     fx.write_spec(root, fx.CROSSING_SPEC)
-    fx.seed_positive_class(root, "flower", fx.CROSSING_SPEC.positive_class_name)
+    fx.seed_positive_class(root, "flower", fx.CROSSING_SPEC.positive_value)
     return root
 
 
@@ -589,12 +589,12 @@ def test_unconfirmed_crossing_door_refuses(tmp_path: Path):
 def test_superseded_confirmation_names_the_field(tmp_path: Path):
     """A confirmation covers the values it was given, so a moved field refuses naming both of them."""
     body = _delivery(tmp_path, validated=True)
-    _hand_edit_spec(tmp_path, "bud_opening", positive_class_name="closed")
+    _hand_edit_spec(tmp_path, "bud_opening", positive_value="closed")
     out_csv = tmp_path / "delivered.csv"
 
     res = _compute(body, out_csv, **_validated_call(body))
 
-    assert "positive_class_name has changed since" in res["error"]
+    assert "positive_value has changed since" in res["error"]
     assert "'open'" in res["error"] and "'closed'" in res["error"]
     assert not out_csv.exists()
 
@@ -607,13 +607,13 @@ def test_empty_constituting_field_refuses_before_class_id(tmp_path: Path):
     precondition runs first, so the refusal describes what is actually missing.
     """
     body = _delivery(tmp_path, validated=True)
-    _hand_edit_spec(tmp_path, "bud_opening", positive_class_name="")
+    _hand_edit_spec(tmp_path, "bud_opening", positive_value="")
     fx.seed_confirmed_crossing(tmp_path, "bud_opening", measured_subject="bud")
     out_csv = tmp_path / "delivered.csv"
 
     res = _compute(body, out_csv, **_validated_call(body))
 
-    assert "rests on positive_class_name, which this trait's spec leaves empty" in res["error"]
+    assert "rests on positive_value, which this trait's spec leaves empty" in res["error"]
     assert "id_map" not in res["error"]
     assert not out_csv.exists()
 

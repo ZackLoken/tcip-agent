@@ -6,7 +6,7 @@ Trait definition (authoritative; see the ``phenology`` skill + the CLAUDE.md mea
 integrity invariant): the positive-state fraction = the fraction of a plant's detected objects
 that are in the trait's positive/measured state, an expert-defined visible morphological stage
 emitted by a *validated*
-classifier (the trait's ``positive_class_name``), never a geometric proxy such as bbox height.
+classifier (the trait's ``positive_value``), never a geometric proxy such as bbox height.
 Milestone columns come entirely from the trait's own ``TraitSpec`` (``phenology_prefix`` plus
 each ``milestone_fractions`` entry), so a different registered trait yields its own prefix and
 columns with no code change:
@@ -321,9 +321,9 @@ def resolve_positive_class_id(spec, predictions_by_date: dict[str, str]) -> tupl
     contains the trait's positive value, so the caller refuses rather than guessing with a bare
     default.
     """
-    name = spec.positive_class_name
+    name = spec.positive_value
     if not name:
-        return None, f"trait {spec.name!r} defines no positive_class_name"
+        return None, f"trait {spec.name!r} defines no positive_value"
     for pred_dir in predictions_by_date.values():
         id_map = bucket_id_map(Path(pred_dir))
         if id_map is not None and name in id_map:
@@ -401,7 +401,7 @@ def count_by_class(
 def per_plant_series(
     mapping: dict[str, list],
     predictions_by_date: dict[str, str],
-    positive_class_name: str,
+    positive_value: str,
 ) -> dict[str, dict]:
     """Aggregate classified predictions into a per-plant positive-fraction series.
 
@@ -456,7 +456,7 @@ def per_plant_series(
                 acc[3] += 1
                 continue
             total, positive, unclassified = count_by_class(
-                pred_path / f"{stem}.json", id_map, positive_class_name, scope=scope)
+                pred_path / f"{stem}.json", id_map, positive_value, scope=scope)
             acc[0] += total
             acc[1] += positive
             acc[2] += unclassified
@@ -469,7 +469,7 @@ def per_plant_series(
 def per_plant_phenology(
     mapping: dict[str, list],
     predictions_by_date: dict[str, str],
-    positive_class_name: str,
+    positive_value: str,
     spec,
 ) -> dict:
     """Full canonical pipeline: classified predictions + plant mapping → per-plant milestones.
@@ -487,7 +487,7 @@ def per_plant_phenology(
     disclosure). An unattributed image's count is a delivery-wide disclosure, not a per-plant
     field, and is not this function's: see ``plant_mapping.MappingBuild.unattributed``.
     """
-    per_plant = per_plant_series(mapping, predictions_by_date, positive_class_name)
+    per_plant = per_plant_series(mapping, predictions_by_date, positive_value)
     rows = []
     any_classified_date = False
     for plant_id, info in sorted(per_plant.items()):

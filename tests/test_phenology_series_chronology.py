@@ -170,7 +170,7 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
                for d in ["2026-03-09", "2026-03-01", "2026-03-13", "2026-03-05"]}
     preds = {d: str(tmp_path / d) for d in dates}
 
-    out = phenology.per_plant_phenology(mapping, preds, positive_class_name="open",
+    out = phenology.per_plant_phenology(mapping, preds, positive_value="open",
                                         spec=BUD_OPENING)
 
     rows = {r["plant_id"]: r for r in out["rows"]}

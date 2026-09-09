@@ -22,7 +22,7 @@ from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 BUD_SPEC = {
     "name": "bud",
     "delivers": ["leaf_out_05per_date", "leaf_out_50per_date"],
-    "positive_class_name": "open",
+    "positive_value": "open",
     "milestone_fractions": [0.05, 0.5, 0.95],
     "milestone_on": "positive_fraction",
     "majority_milestone": "95per",
@@ -34,7 +34,7 @@ BUD_SPEC = {
 PISTILLATE_SPEC = {
     "name": "pistillate",
     "delivers": ["pistillate_50per_date", "pistillate_flowering_date"],
-    "positive_class_name": "open",
+    "positive_value": "open",
     "milestone_fractions": [0.5],
     "milestone_on": "positive_fraction",
     "majority_milestone": "50per",
@@ -57,7 +57,8 @@ def _write_specs(project_root: Path) -> None:
 
     specs_dir = project_root / traits._TRAIT_SPECS_RELPATH
     for spec in (BUD_SPEC, PISTILLATE_SPEC):
-        ts.replace(traits.trait_spec_key(specs_dir, spec["name"]), spec, expect=ts.Version.ABSENT)
+        stamped = {**spec, "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}
+        ts.replace(traits.trait_spec_key(specs_dir, spec["name"]), stamped, expect=ts.Version.ABSENT)
     for spec in (BUD_SPEC, PISTILLATE_SPEC):
         seed_confirmed_crossing(project_root, spec["name"])
 
@@ -128,13 +129,13 @@ def _deliver(tmp_path: Path, spec: dict, *, validated: bool) -> dict:
     """
     root = tmp_path / spec["name"]
     mapping_name, dirs = _predictions(
-        tmp_path, root, spec["positive_class_name"],
-        {"other": 0, spec["positive_class_name"]: 1}, trait=spec["name"],
+        tmp_path, root, spec["positive_value"],
+        {"other": 0, spec["positive_value"]: 1}, trait=spec["name"],
         attribute=spec["majority_label"])
     classifier_dirs = None
     if validated:
         first = dirs["2026-02-11"]
-        _stamp_classifier(first, spec["name"], spec["positive_class_name"], dataset_root=root)
+        _stamp_classifier(first, spec["name"], spec["positive_value"], dataset_root=root)
         classifier_dirs = [first]
     out_csv = root / f"{spec['phenology_prefix']}_phenology.csv"
     res = deliver_phenology_milestones(

@@ -27,7 +27,7 @@ def author_trait_spec(
     trait: str,
     delivers: list[str],
     rationale: str,
-    positive_class_name: str = "",
+    positive_value: str = "",
     milestone_fractions: list[float] | None = None,
     milestone_on: str = "",
     majority_milestone: str = "",
@@ -65,7 +65,7 @@ def author_trait_spec(
             Required, and every entry must be in crops.yml.
         rationale: The agent's account of why it chose these values, from the breeder's own
             words. Prose, read by a breeder, not parsed.
-        positive_class_name: The `classes.json` class the positive call resolves to, if any.
+        positive_value: The `subjects.json` subject the positive call resolves to, if any.
         milestone_fractions: Crossing fractions for a milestone-delivering trait.
         milestone_on: The quantity the milestones cross, e.g. `positive_fraction`.
         majority_milestone: The crops.yml majority-date crossing key this trait's milestones map
@@ -101,7 +101,7 @@ def author_trait_spec(
             project_root,
             trait,
             delivers=delivers,
-            positive_class_name=positive_class_name,
+            positive_value=positive_value,
             milestone_fractions=milestone_fractions or (),
             milestone_on=milestone_on,
             majority_milestone=majority_milestone,
@@ -172,10 +172,11 @@ def revise_trait_spec(
             the agent, on the trait-spec statement this call writes; the breeder reads it in the
             Results tab's statement panel. Nothing surfaces it in a refusal.
 
-    Returns the updated spec, `superseded`, `statement_restated` (true when this call stated or
-    restated the trait's trait-spec statement) and `statement_note`; when it did, also
-    `record_seen`, the content hash the confirming surface compares against so a click cannot
-    confirm text nobody displayed.
+    Returns the updated spec as stored, `schema_version` included (the current ceiling, stamped
+    on every write), `superseded`, `statement_restated` (true when this call stated or restated the
+    trait's trait-spec statement) and `statement_note`; when it did, also `record_seen`, the
+    content hash the confirming surface compares against so a click cannot confirm text nobody
+    displayed.
     """
     from tcip_mcp import operationalization
 

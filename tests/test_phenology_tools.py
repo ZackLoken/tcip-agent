@@ -701,7 +701,7 @@ def _deliver_via_writer(
     stated = check_operationalization(spec, record, STATE_CROSSING_DATES)
     result = phenology.per_plant_phenology(
         mapping_build.rows(), predictions_by_date,
-        positive_class_name=spec.positive_class_name, spec=spec)
+        positive_value=spec.positive_value, spec=spec)
 
     return phenology.write_phenology_csv(
         "test", result["rows"], Path(output_csv_path), spec, flags=flags,

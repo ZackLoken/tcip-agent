@@ -905,7 +905,7 @@ describe("ResultsTab trait-spec authoring statements", () => {
     trait: "subject_a",
     statement_fields: {
       delivers: ["subject_a_50per_date"],
-      positive_class_name: "subject_a_open",
+      positive_value: "subject_a_open",
       milestone_fractions: [0.5, 0.95],
       milestone_on: "positive_fraction",
       majority_milestone: "95per",

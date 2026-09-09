@@ -26,7 +26,7 @@ def project(tmp_path: Path) -> Path:
 
 
 def test_changing_measured_subject_invalidates_the_seen_hash(project: Path):
-    fx.seed_positive_class(project, "bush", fx.CROSSING_SPEC.positive_class_name)
+    fx.seed_positive_class(project, "bush", fx.CROSSING_SPEC.positive_value)
     seen = fx.state_crossing(project)
     fx.state_crossing(project, measured_subject="bush")
 
@@ -141,7 +141,7 @@ def test_confirming_stamps_the_identity_the_clock_and_the_fields_it_covered(proj
     assert confirmed["confirmed_at"].endswith("+00:00")
     assert confirmed["identity_from_request"] is True
     assert confirmed["confirmed_fields"] == {
-        "positive_class_name": "open",
+        "positive_value": "open",
         "milestone_on": "positive_fraction",
         "milestone_fractions": [0.05, 0.50],
     }

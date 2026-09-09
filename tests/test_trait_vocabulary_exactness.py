@@ -23,9 +23,14 @@ from tcip_mcp.traits import (
 
 
 def _write_spec(directory: Path, name: str, spec: dict) -> None:
+    """Write a raw trait-spec record, stamped at the current schema ceiling by default."""
     import tcip_store as ts
 
-    ts.replace(traits.trait_spec_key(directory, name), {"name": name, **spec}, expect=ts.Version.ABSENT)
+    ts.replace(
+        traits.trait_spec_key(directory, name),
+        {"name": name, "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION, **spec},
+        expect=ts.Version.ABSENT,
+    )
 
 
 def _two_traits_with_different_semantics(directory: Path) -> None:
@@ -33,14 +38,14 @@ def _two_traits_with_different_semantics(directory: Path) -> None:
     so serving one where the other was asked for is observable rather than harmless."""
     _write_spec(directory, "bud", {
         "delivers": ["leaf_out_50per_date"],
-        "positive_class_name": "open",
+        "positive_value": "open",
         "count_bias_tolerance_frac": 0.02,
         "milestone_fractions": [0.05, 0.5, 0.95],
         "phenology_prefix": "bud",
     })
     _write_spec(directory, "leaf", {
         "delivers": ["leaf_length"],
-        "positive_class_name": "expanded",
+        "positive_value": "expanded",
         "count_bias_tolerance_frac": 0.25,
         "milestone_fractions": [0.5],
         "phenology_prefix": "leaf",
@@ -71,9 +76,9 @@ def test_get_trait_resolves_the_exact_registered_name(tmp_path: Path, monkeypatc
     _two_traits_with_different_semantics(specs_dir)
 
     assert get_trait("bud").count_bias_tolerance_frac == 0.02
-    assert get_trait("bud").positive_class_name == "open"
+    assert get_trait("bud").positive_value == "open"
     assert get_trait("leaf").count_bias_tolerance_frac == 0.25
-    assert get_trait("leaf").positive_class_name == "expanded"
+    assert get_trait("leaf").positive_value == "expanded"
 
 
 def test_unknown_trait_refusal_lists_what_is_registered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

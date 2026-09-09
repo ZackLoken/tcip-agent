@@ -46,7 +46,8 @@ def test_list_traits_names_a_broken_spec_alongside_the_valid_one(
 
     specs_dir = tmp_path / ".tcip" / "state" / "trait_specs"
     tcip_store.replace(traits.trait_spec_key(specs_dir, "unicorn"),
-                       {"name": "unicorn", "delivers": ["unicorn_horn_length"]},
+                       {"name": "unicorn", "delivers": ["unicorn_horn_length"],
+                        "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
                        expect=tcip_store.Version.ABSENT)
 
     resp = client.get("/api/results/traits", params={"project_root": str(tmp_path)})

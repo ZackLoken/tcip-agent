@@ -167,7 +167,9 @@ def test_doctor_flags_a_trait_spec_that_failed_to_load(tmp_path):
     # to land as the same loose file the file backend reads, not the process-default backend.
     ts.bind(FileBackend())
     ts.replace(traits.trait_spec_key(specs_dir, "unicorn"),
-              {"name": "unicorn", "delivers": ["unicorn_horn_length"]}, expect=ts.Version.ABSENT)
+              {"name": "unicorn", "delivers": ["unicorn_horn_length"],
+               "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
+              expect=ts.Version.ABSENT)
 
     res = _run(root, file_layout=True)
     assert res.returncode == 2  # errors present
@@ -568,9 +570,11 @@ def test_trait_specs_are_read_from_the_registrys_own_directory(tmp_path):
     root = _layout_project(tmp_path, "2026-03-04")
     specs_dir = root / traits._TRAIT_SPECS_RELPATH
     ts.replace(traits.trait_spec_key(specs_dir, "bloom_length"),
-              {"name": "bloom_length", "delivers": ["bloom_length"]}, expect=ts.Version.ABSENT)
+              {"name": "bloom_length", "delivers": ["bloom_length"],
+               "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}, expect=ts.Version.ABSENT)
     ts.replace(traits.trait_spec_key(specs_dir, "burr_size"),
-              {"name": "burr_size", "delivers": ["burr_size"], "measured_with": "calipers"},
+              {"name": "burr_size", "delivers": ["burr_size"], "measured_with": "calipers",
+               "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
               expect=ts.Version.ABSENT)
     # A confirmed, current statement isolates the loadable spec's own finding, named off the
     # spec that actually loads rather than spelled here.
@@ -592,7 +596,8 @@ def _leaf_spec_project(tmp_path: Path) -> Path:
     root = _layout_project(tmp_path, "2026-03-04")
     directory = root / traits._TRAIT_SPECS_RELPATH
     ts.replace(traits.trait_spec_key(directory, "leaf"),
-               {"name": "leaf", "delivers": ["leaf_length"]}, expect=ts.Version.ABSENT)
+               {"name": "leaf", "delivers": ["leaf_length"],
+                "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}, expect=ts.Version.ABSENT)
     return root
 
 

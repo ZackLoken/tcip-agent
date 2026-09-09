@@ -31,7 +31,7 @@ TRAITS_MODULE = REPO_ROOT / "packages" / "tcip-mcp" / "src" / "tcip_mcp" / "trai
 def _author(root: Path, trait: str = "bud_opening_e2e", **overrides: object) -> dict:
     fields: dict[str, object] = dict(
         delivers=("leaf_out_05per_date",),
-        positive_class_name="open",
+        positive_value="open",
         milestone_fractions=(0.05, 0.5),
         milestone_on="positive_fraction",
         rationale="the breeder described the state directly, in their own field-scoring terms",
@@ -55,7 +55,12 @@ def test_a_spec_with_no_statement_is_not_a_collision_and_the_call_proceeds_as_a_
     (here, seeded directly to stand in for a second write that failed partway) is not refused."""
     directory = traits.trait_specs_dir(str(tmp_path))
     key = traits.trait_spec_key(directory, "bud_opening_e2e")
-    ts.replace(key, {"name": "bud_opening_e2e", "delivers": ["leaf_out_05per_date"]}, expect=ts.Version.ABSENT)
+    ts.replace(
+        key,
+        {"name": "bud_opening_e2e", "delivers": ["leaf_out_05per_date"],
+         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
+        expect=ts.Version.ABSENT,
+    )
 
     statement = _author(tmp_path)
 
@@ -176,16 +181,36 @@ def test_updating_a_trait_spec_with_a_caller_supplied_schema_version_refuses(tmp
         traits.write_trait_spec_fields("leaf", {"schema_version": 2}, project_root=tmp_path)
 
 
-def test_a_stamped_trait_specs_schema_version_survives_a_field_edit(tmp_path: Path) -> None:
-    """A record already carrying a ``schema_version`` stamp (seeded directly here, the way an
-    adopted or hand-conformed record would carry one) must keep that stamp through an ordinary
-    field-edit rewrite: ``_encode_spec`` has no such dataclass field, so nothing but a deliberate
-    re-attach in the write path keeps it from falling out on every edit."""
+def test_a_record_stamped_1_is_refused_before_any_edit(tmp_path: Path) -> None:
+    """A record stamped ``1`` (seeded directly here, standing in for one written before the
+    subject-registry rename) is refused by :func:`traits.trait_spec_unconformed` before the merge
+    even runs, naming the conform command, rather than silently carrying an edit over a shape the
+    encoder no longer writes."""
     _author(tmp_path, trait="leaf", delivers=("leaf_length",), holdout_match_quality_floor=0.4)
     directory = traits.trait_specs_dir(str(tmp_path))
     key = traits.trait_spec_key(directory, "leaf")
     stored = ts.read_versioned(key)
     ts.replace(key, {**stored.value, "schema_version": 1}, expect=stored.version)
+
+    with pytest.raises(ValueError, match="rename-subject-registry"):
+        traits.write_trait_spec_fields(
+            "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
+            rationale="the breeder raised the minimum acceptable held-out match quality",
+        )
+
+    unchanged = ts.read_versioned(key).value
+    assert unchanged["schema_version"] == 1
+    assert unchanged["holdout_match_quality_floor"] == 0.4
+
+
+def test_a_stamped_2_trait_specs_schema_version_survives_a_field_edit(tmp_path: Path) -> None:
+    """A record already carrying the current ``schema_version`` stamp keeps it through an ordinary
+    field-edit rewrite: ``_encode_spec`` has no such dataclass field, and every write stamps the
+    ceiling unconditionally, so the record after a rewrite carries the same value as before it,
+    never a dropped or stale one."""
+    _author(tmp_path, trait="leaf", delivers=("leaf_length",), holdout_match_quality_floor=0.4)
+    directory = traits.trait_specs_dir(str(tmp_path))
+    key = traits.trait_spec_key(directory, "leaf")
 
     traits.write_trait_spec_fields(
         "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
@@ -193,7 +218,7 @@ def test_a_stamped_trait_specs_schema_version_survives_a_field_edit(tmp_path: Pa
     )
 
     rewritten = ts.read_versioned(key).value
-    assert rewritten["schema_version"] == 1
+    assert rewritten["schema_version"] == traits.TRAIT_SPEC_SCHEMA_VERSION
     assert rewritten["holdout_match_quality_floor"] == 0.6
 
 
@@ -223,10 +248,10 @@ def test_a_restatement_over_an_existing_spec_carries_its_localization_and_sliver
     key = traits.trait_spec_statement_key(scope, "bud_opening_e2e")
     ts.delete(key, expect=ts.read_versioned(key).version)
 
-    _author(tmp_path, positive_class_name="closed")
+    _author(tmp_path, positive_value="closed")
 
     reloaded = traits.get_trait_for("bud_opening_e2e", str(tmp_path))
-    assert reloaded.positive_class_name == "closed"  # the restatement's own authored field moved
+    assert reloaded.positive_value == "closed"  # the restatement's own authored field moved
     assert reloaded.localization == traits.CENTER_MATCH
     assert reloaded.localization_tolerance == "fixed"
     assert reloaded.localization_tolerance_frac == 0.25
@@ -249,7 +274,7 @@ def test_a_trait_authored_and_confirmed_through_this_surface_delivers_end_to_end
     statement = traits.author_trait_spec(
         str(tmp_path), "bud_opening",
         delivers=BUD_OPENING.delivers,
-        positive_class_name="open",
+        positive_value="open",
         milestone_fractions=(0.05, 0.50, 0.95),
         milestone_on="positive_fraction",
         phenology_prefix="bud",
@@ -452,14 +477,12 @@ def test_an_empty_rationale_refuses_by_name(tmp_path: Path) -> None:
 
 
 def test_a_stamped_specs_schema_version_survives_a_restating_revision(tmp_path: Path) -> None:
-    """Coverage: the reattachment itself is the baseline's own behavior
-    (``test_a_stamped_trait_specs_schema_version_survives_a_field_edit``); this only pins that
-    the new restating path still goes through it."""
+    """Coverage: the unconditional stamp is the baseline's own behavior
+    (``test_a_stamped_2_trait_specs_schema_version_survives_a_field_edit``); this only pins that
+    the restating path still writes through the same encoder."""
     _confirmed_leaf(tmp_path)
     directory = traits.trait_specs_dir(str(tmp_path))
     key = traits.trait_spec_key(directory, "leaf")
-    stored = ts.read_versioned(key)
-    ts.replace(key, {**stored.value, "schema_version": 1}, expect=stored.version)
 
     traits.revise_trait_spec_fields(
         "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
@@ -467,7 +490,7 @@ def test_a_stamped_specs_schema_version_survives_a_restating_revision(tmp_path: 
     )
 
     rewritten = ts.read_versioned(key).value
-    assert rewritten["schema_version"] == 1
+    assert rewritten["schema_version"] == traits.TRAIT_SPEC_SCHEMA_VERSION
     assert rewritten["holdout_match_quality_floor"] == 0.6
 
 
@@ -593,15 +616,13 @@ def test_a_stamped_specs_schema_version_survives_a_non_restating_edit(tmp_path: 
     _confirmed_leaf(tmp_path)
     directory = traits.trait_specs_dir(str(tmp_path))
     key = traits.trait_spec_key(directory, "leaf")
-    stored = ts.read_versioned(key)
-    ts.replace(key, {**stored.value, "schema_version": 1}, expect=stored.version)
 
     traits.write_trait_spec_fields(
         "leaf", {"localization": traits.CENTER_MATCH}, project_root=tmp_path,
     )
 
     rewritten = ts.read_versioned(key).value
-    assert rewritten["schema_version"] == 1
+    assert rewritten["schema_version"] == traits.TRAIT_SPEC_SCHEMA_VERSION
     assert rewritten["localization"] == traits.CENTER_MATCH
 
 
@@ -788,7 +809,8 @@ def test_a_no_rationale_race_leaves_a_stale_statement_every_surface_names(
     spec_key = traits.trait_spec_key(directory, "leaf_race")
     ts.replace(
         spec_key,
-        {"name": "leaf_race", "delivers": ["leaf_length"], "holdout_match_quality_floor": 0.4},
+        {"name": "leaf_race", "delivers": ["leaf_length"], "holdout_match_quality_floor": 0.4,
+         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
         expect=ts.Version.ABSENT,
     )
     scope = traits.trait_spec_statements_scope(tmp_path)

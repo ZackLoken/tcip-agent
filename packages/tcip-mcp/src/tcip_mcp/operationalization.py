@@ -7,7 +7,7 @@ things, the one check a delivery door runs before it writes, and the confirmatio
 backend calls.
 
 The record never copies a ``TraitSpec`` value as an operative one. Every consumer of
-``positive_class_name``, ``count_objective`` and the rest keeps reading the spec, unchanged. What
+``positive_value``, ``count_objective`` and the rest keeps reading the spec, unchanged. What
 the record stores is a snapshot of the fields the confirmation covered, read for one purpose:
 detecting that they moved since.
 
@@ -74,7 +74,7 @@ all follow from the kind. A sixth member is added deliberately, with its own thr
 """
 
 _CONSTITUTING_FIELDS: dict[str, tuple[str, ...]] = {
-    STATE_CROSSING_DATES: ("positive_class_name", "milestone_on", "milestone_fractions"),
+    STATE_CROSSING_DATES: ("positive_value", "milestone_on", "milestone_fractions"),
     PER_IMAGE_COUNT: ("count_objective", "localization", "holdout_match_quality_floor"),
     PER_PLANT_COUNT_AGGREGATE: ("count_objective", "holdout_match_quality_floor"),
     PER_PLANT_ORDINAL_AGGREGATE: ("ordinal_agreement_floor",),
@@ -390,7 +390,7 @@ def check_operationalization(
     of: a classified bucket's own scope subject for a classified stamp, its recorded map's keys
     otherwise (never the map's keys for a classified bucket, whose keys are attribute values, not
     object classes). ``registry``
-    is the delivered dataset's class registry, checked only for a ``state_crossing_dates`` delivery:
+    is the delivered dataset's subject registry, checked only for a ``state_crossing_dates`` delivery:
     when given, a registry that no longer declares the confirmed positive class for the confirmed
     measured subject is reported through ``registry_problem``, never folded into ``superseded``,
     since what changed is the definition's binding to the dataset, not a spec field the breeder's
@@ -425,9 +425,9 @@ def check_operationalization(
         )
 
     # An unauthored positive class is state 4's own report (below), not a registry mismatch.
-    if delivery_kind == STATE_CROSSING_DATES and registry is not None and spec.positive_class_name:
+    if delivery_kind == STATE_CROSSING_DATES and registry is not None and spec.positive_value:
         registry_problem = positive_value_problem(
-            registry, str(stated.get("measured_subject") or ""), spec.positive_class_name
+            registry, str(stated.get("measured_subject") or ""), spec.positive_value
         )
         if registry_problem is not None:
             return OperationalizationCheck(
@@ -620,8 +620,8 @@ def _registry_problem_text(
 ) -> str:
     return (
         f"Delivery refused for trait {spec.name!r}: its confirmed positive class "
-        f"{spec.positive_class_name!r} for measured subject {stated.get('measured_subject')!r} no "
-        f"longer holds against the delivered dataset's class registry: {problem}. The definition's "
+        f"{spec.positive_value!r} for measured subject {stated.get('measured_subject')!r} no "
+        f"longer holds against the delivered dataset's subject registry: {problem}. The definition's "
         "binding to this dataset changed, not a value the breeder confirmed, so re-confirming "
         "will not clear this. Author the class into the registry, or restate the "
         "operationalization with state_trait_operationalization against the dataset whose "
@@ -827,14 +827,14 @@ def state_operationalization(
                 "operationalized against classes nobody declared. Pass the SubjectRegistry read "
                 "from the dataset this statement's classes belong to."
             )
-        # An unauthored positive class (spec.positive_class_name empty) is a spec-authoring gap
+        # An unauthored positive class (spec.positive_value empty) is a spec-authoring gap
         # state 4 reports at delivery time, not a registry mismatch: nothing is named yet to check.
-        if spec.positive_class_name:
-            problem = positive_value_problem(registry, subject_text, spec.positive_class_name)
+        if spec.positive_value:
+            problem = positive_value_problem(registry, subject_text, spec.positive_value)
             if problem is not None:
                 raise ValueError(
                     f"a {STATE_CROSSING_DATES} statement for trait {trait!r} names positive class "
-                    f"{spec.positive_class_name!r} for subject {subject_text!r}, and {problem}. "
+                    f"{spec.positive_value!r} for subject {subject_text!r}, and {problem}. "
                     "State a class the registry actually declares, or update the registry first."
                 )
 

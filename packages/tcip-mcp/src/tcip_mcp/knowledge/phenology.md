@@ -36,7 +36,7 @@ flower elongation/receptivity call.
 > current best-guess reading of that text, recorded on the trait spec as `majority_milestone`
 > and flagged crossing-unconfirmed via `majority_provisional`. That confirmation path is not
 > `state_trait_operationalization`, which confirms `state_crossing_dates`' own fields
-> (`positive_class_name`, `milestone_on`, `milestone_fractions`) and does not touch this
+> (`positive_value`, `milestone_on`, `milestone_fractions`) and does not touch this
 > mapping; a disagreement over which crossing the majority date means is corrected on the
 > trait spec itself, through `revise_trait_spec` (or set at authoring time via
 > `author_trait_spec`), not this file. Since `majority_milestone` and `majority_provisional`
@@ -104,7 +104,7 @@ definition, change it there; never fork a second copy. So the agent composes too
 Once a real localization-kind derivation (from actual GT box geometry) or a real breeder-answered
 count objective exists for this trait, persist it with `revise_trait_spec(project_root,
 trait_name, fields, rationale=...)`, the one audited write path for a `TraitSpec`'s fields
-(`count_objective`, `localization`, `positive_class_name`, ...; the positive class must be a value
+(`count_objective`, `localization`, `positive_value`, ...; the positive class must be a value
 one of the measured subject's attributes declares in the delivered dataset's own class registry,
 checked when the crossing statement is made and again at every delivery). It refuses if the trait
 has no existing spec file; register one first with `author_trait_spec(project_root, trait,
