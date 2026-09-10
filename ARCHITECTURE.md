@@ -25,21 +25,21 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 27272527.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD f2308217.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 27272527 has 436 modules across the six scanned roots (145596 total lines):
+HEAD f2308217 has 436 modules across the six scanned roots (145585 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 138 | 64638 |
+| tcip-mcp | 138 | 64631 |
 | tcip-annotation | 12 | 4346 |
-| tcip-web | 40 | 14086 |
+| tcip-web | 40 | 14083 |
 | tcip-store | 13 | 5282 |
-| tcip-web-frontend | 216 | 52290 |
+| tcip-web-frontend | 216 | 52289 |
 | tools | 17 | 4954 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
@@ -81,7 +81,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/cli/plant_aware_group_splits.py | Plant-aware group-key derivation for ``draw_splits``, over per-stem georeferenced rasters. | 6 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/preflight_config.py | Validate a training configuration before launching, from the command line. | 3 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/render_failure_cases.py | Find and render the worst predictions for failure analysis. | 3 | 0 |
-| packages/tcip-mcp/src/tcip_mcp/cli/repair_classified_predictions.py | Repair a project's classified prediction buckets into the writer rail's shape: an ``operating_point.json`` stamp carrying its ``(subject, attribute)`` pair, and per-image documents that carry the decoded value under ``attributes[attribute]`` with the object class in ``subject``, the shape ``write_predictions_json`` now writes and every reader now holds a bucket to. | 11 | 0 |
+| packages/tcip-mcp/src/tcip_mcp/cli/repair_classified_predictions.py | Repair a project's classified prediction buckets into the writer rail's shape: an ``operating_point.json`` stamp carrying its ``(subject, attribute)`` pair, and per-image documents that carry the decoded value under ``attributes[attribute]`` with the object class in ``subject``, the shape ``write_predictions_json`` writes and every reader holds a bucket to. | 11 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/scan_dataset.py | Scan a folder for images, labels, and predictions. | 3 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/score_predictions.py | Score on-disk predictions against on-disk ground truth (COCOeval), from the command line. | 3 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/shp_to_plant_csv.py | Convert a plant-locations shapefile into ``read_plant_csvs``' CSV schema. | 1 | 0 |
