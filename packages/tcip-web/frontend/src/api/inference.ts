@@ -286,8 +286,8 @@ export type OperationalizationRecord = {
 };
 
 /** The four fields the confirmation writer owns, every one of them null after a withdrawal, plus
- *  the audit-append warning (A8): a confirmation that lands but whose audit line does not is still
- *  a 200, never a refusal, the same shape the trait-spec confirmation route now also carries. */
+ *  the audit-append warning: a confirmation that lands but whose audit line does not is still
+ *  a 200, never a refusal, the same shape the trait-spec confirmation route also carries. */
 export interface OperationalizationConfirmation {
   confirmed_by: string | null;
   confirmed_at: string | null;
@@ -455,7 +455,7 @@ export type TraitSpecStatementRecord = {
   record_seen: string;
 };
 
-/** The four fields the trait-spec confirmation writer owns, plus the audit-append warning (A8):
+/** The four fields the trait-spec confirmation writer owns, plus the audit-append warning:
  *  a confirmation that lands but whose audit line does not is still a 200, never a refusal. */
 export interface TraitSpecStatementConfirmation {
   confirmed_by: string | null;
@@ -754,7 +754,7 @@ export const resultsApi = {
     ),
 
   // The server computes what it exports, never a caller-composed table of rows. Its own request
-  // shape, never a spread of the measurement request, which no longer shares one with it.
+  // shape is distinct from the measurement request's shape, never a spread of it.
   downloadCsv: async (body: ExportCsvRequest): Promise<Blob> => {
     const resp = await fetch(ROUTES.postResultsExportCsv, {
       method: "POST",
