@@ -542,8 +542,8 @@ def _register_entry(
 
 
 _STRAY_SCHEMA_VERSION_TWO = 2
-"""A registry index's own stray ``schema_version`` value from before this store's version-1
-reset: this conform's one-time acceptance window, dropped at the store's first real bump. The
+"""A registry index's stray ``schema_version`` value of 2: this conform's acceptance window,
+dropped at the store's first real bump. The
 seam's own read-side ceiling refuses this value outright (``REGISTRY_SCHEMA_VERSION`` is 1), so
 only :func:`conform_registry_paths_on_disk`'s raw-bytes read ever reaches
 :func:`_document_entries_for_conform` carrying it; once this store's ceiling moves again, a

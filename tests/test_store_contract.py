@@ -854,10 +854,10 @@ def test_settling_through_append_after_a_crash_installs_the_pending_watermark(
     append to it. The marker's own crash-recovery path runs first, installing the pending
     watermark before the new entry is written, so the log holds exactly the one new entry
     and a replay from the pre-crash cursor returns it rather than a fragment of stale
-    bytes read against an unadvanced base. The guard is the marker assertion below: the
-    crash leaves the marker at the old base rather than the pending value.
-    The pending-file-gone assertion beside it holds even at baseline, since nothing
-    writes a pending file there; it documents the state rather than guarding anything."""
+    bytes read against an unadvanced base. The marker assertion below is the guard: the
+    append settles the pending watermark onto the marker. The pending-file-gone assertion
+    beside it documents the state rather than guarding anything, since nothing writes a
+    pending file once the append has settled it."""
     only_on(store, FILE, _CLEAR_LOG_RACE)
     backend = store.backend
     key = store.key(LOG, "settle-through-append")

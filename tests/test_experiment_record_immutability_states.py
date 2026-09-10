@@ -93,7 +93,7 @@ def test_failed_run_populated_lineage_edge_is_frozen_while_an_empty_one_accepts_
 ):
     """The additive lock, driven through the two fields ``update_lineage`` still admits
     (``model_weights``/``model_weights_sha256`` are ``complete_run``'s alone, refused
-    unconditionally, so they cannot demonstrate the additive rule any more)."""
+    unconditionally, so they cannot demonstrate the additive rule)."""
     from tcip_mcp.experiments import create_experiment, update_lineage, update_status
 
     eid = "exp-017-elderberry-umbel-det"

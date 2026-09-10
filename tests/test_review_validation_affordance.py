@@ -361,9 +361,8 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     # routes/review.py threads a real staged_conf_floor into resolve_operating_point_from_review:
     # max(generation_conf, review_conf_threshold), the generation half read off the bucket's own
     # operating_point.json sidecar, the review half read off the verdicts' own recorded
-    # conf_threshold. A
-    # realistic, disjoint, count-agreeing, adjudication-covered review reference must actually
-    # reach review_confirmed end to end through the route.
+    # conf_threshold. A realistic, disjoint, count-agreeing, adjudication-covered review
+    # reference must reach review_confirmed end to end through the route.
     proj, pred_dir = _make_dense_reviewed_project(tmp_path)
     resp = client.post("/api/review/validate_reference", json={
         "dataset_root": proj, "trait": "bud_opening", "pred_dir": pred_dir, "subject": "bud"})

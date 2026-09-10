@@ -58,9 +58,8 @@ def test_predict_tiled_shape_and_bounds(tmp_path):
 
 
 def test_predict_tiled_stamps_cap_hit_when_the_full_frame_cap_truncates(tmp_path):
-    """``predict_tiled``'s post-merge full-frame cap already truncates a dense result
-    (``self.max_dets``), but the truncation itself was invisible in the returned result: this
-    stamps ``cap_hit`` (computed from the pre-truncation count) so a caller building its own
+    """``predict_tiled``'s post-merge full-frame cap truncates a dense result (``self.max_dets``)
+    and stamps ``cap_hit``, computed from the pre-truncation count, so a caller building its own
     records (block calibration's ``_band_records``) can surface cap saturation as provenance."""
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
@@ -130,13 +129,13 @@ def test_run_inference_tile_flag(tmp_path, monkeypatch):
 
 
 def test_predict_tiled_whole_decode_channel_mismatch_refuses(tmp_path):
-    """The channel-count refusal promoted to the whole-decode path (:class:`predict_tiled`'s path/
-    ``BandGroupRef`` source kind, not just the windowed-reader kind) must be built on
+    """The channel-count refusal on the whole-decode path (:class:`predict_tiled`'s path/
+    ``BandGroupRef`` source kind, not only the windowed-reader kind) is built on
     ``derivations.probe_channels`` (the file's own real band count, independently probed), never on
-    ``load_image``'s output: ``load_image(path, self.in_chans)`` is already told what channel count
-    to coerce toward before it returns anything, so comparing against its own output would never
-    actually catch a mismatch. A real 5-band ``.npy`` file against a 3-``in_chans`` predictor is the
-    proof: this must raise before any tile is read, not silently route/coerce the file to 3 bands."""
+    ``load_image``'s output: ``load_image(path, self.in_chans)`` is told what channel count to
+    coerce toward before it returns anything, so comparing against its own output would never
+    catch a mismatch. A real 5-band ``.npy`` file against a 3-``in_chans`` predictor raises before
+    any tile is read, never silently routing or coercing the file to 3 bands."""
     import numpy as np
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
@@ -159,7 +158,7 @@ def test_predict_tiled_whole_decode_admits_a_photographic_rgba_file_at_in_chans_
     photo with an alpha channel, common) has no real 4-vs-3 mismatch, since ``load_image``'s own
     PIL conversion coerces it to RGB before the model ever sees it, the same as the untiled
     ``predict``/``predict_batch`` paths already do. ``probe_channels`` alone can't see that
-    coercion (it reads the file's raw, uncoerced mode), so the promoted refusal must not fire here
+    coercion (it reads the file's raw, uncoerced mode), so the refusal must not fire here
     or every alpha-channel photo would abort a tiled run that untiled inference handles fine."""
     from PIL import Image
 

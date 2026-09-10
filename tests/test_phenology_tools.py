@@ -669,7 +669,7 @@ def _deliver_via_writer(
     """Deliver through the canonical writer directly, built from the same reconciliation, basis
     and mapping ``deliver_phenology_milestones`` itself resolves before calling it.
 
-    Writer-level, not tool-level: the MCP tool takes no acknowledgement any more, so a test
+    Writer-level, not tool-level: the MCP tool takes no acknowledgement, so a test
     proving what an acknowledged, unvalidated delivery stamps on the CSV runs through this
     instead. The producer path (a real request through the web export route) is exercised by
     ``tests/test_tcip_web_results_routes.py``, not here.

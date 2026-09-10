@@ -1,4 +1,4 @@
-"""``test_store_contract.py``'s ``REGISTERED`` goldens, checked against their producers.
+"""Several of ``test_store_contract.py``'s ``REGISTERED`` goldens, checked against their producers.
 
 A golden there proves placement and encoding, never shape. Each case here derives the shape from
 the same producer the platform ships and checks the registered golden agrees with it, so a

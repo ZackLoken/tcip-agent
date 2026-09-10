@@ -676,7 +676,7 @@ def test_acknowledge_still_clears_the_gate_dimensions_in_the_same_call(
     """The two rules are separate, and this is the direction that proves it rather than assumes it.
 
     Same call, same acknowledgement: with the meaning confirmed, the unvalidated evidence ships
-    stamped false. The MCP tool takes no acknowledgement any more, so this runs through the web
+    stamped false. The MCP tool takes no acknowledgement, so this runs through the web
     export route, the one surface that builds a real one.
     """
     body = _delivery(tmp_path, validated=False)
@@ -984,7 +984,7 @@ def _validated_bucket(
 ) -> str:
     """A prediction bucket genuinely bound to a validation record.
 
-    None of these doors take an acknowledgement any more, so a call that must actually deliver
+    None of these doors take an acknowledgement, so a call that must actually deliver
     needs real evidence behind it rather than a caller-asserted escape.
     """
     from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT

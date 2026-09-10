@@ -143,8 +143,7 @@ def _agent_train_declares_a_path_it_never_wrote(ctx):
 
 
 def test_envelope_declared_deliverable_never_written_fails_run_and_registers_nothing(tmp_path):
-    """The refusal partner of rail 16: a declared path this run cannot read is refused by
-    complete_run, and the envelope marks the run failed rather than completing with an
+    """A declared path this run cannot read is refused by complete_run, and the envelope marks the run failed rather than completing with an
     unrecorded digest, naming the path."""
     from tcip_mcp.experiments import create_experiment, update_status
     from tcip_mcp.model_registry import ModelRegistry

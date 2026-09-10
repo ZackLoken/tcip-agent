@@ -294,7 +294,7 @@ def test_bind_manifest_stems_admits_the_quarantined_member_once_reconfirmed(tmp_
 
 
 def test_bind_manifest_stems_refuses_an_empty_side_after_binding(tmp_path: Path):
-    """No manifest write can draw an empty side any more (every ratio is refused at zero): an
+    """No manifest write can draw an empty side (every ratio is refused at zero): an
     empty side after binding is exercised on a real draw with its own val members for one date
     moved onto train through the store, the shape a manifest predating that rail would read as."""
     from tcip_mcp.pipelines.data.splits import bind_manifest_stems, member_identity_parts
