@@ -540,6 +540,137 @@ def test_an_attached_image_prefaces_the_prompt_and_is_recorded_in_the_runs_meta(
     assert prompt.endswith("question")
 
 
+# ── per-family prompt override and the single-family re-run marker ─────────
+
+
+def test_a_family_prompt_override_replaces_the_shared_prompt_for_that_family_alone(
+    runner, tmp_path, monkeypatch
+):
+    """--family-prompt swaps the prompt text for one family and records which file it came
+    from; a family with no override still gets the shared --prompt-file."""
+    monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
+    monkeypatch.setattr(runner, "harness_version", lambda *a, **k: "stub-version")
+    monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: "/stub/harness")
+    for family in ("codex", "antigravity"):
+        monkeypatch.setitem(runner.BUILDERS, family, lambda *a, **k: (["stub", "argv"], None))
+
+    (tmp_path / "shared.txt").write_text("shared question", encoding="utf-8")
+    override = tmp_path / "codex_only.txt"
+    override.write_text("a codex-only question", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", [
+        "cross_family_ask.py", "--question-id", "qid",
+        "--prompt-file", str(tmp_path / "shared.txt"),
+        "--families", "codex,antigravity",
+        "--family-prompt", f"codex={override}",
+        "--model", "stub-model",
+        "--cwd", str(tmp_path), "--out", str(tmp_path / "out"), "--timeout", "5",
+    ])
+
+    assert runner.main() == 0
+
+    codex_meta = json.loads(
+        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(encoding="utf-8"))
+    assert codex_meta["prompt_source"] == str(override)
+    codex_prompt = (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "prompt.txt").read_text(
+        encoding="utf-8")
+    assert codex_prompt == "a codex-only question"
+
+    agy_meta = json.loads(
+        (tmp_path / "out" / "qid" / "as-shipped" / "antigravity" / "meta.json").read_text(encoding="utf-8"))
+    assert agy_meta["prompt_source"] == str(tmp_path / "shared.txt")
+    agy_prompt = (tmp_path / "out" / "qid" / "as-shipped" / "antigravity" / "prompt.txt").read_text(
+        encoding="utf-8")
+    assert agy_prompt == "shared question"
+
+
+@pytest.mark.parametrize("bad_flag", ["codex-no-separator", "nobody=missing.txt"])
+def test_a_malformed_family_prompt_flag_is_refused_before_any_family_launches(
+    runner, tmp_path, monkeypatch, bad_flag
+):
+    """A flag with no '=' and a flag naming an unknown family both refuse rather than launch."""
+    launched = []
+    monkeypatch.setattr(runner, "run_one", lambda *a, **k: launched.append(a))
+    monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: "/stub/harness")
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [
+        "cross_family_ask.py", "--question-id", "qid",
+        "--prompt-file", str(tmp_path / "q.txt"), "--families", "codex",
+        "--family-prompt", bad_flag,
+        "--cwd", str(tmp_path), "--out", str(tmp_path / "out"),
+    ])
+
+    with pytest.raises(SystemExit) as refused:
+        runner.main()
+    assert refused.value.code != 0
+    assert launched == []
+
+
+def test_a_family_prompt_flag_naming_a_missing_file_is_refused(runner, tmp_path, monkeypatch):
+    launched = []
+    monkeypatch.setattr(runner, "run_one", lambda *a, **k: launched.append(a))
+    monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: "/stub/harness")
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [
+        "cross_family_ask.py", "--question-id", "qid",
+        "--prompt-file", str(tmp_path / "q.txt"), "--families", "codex",
+        "--family-prompt", f"codex={tmp_path / 'absent.txt'}",
+        "--cwd", str(tmp_path), "--out", str(tmp_path / "out"),
+    ])
+
+    with pytest.raises(SystemExit) as refused:
+        runner.main()
+    assert refused.value.code != 0
+    assert launched == []
+
+
+def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_intact(
+    runner, tmp_path, monkeypatch
+):
+    """Re-running one family under a question id already carrying both families' results must
+    not touch the other family's recorded run, and must say of itself that it is a rerun."""
+    monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
+    monkeypatch.setattr(runner, "harness_version", lambda *a, **k: "stub-version")
+    monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: "/stub/harness")
+    for family in ("codex", "antigravity"):
+        monkeypatch.setitem(runner.BUILDERS, family, lambda *a, **k: (["stub", "argv"], None))
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+
+    first_argv = [
+        "cross_family_ask.py", "--question-id", "qid",
+        "--prompt-file", str(tmp_path / "q.txt"), "--families", "codex,antigravity",
+        "--model", "stub-model",
+        "--cwd", str(tmp_path), "--out", str(tmp_path / "out"), "--timeout", "5",
+    ]
+    monkeypatch.setattr(sys, "argv", first_argv)
+    assert runner.main() == 0
+
+    antigravity_meta_path = tmp_path / "out" / "qid" / "as-shipped" / "antigravity" / "meta.json"
+    antigravity_meta_before = antigravity_meta_path.read_text(encoding="utf-8")
+    codex_meta_before = json.loads(
+        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(encoding="utf-8"))
+    assert codex_meta_before["rerun"] is False
+
+    monkeypatch.setattr(sys, "argv", [
+        "cross_family_ask.py", "--question-id", "qid",
+        "--prompt-file", str(tmp_path / "q.txt"), "--families", "codex",
+        "--model", "stub-model",
+        "--cwd", str(tmp_path), "--out", str(tmp_path / "out"), "--timeout", "5",
+    ])
+    assert runner.main() == 0
+
+    assert antigravity_meta_path.read_text(encoding="utf-8") == antigravity_meta_before
+
+    codex_meta_after = json.loads(
+        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(encoding="utf-8"))
+    assert codex_meta_after["rerun"] is True
+
+    summary = json.loads(
+        (tmp_path / "out" / "qid" / "as-shipped" / "summary.json").read_text(encoding="utf-8"))
+    families_in_summary = {row["family"] for row in summary}
+    assert families_in_summary == {"codex", "antigravity"}
+
+
 def test_a_missing_image_is_refused_before_any_family_launches(runner, tmp_path, monkeypatch):
     """A family told to review an image that is not there would answer about nothing; the
     runner refuses by name instead of launching."""
