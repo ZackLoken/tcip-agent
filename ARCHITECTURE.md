@@ -1531,7 +1531,7 @@ refuses the call rather than filing it there.
 Platform-scoped, no `scope` of their own: the training envelope's open/close events
 (`pipelines/training/envelope.py`), the model registry's replace and write-refusal events
 (`model_registry.py:408,424`), `evaluation.py`'s derived-localization-kind record
-(`pipelines/training/evaluation.py:539` (`record_event_or_raise`)),
+(`pipelines/training/evaluation.py:537` (`record_event_or_raise`)),
 `experiments.py`'s post-terminal refusal (`_audit_refused`, `experiments.py:386`) when its caller names no
 project root (the training watchdog passes the launch's own pinned platform root, so its lines
 carry a `scope` equal to the platform root, the presence-never-means-non-platform case), and
