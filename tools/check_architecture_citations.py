@@ -53,7 +53,7 @@ SKIP_DIRS = frozenset(
 )
 
 #: Code spans in document order, consecutive backticks always pairing so no repetition cap; a
-#: capped one once let a long span find no closing backtick and desynchronize every pair after.
+#: capped one would let a long span find no closing backtick and desynchronize every pair after.
 SPAN_RE = re.compile(r"`([^`]*)`", re.DOTALL)
 SPAN_LENGTH_CAP = 300
 CITATION_RE = re.compile(

@@ -2,7 +2,7 @@
 """Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in crops.yml.
 
 The deterministic backstop against a crop skill asserting a trait name outside the
-breeder-defined controlled vocabulary, catching a fabrication review alone might pass.
+breeder-defined controlled vocabulary, catching a fabrication that a review alone might pass.
 
 Two independent checks, deliberately not sharing one extraction mechanism, so a gap in one
 check's coverage does not also blind the other:
