@@ -477,7 +477,7 @@ def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
     applies, so a manifest recording it as a numeric string still relaunches as the int it names
     rather than crashing the worker's own comparison; a caller checks
     :func:`_invalid_split_draws_field` first, so the coercion here is asserted to never read
-    ``None`` -- that obligation is the caller's, never a value this function substitutes."""
+    ``None``: that obligation is the caller's, never a value this function substitutes."""
     from tcip_mcp.tools.training_tools import coerce_split_draws
 
     draws = coerce_split_draws(manifest.get("split_draws"))
@@ -776,12 +776,12 @@ def _trial_view_dir(sweep_id: str, *, root: Optional[str] = None) -> Path:
 def _ensure_trial_view(sweep_id: str, sweep_root: Path, *, root: Optional[str] = None) -> Path:
     """A directory where every trial with a tensorboard dir today is linked under its bare
     ``trial_<id>`` name, so TensorBoard's own per-run picker shows that instead of
-    ``trial_<id>\\tensorboard`` -- the leaf-directory name TensorBoard would otherwise read off
+    ``trial_<id>\\tensorboard``, the leaf-directory name TensorBoard would otherwise read off
     ``sweep_root`` directly, since each trial nests its event files one level down.
 
     Only adds links; never removes one, so a run open in a browser tab never has its link pulled
-    out from under it. Existing links are left alone -- a trial's own tensorboard dir, once
-    created, is never moved -- and TensorBoard's own ``--reload_interval`` picks up a link added
+    out from under it. Existing links are left alone (a trial's own tensorboard dir, once
+    created, is never moved), and TensorBoard's own ``--reload_interval`` picks up a link added
     after it already started, the same as it would a new subdirectory.
     """
     view = _trial_view_dir(sweep_id, root=root)
