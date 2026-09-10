@@ -378,7 +378,7 @@ async def state_ws(websocket: WebSocket) -> None:
         _state_watchers.discard(websocket)
 
 
-# ── Panel event hub (replaces .tcip/events/ file bridge) ──
+# ── Panel event hub ──
 
 # Recent events per panel, kept in memory for replay on reconnect.
 _recent_events: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=64))

@@ -1,7 +1,7 @@
 """PreToolUse PowerShell guard for the fenced in-app agent terminal.
 
 The sibling ``agent_bash_guard.py`` guards the Bash tool; on Windows the fenced agent also has a
-PowerShell tool, which without this hook carries no deny rule and no hook of its own, so an agent
+PowerShell tool, which carries no deny rule of its own, so an agent
 could sidestep the whole fence with ``Set-Content packages\\...`` or ``Remove-Item``. This hook
 mirrors the Bash guard for PowerShell.
 

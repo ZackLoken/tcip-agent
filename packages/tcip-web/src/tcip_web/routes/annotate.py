@@ -209,10 +209,9 @@ def save_labels(payload: SavePayload) -> dict:
 
     A save under a dataset root records to that dataset's own audit log; a save under no dataset
     root (a label path confined to an allowed workspace, project or image root but outside any
-    dataset tree) records to the platform's own log instead, so it now depends on the platform
+    dataset tree) records to the platform's own log instead, which depends on the platform
     state root being writable. Either way, a write that commits and cannot be recorded answers 409
-    with the marker and the response the write would have returned, rather than the 200 it
-    answered before.
+    with the marker and the response the write would have returned.
     """
     w, h = _image_dims(payload.image_path)
     label_path = _guard_label_path(payload.label_path)
