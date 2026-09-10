@@ -51,9 +51,10 @@ TASKS = ("detect", "segment")
 SUBJECTS_FILENAME = "subjects.json"
 RETIRED_SUBJECTS_FILENAME = "classes.json"
 """The subject registry's name before the rename that gave it one of its own. No writer places a
-document under this name; it is read only by :func:`tcip_mcp.subject_registry.retired_document`
-(a dataset still holding it and no ``subjects.json`` is pre-rename data, never a fresh write) and
-by the doctor, the conform command and the two bundle doors that answer that fact."""
+document under this name; it is read only by :func:`tcip_mcp.subject_registry.retired_document`,
+which answers present whenever this file decodes as a registry, whether or not ``subjects.json``
+is beside it, and by the doctor, the conform command, :func:`tcip_mcp.audit.dataset_scope_of` and
+the two bundle doors that answer that fact."""
 
 UNDATED_BUCKET = "undated"
 """The bucket a dateless capture lands in: ``ingest_images`` writes it, and any store key that

@@ -109,8 +109,8 @@ class TraitSpec:
     # value comes from ``derivations.derive_localization_tolerance_frac`` at runtime).
     localization_tolerance: str = "half_class_avg_size"
     localization_tolerance_frac: float = 0.5  # fallback only, see derive_localization_tolerance_frac
-    # The subject the positive call resolves to in subjects.json, by name (the id is a mapping
-    # fact derived from the labels, not a pinned magic number). Empty = the trait has no positive value.
+    # The value one of the measured subject's attributes declares in subjects.json, checked
+    # against that subject's own attribute values. Empty = the trait has no positive value.
     positive_value: str = ""
     # Milestone crossing fractions and the quantity they cross.
     milestone_fractions: tuple[float, ...] = ()

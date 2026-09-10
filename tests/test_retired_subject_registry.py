@@ -2,7 +2,7 @@
 absence refusals, the doctor's finding, dataset_scope_of's evidence and the two bundle doors,
 all against a dataset still holding the pre-rename document. Each refusal is paired with what
 still admits, per CLAUDE.md's rail rule: a bare dataset root with no registry file at all works
-at every one of these sites exactly as before this family.
+at every one of these sites exactly as before the subject-registry rename.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def _dataset(root: Path, *, with_registry: bool = True) -> Path:
 
 def _retire(root: Path) -> None:
     """Stand in for the old writer: rename the current registry to the retired filename, the
-    same on-disk state a dataset that predates this family is in."""
+    same on-disk state a dataset that predates the subject-registry rename is in."""
     (root / "subjects.json").rename(root / "classes.json")
 
 
