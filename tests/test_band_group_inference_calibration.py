@@ -146,9 +146,9 @@ def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path, monkeypatch)
     assert result["results"][0]["image"].endswith("capture_001.bandgroup")
 
 
-def test_calibrate_operating_point_crashes_without_the_fix(tmp_path):
-    """Stringifying the BandGroupRef reproduces the crash, against the same real
-    predictor/dataset this module's other test proves now works."""
+def test_predict_batch_rejects_stringified_band_group_refs(tmp_path):
+    """Stringifying the ``BandGroupRef`` before calling ``predict_batch``, instead of passing the
+    raw ``Path``/``BandGroupRef``, raises."""
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.splits import label_image_stems
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
@@ -159,6 +159,5 @@ def test_calibrate_operating_point_crashes_without_the_fix(tmp_path):
     predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
 
     stems, stem_to_image = label_image_stems(str(labels_dir), str(images_dir))
-    # The pre-fix call shape: str(stem_to_image[s]) instead of the raw Path|BandGroupRef.
     with pytest.raises(Exception):
         predictor.predict_batch([str(stem_to_image[s]) for s in stems], tile=False)

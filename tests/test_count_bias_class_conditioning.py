@@ -429,7 +429,7 @@ def test_pick_serves_the_worst_class_not_the_pooled_total_admits_it_when_dense_e
                 dt.append({"bbox": box, "category_id": cat, "score": 0.95})
                 dt.append({"bbox": [200.0 * cat + offset, 400.0, 40.0, 40.0],
                            "category_id": cat, "score": 0.95})
-                # 200 background objects for this class too, always found -- classes 1/2 carry their
+                # 200 background objects for this class too, always found: classes 1/2 carry their
                 # own permanent +1 bias (the spurious detection above), so they need the same density
                 # boost as class 3 to clear the new relative tolerance.
                 for k in range(200):
@@ -442,7 +442,7 @@ def test_pick_serves_the_worst_class_not_the_pooled_total_admits_it_when_dense_e
             dt.append({"bbox": [700.0 + offset, 50.0, 40.0, 40.0], "category_id": 3, "score": 0.95})
             dt.append({"bbox": [800.0 + offset, 50.0, 40.0, 40.0], "category_id": 3, "score": 0.4})
             # 200 background class-3 objects, always found (score 0.95, survives every conf on this
-            # curve) -- spaced well outside center-match tolerance from everything above and each
+            # curve): spaced well outside center-match tolerance from everything above and each
             # other, in their own row far from the rest of the layout.
             for k in range(200):
                 box = [1500.0 + 60.0 * k + offset, 900.0, 40.0, 40.0]
@@ -477,7 +477,7 @@ def test_effective_count_bias_tolerance_floor_governs_a_near_zero_fraction():
     from tcip_mcp.pipelines.operating_point import _effective_count_bias_tolerance
 
     # A rare class (typical_count=1) at the platform default fraction (0.01) alone would demand a
-    # tolerance of 0.01 -- an impossible standard for any integer count. The derived floor (1/n) is
+    # tolerance of 0.01: an impossible standard for any integer count. The derived floor (1/n) is
     # what actually governs here, not the fraction term.
     tol = _effective_count_bias_tolerance(0.01, typical_count=1.0, n=5)
     assert tol == pytest.approx(0.2)
@@ -497,9 +497,9 @@ def test_effective_count_bias_tolerance_floor_shrinks_as_evidence_grows():
 def test_effective_count_bias_tolerance_floor_never_loosens_past_d12_default_at_n_ge_2():
     from tcip_mcp.pipelines.operating_point import _effective_count_bias_tolerance
 
-    # The old absolute default was 1.0 -- at every n the reference-sufficiency gates actually let
+    # The absolute default is 1.0: at every n the reference-sufficiency gates actually let
     # through (n >= 2), the floor alone stays at or below half that, so it can never be the reason a
-    # reference passes today that the old flat gate would have refused.
+    # reference passes that a flat 1.0 gate would refuse.
     for n in range(2, 60):
         assert _effective_count_bias_tolerance(0.0, typical_count=0.0, n=n) <= 0.5
 
@@ -508,14 +508,13 @@ def test_effective_count_bias_tolerance_fraction_term_dominates_a_dense_referenc
     from tcip_mcp.pipelines.operating_point import _effective_count_bias_tolerance
 
     # At the density this platform's own test suite's dense fixtures use (~100 objects/image, not
-    # verified against real production imagery), the fraction term -- not the floor -- sets the
-    # tolerance, and reproduces the old absolute default of 1.0 exactly at the new 0.01 default
-    # fraction (the property the default was chosen for).
+    # verified against real production imagery), the fraction term, not the floor, sets the
+    # tolerance, reproducing the absolute value 1.0 at the 0.01 default fraction.
     assert _effective_count_bias_tolerance(0.01, typical_count=100.0, n=40) == pytest.approx(1.0)
 
 
 def _floor_matters_records(prefix, offset):
-    """Class 1: dense (20/image), perfect, present every image -- keeps the reference from tripping
+    """Class 1: dense (20/image), perfect, present every image: keeps the reference from tripping
     unrelated gates. Class 2: sparse (2/image), present every image, with one extra spurious
     detection on exactly one of the 5 images (a real, non-uniform per-image bias, mean 0.2)."""
     recs = []
@@ -537,7 +536,7 @@ def _floor_matters_records(prefix, offset):
 
 def test_per_class_stamped_tolerance_reflects_the_floor_not_just_the_fraction_term():
     """End-to-end: the sparse class's stamped tolerance (what the gate actually compared its bias
-    against) must be the floor (1/n_present == 0.2), not the fraction term alone (0.01 * 2 == 0.02) --
+    against) must be the floor (1/n_present == 0.2), not the fraction term alone (0.01 * 2 == 0.02):
     a direct pin on ``_effective_count_bias_tolerance`` being live inside ``resolve_operating_point``,
     not inferred indirectly from a pass/fail outcome an unrelated SE term could also explain.
     """
@@ -547,7 +546,7 @@ def test_per_class_stamped_tolerance_reflects_the_floor_not_just_the_fraction_te
         holdout_records=_floor_matters_records("h", 5000.0))
     sweep = b.params["conf"].gate_evidence
     assert sweep["per_class_typical_count"]["2"] == pytest.approx(2.0)
-    # The floor (1/5 == 0.2), not the fraction term alone (0.01 * 2 == 0.02) -- an order of magnitude
+    # The floor (1/5 == 0.2), not the fraction term alone (0.01 * 2 == 0.02): an order of magnitude
     # apart, so this is not a rounding coincidence.
     assert sweep["per_class_count_bias_tolerance"]["2"] == pytest.approx(0.2)
     assert sweep["per_class_count_bias_tolerance"]["2"] > 0.01 * sweep["per_class_typical_count"]["2"]
@@ -571,7 +570,7 @@ def test_a_class_present_on_exactly_one_holdout_image_cannot_be_validated_by_it_
                 dt.append({"bbox": box, "category_id": 1, "score": 0.95})
             if i == 0:
                 # class 2 exists only on this one image: 150 real objects, a small (2%) real
-                # over-count -- small enough that a legitimately-derived tolerance from 150 objects
+                # over-count: small enough that a legitimately-derived tolerance from 150 objects
                 # of density would admit it, if one image were enough evidence to trust at all.
                 for k in range(150):
                     box = [50.0 + 30.0 * k + offset, 900.0, 20.0, 20.0]
@@ -611,7 +610,7 @@ def test_a_class_missing_entirely_gets_the_missing_class_message_not_the_single_
     b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
-    assert "2" not in sweep["holdout_bias"]["per_class"]  # not present at all -- no n_present==0 key
+    assert "2" not in sweep["holdout_bias"]["per_class"]  # not present at all: no n_present==0 key
     assert sweep["per_class_insufficient_images"] == []
     assert sweep["holdout_missing_classes"] == ["2"]
     out = describe_review_validation(b, reviewed_image_count=N_IMAGES)
@@ -620,10 +619,10 @@ def test_a_class_missing_entirely_gets_the_missing_class_message_not_the_single_
 
 
 def test_gate_evidence_summary_surfaces_per_class_tolerance_and_typical_count():
-    """Per-class provenance fields were added to `gate_evidence_summary` (the agent-facing compact view)
-    but nothing asserted they actually reach its output -- deleting them left the suite green.
-    Drives a real refusal through the real door end to end, then checks the compact view a caller
-    (e.g. run_inference's response) actually sees, not just the full sidecar.
+    """Coverage: `gate_evidence_summary`'s per-class provenance fields (the agent-facing compact
+    view) have no assertion that they reach its output. Drives a real refusal through the real
+    door end to end, then checks the compact view a caller (e.g. run_inference's response)
+    actually sees, not just the full sidecar.
     """
     from tcip_mcp.pipelines.calibration import gate_evidence_summary
 
@@ -637,5 +636,5 @@ def test_gate_evidence_summary_surfaces_per_class_tolerance_and_typical_count():
     assert out["pooled_typical_count"] == sweep["pooled_typical_count"]
     assert out["per_class_typical_count"] == sweep["per_class_typical_count"]
     assert out["per_class_insufficient_images"] == sweep["per_class_insufficient_images"]
-    # Not vacuously equal to None on both sides -- the sidecar actually carries real values here.
+    # Not vacuously equal to None on both sides: the sidecar actually carries real values here.
     assert out["per_class_typical_count"] == {"1": 4.0, "2": 4.0}

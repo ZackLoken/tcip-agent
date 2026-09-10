@@ -36,7 +36,7 @@ def test_target_class_id_explicit_key_and_fallbacks():
 def test_class_balanced_sampler_honors_custom_class_key():
     from tcip_mcp.pipelines.data.samplers import ClassBalancedSampler
     # Class lives under a non-standard key; without class_key every sample would fall
-    # through to None and get a uniform weight (the old silent-class-0 bug).
+    # through to None and get a uniform weight instead of its real class weight.
     targets = [{"my_cls": 0}, {"my_cls": 0}, {"my_cls": 0}, {"my_cls": 1}]
     ds = _FakeDataset(targets, {0: 3, 1: 1})
     s = ClassBalancedSampler(ds, class_key="my_cls")
@@ -46,8 +46,8 @@ def test_class_balanced_sampler_honors_custom_class_key():
 def test_class_balanced_sampler_detection_1indexed_labels():
     from tcip_mcp.pipelines.data.samplers import ClassBalancedSampler
     # Detection targets carry 1-indexed tensor labels (cid + 1) while
-    # class_distribution is 0-indexed; the weight lookup must land on the right
-    # class (previously class k got class k+1's weight, or missed entirely).
+    # class_distribution is 0-indexed; the weight lookup must land on class k's own
+    # weight for every k, never class k+1's or a missed lookup.
     targets = [
         {"labels": torch.tensor([1])},  # class 0 (common)
         {"labels": torch.tensor([1])},

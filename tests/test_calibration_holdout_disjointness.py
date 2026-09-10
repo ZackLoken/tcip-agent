@@ -258,7 +258,7 @@ def test_train_disjointness_spatial_strip_geometric_containment(tmp_path, monkey
     assert clean["group_check"] == "spatial_strip_geometric"
     assert clean["unresolvable"] is False
 
-    # A rect from a source whose name is not "mosaic" at all -- the lexical check has nothing
+    # A rect from a source whose name is not "mosaic" at all: the lexical check has nothing
     # to key off, but the region it actually covers spills into the persisted train area.
     leaked = _train_disjointness(
         "exp_geo", set(), {"other_mosaic"}, hold_rects={"other_mosaic": (10, 10, 100, 100)})
@@ -273,8 +273,8 @@ def test_train_disjointness_spatial_strip_geometric_containment(tmp_path, monkey
 def test_train_disjointness_spatial_strip_geometric_admits_calibration_region(tmp_path, monkeypatch):
     """A rect fully inside a persisted calibration_region (the four-way split's own reserved
     calibration side, distinct from val/test) must clear the geometric check exactly like a
-    val/test rect does -- calibration_region was omitted from the non-train set once and every
-    block calibration failed as a result; this pins it against regression."""
+    val/test rect does: calibration_region belongs in the non-train set the geometric check
+    admits against."""
     import tcip_store
 
     from tcip_mcp.experiments import split_key
@@ -304,9 +304,9 @@ def test_train_disjointness_spatial_strip_geometric_admits_calibration_region(tm
 
 def test_train_disjointness_geometric_check_end_to_end_with_persisted_regions(tmp_path):
     """The real pipeline: auto_train_val -> persist_split_manifest persists train_region/
-    val_region (this phase's own addition), and _train_disjointness's geometric check reads
-    them back correctly -- a calibration rect drawn from inside the persisted val region reads
-    clean, and one drawn from inside the persisted train region is caught."""
+    val_region, and _train_disjointness's geometric check reads them back correctly: a
+    calibration rect drawn from inside the persisted val region reads clean, and one drawn
+    from inside the persisted train region is caught."""
     from tcip_mcp.experiments import create_experiment, read_split_manifest
     from tcip_mcp.pipelines.operating_point import _train_disjointness
     from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
@@ -403,7 +403,7 @@ def test_review_to_records_stems_the_image_id():
     assert recs[0]["image_id"] == "srcA_0_0"  # stemmed, not "srcA_0_0.jpg"
 
 
-def test_review_confirmed_leak_now_detected(tmp_path, monkeypatch):
+def test_train_disjointness_matches_extensioned_review_ids_to_train_group(tmp_path, monkeypatch):
     """Extensioned review ids in the same tile group as training stems must be caught, not
     silently reported clean."""
     import tcip_store
@@ -510,7 +510,7 @@ def test_gate_evidence_summary_surfaces_disjointness_fields():
 def test_gate_evidence_summary_surfaces_split_policy_divergence():
     """attach_split_policy_provenance writes into conf.gate_evidence; gate_evidence_summary must forward those
     keys too, or run_inference's actual response never shows a caller their declared seed/ratio
-    didn't take effect against an existing lock -- only the persisted sweep artifact would."""
+    didn't take effect against an existing lock: only the persisted sweep artifact would."""
     from tcip_mcp.pipelines.calibration import gate_evidence_summary
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, derived
 
@@ -757,7 +757,7 @@ def test_calibration_discloses_excluded_incomplete_attribute_count(tmp_path):
     for s in ("partial_a", "partial_b"):
         json_io.write_annotations(str(labels_dir / f"{s}.json"), [
             Annotation(subject="bud", geometry=BBox(2, 2, 10, 10), attributes={"state": "open"}),
-            Annotation(subject="bud", geometry=BBox(15, 15, 20, 20)),  # no `state` -- unlabeled
+            Annotation(subject="bud", geometry=BBox(15, 15, 20, 20)),  # no `state`: unlabeled
         ], IMG, IMG)
 
     stub = _CalStub()
@@ -829,10 +829,8 @@ def test_calibration_gt_id_map_prefers_the_training_recorded_map_over_a_fresh_re
 
     monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.resolve_registry_id_map", _boom)
 
-    # No subjects.json exists for this dataset, so the pre-fix code (which always re-derived from
-    # the registry when `subject` was set) would have raised the ValueError
-    # test_calibration_attribute_registry_refusal_reaches_the_caller pins -- this must instead
-    # succeed, using only the recorded map.
+    # No subjects.json exists for this dataset: calibrate_operating_point must still succeed,
+    # using only the recorded map, never re-deriving from the registry when `subject` is set.
     bundle, _dh, n_excluded, _evidence = calibration.calibrate_operating_point(
         stub, "bud_opening", str(labels_dir), str(images_dir),
         tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,

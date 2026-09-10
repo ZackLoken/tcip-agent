@@ -221,10 +221,9 @@ class TestLosses:
         assert len(combined.losses) == 2
 
     def test_combined_loss_receives_class_weighting(self):
-        """The weighting context must reach a combined loss's weightable term.
-
-        It used to be dropped: the `+` branch recursed without forwarding class_distribution,
-        so imbalance handling silently vanished for every combined loss.
+        """The weighting context must reach a combined loss's weightable term: the `+` branch
+        forwards class_distribution on every recursion, so imbalance handling never silently
+        vanishes for a combined loss.
         """
         from tcip_mcp.pipelines.components.losses import build_loss
         combined = build_loss("cross_entropy+dice", class_distribution={0: 100, 1: 10, 2: 5},

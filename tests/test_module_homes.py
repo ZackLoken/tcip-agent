@@ -441,14 +441,13 @@ def test_revise_trait_spec_has_one_home():
 
 
 def test_accept_proposals_is_absent_from_package_source():
-    """The rename's structural half: the retired name ``accept_proposals`` is gone from every
-    package's shipped source, not just from the live MCP registry the manifest test checks (a
-    registry lookup only fires for an ``@mcp.tool()``-decorated name, so an undecorated
-    back-compat alias or shim under the old name would pass that check unnoticed). Text search,
-    not an AST identifier scan: a shim could just as easily be a string key or an alias
-    assignment as a def. ``tests/`` deliberately keeps the old spelling (the manifest's removed
-    set, this file's own history) and is out of scope by construction, since it sits outside
-    every package's own source tree.
+    """``accept_proposals`` is absent from every package's shipped source, not just from the
+    live MCP registry the manifest test checks (a registry lookup only fires for an
+    ``@mcp.tool()``-decorated name, so an undecorated alias or shim under that name would pass
+    that check unnoticed). Text search, not an AST identifier scan: a shim could just as easily
+    be a string key or an alias assignment as a def. ``tests/`` is out of scope by construction,
+    since it sits outside every package's own source tree; it may still name that spelling itself
+    (the manifest's removed-name set, this docstring).
     """
     import tcip_store
 
@@ -459,8 +458,8 @@ def test_accept_proposals_is_absent_from_package_source():
             assert "accept_proposals" not in text, f"{py_file} still names accept_proposals"
 
 
-def test_review_priority_queue_no_longer_defines_its_own_dict_and_lock():
-    """The priority-queue registry's dict-plus-lock state moved onto jobstore.JobRegistry
+def test_review_priority_queue_defines_no_own_dict_or_lock():
+    """The priority-queue registry's dict-plus-lock state lives on jobstore.JobRegistry
     (checked below); review.py keeps only its routes and its own job dataclass and worker."""
     path = _web_module_path("routes/review.py")
     assert path.is_file()
@@ -468,8 +467,8 @@ def test_review_priority_queue_no_longer_defines_its_own_dict_and_lock():
     assert not stray, f"review.py still defines {sorted(stray)}"
 
 
-def test_images_overview_builds_no_longer_defines_its_own_dict_and_lock():
-    """images.py's overview-build registry moved onto jobstore.JobRegistry the same way."""
+def test_images_overview_builds_define_no_own_dict_or_lock():
+    """images.py's overview-build registry lives on jobstore.JobRegistry the same way."""
     path = _web_module_path("routes/images.py")
     assert path.is_file()
     stray = {"_overview_jobs", "_overview_lock"} & set(_assign_name_counts(path))
@@ -477,9 +476,9 @@ def test_images_overview_builds_no_longer_defines_its_own_dict_and_lock():
 
 
 def test_job_registry_class_is_the_one_home_for_the_dict_plus_lock_registry_shape():
-    """jobstore.JobRegistry is the one home for the register/get/persist/rehydrate shape
-    review.py's priority queue and images.py's overview builds used to restate around their own
-    dict-plus-lock registry (inference.py and tuning.py adopt the same class too)."""
+    """jobstore.JobRegistry is the one home for the register/get/persist/rehydrate shape;
+    review.py's priority queue, images.py's overview builds, inference.py and tuning.py all
+    adopt the same class rather than each restating it around its own dict-plus-lock registry."""
     jobstore_path = _web_module_path("jobstore.py")
     assert jobstore_path.is_file()
     counts = _def_name_counts(jobstore_path, node_types=(ast.ClassDef,))
@@ -491,12 +490,10 @@ def test_job_registry_class_is_the_one_home_for_the_dict_plus_lock_registry_shap
         assert "JobRegistry" not in other, f"{py_file} also defines JobRegistry"
 
 
-def test_inference_and_tuning_no_longer_bind_historical_dict_aliases():
-    """inference.py's ``_jobs``/``_job_lock`` and tuning.py's ``_sweeps`` restated
-    ``_registry.jobs``/``_registry.lock`` under their pre-adoption names for no shipped
-    reader (tuning.py's ``_sweeps``) or none at all (inference.py's pair); every reaching test
-    now goes through ``_registry`` directly, the same access review.py's and images.py's own
-    registries never offered another name for. tuning.py's ``_lock`` stays: its own
+def test_inference_and_tuning_bind_no_dict_aliases_of_their_own():
+    """inference.py defines no ``_jobs``/``_job_lock`` and tuning.py no ``_sweeps``: every
+    reaching test goes through ``_registry`` directly, the same access review.py's and
+    images.py's own registries offer no other name for. tuning.py's ``_lock`` stays: its own
     ``_workers`` dict, unrelated to the registry, still guards through it."""
     inference_path = _web_module_path("routes/inference.py")
     tuning_path = _web_module_path("routes/tuning.py")
@@ -536,11 +533,11 @@ def test_validate_reference_request_and_response_models_moved_to_validation_modu
 
 
 def test_the_retired_sweep_vocabulary_is_absent_from_package_source():
-    """The calibration sense of "sweep" retired its ``sweep_data``/``has_sweep`` spellings for
-    ``gate_evidence``/``has_gate_evidence`` everywhere a producer or reader carries them. Text
-    search over every package's own source tree, not an AST identifier scan: a shim could as
-    easily be a string key as a def. ``tests/`` deliberately keeps the old spelling (fixtures for
-    the carried-subrecord contract, this file's own history) and is out of scope by construction.
+    """``sweep_data``/``has_sweep`` are absent everywhere a producer or reader of the calibration
+    sense of "sweep" carries ``gate_evidence``/``has_gate_evidence`` instead. Text search over
+    every package's own source tree, not an AST identifier scan: a shim could as easily be a
+    string key as a def. ``tests/`` is out of scope by construction; it may still name that
+    spelling itself (fixtures for the carried-subrecord contract, this docstring).
     """
     import tcip_store
 

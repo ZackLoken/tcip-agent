@@ -776,7 +776,7 @@ def test_to_coco_dataset_excludes_the_whole_image_when_any_instance_is_unlabeled
     assembly with a raise, and must also not be silently narrowed to just its labeled subset,
     training the image's other real objects as background. The whole image is excluded and
     disclosed, the same treatment a missing label file already gets. A genuinely undecodable
-    value still raises -- that distinction is unaffected."""
+    value still raises: that distinction is unaffected."""
     mixed_path = tmp_path / "IMG_A.json"
     write_annotations(mixed_path, [
         Annotation(subject="bud", geometry=BBox(10, 10, 30, 30),
@@ -794,8 +794,8 @@ def test_to_coco_dataset_excludes_the_whole_image_when_any_instance_is_unlabeled
         subject="bud", id_map={"open": 0, "closed": 1}, attribute="opening",
     )
 
-    # The mixed image is excluded wholesale -- not present at all, not even with its labeled
-    # instance -- and the exclusion is disclosed, never silent.
+    # The mixed image is excluded wholesale (not present at all, not even with its labeled
+    # instance), and the exclusion is disclosed, never silent.
     assert [i["file_name"] for i in coco["images"]] == ["IMG_B.JPG"]
     assert len(coco["annotations"]) == 1
     assert coco["annotations"][0]["category_id"] == 0  # "open", from IMG_B only

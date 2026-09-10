@@ -1,11 +1,10 @@
 """Tests for tools/prove_test_fails_before.py's test_file resolution, run by subprocess
 against the repository's own history.
 
-Before this fix an absolute test_file path named the working checkout's file regardless of the
-tree pytest actually ran in, so a materialized baseline that should fail collected and ran the
-fixed tree's test instead and reported VACUOUS for a real guard. A relative and an absolute path
-naming the same file under tests/ must now report the same verdict, and a path outside tests/
-must refuse rather than be materialized anywhere.
+An absolute test_file path must name the file in the tree pytest actually runs in, not the
+working checkout's own file: a relative and an absolute path naming the same file under tests/
+must report the same verdict, and a path outside tests/ must refuse rather than be materialized
+anywhere.
 
 The two guard checks run against the real baseline commit ``BASELINE``, so the checkout they run
 in must carry the repository's history: CI's python job checks out with ``fetch-depth: 0`` for

@@ -388,8 +388,8 @@ def test_sweep_stopper_stop_all_true_once_ray_no_longer_holds_any_trial_live(tmp
 
 def test_sweep_stopper_stop_all_true_at_once_for_a_trial_ray_killed_outright(tmp_path) -> None:
     """A trial Ray kills outright may never reach ``_run_hpo_trial``'s own ``finally``, so its
-    resolved-config record never gets written; the old disk-based check read that trial as
-    still running until the heartbeat stale window passed regardless. The callback's own live
+    resolved-config record never gets written, and a disk-based check alone would read that
+    trial as still running until the heartbeat stale window passed. The callback's own live
     set, fed by Ray's own ``on_trial_error`` report, says otherwise at once."""
     from tcip_mcp.pipelines.training.hpo import _build_sweep_stopper
     from tcip_mcp.tools.training_tools import SWEEP_CANCEL_SENTINEL

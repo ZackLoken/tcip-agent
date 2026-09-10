@@ -287,9 +287,9 @@ def test_inspect_project_against_a_nonexistent_workspace_creates_nothing(
 def test_inspect_project_reports_the_workspace_store_refusal_for_a_loose_marker(
     tmp_path: Path, monkeypatch
 ):
-    """A workspace holding a loose ``.active`` with no database is what precedes
-    ``tcip adopt-store``; the divergence check must name that refusal rather
-    than let it raise out of ``inspect_project``."""
+    """A workspace holding a loose ``.active`` with no database is what precedes ``tcip
+    adopt-store``; the divergence check must name that refusal rather than let it raise out of
+    ``inspect_project``."""
     from tcip_store.sqlite_backend import SqliteBackend
 
     from tcip_mcp import workspace
@@ -881,9 +881,9 @@ def test_import_project_keeps_a_relative_entry_relative_when_the_archive_carries
 ):
     """A relative registry entry whose weights the archive legitimately dropped
     (``include_models=False``) must come back still relative and disclosed as unresolved: the
-    staging conform's no-match fallback used to write the entry's own staging directory's
-    absolute path over it, misfiling an internal-but-absent entry as designed-external and
-    leaving a path into a directory the door was about to delete permanently in the registry."""
+    staging conform's no-match fallback must never write the entry's own staging directory's
+    absolute path over it, which would misfile an internal-but-absent entry as designed-external
+    and leave a path into a directory the door is about to delete permanently in the registry."""
     from tcip_mcp.experiments import (
         complete_run, create_experiment, experiment_dir, register_model_from_experiment,
         update_status,

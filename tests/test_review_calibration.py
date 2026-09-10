@@ -266,7 +266,7 @@ def test_class_id_unresolvable_message_is_drawn_from_the_shared_failure_vocabula
 def test_a_coverage_only_attestation_needs_no_resolvable_class_id():
     # "swept this image, found nothing more" (ReviewTab.tsx's recordSweepAttested): neither
     # gt_bbox_norm nor pred_bbox_norm set, class_id unresolved (nothing was classified). This must
-    # not refuse the reference -- the entry carries no class-scoped evidence to admit either way --
+    # not refuse the reference (the entry carries no class-scoped evidence to admit either way),
     # and its missed_object_attested stamp must still count toward adjudication coverage.
     state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": False, "detections": [
         {"match_type": "sweep", "action": "swept", "class_id": None, "class_name": "",

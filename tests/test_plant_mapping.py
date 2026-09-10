@@ -90,7 +90,7 @@ def test_segment_runs_splits_on_large_jumps() -> None:
 
 def test_segment_runs_splits_on_multiple_jumps() -> None:
     # Three row runs of ~2 m in-row steps separated by two ~15 m row-transition jumps.
-    # 15 m is well under the old fixed 25 m constant, so this only splits under a derivation
+    # 15 m is well under a fixed 25 m threshold, so this only splits under a derivation
     # that reads the break relative to this date's own ~2 m walking pace.
     stamps = [
         _stamp("a", 43.19600000, -90.0580, 0),
@@ -111,7 +111,7 @@ def test_segment_runs_splits_on_multiple_jumps() -> None:
 
 def test_segment_runs_curved_row_not_fragile_to_uneven_steps() -> None:
     # In-row steps vary (20-28 m, simulating a curved row's uneven pace) and one includes a step
-    # larger than the old fixed 25 m constant, followed by one unambiguous ~300 m row-transition
+    # larger than a fixed 25 m threshold, followed by one unambiguous ~300 m row-transition
     # jump. A fixed-distance rule would split on every step over 25 m; the derivation should not.
     stamps = [
         _stamp("a", 43.196000, -90.0580, 0),
@@ -128,8 +128,8 @@ def test_segment_runs_curved_row_not_fragile_to_uneven_steps() -> None:
 
 
 def test_segment_runs_uniform_gaps_stay_one_run() -> None:
-    # Roughly uniform ~27-32 m gaps throughout, all above the old fixed 25 m constant (which
-    # would have split every consecutive pair) but with no real bimodal break in the sequence.
+    # Roughly uniform ~27-32 m gaps throughout, all above a fixed 25 m threshold (which
+    # would split every consecutive pair) but with no real bimodal break in the sequence.
     stamps = [
         _stamp("a", 43.196000, -90.0580, 0),
         _stamp("b", 43.196252, -90.0580, 2),  # ~28 m

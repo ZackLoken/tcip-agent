@@ -735,12 +735,11 @@ def test_a_classified_rewrite_under_no_dataset_root_writes_one_entry_consistent_
     fallback cannot tell a bucket's own prior stamp from a genuine dataset marker, the seam's
     known behaviour documented on ``_emit_conform_audit``, not this command's to change): the
     entry lands under that resolved root's own log instead. Either way the outcome text and the
-    entry's filed scope never disagree, which is the scope-consistency bug this pin guards: the
-    two used to be read from ``dataset_scope_of`` at two different times (once before the rewrite,
-    once after), and the stamp write in between could make the second read answer differently
-    from the first.
+    entry's filed scope never disagree, which is the scope-consistency bug this pin guards: reading
+    ``dataset_scope_of`` at two different times (once before the rewrite, once after) risks the
+    stamp write in between making the second read answer differently from the first.
 
-    Fails at the baseline on ``entry["outcome"]``/``outcome`` itself, on the sqlite leg only: this
+    The guarded assertion is ``entry["outcome"]``/``outcome`` itself, on the sqlite leg only: this
     bucket resolves under no real dataset root (``dataset_layout.dataset_root_of`` finds no
     canonical segment in its path) on both backends, so the no-verdict-store note belongs in the
     outcome regardless of backend; on the database backend, ``dataset_scope_of`` answers the
@@ -902,8 +901,8 @@ def test_a_classified_rewrite_with_a_validated_stamp_writes_an_entry_whose_outco
 ):
     """A rewrite of a bucket whose stamp already claimed validated floors the claim (rule 7),
     since the rewrite changes the bucket's own content digest away from the one the validation
-    record was earned over. The floor note used to reach only stdout in the returned outcome
-    string; it now rides the audit entry's own outcome field too."""
+    record was earned over. The floor note rides both the returned outcome string and the audit
+    entry's own outcome field."""
     import tcip_mcp.audit as audit_module
     from tests._binding_fixtures import file_validation_record
     from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT

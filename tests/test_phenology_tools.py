@@ -534,14 +534,14 @@ def test_deliver_phenology_milestones_floors_a_count_stamp_earned_for_a_differen
 
 def test_deliver_phenology_milestones_reports_n_images_unattributed_when_never_assessed(tmp_path: Path) -> None:
     """The measurement-integrity guard's early return (no bucket anywhere classified the trait's
-    positive class) must disclose n_images_unattributed the same way the success path does -- both
+    positive class) must disclose n_images_unattributed the same way the success path does: both
     read it off the same delivery disclosure, so an early refusal is not missing a field a later
     success would have carried."""
     root = _ds_root(tmp_path)
     d1 = _bucket(tmp_path, "2026-02-11")
     d1.mkdir(parents=True)
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
-    # No P1_a.json written under d1 -- the mapping names it but nothing was ever inferred for it,
+    # No P1_a.json written under d1: the mapping names it but nothing was ever inferred for it,
     # so the only date on record is missing, never classified.
     mapping_name = "valley"
     _write_mapping(tmp_path, mapping_name, {
@@ -567,7 +567,7 @@ def test_deliver_phenology_milestones_reports_n_images_unattributed_when_never_a
 
 def test_deliver_phenology_milestones_rejects_classifier_stamp_from_unrelated_run(tmp_path: Path) -> None:
     """A genuinely-validated classifier_operating_point.json calibrated for a
-    different trait/experiment must not validate an unrelated delivery -- classifier_pred_dirs is a
+    different trait/experiment must not validate an unrelated delivery: classifier_pred_dirs is a
     separate, caller-supplied list, so reconcile_classifier_validity's own on-disk check alone can't
     see this; the stamp's own recorded trait/experiment_id must agree with what's being delivered."""
     root = _ds_root(tmp_path)
@@ -603,17 +603,17 @@ def test_deliver_phenology_milestones_rejects_classifier_stamp_from_unrelated_ru
 
 def test_deliver_phenology_milestones_rejects_classifier_stamp_with_no_trait_recorded(tmp_path: Path) -> None:
     """The real writer (calibrate_classifier_operating_point) always
-    records a real trait name -- unlike experiment_id, there is no legitimate producer path that
+    records a real trait name: unlike experiment_id, there is no legitimate producer path that
     omits it. A sidecar with trait=None (a hand-edited or foreign file, not one the real writer could
     produce) must not be trusted just because neither the trait-mismatch nor the experiment-mismatch
-    branch fires against a null -- both being null would otherwise bypass the binding check entirely."""
+    branch fires against a null: both being null would otherwise bypass the binding check entirely."""
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["closed"])
     _write_preds(d2, "P1_b", ["open"])
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
-    # Genuinely "validated", but with neither trait nor experiment_id recorded -- the shape a
+    # Genuinely "validated", but with neither trait nor experiment_id recorded: the shape a
     # hand-edited/foreign sidecar could carry, never one calibrate_classifier_operating_point writes.
     _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait=None, experiment_id=None)
     mapping_name = "valley"
@@ -1202,7 +1202,7 @@ def test_calibrate_classifier_operating_point_partial_flip_fails_compensating_er
     _write_split(cal_gt, cal_pred, prefix="cal", n_images=30, per_image_calls=good)
 
     def flipped(i):
-        # 40% of images get a fully-flipped pair (both calls wrong) -- symmetric, net bias 0.
+        # 40% of images get a fully-flipped pair (both calls wrong): symmetric, net bias 0.
         if i % 5 < 2:
             return [(True, False), (False, True)]
         return [(True, True), (False, False)]
@@ -1230,7 +1230,7 @@ def test_calibrate_classifier_operating_point_partial_flip_fails_compensating_er
 
 def test_resolve_classifier_operating_point_refuses_single_image_holdout() -> None:
     """A single-image holdout has no images to vary the count-bias
-    across, so its std is trivially 0 -- the SE penalty the equivalence test relies on vanishes.
+    across, so its std is trivially 0: the SE penalty the equivalence test relies on vanishes.
     Must refuse (insufficient_holdout_images), the same minimum the detection path requires,
     rather than pass at exactly the tolerance with zero uncertainty discount."""
     from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
@@ -1239,7 +1239,7 @@ def test_resolve_classifier_operating_point_refuses_single_image_holdout() -> No
         {"image_id": "c0", "is_true_positive": True, "is_pred_positive": True, "bbox": [0.0, 0.0, 10.0, 10.0]},
         {"image_id": "c1", "is_true_positive": False, "is_pred_positive": False, "bbox": [20.0, 0.0, 30.0, 10.0]},
     ]
-    # 20 instances, all on one image -- a real net bias of +1, which the equivalence test's SE=0
+    # 20 instances, all on one image: a real net bias of +1, which the equivalence test's SE=0
     # (n_images=1) would let through regardless of tolerance.
     hold = [
         {"image_id": "h0", "is_true_positive": i < 10, "is_pred_positive": i < 11,
@@ -1257,7 +1257,7 @@ def test_resolve_classifier_operating_point_bias_is_scoped_to_present_images() -
     """count_bias/count_bias_std must be measured over the same population typical_positive_count
     is already scoped to (images carrying a true or predicted positive), matching the pooled
     detector gate's own present-scoping, mirroring _count_stats_at_conf's own `if gt or dt`.
-    Without that scoping, an all-negative image (no true positive, no predicted positive -- a
+    Without that scoping, an all-negative image (no true positive, no predicted positive:
     confirmed-closed bud the classifier correctly called negative) would contribute a certain
     zero to the bias mean/std while never counting toward typical_positive_count, diluting a real
     systematic miscall by n_bias_images/n_present exactly as the detector path's own dilution
@@ -1270,7 +1270,7 @@ def test_resolve_classifier_operating_point_bias_is_scoped_to_present_images() -
     ]
     hold = []
     # 10 informative images: 100 real positives each, systematically over-called by +2 (102
-    # predicted positive) -- a real 2% relative over-count.
+    # predicted positive): a real 2% relative over-count.
     for i in range(10):
         for k in range(100):
             hold.append({"image_id": f"h{i}", "is_true_positive": True, "is_pred_positive": True,
@@ -1279,7 +1279,7 @@ def test_resolve_classifier_operating_point_bias_is_scoped_to_present_images() -
             hold.append({"image_id": f"h{i}", "is_true_positive": False, "is_pred_positive": True,
                         "bbox": [float(9000 + k), 0.0, float(9001 + k), 10.0]})
     # 40 uninformative images: every instance confirmed negative and correctly called negative.
-    # No true positive, no predicted positive anywhere on these -- exactly the population
+    # No true positive, no predicted positive anywhere on these: exactly the population
     # typical_positive_count already excludes.
     for i in range(40):
         hold.append({"image_id": f"empty{i}", "is_true_positive": False, "is_pred_positive": False,
@@ -1298,7 +1298,7 @@ def test_resolve_classifier_operating_point_bias_is_scoped_to_present_images() -
 def _classifier_items(prefix, n_images, pos_per_image, *, miscall_images=(), image_offset=0):
     """``pos_per_image`` correctly-called positives per image, plus one token negative per image (so
     kappa stays defined). On ``miscall_images`` (indices), one extra false-positive-called instance
-    is added -- the same absolute miscall, regardless of density. Every image's whole geometry is
+    is added: the same absolute miscall, regardless of density. Every image's whole geometry is
     offset by its own index (``image_offset`` shifts a sibling split's sequence further still), so
     two images never share content by construction unless a test deliberately reuses one.
     """
@@ -1338,7 +1338,7 @@ def test_resolve_classifier_operating_point_relative_tolerance_refuses_a_sparse_
         holdout_items=_classifier_items("h", 20, 150, miscall_images=[0], image_offset=20),
         experiment_id=None)
     assert dense["gate_evidence"]["typical_positive_count"] == pytest.approx(150.0)
-    # Same count_bias/count_bias_std as the sparse case (the miscall pattern is identical) -- only
+    # Same count_bias/count_bias_std as the sparse case (the miscall pattern is identical): only
     # the derived tolerance differs, proving density is what changed the outcome.
     assert dense["gate_evidence"]["count_bias"] == pytest.approx(sparse["gate_evidence"]["count_bias"])
     assert dense["gate_evidence"]["count_bias_std"] == pytest.approx(sparse["gate_evidence"]["count_bias_std"])
@@ -1350,7 +1350,7 @@ def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floo
     tmp_path: Path, monkeypatch,
 ) -> None:
     """TraitSpec.classifier_agreement_floor, when a trait authors one,
-    must be the floor actually applied -- not the platform's interim default."""
+    must be the floor actually applied, not the platform's interim default."""
     from dataclasses import replace
 
     from tcip_mcp.pipelines import operating_point as op_mod
@@ -1359,7 +1359,7 @@ def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floo
     strict_bud_opening = replace(BUD_OPENING, classifier_agreement_floor=0.9)
     monkeypatch.setattr(op_mod, "get_trait", lambda name: strict_bud_opening)
 
-    # A holdout with kappa=0.8 -- clears the platform's interim default (0.41) but not the
+    # A holdout with kappa=0.8: clears the platform's interim default (0.41) but not the
     # trait's own stricter authored floor (0.9).
     def make_items(n, flips):
         items = []
@@ -1607,7 +1607,7 @@ def test_calibrate_classifier_operating_point_foreign_checkpoint_stamp_still_rea
     tmp_path: Path,
 ) -> None:
     """experiment_id=None (a foreign/unregistered checkpoint) skips train-disjointness rather than
-    failing closed -- the classifier-validity stamp is still reachable for an otherwise clean
+    failing closed: the classifier-validity stamp is still reachable for an otherwise clean
     reference."""
     root = _ds_root(tmp_path)
     _write_bud_opening_registry(root)
@@ -1635,7 +1635,7 @@ def test_calibrate_classifier_operating_point_unassessed_gt_never_fabricates_a_n
     """A GT instance never assessed for `attribute` (no opening key at all)
     must be excluded from the reference, never coerced into "not positive". A perfect classifier
     scored against a reference where every image also carries unassessed instances must still pass
-    cleanly -- the unassessed instances contribute no fabricated disagreement."""
+    cleanly: the unassessed instances contribute no fabricated disagreement."""
     root = _ds_root(tmp_path)
     _write_bud_opening_registry(root)
     cal_gt, cal_pred = root / "annotations" / "cal", tmp_path / "cal_pred"
@@ -1643,9 +1643,9 @@ def test_calibrate_classifier_operating_point_unassessed_gt_never_fabricates_a_n
 
     def perfect_plus_unassessed(_i: int) -> list[tuple[bool | None, bool]]:
         # 2 correctly-classified instances (1 pos, 1 neg) + 2 never-assessed instances. The
-        # classifier's own call on the unassessed instances is irrelevant -- they must not enter
+        # classifier's own call on the unassessed instances is irrelevant: they must not enter
         # the reference at all, so their is_pred_positive value here is deliberately inconsistent
-        # (would fabricate a disagreement if the bug were still present).
+        # (a value that would fabricate a disagreement if it entered the reference).
         return [(True, True), (False, False), (None, True), (None, False)]
 
     _write_split(cal_gt, cal_pred, prefix="cal", n_images=20, per_image_calls=perfect_plus_unassessed)
@@ -1723,7 +1723,7 @@ def test_classification_items_derives_center_match_tolerance_across_the_whole_sp
 
     by_image = {it["image_id"]: it for it in items}
     assert "small" in by_image, (
-        "the small-object image's pair was dropped -- tolerance was derived per-image, not "
+        "the small-object image's pair was dropped: tolerance was derived per-image, not "
         "across the whole split"
     )
     assert by_image["small"]["is_true_positive"] is False  # "closed"
@@ -1734,10 +1734,10 @@ def test_classification_items_derives_center_match_tolerance_across_the_whole_sp
 
 def test_classification_items_scopes_gt_to_the_run_subject(tmp_path: Path) -> None:
     """A labels dir isn't guaranteed to hold only one kind of
-    annotation -- a dataset that also isolates an enabling subject (e.g. "bush", root CLAUDE.md's
+    annotation: a dataset that also isolates an enabling subject (e.g. "bush", root CLAUDE.md's
     "a subject is not a trait") must not let that unrelated box enter the match pool. Here a "bush"
     annotation sits exactly on the prediction's center (distance 0) while the real "bud" GT is a
-    few px off -- if subject weren't scoped, greedy center-match (closest first) would steal the
+    few px off: if subject weren't scoped, greedy center-match (closest first) would steal the
     match for "bush" and either drop the real bud pair or attribute it to the wrong box/attribute
     entirely."""
     root = _ds_root(tmp_path)

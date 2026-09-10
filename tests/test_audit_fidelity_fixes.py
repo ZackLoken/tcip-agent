@@ -25,9 +25,9 @@ def _img(tmp_path, name="IMG_0001.JPG", size=(100, 80)):
 def test_mcp_save_annotations_empty_refuses_and_preserves_gt(tmp_path):
     """An empty save is refused (each annotation needs a subject) and never deletes existing GT.
 
-    A confirmed negative is now an empty label + a human Complete in image_status.json, not a
-    product of an empty save door, so the door that used to write ``{objects: []}`` is gone. What
-    stays load-bearing is that a save call cannot destroy annotated ground truth.
+    A confirmed negative is an empty label plus a human Complete in image_status.json, never a
+    product of an empty save. What stays load-bearing is that a save call cannot destroy
+    annotated ground truth.
     """
     from tcip_mcp.tools.annotation_tools import save_annotations
 

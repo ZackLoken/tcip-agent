@@ -1,9 +1,9 @@
-"""``record_delivery_binding_event``'s dataset-scoped audit line used to go through
-``record_event`` (never raises, a dropped append is only logged) even though the mutation it
-records already committed by the time this call runs and no ``@audited`` tool body brackets it.
-It now goes through ``record_event_or_raise``, so a failed append surfaces to the delivering
-door as ``AuditEntryNotWritten`` rather than passing as if the platform's canonical log recorded
-the delivery when it did not.
+"""``record_delivery_binding_event``'s dataset-scoped audit line goes through
+``record_event_or_raise``, never ``record_event`` (never raises, a dropped append is only
+logged), even though the mutation it records already committed by the time this call runs and no
+``@audited`` tool body brackets it: a failed append surfaces to the delivering door as
+``AuditEntryNotWritten`` rather than passing as if the platform's canonical log recorded the
+delivery when it did not.
 """
 
 from __future__ import annotations

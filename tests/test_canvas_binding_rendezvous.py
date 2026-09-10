@@ -39,7 +39,7 @@ def _restore_store_after():
 def test_a_restarted_process_replays_the_records_generation_and_a_push_succeeds(
     tmp_path: Path,
 ) -> None:
-    """(a) restart simulation: a fresh app process's lifespan replays the record's own
+    """Restart simulation: a fresh app process's lifespan replays the record's own
     generation, and a push naming it succeeds."""
     with TestClient(app, base_url="http://127.0.0.1") as client:
         sel = _select(client, tmp_path)
@@ -60,10 +60,10 @@ def test_a_restarted_process_replays_the_records_generation_and_a_push_succeeds(
         assert _meta(tmp_path)["image_path"] == "C:/img/a.jpg"
 
 
-def test_b_a_record_deleted_after_adoption_replays_null_and_the_gate_trips(
+def test_record_deleted_after_adoption_replays_null_and_the_gate_trips(
     tmp_path: Path,
 ) -> None:
-    """(b) record deleted after adoption: the next replay carries a null generation (the
+    """Record deleted after adoption: the next replay carries a null generation (the
     client-side presence gate trips on it), and the route's 409 names the missing record."""
     with TestClient(app, base_url="http://127.0.0.1") as client:
         sel = _select(client, tmp_path)
@@ -84,8 +84,8 @@ def test_b_a_record_deleted_after_adoption_replays_null_and_the_gate_trips(
         assert r.json()["detail"]["generation"] is None
 
 
-def test_c_an_external_bump_converges_after_a_resync(tmp_path: Path) -> None:
-    """(c) an external bump (another process's own select, simulated by writing the record
+def test_an_external_bump_converges_after_a_resync(tmp_path: Path) -> None:
+    """An external bump (another process's own select, simulated by writing the record
     directly through the store seam): a resync's replay carries the bumped generation, and
     the next push succeeds against it."""
     with TestClient(app, base_url="http://127.0.0.1") as client:
