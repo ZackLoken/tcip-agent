@@ -5,8 +5,7 @@ stack whose install guarantees every command's imports. Each subcommand's own mo
 the package that owns it (``tcip_mcp.cli.<name>`` for all but
 one; ``distill-learnings`` in this package, since its own imports need nothing tcip_mcp adds) and
 exposes ``main(argv)``, returning the exit code the command's own ``main`` returned. A command
-module keeps its own script's argparse interface, docstring and behavior; this dispatcher moves
-nothing but where a command is invoked from.
+module owns its argparse interface and behavior; the dispatcher only routes.
 
 Run as ``python -m tcip_web.cli <command> [args...]`` (what a test spawns, so it holds without a
 reinstall) or, once installed, as ``tcip <command> [args...]``.
@@ -42,9 +41,8 @@ COMMANDS: dict[str, str] = {
     "rename-subject-registry": "tcip_mcp.cli.rename_subject_registry",
 }
 """Command name (as typed after ``tcip``) to the module exposing its ``main(argv)``, named after
-the script it replaces with underscores respelled as hyphens; the two renamed commands
-(``write-project-site``, ``repair-classified-predictions``) carry their current name,
-never the retired conform name."""
+the script it replaces with underscores respelled as hyphens, never the retired conform name for
+the two renamed commands (``write-project-site``, ``repair-classified-predictions``)."""
 
 
 def _usage() -> str:

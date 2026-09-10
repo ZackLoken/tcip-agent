@@ -370,8 +370,7 @@ class PhenologyPayload(BaseModel):
     here, since the caller controls the column names and any declared shape. A table with a
     ``ratio`` column is a phenology curve or an unrelated QC table depending on where it came
     from, which is exactly what a caller-supplied payload erases. So no door accepts rows: they
-    accept a request to compute rows, and the server knows what it produced because it produced
-    it.
+    accept a request to compute rows, and the server always knows what it produced.
     """
 
     model_config = ConfigDict(extra="forbid")
