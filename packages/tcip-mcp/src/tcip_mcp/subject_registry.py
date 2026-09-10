@@ -105,7 +105,7 @@ class RegistryError(ValueError):
 
 class SubjectRegistryUnconformed(RegistryError):
     """A dataset root still carries the retired ``classes.json`` and no registry write may land
-    beside it: conform it first (``tcip rename-subject-registry``)."""
+    beside it: rename it to ``subjects.json`` by hand first."""
 
 
 def retired_document(dataset_root: str | Path) -> Path | None:
@@ -113,8 +113,9 @@ def retired_document(dataset_root: str | Path) -> Path | None:
     through :func:`registry_from_dict`, else ``None``.
 
     Whether or not ``subjects.json`` exists beside it: a fresh write to ``subjects.json`` next to
-    a still-present retired copy would manufacture the divergent pair the conform command refuses,
-    so this answers present regardless. Decoding is what makes the file evidence the platform
+    a still-present retired copy would manufacture the divergent pair the registry writers refuse
+    (:class:`SubjectRegistryUnconformed`), so this answers present regardless. Decoding is what
+    makes the file evidence the platform
     wrote a registry there; a third-party file named ``classes.json`` that is not a registry is no
     claim at all, and is never mistaken for the retired document here (the doctor reports it
     separately, as a stray file).
@@ -277,8 +278,8 @@ def write_registry(path: str | Path, registry: SubjectRegistry) -> None:
 
     Refuses (:class:`SubjectRegistryUnconformed`) when the dataset root still carries the retired
     ``classes.json`` (:func:`retired_document`): no registry write lands beside it, since a fresh
-    ``subjects.json`` next to a still-present retired copy is the divergent pair the conform
-    command (``tcip rename-subject-registry``) refuses to reconcile.
+    ``subjects.json`` next to a still-present retired copy is the divergent pair only a hand
+    rename of ``classes.json`` to ``subjects.json`` resolves.
     """
     import tcip_store
 
@@ -286,8 +287,8 @@ def write_registry(path: str | Path, registry: SubjectRegistry) -> None:
     stale = retired_document(root)
     if stale is not None:
         raise SubjectRegistryUnconformed(
-            f"{root} still carries the retired registry at {stale}; conform it first "
-            "(tcip rename-subject-registry) before writing subjects.json beside it"
+            f"{root} still carries the retired registry at {stale}; rename it to subjects.json "
+            "by hand before writing subjects.json beside it"
         )
     tcip_store.put_blob(
         _registry_key(path), tcip_store.RECORD_JSON.encode(registry_to_dict(registry))
@@ -472,8 +473,8 @@ def replace_registry(
     stale = retired_document(root)
     if stale is not None:
         raise SubjectRegistryUnconformed(
-            f"{root} still carries the retired registry at {stale}; conform it first "
-            "(tcip rename-subject-registry) before writing subjects.json beside it"
+            f"{root} still carries the retired registry at {stale}; rename it to subjects.json "
+            "by hand before writing subjects.json beside it"
         )
 
     key = _registry_key(path)
@@ -546,8 +547,8 @@ def copy_registry(source: str | Path, destination: str | Path) -> None:
     stale = retired_document(dest_root)
     if stale is not None:
         raise SubjectRegistryUnconformed(
-            f"{dest_root} still carries the retired registry at {stale}; conform it first "
-            "(tcip rename-subject-registry) before writing subjects.json beside it"
+            f"{dest_root} still carries the retired registry at {stale}; rename it to "
+            "subjects.json by hand before writing subjects.json beside it"
         )
 
     dest_key = _registry_key(destination)

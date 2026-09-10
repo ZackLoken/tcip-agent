@@ -112,7 +112,7 @@ def resolve_registry_id_map(labels_dir, subject: str | None, attribute: str | No
             raise ValueError(
                 f"attribute {attribute!r} classification needs a subjects.json to order its "
                 f"values, but {labels_dir} resolves only the retired registry at {stale}; "
-                "conform it first (tcip rename-subject-registry).")
+                "rename it to subjects.json by hand.")
         raise ValueError(
             f"attribute {attribute!r} classification needs a subjects.json to order its values, "
             f"but none was found for {labels_dir}.")

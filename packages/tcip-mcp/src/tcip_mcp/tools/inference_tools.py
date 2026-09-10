@@ -222,8 +222,7 @@ def unmapped_classified_run(
             return (
                 f"this run decoded along attribute {attribute!r} of subject {subject!r} from a "
                 f"registry-derived dataset, but {images_dir!r} resolves only the retired "
-                f"registry at {stale}. Conform it first (tcip rename-subject-registry), then "
-                "retry."
+                f"registry at {stale}. Rename it to subjects.json by hand, then retry."
             )
         return (
             f"this run decoded along attribute {attribute!r} of subject {subject!r} from a "

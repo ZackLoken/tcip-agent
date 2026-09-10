@@ -90,7 +90,7 @@ def test_write_registry_refuses_beside_the_retired_document(tmp_path):
     with pytest.raises(SubjectRegistryUnconformed) as exc:
         write_registry(tmp_path / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
     assert "classes.json" in str(exc.value)
-    assert "tcip rename-subject-registry" in str(exc.value)
+    assert "rename it to subjects.json" in str(exc.value)
     assert not (tmp_path / "subjects.json").exists()
 
 
@@ -101,7 +101,7 @@ def test_replace_registry_refuses_beside_the_retired_document(tmp_path):
         replace_registry(
             tmp_path / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)),
             expect=None)
-    assert "tcip rename-subject-registry" in str(exc.value)
+    assert "rename it to subjects.json" in str(exc.value)
     assert not (tmp_path / "subjects.json").exists()
 
 
@@ -111,7 +111,7 @@ def test_copy_registry_refuses_at_a_destination_carrying_the_retired_document(tm
     (dest / "classes.json").write_bytes((source / "subjects.json").read_bytes())
     with pytest.raises(SubjectRegistryUnconformed) as exc:
         copy_registry(source / "subjects.json", dest / "subjects.json")
-    assert "tcip rename-subject-registry" in str(exc.value)
+    assert "rename it to subjects.json" in str(exc.value)
     assert not (dest / "subjects.json").exists()
 
 
@@ -134,7 +134,7 @@ def test_write_subject_registry_tool_answers_error_beside_the_retired_document(t
     assert "classes.json" in result["error"]
 
 
-# ── register_dataset refuses, naming the path and the command ──────────────────────────────
+# ── register_dataset refuses, naming the path and the hand rename ──────────────────────────
 
 
 def test_register_dataset_refuses_beside_the_retired_document(tmp_path):
@@ -145,7 +145,7 @@ def test_register_dataset_refuses_beside_the_retired_document(tmp_path):
     result = register_dataset(str(root), crop="walnut")
     assert "error" in result
     assert str(root) in result["error"]
-    assert "tcip rename-subject-registry" in result["error"]
+    assert "rename it to subjects.json" in result["error"]
 
 
 def test_register_dataset_admits_valid_work_with_no_registry_at_all(tmp_path):
@@ -167,7 +167,7 @@ def test_resolve_registry_id_map_names_the_retired_file_for_attribute_classifica
     with pytest.raises(ValueError) as exc:
         resolve_registry_id_map(root / "annotations" / "2026-03-04", "bud", "condition")
     assert "classes.json" in str(exc.value)
-    assert "tcip rename-subject-registry" in str(exc.value)
+    assert "rename it to subjects.json" in str(exc.value)
 
 
 def test_resolve_statement_registry_names_the_retired_file(tmp_path):
@@ -178,7 +178,7 @@ def test_resolve_statement_registry_names_the_retired_file(tmp_path):
     with pytest.raises(ValueError) as exc:
         resolve_statement_registry(str(root), str(root))
     assert "classes.json" in str(exc.value)
-    assert "tcip rename-subject-registry" in str(exc.value)
+    assert "rename it to subjects.json" in str(exc.value)
 
 
 def test_unmapped_classified_run_names_the_retired_file(tmp_path):
@@ -190,7 +190,7 @@ def test_unmapped_classified_run_names_the_retired_file(tmp_path):
         {"subject": "bud", "attribute": "condition"}, None, images_dir=str(root / "images" / "2026-03-04"))
     assert msg is not None
     assert "classes.json" in msg
-    assert "tcip rename-subject-registry" in msg
+    assert "Rename it to subjects.json" in msg
 
 
 # ── the doctor reports it ───────────────────────────────────────────────────────────────────
@@ -208,7 +208,7 @@ def test_doctor_reports_the_retired_document(tmp_path):
     level, message = findings[0]
     assert level == "warn"
     assert str(root) in message
-    assert "tcip rename-subject-registry" in message
+    assert "rename it to subjects.json" in message
 
 
 def test_doctor_reports_a_stray_undecodable_classes_json_separately(tmp_path):
@@ -312,7 +312,7 @@ def test_draw_splits_refuses_naming_a_retired_document_at_a_split_destination_no
     )
     assert "error" in result
     assert "classes.json" in result["error"]
-    assert "tcip rename-subject-registry" in result["error"]
+    assert "rename it to subjects.json" in result["error"]
     # Nothing written: no manifest, no materialized image/label tree.
     assert not (out / "split_manifest.json").exists()
     assert not (out / "train" / "images").exists()
@@ -355,7 +355,7 @@ def test_archive_project_refuses_naming_the_retired_document(tmp_path):
     result = archive_project(str(root), str(tmp_path / "bundle.zip"))
     assert "error" in result
     assert "classes.json" in result["error"]
-    assert "tcip rename-subject-registry" in result["error"]
+    assert "rename it to subjects.json" in result["error"]
     assert not (tmp_path / "bundle.zip").exists()
 
 
@@ -410,11 +410,11 @@ def test_save_subjects_route_answers_400_beside_the_retired_document(tmp_path):
 
     assert resp.status_code == 400
     assert "classes.json" in resp.text
-    assert "tcip rename-subject-registry" in resp.text
+    assert "rename it to subjects.json" in resp.text
     assert not (root / "subjects.json").exists()
 
 
-# ── materialize_review_dataset answers {"error": ...} naming the conform ───────────────────
+# ── materialize_review_dataset answers {"error": ...} naming the hand rename ───────────────
 
 
 def _seed_classified_verdict(state_dir: Path, *, bucket: str) -> None:
@@ -436,7 +436,7 @@ def test_materialize_review_dataset_answers_error_beside_the_retired_document(tm
     """A classified scope's own registry copy (materialize.py's
     _copy_source_registry_for_classified_scope, through copy_registry) refuses at a destination
     already carrying the retired document, before anything else is written, and
-    materialize_review_dataset answers {"error": ...} naming the conform."""
+    materialize_review_dataset answers {"error": ...} naming the hand rename."""
     from PIL import Image
 
     from tcip_mcp.pipelines.resolution import write_sidecar
@@ -464,7 +464,7 @@ def test_materialize_review_dataset_answers_error_beside_the_retired_document(tm
 
     assert "error" in result
     assert "classes.json" in result["error"]
-    assert "tcip rename-subject-registry" in result["error"]
+    assert "rename it to subjects.json" in result["error"]
 
 
 # ── the absence answers, with only the retired document on the root ────────────────────────

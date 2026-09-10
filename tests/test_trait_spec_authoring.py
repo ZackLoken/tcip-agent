@@ -184,10 +184,10 @@ def test_updating_a_trait_spec_with_a_caller_supplied_schema_version_refuses(tmp
 def test_a_record_stamped_1_is_refused_before_any_edit(tmp_path: Path) -> None:
     """A record stamped ``1`` (seeded directly here, standing in for one written before the
     subject-registry rename) is refused by :func:`traits.trait_spec_unconformed` before the merge
-    even runs, naming the conform command, rather than silently carrying an edit over a shape the
-    encoder no longer writes. Coverage, not a guard: a fail-before proof against a pre-rename
-    baseline fails at ``_author``'s own ``positive_value`` field, not at the
-    ``rename-subject-registry`` match this test names, since every fixture in this module already
+    even runs, naming the ``author_trait_spec`` remedy, rather than silently carrying an edit
+    over a shape the encoder no longer writes. Coverage, not a guard: a fail-before proof against
+    a pre-rename baseline fails at ``_author``'s own ``positive_value`` field, not at the
+    ``author_trait_spec`` match this test names, since every fixture in this module already
     carries the field rename."""
     _author(tmp_path, trait="leaf", delivers=("leaf_length",), holdout_match_quality_floor=0.4)
     directory = traits.trait_specs_dir(str(tmp_path))
@@ -195,7 +195,7 @@ def test_a_record_stamped_1_is_refused_before_any_edit(tmp_path: Path) -> None:
     stored = ts.read_versioned(key)
     ts.replace(key, {**stored.value, "schema_version": 1}, expect=stored.version)
 
-    with pytest.raises(ValueError, match="rename-subject-registry"):
+    with pytest.raises(ValueError, match="author_trait_spec"):
         traits.write_trait_spec_fields(
             "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
             rationale="the breeder raised the minimum acceptable held-out match quality",
