@@ -111,7 +111,7 @@ def test_copy_registry_refuses_at_a_destination_carrying_the_retired_document(tm
     (dest / "classes.json").write_bytes((source / "subjects.json").read_bytes())
     with pytest.raises(SubjectRegistryUnconformed) as exc:
         copy_registry(source / "subjects.json", dest / "subjects.json")
-    assert "rename it to subjects.json" in str(exc.value)
+    assert "remove that file by hand" in str(exc.value)
     assert not (dest / "subjects.json").exists()
 
 
@@ -312,7 +312,7 @@ def test_draw_splits_refuses_naming_a_retired_document_at_a_split_destination_no
     )
     assert "error" in result
     assert "classes.json" in result["error"]
-    assert "rename it to subjects.json" in result["error"]
+    assert "remove that file by hand" in result["error"]
     # Nothing written: no manifest, no materialized image/label tree.
     assert not (out / "split_manifest.json").exists()
     assert not (out / "train" / "images").exists()
@@ -436,7 +436,7 @@ def test_materialize_review_dataset_answers_error_beside_the_retired_document(tm
     """A classified scope's own registry copy (materialize.py's
     _copy_source_registry_for_classified_scope, through copy_registry) refuses at a destination
     already carrying the retired document, before anything else is written, and
-    materialize_review_dataset answers {"error": ...} naming the hand rename."""
+    materialize_review_dataset answers {"error": ...} naming the removal by hand."""
     from PIL import Image
 
     from tcip_mcp.pipelines.resolution import write_sidecar
@@ -464,7 +464,7 @@ def test_materialize_review_dataset_answers_error_beside_the_retired_document(tm
 
     assert "error" in result
     assert "classes.json" in result["error"]
-    assert "rename it to subjects.json" in result["error"]
+    assert "remove that file by hand" in result["error"]
 
 
 # ── the absence answers, with only the retired document on the root ────────────────────────

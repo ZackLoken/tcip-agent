@@ -123,9 +123,9 @@ def test_config_spec_stamped_with_schema_version_still_loads(tmp_path: Path):
 
 
 def test_config_spec_unstamped_is_reported_unconformed(tmp_path: Path):
-    """No schema_version key names a record that predates the subject-registry rename;
-    re-author it through `author_trait_spec`, or a hand-authored file with `"schema_version": 2`.
-    Coverage, not a guard: at every pre-rename baseline this module never collects (its own
+    """No schema_version key names a record that predates the subject-registry rename; the
+    reason names the field rename and the stamp a hand-authored file needs, and says no
+    platform door conforms a stored record. Coverage, not a guard: at every pre-rename baseline this module never collects (its own
     fixtures already carry the field rename), so a fail-before proof against one is REFUSED."""
     import tcip_store as ts
 
@@ -138,7 +138,8 @@ def test_config_spec_unstamped_is_reported_unconformed(tmp_path: Path):
     specs, errors = load_trait_specs_with_errors(specs_dir=specs_dir)
     assert specs == []
     assert errors[0]["kind"] == "unconformed"
-    assert "author_trait_spec" in errors[0]["reason"]
+    assert "schema_version" in errors[0]["reason"]
+    assert "no platform door conforms" in errors[0]["reason"]
 
 
 # ── count_objective is validated against the registry, not a hardcoded whitelist ─

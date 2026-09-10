@@ -1022,9 +1022,10 @@ def draw_splits(
             stale = retired_document(out_dir / split_name)
             if stale is not None:
                 return {"error": f"{out_dir / split_name} still carries the retired registry "
-                                 f"at {stale}; rename it to subjects.json by hand before "
-                                 "materializing this split, since a registry copy lands beside "
-                                 "it and nothing was written for this call"}
+                                 f"at {stale}; remove that file by hand (the registry copy is "
+                                 "placed from the source), or delete the destination tree, "
+                                 "before materializing this split; nothing was written for "
+                                 "this call"}
 
     try:
         fingerprint = dataset_fingerprint(folder_path)

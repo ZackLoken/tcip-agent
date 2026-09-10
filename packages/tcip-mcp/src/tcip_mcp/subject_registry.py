@@ -105,7 +105,9 @@ class RegistryError(ValueError):
 
 class SubjectRegistryUnconformed(RegistryError):
     """A dataset root still carries the retired ``classes.json`` and no registry write may land
-    beside it: rename it to ``subjects.json`` by hand first."""
+    beside it: rename it to ``subjects.json`` by hand first. A root carrying both files is
+    refused until one of them is removed by hand, since which registry is meant is not the
+    platform's to choose."""
 
 
 def retired_document(dataset_root: str | Path) -> Path | None:
@@ -278,8 +280,8 @@ def write_registry(path: str | Path, registry: SubjectRegistry) -> None:
 
     Refuses (:class:`SubjectRegistryUnconformed`) when the dataset root still carries the retired
     ``classes.json`` (:func:`retired_document`): no registry write lands beside it, since a fresh
-    ``subjects.json`` next to a still-present retired copy is the divergent pair only a hand
-    rename of ``classes.json`` to ``subjects.json`` resolves.
+    ``subjects.json`` next to a still-present retired copy is a divergent pair; a root carrying
+    both files is refused until one of them is removed by hand.
     """
     import tcip_store
 
@@ -288,7 +290,8 @@ def write_registry(path: str | Path, registry: SubjectRegistry) -> None:
     if stale is not None:
         raise SubjectRegistryUnconformed(
             f"{root} still carries the retired registry at {stale}; rename it to subjects.json "
-            "by hand before writing subjects.json beside it"
+            "by hand before writing subjects.json beside it, and a root carrying both files is "
+            "refused until one of them is removed by hand"
         )
     tcip_store.put_blob(
         _registry_key(path), tcip_store.RECORD_JSON.encode(registry_to_dict(registry))
@@ -474,7 +477,8 @@ def replace_registry(
     if stale is not None:
         raise SubjectRegistryUnconformed(
             f"{root} still carries the retired registry at {stale}; rename it to subjects.json "
-            "by hand before writing subjects.json beside it"
+            "by hand before writing subjects.json beside it, and a root carrying both files is "
+            "refused until one of them is removed by hand"
         )
 
     key = _registry_key(path)
@@ -547,8 +551,9 @@ def copy_registry(source: str | Path, destination: str | Path) -> None:
     stale = retired_document(dest_root)
     if stale is not None:
         raise SubjectRegistryUnconformed(
-            f"{dest_root} still carries the retired registry at {stale}; rename it to "
-            "subjects.json by hand before writing subjects.json beside it"
+            f"{dest_root} still carries the retired registry at {stale}; remove that file by "
+            "hand (the registry copy is placed from the source), or delete the destination "
+            "tree, before a copy lands beside it"
         )
 
     dest_key = _registry_key(destination)
