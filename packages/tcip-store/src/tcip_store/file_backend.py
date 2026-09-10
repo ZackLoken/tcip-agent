@@ -684,7 +684,7 @@ class FileBackend:
         """The cumulative offset this log's cursor space starts from.
 
         Zero for a log that was never cleared, which is why every cursor computed against it
-        below reduces to today's plain byte offset for the overwhelming majority of logs.
+        below reduces to a plain byte offset for the overwhelming majority of logs.
         """
         marker = self._clear_base_path(path)
         data = self._read_bytes(marker)
