@@ -1040,7 +1040,7 @@ describe("ResultsTab trait-spec authoring statements", () => {
   });
 });
 
-describe("ResultsTab audit_warning banner (A8)", () => {
+describe("ResultsTab audit_warning banner", () => {
   const COUNT_RECORD: OperationalizationRecord = {
     trait: "subject_b_total",
     delivery_kind: "per_plant_count_aggregate",

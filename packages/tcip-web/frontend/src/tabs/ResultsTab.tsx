@@ -391,7 +391,7 @@ export function ResultsTab() {
   const [confirmingKey, setConfirmingKey] = useState<string | null>(null);
   const [withdrawingKey, setWithdrawingKey] = useState<string | null>(null);
   const [confirmNotes, setConfirmNotes] = useState<Record<string, string>>({});
-  // A confirmation that landed but whose audit line did not (A8): not a failure, so it is kept
+  // A confirmation that landed but whose audit line did not: not a failure, so it is kept
   // apart from the error-styled notes above.
   const [confirmAuditWarnings, setConfirmAuditWarnings] = useState<Record<string, string | null>>(
     {},
