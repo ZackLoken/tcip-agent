@@ -309,6 +309,35 @@ def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(tmp_pa
     assert "GUARDS" in result.stdout
 
 
+def test_a_bare_file_not_found_error_outside_the_assertion_is_refused_not_guards(tmp_path):
+    """A test that reads a data file the baseline commit does not carry (outside tests/, so the
+    tests/ overlay cannot supply it) raises FileNotFoundError outside its own assertion: the code
+    under test was never reached, so this scores REFUSED, never GUARDS."""
+    repo = _scratch_repo(tmp_path)
+    _write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = _commit_all(repo, "double is a no-op, no recorded value yet")
+
+    (repo / "data").mkdir()
+    _write(repo / "data" / "expected.txt", "6\n")
+    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    _write(repo / "tests" / "test_widgets.py",
+           "from pathlib import Path\n"
+           "\n"
+           "\n"
+           "def test_double_matches_the_recorded_value():\n"
+           "    from widgets import double\n"
+           "    root = Path(__file__).resolve().parents[1]\n"
+           "    expected = int((root / 'data' / 'expected.txt').read_text())\n"
+           "    assert double(3) == expected\n")
+    _commit_all(repo, "double actually doubles, checked against a recorded value")
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "REFUSED" in result.stdout
+    assert "[unreached]" in result.stdout
+
+
 def test_a_key_error_on_a_package_result_guards(tmp_path):
     """An assertion that inspects a package result by key, where the baseline's result lacks
     that key, raises KeyError at the assert line itself, inside the test file: the code under

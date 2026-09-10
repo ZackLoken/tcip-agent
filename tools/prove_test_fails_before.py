@@ -434,8 +434,10 @@ def run_capturing_outcome(tree: Path, targets: list[str], expr: str, env: dict[s
 
 
 def _is_unreached(headline: str) -> bool:
-    """A failure that never reached the code under test carries the same weight as a collection error."""
-    return headline.startswith(("ModuleNotFoundError", "ImportError"))
+    """A failure that never reached the code under test carries the same weight as a collection
+    error: a missing module, or a missing file the overlaid test needs that only the newer tree
+    carries (a fixture path outside ``tests/``, which the test-tree overlay cannot supply)."""
+    return headline.startswith(("ModuleNotFoundError", "ImportError", "FileNotFoundError"))
 
 
 def _crash_outside_test_tree(crash_path: str | None, tree: Path) -> bool:
@@ -474,7 +476,8 @@ def _is_call_signature_mismatch(headline: str) -> bool:
 def _failure_kind(entry: dict, tree: Path) -> str:
     """One of ``unreached``, ``behavioral``, ``fixture``, for one failed or errored test.
 
-    ``unreached``: the import never resolved, the same weight as a collection error.
+    ``unreached``: the import never resolved, or a needed file was missing, the same weight as a
+    collection error.
 
     A setup or teardown failure (``entry["phase"]`` is not ``"call"``) is always ``fixture``: the
     test body never ran, whatever raised it, wherever the crash frame sits. The rest applies only
@@ -531,7 +534,7 @@ def _classify(observed: dict, baseline_precedes: bool, tree: Path) -> tuple[str,
     fixture = [t for t, k in zip(failed, kinds) if k == "fixture"]
     behavioral = [t for t, k in zip(failed, kinds) if k == "behavioral"]
     if failed and not behavioral and fixture:
-        discount = (f" {len(unreached)} further failure(s) rest on a missing import."
+        discount = (f" {len(unreached)} further failure(s) rest on a missing import or file."
                     if unreached else "")
         return REFUSED, (
             f"{len(fixture)} of {len(failed)} failing test(s) are fixture-shaped: {len(fixture)} "
@@ -541,10 +544,10 @@ def _classify(observed: dict, baseline_precedes: bool, tree: Path) -> tuple[str,
         )
     if failed and not behavioral:
         return REFUSED, (
-            f"all {len(failed)} failing tests failed on a missing import rather than on an "
-            f"assertion ({unreached[0]['headline']}), so the code under test was never reached and "
-            "no behavior was compared. A baseline whose source will not import in the current "
-            "environment cannot produce evidence."
+            f"all {len(failed)} failing tests failed on a missing import or file rather than on "
+            f"an assertion ({unreached[0]['headline']}), so the code under test was never reached "
+            "and no behavior was compared. A baseline whose source will not import, or whose tree "
+            "lacks a file the test needs, in the current environment cannot produce evidence."
         )
     if behavioral:
         discount_parts = []
