@@ -1110,9 +1110,9 @@ def _launched_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
 
     A record is a launched run when its config carries ``model_source`` and
     :func:`~tcip_mcp.experiments.is_launched` says so: a stamped ``output_dir``, a state other
-    than ``"created"``, or the ``metrics_logged`` marker, so a record from before the stamp moved
-    to one transaction, whose separate ``state`` write never landed, still lists, and a
-    pre-created experiment that never launched does not; the
+    than ``"created"``, or the ``metrics_logged`` marker, so a record whose ``state`` write never
+    landed beside its stamp still lists, and a pre-created experiment that never launched does
+    not; the
     same predicate :func:`~tcip_mcp.experiments.compare_experiments` consults before deriving a
     heartbeat state at all. Rows come back sorted by
     experiment id (``experiment_ids_with_status``'s own order), each carrying ``external: True``:

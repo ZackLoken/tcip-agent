@@ -5,9 +5,9 @@ delivery kind owns.
 delivery writer: every specialist per-plant door (``deliver_orthomosaic_plant_counts``,
 ``deliver_phenology_milestones``) composes its own buckets and mapping into that writer's own
 ``results`` shape and calls it directly. ``supersede_delivery`` is the withdrawal-or-replacement
-statement for an already-shipped
-file: a delivery event records what shipped, and a supersession records that the number it named is
-withdrawn or superseded by a fresh delivery, never a deletion or a rewrite of either.
+statement for an already-shipped file: a delivery event records what shipped, and a supersession
+records that the number it named is withdrawn or superseded by a fresh delivery, never a deletion
+or a rewrite of either.
 """
 
 from __future__ import annotations

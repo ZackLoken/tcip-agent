@@ -12,8 +12,8 @@ A long-lived process binds the variable once at startup, through :func:`pin_plat
 A process that opts in (``from_marker=True``: the web backend always, the MCP server inside
 the platform's own agent terminal) binds from the workspace's active-project marker when one
 names an adoptable project, else keeps whatever it inherited, else the repo root. A process
-that does not opt in falls back to the inherited variable, else the repo
-root. Either way the decision is recorded in a :class:`RootBinding`, kept module-level and
+that does not opt in falls back to the inherited variable, else the repo root. Either way the
+decision is recorded in a :class:`RootBinding`, kept module-level and
 returned by :func:`root_binding`, since no process in this repo configures logging and an info
 line would otherwise reach nothing; ``inspect_project`` and the workspace projects list route
 report it.
@@ -21,9 +21,9 @@ report it.
 Adopting a project (``workspace.activate_project``) *repins* the adopting process's own
 variable to ``<workspace>/<project>`` through :func:`repin_platform_root`, so the platform's own
 audit log (now this project's, one file at one key), experiments, and registry all land under
-that project from then on; a training run in flight
-keeps writing to the root it started under (the launch snapshots it once) until it is
-deliberately adopted. The repin is explicit, never a passive marker read: no operation other
+that project from then on; a training run in flight keeps writing to the root it started under
+(the launch snapshots it once) until it is deliberately adopted. The repin is explicit, never
+a passive marker read: no operation other
 than an adopt itself changes a running process's root, so the window between one process
 adopting and another converging is stated rather than closed here.
 
