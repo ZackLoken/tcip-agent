@@ -82,9 +82,9 @@ def normalize_train_config(config: dict) -> dict:
 
     Top-level wins: a key already present at the top level is never overwritten by the
     nested value: the HPO objective writes tuned params (lr, schedule) flat, and those must
-    survive. The ``training`` section is left in
-    place for the validated schema and the experiment-record snapshot. Shallow copy: nested
-    dicts are shared, so callers must not mutate them in place after normalizing.
+    survive. The ``training`` section is left in place for the validated schema and the
+    experiment-record snapshot. Shallow copy: nested dicts are shared, so callers must not
+    mutate them in place after normalizing.
     """
     cfg = dict(config)
     training = cfg.get("training")

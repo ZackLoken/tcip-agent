@@ -365,11 +365,9 @@ def resolve_selection_metric(
     both ``model_best.pt`` and early stopping, deliberately the same key for both.
 
     Default: ``"objective"`` for detection/instance_seg, else ``"loss"``. An explicit
-    ``requested`` is honored, except it is rejected when
-    ``trait`` is a center-match trait and ``requested`` names a metric that trait's own
-    localization criterion demotes to comparability-only
-    (``evaluation.CENTER_MATCH_COMPARABILITY_KEYS``): a checkpoint selected by a metric the trait
-    does not trust does not rest on the trait's own criterion.
+    ``requested`` is honored, except it is rejected when ``trait`` is a center-match trait and
+    ``requested`` names a metric that trait's own localization criterion demotes to
+    comparability-only (``evaluation.CENTER_MATCH_COMPARABILITY_KEYS``).
 
     Reads the trait's recorded localization kind (``TraitSpec.localization`` is derived
     once from real GT and persisted, never authored). This runs at preflight time, before any GT is
