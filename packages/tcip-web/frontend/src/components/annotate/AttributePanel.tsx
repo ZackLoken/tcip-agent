@@ -13,10 +13,9 @@ import { schemaChangeSweepToast } from "@/lib/registrySweep";
 import { useStore } from "@/store";
 
 /** Per-instance attribute editing + a geometry-less (image/plant-level) rating entry, plus
- *  authoring new attributes and values onto the active subject. Minimal but functional (the
- *  polished editor is a later slice): the selected shape's attributes, the image-level ratings
- *  that ride in the same label file with no box, and the registry-growing controls a breeder
- *  otherwise has no way to reach without a shell. */
+ *  authoring new attributes and values onto the active subject: the selected shape's
+ *  attributes, the image-level ratings that ride in the same label file with no box, and the
+ *  registry-growing controls a breeder otherwise has no way to reach without a shell. */
 export function AttributePanel({
   selectedBoxIdx,
   locked,

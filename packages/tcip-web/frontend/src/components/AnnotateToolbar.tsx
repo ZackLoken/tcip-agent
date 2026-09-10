@@ -1,5 +1,5 @@
 /**
- * Annotate-tab context toolbar. Two rows matching the approved mockup:
+ * Annotate-tab context toolbar. Two rows:
  *   Row 1: tool mode (Point/Box/Polygon, plus Map on a multi-cell raster), the subject picker
  *          pill, an Editor toggle, then the nav filter, image navigation, and the Complete
  *          checkbox.
