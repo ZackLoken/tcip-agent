@@ -182,12 +182,10 @@ def test_updating_a_trait_spec_with_a_caller_supplied_schema_version_refuses(tmp
 
 
 def test_a_record_stamped_1_is_refused_before_any_edit(tmp_path: Path) -> None:
-    """A record stamped ``1`` (seeded directly here, standing in for one written before the
-    subject-registry rename) is refused by :func:`traits.trait_spec_unconformed` before the merge
-    even runs, naming the field rename, rather than silently carrying an edit over a shape the
-    encoder no longer writes. Coverage, not a guard: a fail-before proof against a pre-rename
-    baseline fails at ``_author``'s own ``positive_value`` field, not at the match this test
-    names, since every fixture in this module already carries the field rename."""
+    """Coverage, not a guard: a record stamped ``1`` (seeded directly here, standing in for one
+    written before the subject-registry rename) is refused by :func:`traits.trait_spec_unconformed`
+    before the merge even runs, naming the field rename, rather than silently carrying an edit
+    over a shape the encoder no longer writes."""
     _author(tmp_path, trait="leaf", delivers=("leaf_length",), holdout_match_quality_floor=0.4)
     directory = traits.trait_specs_dir(str(tmp_path))
     key = traits.trait_spec_key(directory, "leaf")
@@ -230,9 +228,8 @@ def test_a_restatement_over_an_existing_spec_carries_its_localization_and_sliver
     """``author_trait_spec`` never accepts ``localization``/``localization_tolerance``/
     ``localization_tolerance_frac``/``sliver_policy``/``sliver_frac``: a restatement over an
     existing spec keeps whatever ``write_trait_spec_fields`` last set for them, changing only
-    the fields ``author_trait_spec`` itself authors. Coverage: the restriction is already the
-    baseline's own behavior, pinned here since no existing test asserted on these fields'
-    values after a restatement.
+    the fields ``author_trait_spec`` itself authors. Coverage: the restriction already holds;
+    this pins it, since no existing test asserted on these fields' values after a restatement.
     """
     _author(tmp_path)
     traits.write_trait_spec_fields(
@@ -479,9 +476,9 @@ def test_an_empty_rationale_refuses_by_name(tmp_path: Path) -> None:
 
 
 def test_a_stamped_specs_schema_version_survives_a_restating_revision(tmp_path: Path) -> None:
-    """Coverage: the unconditional stamp is the baseline's own behavior
-    (``test_a_stamped_2_trait_specs_schema_version_survives_a_field_edit``); this only pins that
-    the restating path still writes through the same encoder."""
+    """Coverage: the unconditional stamp already runs on every write
+    (``test_a_stamped_2_trait_specs_schema_version_survives_a_field_edit``); this pins that the
+    restating path writes through the same encoder."""
     _confirmed_leaf(tmp_path)
     directory = traits.trait_specs_dir(str(tmp_path))
     key = traits.trait_spec_key(directory, "leaf")

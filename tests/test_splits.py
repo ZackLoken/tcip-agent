@@ -330,10 +330,9 @@ def test_spatial_strip_split_no_tile_shared_and_buffer_respected():
 
 
 def test_center_out_order_ties_resolve_in_declared_order():
-    """Coverage of ``_center_out_order`` directly: the private function's signature changed
-    (it dropped its ``seed`` parameter), so this cannot be run against the baseline commit; the
-    property is proven through :func:`spatial_strip_split` in the test below instead, and this
-    one documents ``_center_out_order`` itself rather than guarding a regression.
+    """Coverage of ``_center_out_order`` directly: this documents ``_center_out_order`` itself
+    rather than guarding a regression; the property is proven through
+    :func:`spatial_strip_split` in the test below.
 
     Two equal-share slots resolve center-out in the order they were given, whichever order
     that is: swapping the input order swaps which cardinal side each lands on, so the tie is

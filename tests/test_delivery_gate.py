@@ -153,8 +153,8 @@ def test_a_wrong_kind_reference_floors_the_dimension_it_cannot_clear(dimension, 
     ("classifier", VALIDATED_HELD_OUT),
     ("classifier", VALIDATED_REVIEW_CONFIRMED),
     ("tile_size", res.VALIDATED_PERSISTED_GEOMETRY),
-    # getattr: absent at the baseline (pre-promotion), present after; a baseline run then floors
-    # this case on assertion (None clears nothing) rather than erroring at collection.
+    # getattr, not a plain attribute access, so this file still collects without the constant;
+    # None then floors this case on assertion (clears nothing) rather than erroring at collection.
     ("tile_size", getattr(res, "VALIDATED_NATIVE_FRAME_GEOMETRY", None)),
     ("tile_size", res.VALIDATED_EXPLICIT_GEOMETRY),
     ("scale", res.VALIDATED_PHYSICAL_MEASUREMENT),

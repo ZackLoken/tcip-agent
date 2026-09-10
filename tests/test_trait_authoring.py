@@ -125,8 +125,8 @@ def test_config_spec_stamped_with_schema_version_still_loads(tmp_path: Path):
 def test_config_spec_unstamped_is_reported_unconformed(tmp_path: Path):
     """No schema_version key names a record that predates the subject-registry rename; the
     reason names the field rename and the stamp a hand-authored file needs, and says no
-    platform door conforms a stored record. Coverage, not a guard: at every pre-rename baseline this module never collects (its own
-    fixtures already carry the field rename), so a fail-before proof against one is REFUSED."""
+    platform door conforms a stored record. Coverage, not a guard: every fixture in this module
+    already carries the field rename."""
     import tcip_store as ts
 
     specs_dir = tmp_path / "trait_specs"

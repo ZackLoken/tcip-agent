@@ -31,9 +31,7 @@ def hpo_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_monitor_training_refuses_both_experiment_id_and_sweep_id() -> None:
-    """Coverage, not GUARDS: a baseline missing ``sweep_id`` from the signature entirely fails on
-    the call itself (a ``TypeError``), not on the assertions below, so this cannot have guarded
-    that signature into existence."""
+    """Coverage: monitor_training refuses when both experiment_id and sweep_id are given."""
     from tcip_mcp.tools.training_tools import monitor_training
 
     res = monitor_training(experiment_id="run-1", sweep_id="sweep-1")
@@ -43,7 +41,8 @@ def test_monitor_training_refuses_both_experiment_id_and_sweep_id() -> None:
 
 
 def test_monitor_training_refuses_neither_experiment_id_nor_sweep_id() -> None:
-    """Coverage, not GUARDS: same basis as the both-given case above."""
+    """Coverage: monitor_training refuses when neither experiment_id nor sweep_id is given, on the
+    same basis as the both-given case above."""
     from tcip_mcp.tools.training_tools import monitor_training
 
     res = monitor_training()

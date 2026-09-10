@@ -49,8 +49,7 @@ def _tracked_files() -> list[str]:
         )
         return [line for line in out.stdout.splitlines() if line]
     except (subprocess.CalledProcessError, OSError):
-        # A fail-before proof's git-archive baseline has no .git directory; the same git-free
-        # fallback test_tools_readme_index.py uses.
+        # Without a .git directory, the same git-free fallback test_tools_readme_index.py uses.
         names: list[str] = []
         for prefix in _SCOPE_PREFIXES:
             base = REPO_ROOT / prefix

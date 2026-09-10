@@ -6,8 +6,8 @@ what should be there) and asserts every basename other than `README.md` and anyt
 `__pycache__` appears in tools/README.md's own text as a backticked filename. Coverage of the
 index's completeness, not a behavior fix.
 
-Without git (a fail-before proof's git-archive baseline has no `.git` directory), the fallback
-walks `tools/` directly, the same git-free fallback `test_deleted_skills.py` uses.
+Without git, the fallback walks `tools/` directly, the same git-free fallback
+`test_deleted_skills.py` uses.
 """
 
 from __future__ import annotations

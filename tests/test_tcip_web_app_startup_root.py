@@ -152,12 +152,11 @@ else:
 
 
 def test_workspace_unset_test_client_import_signal_without_pytest_refuses_the_lifespan(tmp_path):
-    """Entering ``with TestClient(app):`` with no request yet runs the lifespan, which calls
-    ``bind_startup_root`` with no ASGI scope available: neither the pytest signal nor the
+    """A guard: entering ``with TestClient(app):`` with no request yet runs the lifespan, which
+    calls ``bind_startup_root`` with no ASGI scope available; neither the pytest signal nor the
     middleware's scope check can catch that case, so only the process-level signal that
     ``starlette.testclient`` has been imported does. This subprocess never imports pytest,
-    proving that signal works on its own; the baseline (code without it) prints
-    "no-exception"."""
+    proving that signal works on its own."""
     fake_home = tmp_path / "fakehome"
     fake_home.mkdir()
     scratch_state = tmp_path / "state"

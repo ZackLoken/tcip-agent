@@ -15,7 +15,7 @@ from tcip_mcp.pipelines import resolution
 
 
 def test_a_delivered_files_own_bytes_are_the_recorded_digest(tmp_path: Path) -> None:
-    """GUARDS: record_delivery_binding_event stamps output_sha256 from the file it names."""
+    """A guard: record_delivery_binding_event stamps output_sha256 from the file it names."""
     out_csv = tmp_path / "out.csv"
     out_csv.write_text("plant_id,count\nP1,3\n", encoding="utf-8")
 
