@@ -7,8 +7,8 @@ when it sits under one, its own resolved path otherwise, per :func:`bucket_key_o
 a score bin or a quota allocation. The canonical ``predictions/<model>/<date>`` layout is one
 regime's convention for building that path, not the definition of a bucket's identity. Once a
 reviewer has recorded verdicts (accept/reject/edit) against any of a bucket's images,
-re-running inference or re-staging into it would orphan those verdicts
-(they reference the predictions by geometry). So the prediction writers resolve a run-scoped
+re-running inference or re-staging into it would orphan those verdicts (they reference the
+predictions by geometry). So the prediction writers resolve a run-scoped
 bucket through here: with verdicts present the default writes are redirected to the next free
 ``<name>@r2`` / ``@r3`` variant, and an explicit ``overwrite=True`` is refused with a count.
 
@@ -352,8 +352,8 @@ def resolve_writable_bucket(
     whatever ``overwrite`` says, naming the document count and the suggested first variant free of
     both a verdict and a document (or ``None``, see below). With verdicts on the requested bucket:
     the verdict check runs first, ahead of any document check, so a bucket a reviewer has already
-    verdicted redirects (or refuses on ``overwrite=True``) whether or
-    not it also holds a document. ``overwrite=False`` (default) picks the next ``<requested>@r2``
+    verdicted redirects (or refuses on ``overwrite=True``) whether or not it also holds a
+    document. ``overwrite=False`` (default) picks the next ``<requested>@r2``
     / ``@r3`` variant free of a verdict (and, with ``refuse_documents``, also free of a document);
     ``overwrite=True`` raises :class:`BucketHasVerdicts`. Either exception's suggestion is the one
     variant search: a candidate that holds neither a verdict nor a document (with the keyword off,

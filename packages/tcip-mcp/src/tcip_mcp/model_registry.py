@@ -183,8 +183,8 @@ def _unregistered_checkpoint_error(checkpoint_path: Path, digest: str, root: str
         f"{checkpoint_path} (sha256 {digest}) is not named by any entry in the registry at "
         f"{root!r}: register it with register_model under a name of its own (explicit mode; a "
         "completed run registers its own final weights on completion under the run's id, and a "
-        "second checkpoint of the same run -- model_final beside a model_best, or a bespoke tag "
-        "-- is registered in explicit mode under a distinct name, since experiment mode names "
+        "second checkpoint of the same run (model_final beside a model_best, or a bespoke tag) "
+        "is registered in explicit mode under a distinct name, since experiment mode names "
         "the entry after the run and replaces by name)."
     )
 

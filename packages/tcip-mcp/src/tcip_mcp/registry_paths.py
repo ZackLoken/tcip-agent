@@ -3,11 +3,9 @@ dataset registries share when they decide whether a target sits under their own 
 
 The registry's entries-mapping convention (see ``model_registry.py``) is the value's own carrier:
 relative POSIX exactly when the target lives under the registry's scope root, absolute exactly
-when external.
-The dataset registry (``tools/project_tools.py``) spells the same convention; this module holds
-the one containment walk and the one absolute-form test
-both registries build on, so they cannot silently drift onto two different notions of "under the
-root".
+when external. The dataset registry (``tools/project_tools.py``) spells the same convention;
+this module holds the one containment walk and the one absolute-form test both registries build
+on, so they cannot silently drift onto two different notions of "under the root".
 """
 
 from __future__ import annotations
@@ -35,8 +33,8 @@ def is_external_form(stored: str) -> bool:
     reads as relative under a bare ``PurePosixPath`` and would be joined under the root on
     POSIX; a POSIX root spelling reads as relative under ``PureWindowsPath`` with no drive.
     Either grammar recognizing ``stored`` as absolute is enough to call it external, so an
-    absolute-under-root spelling can never be misread as designed-external on the
-    wrong platform.
+    absolute-under-root spelling can never be misread as designed-external on the wrong
+    platform.
     """
     return PurePosixPath(stored).is_absolute() or PureWindowsPath(stored).is_absolute()
 
@@ -45,9 +43,9 @@ def nearest_containing_ancestor(start: Path, root: Path, *, tolerant: bool) -> P
     """The nearest of ``start`` and its parents that is the same file as ``root``, or ``None``
     when none is.
 
-    ``tolerant=True`` (the dataset speller's own mode) treats an ancestor
-    ``os.path.samefile`` cannot compare (an inaccessible share) as simply not a match and tries
-    the next one. ``tolerant=False`` (the checkpoint speller) re-raises instead: that speller's
+    ``tolerant=True`` (the dataset speller's own mode) treats an ancestor ``os.path.samefile``
+    cannot compare (an inaccessible share) as simply not a match and tries the next one.
+    ``tolerant=False`` (the checkpoint speller) re-raises instead: that speller's
     stricter root gate must never fall through to an external spelling from a comparison it
     could not actually make.
     """

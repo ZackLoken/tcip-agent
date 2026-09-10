@@ -11,7 +11,7 @@ split side.
 
 Composes three existing pieces without reimplementing any of them: ``read_plant_csvs`` (the plant
 CSV parser), ``OrthomosaicGeoreference.pixel_to_wgs84`` (GeoTIFF pixel -> WGS84), and
-``_nearest_plant`` (GPS nearest-neighbour match) -- then hands the resulting ``{identity:
+``_nearest_plant`` (GPS nearest-neighbour match). It then hands the resulting ``{identity:
 group_key}`` map to ``draw_splits(group_key_map=...)``, which already refuses loudly (via
 ``resolve_group_key_fn``) if the map doesn't cover every member it needs. ``identity`` is
 ``<date>/<stem>`` (:func:`~tcip_mcp.pipelines.data.splits.member_identity`, the same identity
@@ -61,8 +61,8 @@ def derive_plant_group_key_map(
 
     Each raster's own center pixel is its representative location (mirroring how
     ``assign_detections_to_plants`` uses a detection box's own centroid), converted to WGS84 via
-    that raster's own :class:`OrthomosaicGeoreference` -- built per file, since two stems can carry
-    different tiepoints or even different CRSes -- then matched to the nearest plant in ``plants``.
+    that raster's own :class:`OrthomosaicGeoreference` (built per file, since two stems can carry
+    different tiepoints or even different CRSes), then matched to the nearest plant in ``plants``.
 
     ``nn_tolerance_m`` defaults to the same derivation ``plant_mapping.build_mapping`` and
     ``orthomosaic_mapping.assign_detections_to_plants`` already use: ``grid_pitch_m(plants) / 6``,
