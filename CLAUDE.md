@@ -246,4 +246,7 @@ via `$TCIP_STATE_ROOT`, pinned at startup by the web backend and every MCP serve
 - `docs/` and `.claude/` are local, gitignored dev tooling (the audit record, the remediation
   plan and rulings, hooks, worktrees), except the generated skills under `.claude/skills/`,
   which are tracked; `docs/current-task.md` and `docs/recent-summary.md` are injected at session
-  start where they exist.
+  start where they exist. `docs/current-task.md` holds open work only: an item's entry says what
+  is open, what closes it and where its record lives, and is deleted at the landing that closes
+  it; the landing's record (hashes, reads, fix-ups, rounds) goes to `docs/recent-summary.md`'s
+  session section and the design record, never to this file.
