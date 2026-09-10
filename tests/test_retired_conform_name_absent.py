@@ -3,10 +3,12 @@
 ``test_tool_renames.py`` and ``test_skill_tool_fidelity.py`` reach only a Tools table's cells (a
 bare backtick-quoted name or a documented call signature); the conform command was never an MCP
 tool and had no table row, so neither sweep would ever see its name. This walks every tracked file
-under the four packages' own ``src`` trees, the frontend's ``src`` tree, and ``tools/`` directly,
-failing on any occurrence of the command's hyphenated CLI spelling or its underscored module name,
-naming the file and line, so a docstring, comment, refusal message or log line that still names
-the deleted command is caught the same way a stale tool-table row is.
+under ``packages/`` (the package contracts and knowledge documents included), ``tools/``,
+``tests/``, both generated skill trees and the root documents (``ARCHITECTURE.md``, ``README.md``,
+``AGENTS.md``, ``CLAUDE.md``), failing on any occurrence of the command's hyphenated CLI spelling
+or its underscored module name, naming the file and line, so a docstring, comment, refusal
+message, log line or document sentence that still names the deleted command is caught the same
+way a stale tool-table row is. This module is the one file allowed to carry the name.
 """
 
 from __future__ import annotations
@@ -17,13 +19,18 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 _SCOPE_PREFIXES = (
-    "packages/tcip-annotation/src/",
-    "packages/tcip-mcp/src/",
-    "packages/tcip-store/src/",
-    "packages/tcip-web/src/",
-    "packages/tcip-web/frontend/src/",
+    "packages/",
     "tools/",
+    "tests/",
+    ".claude/skills/",
+    ".agents/skills/",
+    "ARCHITECTURE.md",
+    "README.md",
+    "AGENTS.md",
+    "CLAUDE.md",
 )
+
+_SELF = "tests/test_retired_conform_name_absent.py"
 
 _NAMES = ("rename-subject-registry", "rename_subject_registry")
 
@@ -47,6 +54,9 @@ def _tracked_files() -> list[str]:
         names: list[str] = []
         for prefix in _SCOPE_PREFIXES:
             base = REPO_ROOT / prefix
+            if base.is_file():
+                names.append(prefix)
+                continue
             if not base.is_dir():
                 continue
             names.extend(
@@ -58,6 +68,8 @@ def _tracked_files() -> list[str]:
 
 
 def _in_scope(rel: str) -> bool:
+    if rel == _SELF:
+        return False
     if "node_modules" in rel.split("/"):
         return False
     if "/dist/" in f"/{rel}" or rel.startswith("dist/"):
