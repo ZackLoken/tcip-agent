@@ -41,9 +41,7 @@ COMMANDS: dict[str, str] = {
     "rename-subject-registry": "tcip_mcp.cli.rename_subject_registry",
 }
 """Command name (as typed after ``tcip``) to the module exposing its ``main(argv)``. A command
-name is that module's own final name with underscores respelled as hyphens, never the retired
-conform name for the two renamed commands (``write-project-site``,
-``repair-classified-predictions``)."""
+name is that module's own final name with underscores respelled as hyphens."""
 
 
 def _usage() -> str:
