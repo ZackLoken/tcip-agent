@@ -764,7 +764,7 @@ def _trial_view_dir(sweep_id: str, *, root: Optional[str] = None) -> Path:
     ``root`` (the sweep's own launch root, from :func:`_sweep_launch_root`) wins when given,
     so the link farm always lands beside the sweep's own trial directories rather than inside
     whichever project this process is currently pinned to; omitted, this falls back to the
-    current platform root, the historical behaviour for a sweep the registry has forgotten.
+    current platform root, which is where a sweep the registry cannot answer for resolves.
     """
     from tcip_mcp.project_paths import resolve_state
 

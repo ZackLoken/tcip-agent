@@ -1,11 +1,11 @@
 """PreToolUse PowerShell guard for the fenced in-app agent terminal.
 
 The sibling ``agent_bash_guard.py`` guards the Bash tool; on Windows the fenced agent also has a
-PowerShell tool, which carries no deny rule of its own, so an agent
-could sidestep the whole fence with ``Set-Content packages\\...`` or ``Remove-Item``. This hook
+PowerShell tool, which no deny rule covers, so the fence needs a hook of its own here or an agent
+sidesteps it with ``Set-Content packages\\...`` or ``Remove-Item``. This hook
 mirrors the Bash guard for PowerShell.
 
-Honest scope (unchanged): a guardrail, not a sandbox. It closes the direct bypasses (full
+Honest scope: a guardrail, not a sandbox. It closes the direct bypasses (full
 cmdlets and their aliases, inline/encoded execution, writing the fence's own files), classifying
 each write target through the shared ``agent_fence_rules`` so the two shells fence one boundary
 and a breeder's own same-named file (their ``README.md``) is not caught by basename. A determined
