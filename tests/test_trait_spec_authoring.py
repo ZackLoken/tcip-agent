@@ -185,7 +185,10 @@ def test_a_record_stamped_1_is_refused_before_any_edit(tmp_path: Path) -> None:
     """A record stamped ``1`` (seeded directly here, standing in for one written before the
     subject-registry rename) is refused by :func:`traits.trait_spec_unconformed` before the merge
     even runs, naming the conform command, rather than silently carrying an edit over a shape the
-    encoder no longer writes."""
+    encoder no longer writes. Coverage, not a guard: a fail-before proof against a pre-rename
+    baseline fails at ``_author``'s own ``positive_value`` field, not at the
+    ``rename-subject-registry`` match this test names, since every fixture in this module already
+    carries the field rename."""
     _author(tmp_path, trait="leaf", delivers=("leaf_length",), holdout_match_quality_floor=0.4)
     directory = traits.trait_specs_dir(str(tmp_path))
     key = traits.trait_spec_key(directory, "leaf")

@@ -124,8 +124,10 @@ def test_config_spec_stamped_with_schema_version_still_loads(tmp_path: Path):
 
 
 def test_config_spec_unstamped_is_reported_unconformed(tmp_path: Path):
-    # No schema_version key names a record that predates the subject-registry rename; conform it
-    # with `tcip rename-subject-registry`, or a hand-authored file with `"schema_version": 2`.
+    """No schema_version key names a record that predates the subject-registry rename; conform
+    it with `tcip rename-subject-registry`, or a hand-authored file with `"schema_version": 2`.
+    Coverage, not a guard: at every pre-rename baseline this module never collects (its own
+    fixtures already carry the field rename), so a fail-before proof against one is REFUSED."""
     import tcip_store as ts
 
     specs_dir = tmp_path / "trait_specs"
