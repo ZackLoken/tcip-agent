@@ -23,7 +23,7 @@ export interface GridCell {
 }
 
 /** One rendered grid block (`get_grid`'s own `grid` and `serving` fields share this shape):
- *  geometry, the full cell list, and how the tile size was chosen -- "cells sized to one
+ *  geometry, the full cell list, and how the tile size was chosen: "cells sized to one
  *  full-resolution screenful", "a chosen cell edge of <n> px" for an explicit tile_size, "one
  *  screenful at <zoom>x zoom" for the set-zoom lattice, or "the lattice this image's coverage
  *  was recorded on" for an already-worked image. Not part of GridGeometry; stripped back off
@@ -35,7 +35,7 @@ export interface RenderedGrid extends GridGeometry {
 }
 
 /** GET /api/coverage/grid's full response: the coverage lattice (`grid`, null with `reason`
- *  when none can be derived -- no set zoom, or a viewport not yet measured), plus the
+ *  when none can be derived: no set zoom, or a viewport not yet measured), plus the
  *  zoom-independent region-serving grid (`serving`, always present). `fresh_derivation_differs`
  *  is set only when `grid` came from an already-worked image's own recorded lattice and the
  *  subject's current zoom would derive a different tile size; null otherwise. */
@@ -50,7 +50,7 @@ export interface CoverageGridResponse {
  *  the view scale the breeder pressed at (null for a non-GUI caller), the working scale (the
  *  subject's set zoom) in effect at write time (which can differ from the one read on screen if
  *  the zoom changed between the read and the press), and whether this image's own
- *  view-coverage record shows the cell already seen -- facts only, no verdict; `at_scale` is
+ *  view-coverage record shows the cell already seen. Facts only, no verdict; `at_scale` is
  *  null and `grid_matched` false when no coverage record existed yet or its grid disagreed. */
 export interface CellAttestedView {
   view_scale: number | null;
@@ -206,8 +206,8 @@ export function subdivideCell(cell: GridCell, divisions: number): PixelRect[] {
 /**
  * How many divisions `subdivideCell` needs so `cell`'s sub-cells are no larger than `targetPx`
  * on their long edge: `ceil(long_edge / targetPx)`, at least 1. A fixed division count scales
- * sub-cell size with the cell itself, not with the viewport that has to contain one -- wrong on
- * any lattice whose cells vary in size (the display-derived serving lattice caps cells at
+ * sub-cell size with the cell itself, not with the viewport that has to contain one, which is
+ * wrong on any lattice whose cells vary in size (the display-derived serving lattice caps cells at
  * display_bounds.DISPLAY_MAX_EDGE=4096px; the coverage lattice's cell edge grows with a low set
  * zoom and can run far larger). Deriving divisions from an absolute pixel target instead keeps
  * sub-cell size, and therefore whether a real viewport can ever fully contain one, consistent
