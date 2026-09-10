@@ -355,8 +355,8 @@ def gui_binding_matches(root: str | Path) -> tuple[bool, dict[str, Any] | None]:
 
     The one comparison every caller that drives the live GUI shares: ``capture_live_canvas``,
     ``focus_human_attention`` and ``push_panel_event`` all refuse when the GUI has moved to
-    another project, and a second, separately-written comparison in each would be the drift
-    ``CLAUDE.md`` warns against. Returns ``(False, None)`` when no binding record exists at all
+    another project, and a second, separately-written comparison in each would let the two
+    drift apart. Returns ``(False, None)`` when no binding record exists at all
     (nothing is open for any root to match); ``(False, binding)`` before ``root`` is even
     compared when the binding was released (``tcip_mcp.project_removal.
     release_project_binding``): a released record names what the GUI last had open, not what it

@@ -2,10 +2,8 @@
 # (imports, syntax, pyflakes) + B033. Line length is not enforced (E501 not selected), to match the existing code style.
 
 [lint]
-# Explicit, not relied-on-as-default: ruff 0.16.0 changed what its own implicit default
-# covers (adding I/UP/RUF and others), which silently turned 732 pre-existing lines across
-# the repo into new CI failures on a version bump with no repo change. Pinning the select
-# here keeps this config's meaning stable across ruff releases.
+# The rule set is selected explicitly, never left to ruff's implicit default, which moves
+# between ruff releases; this config's meaning is fixed by this line alone.
 select = ["E4", "E7", "E9", "F", "B033"]
 ignore = [
     "E741",  # ambiguous one-letter names (l/I/O): low value, mostly in tests

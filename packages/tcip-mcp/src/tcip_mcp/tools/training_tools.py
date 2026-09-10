@@ -823,13 +823,13 @@ def launch_training(
     if not validation["valid"]:
         return {"error": "Invalid config", "issues": validation["issues"]}
 
-    # GUI schema nests stages/mixed_precision/batch_size under ``training``, but the trainer reads them top-level; without this hoist a GUI-launched run silently trains the default single stage.
-    # run_hyperparameter_search normalizes separately, inside _apply_hpo_params.
+    # The GUI schema nests stages, mixed_precision and batch_size under ``training``; the trainer
+    # reads them top-level, so without this hoist a GUI run trains the default single stage.
     from tcip_mcp.pipelines.schemas import normalize_train_config
     config = normalize_train_config(config)
 
-    # The top-level key, never the smoke sub-report: overfit_check runs beside the contract's build, not inside it, on the same batch.
-    # Already rendered by preflight_config for storage (a raw non-finite loss cannot cross the JSON-RPC boundary), so nothing renders it again here.
+    # The top-level key, never the smoke sub-report: overfit_check runs beside the contract's
+    # build, on the same batch; preflight_config already rendered it for storage.
     rendered_overfit_report = validation.get("overfit_check")
 
     # Recorded on the copy above, never the caller's own config dict, so a launch never hands
@@ -1112,10 +1112,9 @@ def _launched_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
     :func:`~tcip_mcp.experiments.is_launched` says so: a stamped ``output_dir``, a state other
     than ``"created"``, or the ``metrics_logged`` marker, so a record whose ``state`` write never
     landed beside its stamp still lists, and a pre-created experiment that never launched does
-    not; the
-    same predicate :func:`~tcip_mcp.experiments.compare_experiments` consults before deriving a
-    heartbeat state at all. Rows come back sorted by
-    experiment id (``experiment_ids_with_status``'s own order), each carrying ``external: True``:
+    not; the same predicate :func:`~tcip_mcp.experiments.compare_experiments` consults before
+    deriving a heartbeat state at all. Rows come back sorted by experiment id
+    (``experiment_ids_with_status``'s own order), each carrying ``external: True``:
     a process-locality fact only (this record was reconstructed from disk, not held in this
     process's own registry), never a statement about who launched it, which is the record's own
     ``launched_by`` (see :func:`~tcip_mcp.experiments.reconstruct_from_status`).
@@ -2575,7 +2574,8 @@ def run_hyperparameter_search(
             )
             result["best_value_spread"] = None
 
-    # best_value_state carries only stored_number's own token vocabulary; best_value_reason is the English sentence for why there is no best value at all.
+    # best_value_state carries only stored_number's own token vocabulary; best_value_reason is
+    # the English sentence for why there is no best value at all.
     manifest_result = {k: result.get(k) for k in ("best_params", "best_value", "n_trials")}
     if "best_value_state" in result:
         manifest_result["best_value_state"] = result["best_value_state"]
