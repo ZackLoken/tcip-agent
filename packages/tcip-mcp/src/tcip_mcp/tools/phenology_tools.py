@@ -525,8 +525,7 @@ def _stated_root_disagreement(dataset_root: str, candidates: dict[str, str]) -> 
 
     Two other modules (``scale_tools.py``, ``calibration_tools.py``) import this beside its own
     caller here. ``calibrate_operating_point`` and ``gate_evidence_summary`` live in
-    ``pipelines/calibration.py``; this check stays in this module, since it is this module's own
-    refusal wording, not a shared primitive those callers each restate.
+    ``pipelines/calibration.py``.
     """
     from tcip_mcp.dataset_layout import dataset_root_of
 
