@@ -810,7 +810,7 @@ def test_annotate_load_hands_back_a_token_its_own_save_accepts(
 def test_annotate_save_without_a_token_still_writes(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    """A caller that supplies no token skips the comparison, exactly as before."""
+    """A caller that supplies no token skips the comparison and its write still lands."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = tmp_path / "labels" / "IMG_0000.json"
     assert _save_box(client, img_path, label_path).status_code == 200
@@ -868,8 +868,8 @@ def test_annotate_multi_ring_polygon_round_trips_through_the_route(client, datas
 
 def test_annotate_save_prefers_rings_over_points_when_both_are_sent(client, dataset_root, tmp_path):
     """`rings` is the full shape and `points` only ever one contour, so `rings` wins: otherwise a
-    client that sends both (a loaded multi-ring shape plus a legacy single-ring mirror) would persist
-    the truncated version."""
+    client that sends both (a loaded multi-ring shape plus a single-ring mirror of it) would
+    persist the truncated version."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = tmp_path / "labels" / "IMG_0000.json"
     rings = [[[10, 10], [30, 10], [30, 30]], [[60, 10], [80, 10], [80, 30]]]
@@ -1238,9 +1238,8 @@ def test_review_action_records_before_building_the_response_so_a_build_failure_s
 def test_review_action_resolves_class_id_from_bucket_id_map(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    """The verdict entry carries a resolved ``class_id``: the producing bucket's own recorded
-    ``id_map`` (``operating_point.json``), read at record time, not the previously-dead
-    ``class_id`` field ``review_to_records`` used to default to 0 for every entry."""
+    """The verdict entry's ``class_id`` is resolved from the producing bucket's own recorded
+    ``id_map`` (``operating_point.json``) at record time, never defaulted to 0."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])

@@ -1,9 +1,7 @@
 """``tcip_mcp.model_registry.conform_registry_paths_on_disk``: the model registry's only
-surviving conform, called by ``import_project`` against a staging tree's loose files before
-accounting for it. ``conform_registry_paths`` (the seam-backed conform this function was cloned
-from) has no caller anywhere under ``packages`` and is gone with its own tests; the four cases
-below outlive it because they exercise the on-disk function directly, plus the real
-archive/import round trip that is the door's only production caller.
+conform, called by ``import_project`` against a staging tree's loose files before accounting for
+it. The four cases below exercise the on-disk function directly, plus the real archive and
+import round trip that is the door's only production caller.
 """
 
 from __future__ import annotations

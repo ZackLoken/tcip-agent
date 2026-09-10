@@ -1,8 +1,8 @@
 """Tests for the project record: the authored site, its create-only write, and its readers.
 
-``tcip_mcp.project_record`` is new: every symbol from it is imported inside each test function
-rather than at module level, so a fail-before run against a tree that predates the module fails
-on that one test's own assertions rather than on collection for the whole file.
+Every symbol from ``tcip_mcp.project_record`` is imported inside the test function that uses it
+rather than at module level, so a tree without the module fails one test's own assertions rather
+than collection for the whole file.
 """
 
 from __future__ import annotations

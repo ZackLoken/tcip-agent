@@ -1,9 +1,9 @@
 """Provenance honesty: a `derived()` stamp must trace to a real implementation.
 
-Guards against the cross_tile_nms costume bug: code once stamped derived_from="GT neighbor-IoU
-distribution" while no function computed it. Every derived_from label stamped anywhere in
-tcip_mcp must be a reviewed entry in DERIVATION_IMPLEMENTATIONS, mapped to an importable
-callable, or explicitly marked as a non-derivation ("caller-input"/"placeholder")."""
+A stamp naming a derivation no function computes (a `derived_from="GT neighbor-IoU
+distribution"` with nothing behind it) is the failure this catches. Every derived_from label
+stamped anywhere in tcip_mcp must be a reviewed entry in DERIVATION_IMPLEMENTATIONS, mapped to
+an importable callable, or explicitly marked as a non-derivation ("caller-input"/"placeholder")."""
 
 from __future__ import annotations
 

@@ -62,7 +62,7 @@ def test_compare_experiments_reports_same_dataset_for_two_matching_prefixed_fing
 
 def test_compare_experiments_forces_none_and_flags_a_bare_legacy_fingerprint(experiments_dir):
     exp.create_experiment("e1", {}, dataset_fingerprint="v1:aaaa")
-    exp.create_experiment("e2", {}, dataset_fingerprint="aaaa")  # bare, pre-family value
+    exp.create_experiment("e2", {}, dataset_fingerprint="aaaa")  # a digest with no formula prefix
 
     result = exp.compare_experiments(["e1", "e2"])
     assert result["same_dataset_fingerprint"] is None

@@ -3,8 +3,8 @@
 Two failure modes this catches:
   1. A tool that is decorated `@mcp.tool()` but never actually registers (import
      error, decorator mistake, duplicate name).
-  2. Docs that hard-code a tool count which then goes stale (the original sin:
-     README said 54, copilot-instructions said 57, reality was 57).
+  2. A document that hard-codes a tool count, which goes stale the next time a
+     tool is added or retired.
 """
 
 from __future__ import annotations

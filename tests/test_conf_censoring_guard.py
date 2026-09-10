@@ -1,9 +1,9 @@
 """The conf-censoring guard, built around a caller-asserted staging floor.
 
 ``resolve_operating_point`` does not infer censorship from the reference's own observed minimum
-score against a hardcoded display floor (that predicate was tautologically true for the GT path,
-since every surviving score is >= the calibration floor by construction, and missed a display-
-floored reference whose observed scores merely happened to dip below the display constant once).
+score against a hardcoded display floor: on the GT path every surviving score is at or above the
+calibration floor by construction, so such a predicate answers yes for every reference and no
+for a display-floored one whose observed scores happen to dip below the constant.
 Instead the caller asserts ``staged_conf_floor``, the floor the reference's predictions were
 actually generated/filtered at, and ``censored = staged_conf_floor is not None and chosen_conf <=
 staged_conf_floor``. An unstated floor is a distinct, separately-named gate

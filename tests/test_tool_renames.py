@@ -10,7 +10,7 @@ run_hyperparameter_search's internal training-loop helper stays named ``_run_hpo
 it is not the tool, and the HPO store names, ``pipelines/training/hpo.py``, and the ``hpo``
 state directory are none of them the literal old token ``run_hpo`` either: an underscore or
 another word sits against every one of them, so the whole-word sweep below would never have
-flagged them, and every other place the old name appeared, tests included, was renamed by hand.
+flagged them.
 
 focus is common CSS/DOM vocabulary outside the tool (frontend ``.focus()`` calls, ``autoFocus``
 props, ``:focus`` selectors, ``onFocus`` handlers, ``focus-`` Tailwind variants), so its
@@ -26,9 +26,9 @@ historical shape without being read as a missed rename.
 
 Every sweep checks a tracked path itself, not only the text inside it, and matches an old name
 case-insensitively; the whole-word boundary still treats an underscore as a word character, so
-a legitimately renamed file or identifier that merely contains the old token as a substring
-(``test_tabulate_counts_bucket_regime.py`` before its own rename, say) is not itself proof the
-sweep would have caught it.
+a legitimately renamed file or identifier that merely contains the old token as a substring is
+not itself proof the sweep would have caught it.
+
 A merge retires the absorbed door's own name outright: the surviving door serves its view under
 an argument, so the merged-away name gets the identical whole-word, whole-tree sweep a rename's
 old name gets, with no scoping needed.
@@ -250,7 +250,7 @@ def test_demoted_name_has_no_tool_table_row(name):
 
 def test_demoted_tool_table_sites_catches_a_call_signature_row(tmp_path):
     """A demoted name surviving in a Tools table as a documented call signature, not a bare
-    backtick-quoted token, is still a stale row: the old bare-name-only regex missed this shape."""
+    backtick-quoted token, is a stale row, and the sweep's regex matches that shape too."""
     fixture = tmp_path / "stale.md"
     fixture.write_text(
         "| Tool | Role |\n"

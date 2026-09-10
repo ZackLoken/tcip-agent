@@ -75,8 +75,7 @@ def _image(root: Path, date: str, stem: str, size: tuple[int, int] = (640, 480))
 
 def _img_path(root: Path, date: str, stem: str) -> str:
     """The path ``_image`` wrote ``stem`` at, for the explicit regime's own ``image_path``
-    argument, which now resolves the dataset root, date and stem in place of the three
-    positional path fragments the door used to take."""
+    argument, which carries the dataset root, date and stem in one value."""
     return str(Path(image_dir(root, date)) / f"{stem}.jpg")
 
 
@@ -300,7 +299,7 @@ def test_stage_proposals_stages_boxes_and_polygons_together(tmp_path: Path) -> N
     for obj in objs:
         assert obj["created_by"] == "claude"
         assert obj["created_at"]
-    # One box + one polygon in the single file (the old detect/segment split is gone).
+    # One box and one polygon in the single file: no detect/segment split.
     kinds = sorted("segmentation" if "segmentation" in o else "bbox" for o in objs)
     assert kinds == ["bbox", "segmentation"]
     assert not (root / "annotations").exists()

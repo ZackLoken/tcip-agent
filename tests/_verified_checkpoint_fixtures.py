@@ -1,8 +1,8 @@
 """Fixtures for the checkpoint-digest rail: a real checkpoint registered through the platform's
 own producer, and a stub ``VerifiedCheckpoint`` for a test that stubs a build.
 
-``build_predictor`` and every measurement-path checkpoint load now take a
-``tcip_mcp.model_registry.VerifiedCheckpoint`` from ``load_registered_checkpoint`` rather than a
+``build_predictor`` and every measurement-path checkpoint load take a
+``tcip_mcp.model_registry.VerifiedCheckpoint`` from ``load_registered_checkpoint``, never a
 bare path: a real-checkpoint test builds and registers one through :func:`registered_checkpoint`,
 and a test that stubs ``build_predictor``/``load_registered_checkpoint`` builds the stub object
 through :func:`stub_verified_checkpoint`.
@@ -54,14 +54,13 @@ def registered_checkpoint(
 
 
 def run_inference_verified(checkpoint_path: str, **overrides: Any):
-    """The ephemeral in-memory pass, for a test that wants exactly what the old, non-persisting
-    ``run_inference`` tool used to hand back before the merge folded it into the door that
-    persists a bucket: loads the registered checkpoint and calls ``_run_inference_verified``
-    directly, the same private pass the merged tool itself calls once it has resolved a bucket.
+    """The ephemeral in-memory pass, for a test that wants inference results with no bucket
+    persisted: loads the registered checkpoint and calls ``_run_inference_verified``
+    directly, the same private pass ``run_inference`` itself calls once it has resolved a bucket.
 
-    ``overrides`` supplies whichever of the pass' own keyword arguments (``image_paths`` included,
-    since the merged tool no longer exposes it) a test cares about; every other one takes the same
-    unstated-sentinel default the old tool forwarded when a caller stated nothing. A checkpoint
+    ``overrides`` supplies whichever of the pass' own keyword arguments (``image_paths``
+    included, which ``run_inference`` does not expose) a test cares about; every other one takes
+    the unstated-sentinel default the tool forwards when a caller states nothing. A checkpoint
     the registry refuses (``UnregisteredCheckpoint``) returns ``{"error": ...}``, the same catch
     every real caller of ``load_registered_checkpoint`` wraps it in, rather than raising out of
     this stand-in for one.

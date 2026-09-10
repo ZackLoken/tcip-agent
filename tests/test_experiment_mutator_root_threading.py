@@ -1,11 +1,11 @@
 """``experiments.py``'s per-mutator functions (``complete_run``, ``log_metrics``,
-``record_artifact``, ``update_lineage``, ``overwrite_config_if_pristine``) took no caller
-``root`` at all, unlike ``update_status``, which already lets a launch's own wall-clock watchdog
-scope its write to the root it captured at launch rather than wherever this process's platform
-root has since moved to. A parent-side writer resolving one of these other mutators against a
-record under a root other than the process's own current pin had no way to reach it, or its own
-refusal's audit line, scoped correctly. Each now threads ``root`` through to its own key
-resolution and to its own ``_audit_refused`` call the same way ``update_status`` already does.
+``record_artifact``, ``update_lineage``, ``overwrite_config_if_pristine``) each take a caller
+``root`` and thread it through to their own key resolution and their own ``_audit_refused``
+call, the same way ``update_status`` does.
+
+A launch's own wall-clock watchdog scopes its write to the root it captured at launch rather
+than wherever this process's platform root has since moved to, so a parent-side writer can
+reach a record, and its refusal's audit line, under a root other than the process's current pin.
 """
 
 from __future__ import annotations

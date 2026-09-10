@@ -45,8 +45,8 @@ def _records(idp="c", *, shift: float = 0.0):
     conf 0.9 -> A unbiased, B under-counts (-1) => net bias -0.5 but higher F1 (no spurious FP).
 
     ``shift`` offsets every GT box's center by that many px (well inside the ~10px center-match
-    tolerance derived from these boxes) while leaving the detections in place, used to give a
-    holdout fixture genuinely different GT content from calibration's (the content-overlap gate
+    tolerance derived from these boxes) while leaving the detections in place, so a holdout
+    fixture carries genuinely different GT content from calibration's (the content-overlap gate
     would otherwise flag a byte-identical-content holdout, differing only by ``image_id``, as a
     clone unable to function as an independent check).
     """
@@ -328,8 +328,8 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
 
 
 def test_resolve_operating_point_cal_rects_none_is_byte_identical(tmp_path, monkeypatch):
-    """cal_rects/hold_rects default to None: an existing caller who never passes them (every
-    caller before this phase) gets exactly today's lexical spatial_strip check, unchanged."""
+    """cal_rects/hold_rects default to None: a caller that passes neither gets the lexical
+    spatial_strip check, never the geometric one."""
     import tcip_store
 
     from tcip_mcp.experiments import split_key
@@ -533,8 +533,8 @@ def test_selection_disjointness_not_applicable_on_an_external_val_record(tmp_pat
 
 
 def test_selection_disjointness_not_applicable_for_a_manifest_less_calibration(tmp_path, monkeypatch):
-    """A checkpoint that drew its own split, calibrated with no manifest named, behaves exactly
-    as before this family: the selection check is not-applicable and never blocks validation."""
+    """A checkpoint that drew its own split, calibrated with no manifest named: the selection
+    check is not-applicable and never blocks validation."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     date = "2-11-26"
     _persist_run_split(

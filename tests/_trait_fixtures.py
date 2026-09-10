@@ -1,16 +1,14 @@
 """Shared test-only trait fixture.
 
-``BUD_OPENING`` used to be a hardcoded builtin in ``tcip_mcp.traits`` that every
-trait-consuming test imported directly. There are no built-ins anymore; every trait is
-authored as a per-project ``.tcip/state/trait_specs/*.yml`` file, so it is
-registered only where that file actually exists. This module is that same value, reconstructed
-locally with neutral names (a mechanism fixture, not a crop's own trait) so the existing test suite
-keeps exercising trait-consuming code paths without depending on any specific project's config
-being present. It is a plain local ``TraitSpec`` literal, not a registered trait: config-loaded
-specs are rebuilt fresh on every ``get_trait()`` call, never module-load singletons (see
-``traits.py``), so nothing here should ever be compared by identity against one.
+``BUD_OPENING`` is a plain local ``TraitSpec`` literal with neutral names, a mechanism fixture
+rather than a crop's own trait, so trait-consuming code paths can be exercised without any
+project's config being present. The platform holds no built-in traits: every trait is authored
+as a per-project ``.tcip/state/trait_specs/*.yml`` file and is registered only where that file
+exists. It is not a registered trait: config-loaded specs are rebuilt fresh on every
+``get_trait()`` call, never module-load singletons (see ``traits.py``), so nothing here should
+ever be compared by identity against one.
 
-The trait's own name, ``bud_opening``, is deliberately not the ``bud`` subject it measures: a
+The trait's own name, ``bud_opening``, is not the ``bud`` subject it measures: a
 subject is an object class to isolate, a trait is the measurement over it, and this fixture keeps
 that distinction rather than reusing one string for both.
 """

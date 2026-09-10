@@ -1,4 +1,4 @@
-"""Tests for the activate_project MCP tool (C3 loop-closer)."""
+"""Tests for the activate_project MCP tool."""
 
 from __future__ import annotations
 

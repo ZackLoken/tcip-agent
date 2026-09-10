@@ -103,7 +103,7 @@ def test_draw_splits_counts_json_objects_not_lines(tmp_path):
                       group_by="stem")
     assert "error" not in res
     # foreground_annotations sums per split: true total is 3+1+0+0. Counting raw JSON text
-    # lines (the old bug) would have reported dozens: negatives alone read as several each.
+    # lines instead reports dozens, since negatives alone read as several each.
     assert sum(res["foreground_annotations"].values()) == 4
 
 

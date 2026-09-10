@@ -1,4 +1,4 @@
-"""Slice 3 tests: plant mapping + per-plant curves + onset dates + CSV export."""
+"""The Results routes: plant mapping, per-plant curves, onset dates and CSV export."""
 
 from __future__ import annotations
 
@@ -253,10 +253,8 @@ def test_phenology_measurement_uses_mapping_and_counts(client: TestClient, tmp_p
 def test_phenology_measurement_reports_the_real_image_count_not_a_hardcoded_one(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    # The row used to assert `n_images: 1` unconditionally while per_plant_series aggregates every
-    # image the mapping names for that (plant, date): the one field in a delivered row derived from
-    # nothing at all. Three images per plant per date must read as 3, with counts aggregated over
-    # all of them.
+    # `n_images` counts the images per_plant_series aggregated for that (plant, date), never a
+    # constant: three images per plant per date read as 3, with counts aggregated over all three.
     body = _phenology_fixture(tmp_path, validated=True, images_per_plant=3, fractions=(0.5,),
                           detections=4)
     rows = client.post(
@@ -350,8 +348,8 @@ def _export(client: TestClient, body: dict, payload: str = "milestones", **extra
 
 
 def test_every_phenology_door_refuses_unvalidated_evidence(client: TestClient, tmp_path: Path) -> None:
-    # Only the CSV door used to reconcile anything; curve/milestone returned unvalidated
-    # phenotype until a Download refusal. Both doors now read the same evidence.
+    # The CSV door and the curve/milestone door read the same evidence, so neither serves an
+    # unvalidated phenotype.
     body = _phenology_fixture(tmp_path, validated=False)
     for route in GATE_DOORS:
         resp = client.post(f"/api/results/{route}", json=body)
@@ -600,14 +598,11 @@ def test_export_refuses_when_nothing_was_ever_classified(client: TestClient, tmp
     assert "open" in resp.json()["detail"]
 
 
-def test_the_old_declaration_bypass_no_longer_reaches_the_door(
+def test_caller_composed_rows_are_refused_whatever_export_kind_declares(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    # Declaring export_kind="diagnostic" and handing over a table shipped a real per-plant curve
-    # with 200 and zero validity evidence, because a curve row carries no registry milestone column
-    # for the retained floor to catch. None of these caller-composed shapes (a curve, a per-plant
-    # count table, milestone dates under renamed columns) can be handed to this door at all: it
-    # computes what it exports.
+    # This door computes what it exports, so none of these caller-composed shapes (a curve, a
+    # per-plant count table, milestone dates under renamed columns) can be handed to it at all.
     for rows in (
         [{"plant_id": "P1", "date": "2026-03-01", "n_total": 20, "n_positive": 1, "ratio": 0.05,
           "n_unclassified": 0, "n_missing": 0}],
@@ -656,10 +651,8 @@ def test_a_genuinely_unvalidated_classifier_refuses_even_when_the_count_is_valid
 def test_exported_milestone_csv_carries_the_canonical_schema_and_its_provenance(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    # The web CSV used to write whatever keys the caller's rows carried, so it lacked the MCP door's
-    # provenance columns entirely. It now writes phenology_csv_columns and stamps it from the same
-    # reconciliation the gate used, and every column the schema declares is filled, or it would be
-    # the same phantom already removed from the schema itself.
+    # The web CSV writes phenology_csv_columns, never the caller's own keys, and stamps its
+    # provenance from the same reconciliation the gate read. Every declared column is filled.
     from tcip_mcp.pipelines.postprocessing.phenology import phenology_csv_columns
     from tcip_mcp.traits import get_trait
 
@@ -705,13 +698,13 @@ def test_curve_and_milestone_projections_share_one_measurement(
 def test_phenology_measurement_response_carries_every_field_the_two_deleted_doors_did(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    """Field-by-field parity: the merged door's ``curves`` projection against per_plant_curves'
-    old ``{rows, n_plants, positive_class_id, **disclosure}`` shape, ``milestones`` against
-    onset_dates' old ``{rows, **disclosure}`` shape (disclosure now sits once at the top level,
-    identical for both since one measurement produced it). The two routes are deleted, so this
-    reconstructs what each one used to assemble from the surviving producer
-    (_PhenologyMeasurement.curve_rows/milestone_rows, _disclosure) it always delegated to, rather
-    than calling a route that no longer exists.
+    """Field-by-field parity: the merged door's ``curves`` projection against the
+    ``{rows, n_plants, positive_class_id}``-plus-disclosure shape ``per_plant_curves`` served,
+    and its ``milestones`` projection against the ``{rows}``-plus-disclosure shape
+    ``onset_dates`` served. Disclosure sits once at the top level, identical for both, since one
+    measurement produces it. Neither route is registered, so both shapes are assembled here from
+    the surviving producer (``_PhenologyMeasurement.curve_rows``/``milestone_rows``,
+    ``_disclosure``) those routes delegated to.
     """
     from tcip_web.routes.results import PhenologyPayload, _disclosure, _measure_phenology
 

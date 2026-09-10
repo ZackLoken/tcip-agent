@@ -198,8 +198,8 @@ def test_auto_train_val_tiny_dataset_guard(tmp_path: Path):
 
 
 def test_auto_train_val_single_source_untiled_still_no_val(tmp_path: Path):
-    """A single-image detection source with tiling absent must still degrade to (train_ds, None)
-    exactly as before the spatial route existed: there is no tiling geometry to block-split by."""
+    """A single-image detection source with tiling absent degrades to (train_ds, None): there is
+    no tiling geometry to block-split by."""
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir(parents=True, exist_ok=True)
@@ -299,12 +299,12 @@ def test_spatial_manifest_tied_test_calibration_fractions_place_by_declared_orde
     assert "seed" not in manifest
 
 
-def test_spatial_manifest_layout_with_distinct_fractions_never_engages_tie_break(
+def test_spatial_manifest_pins_train_val_and_test_regions_for_distinct_fractions(
     tmp_path: Path,
 ):
-    """Coverage, not a guard: with no tied shares (0.65/0.25/0.1), the declared-order
-    tie-break never runs, so the layout comes from the fractions and tile geometry alone. Regions
-    pinned against this exact width/height/tile_size/overlap/fractions."""
+    """Coverage, not a guard: with no tied shares (0.65/0.25/0.1) the declared-order tie-break
+    does not run, so the layout comes from the fractions and tile geometry alone. The three
+    regions are pinned against this exact width, height, tile_size, overlap and fractions."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
@@ -405,9 +405,9 @@ def test_auto_train_val_explicit_group_key_map_not_overridden_by_retry(tmp_path:
 # reserve_calibration_fraction: the four-way split (train/val/test/calibration).
 
 def test_reserve_calibration_fraction_unset_is_byte_identical(tmp_path: Path):
-    """Fail-before/no-op: with reserve_calibration_fraction absent, the spatial_manifest carries
-    no calibration_region and the rest of the manifest is exactly what the 3-way split has always
-    produced (same keys, same train/val/test regions for the same layout)."""
+    """With reserve_calibration_fraction absent, the spatial_manifest carries no
+    calibration_region and the rest of it is the three-way split's own shape (the same keys and
+    the same train/val/test regions for this layout)."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",

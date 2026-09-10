@@ -103,7 +103,7 @@ def test_a_stock_trainer_run_registers_with_trainer_source_and_the_best_epochs_m
     assert entry["metrics"]["epoch"] == best["epoch"]
 
     final = torch.load(tmp_path / "out" / "model_final.pt", weights_only=False)
-    assert isinstance(final["metrics"], dict)  # not the old per-epoch list
+    assert isinstance(final["metrics"], dict)  # one mapping, never a per-epoch list
 
 
 def _lifecycle_run(tmp_path, builder: str, experiment_id: str):

@@ -1,6 +1,7 @@
-"""GUARDS proof, kept isolated: ``record_delivery_binding_event`` stamps a delivered file's own
-digest, exercised directly against a hand-written file so the proof needs nothing from the
-plant-registry family (``resolution.py`` is the only file this test's fix touches).
+"""``record_delivery_binding_event`` stamps a delivered file's own digest.
+
+Exercised directly against a hand-written file, so the only module this test reaches into is
+``resolution.py``.
 """
 
 from __future__ import annotations

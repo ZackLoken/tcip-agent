@@ -197,9 +197,9 @@ def test_ordinal_e2e(tmp_path: Path):
 
 
 def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
-    """A rank scale wider than the old hardcoded default (5) must derive its own count from
-    the CSV, not silently truncate. crops.yml's kernel_pellicle trait is a real 1-7 scale
-    (ranks 0-6, 7 ranks) once 0-indexed."""
+    """A rank scale of 7 ranks must derive its count from the CSV, never truncate to a narrower
+    bound. crops.yml's kernel_pellicle trait is a real 1-7 scale (ranks 0-6, 7 ranks) once
+    0-indexed."""
     images_dir = tmp_path / "images"
     rows = []
     for rank in range(7):
@@ -234,8 +234,8 @@ def test_ordinal_num_ranks_mismatch_raises(tmp_path: Path):
 
 
 def test_classification_derives_num_classes_from_data(tmp_path: Path):
-    """A label range wider than the old hardcoded default (2) must derive its own count from
-    the CSV, not silently truncate."""
+    """A label range of 4 classes must derive its count from the CSV, never truncate to a
+    narrower bound."""
     images_dir = tmp_path / "images"
     rows = []
     for label in range(4):

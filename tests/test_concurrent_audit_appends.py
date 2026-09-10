@@ -1,7 +1,7 @@
-"""Concurrency invariant for the embedded agent terminal (chat-popup-design.md §6):
-two tcip-mcp instances (the operator's own terminal agent + the in-app Claude Code
-session, each spawning its own MCP server) may append to one audit log concurrently.
-The append-only log must not tear or lose lines.
+"""Concurrency invariant for the embedded agent terminal: two tcip-mcp instances (the
+operator's own terminal agent and the in-app Claude Code session, each spawning its own MCP
+server) may append to one audit log concurrently. The append-only log must not tear or lose
+lines.
 
 What the store promises is that every append which returned is in the log, once, not that no
 append times out under saturation. So each appender here records what returned and reports what

@@ -762,10 +762,10 @@ def test_a_web_launched_sweep_runs_only_the_routes_own_tensorboard(
     assert key == f"sweep_{sweep_id}"
 
 
-def test_launch_route_no_longer_exists(client: TestClient, hpo_root) -> None:
-    """The raw launch door retired with the config picker: a sweep starts only from a
-    recorded manifest, through ``/api/tuning/sweeps``, never from a client-submitted
-    base_config/param_space again."""
+def test_the_launch_route_is_not_registered(client: TestClient, hpo_root) -> None:
+    """Nothing serves ``/api/tuning/launch``: a sweep starts only from a recorded manifest,
+    through ``/api/tuning/sweeps``, never from a client-submitted base_config and
+    param_space."""
     resp = client.post(
         "/api/tuning/launch",
         json={"base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
@@ -1046,10 +1046,9 @@ def test_relaunch_passes_through_a_manifests_own_split_draws(
 def test_relaunch_coerces_a_manifests_numeric_string_split_draws(
     client: TestClient, hpo_root, monkeypatch
 ) -> None:
-    """A manifest recording split_draws as a numeric string (an older or hand-written one)
-    once crashed the worker with a TypeError comparing it to an int; the relaunch route now
-    reads it through the same int() coercion caller_split_seed_refusal applies, so it relaunches
-    with the draw count it names rather than the string itself."""
+    """A manifest recording split_draws as a numeric string (an older or hand-written one) is
+    read through the same int() coercion caller_split_seed_refusal applies, so the relaunch runs
+    at the draw count it names rather than comparing the string itself to an int."""
     from tcip_web.routes import tuning
 
     captured: dict = {}
@@ -1078,8 +1077,8 @@ def test_relaunch_route_409s_for_a_manifest_whose_split_draws_is_not_a_draw_coun
 ) -> None:
     """A manifest whose split_draws value coerce_split_draws cannot read as an int is not a
     draw count; the relaunch route refuses it by name before the worker starts, rather than
-    replaying it into the same TypeError a numeric string used to cause or the silently
-    truncated int a bare int() would give a fractional float."""
+    replaying a numeric string into a TypeError or letting a bare int() truncate a fractional
+    float."""
     captured: dict = {}
 
     def fake_run_hyperparameter_search(**kwargs):
@@ -1186,9 +1185,9 @@ def test_manifest_fields_projects_redraws_within_manifest_from_the_base_config()
 def test_relaunch_of_an_older_manifest_missing_relaunched_from_still_succeeds(
     client: TestClient, hpo_root
 ) -> None:
-    """_missing_relaunch_fields does not require relaunched_from: a manifest from before the
-    field existed (_write_sweep's own default, the same shape a real pre-family manifest has)
-    relaunches exactly as any other manifest does."""
+    """_missing_relaunch_fields does not require relaunched_from: a manifest carrying no
+    ``relaunched_from`` key at all (_write_sweep's own default) relaunches exactly as any other
+    manifest does."""
     from tcip_web.routes.tuning import _RELAUNCH_FIELDS, _missing_relaunch_fields
 
     assert "relaunched_from" not in _RELAUNCH_FIELDS
@@ -1240,8 +1239,8 @@ def test_cancel_reaches_a_relaunch_before_run_hyperparameter_search_writes_its_o
 ) -> None:
     """The relaunch route marks the new sweep id as launching, on the request thread, before
     starting the worker: a cancel that arrives once the route has answered but before run_hyperparameter_search's
-    own worker call has written a manifest still reaches the sweep, rather than the 404
-    ``cancel_hyperparameter_search`` used to answer in that window."""
+    own worker call has written a manifest reaches the sweep, never a 404 from
+    ``cancel_hyperparameter_search``."""
     import threading
 
     from tcip_web.routes import tuning
@@ -1270,7 +1269,7 @@ def test_cancel_reaches_a_relaunch_before_run_hyperparameter_search_writes_its_o
 
 def test_worker_marks_an_error_dict_failed_not_completed(hpo_root, monkeypatch) -> None:
     """A relaunch whose data paths moved must read failed with preflight's own words, not
-    completed with no useful result (the defect the relaunch door's own worker fixes)."""
+    completed with no useful result."""
     from tcip_web.routes.tuning import HPOJob, _RelaunchSpec, _worker
 
     monkeypatch.setattr(

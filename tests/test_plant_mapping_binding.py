@@ -709,11 +709,8 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
     """At the pipeline level: ``persist_mapping``'s own contract, not the MCP tool's ``@audited``
     wrapper (which writes its own, separate audit line for the call and would otherwise also
     contend for the same lock this test holds for the whole body). This calls
-    ``plant_mapping.build_mapping`` directly rather than through ``build_plant_mapping``,
-    deliberately: fail-before for this rail is proven at the commit that added the receipt
-    mechanism itself, not at the bare door-renames commit, since ``build_mapping`` gained
-    ``dataset_id``/``project_root``/``built_by`` there too and a baseline before it dies on a
-    ``TypeError`` from this call's own arrangement, not from the assertion this test names."""
+    ``plant_mapping.build_mapping`` directly rather than through ``build_plant_mapping`` so the
+    tool's wrapper does not contend for that lock."""
     from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_store.file_backend import FileBackend, path_lock
 

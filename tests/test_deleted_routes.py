@@ -1,10 +1,9 @@
 """Callerless HTTP routes stay deleted.
 
-Each parametrized case names a route that a consumer sweep found no production or test caller
-for; the route was deleted along with any test that only existed to exercise it, and the
-assertions those tests carried were re-homed onto the surviving route or mechanism that already
-serves the same information. Re-adding one of these routes requires a real consumer to justify it,
-not a caller resurrecting the deleted path unnoticed.
+Each parametrized case names a route no production or test caller reaches, and asserts the app
+does not register it. The information each one served is available from a surviving route or
+mechanism, so re-adding one takes a real consumer rather than a caller reviving the path
+unnoticed.
 """
 
 from __future__ import annotations

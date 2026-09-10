@@ -725,9 +725,9 @@ def test_preflight_config_flags_a_single_group_redraw_date(tmp_path: Path):
 
 def test_preflight_config_flags_a_redraw_date_with_only_one_foreground_group(tmp_path: Path):
     """A date whose train-plus-val members resolve to two distinct groups, only one of them
-    foreground (the other a confirmed-negative group with zero annotations), used to pass this
-    precheck: counting every distinct group regardless of foreground signal read two as enough,
-    though :func:`~tcip_mcp.pipelines.data.splits.group_balanced_split`'s own per-side minimum
+    foreground (the other a confirmed-negative group with zero annotations), is flagged by this
+    precheck: what it counts is foreground groups, never distinct groups alone.
+    :func:`~tcip_mcp.pipelines.data.splits.group_balanced_split`'s own per-side minimum
     needs one *foreground* group for each of train and val, and a background-only group can
     concentrate entirely onto the side that already met its minimum from the other. The bind
     itself is unaffected (both original sides are non-empty, so a plain, non-redraw launch

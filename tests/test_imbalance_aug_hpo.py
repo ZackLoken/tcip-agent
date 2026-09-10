@@ -127,9 +127,8 @@ def test_semantic_seg_head_weighted_ce():
 def test_semantic_seg_head_advertises_no_loss_choice():
     """The head welds CE + multi-class Dice; it must not accept a loss name it cannot honor.
 
-    Previously `loss=` was accepted and silently discarded. There is no registry loss to route
-    to: `build_loss("cross_entropy+dice")` raises at forward, because the registry's DiceLoss is
-    binary while this head emits multi-class logits.
+    There is no registry loss to route a name to: `build_loss("cross_entropy+dice")` raises at
+    forward, since the registry's DiceLoss is binary while this head emits multi-class logits.
     """
     import pytest as _pytest
     from tcip_mcp.pipelines.components.heads import SemanticSegHead
@@ -410,8 +409,8 @@ def test_tune_search_warm_start_and_optimizes(tmp_path):
 
 
 def test_run_hyperparameter_search_exposes_agent_search_choices_not_pinned():
-    """run_hyperparameter_search lets the agent choose search_alg + scheduler; the old Optuna/pruner pins
-    are gone (capability-not-method)."""
+    """run_hyperparameter_search lets the agent choose search_alg and scheduler; it takes no
+    ``pruner`` or ``direction`` parameter."""
     import inspect
 
     from tcip_mcp.tools.training_tools import run_hyperparameter_search

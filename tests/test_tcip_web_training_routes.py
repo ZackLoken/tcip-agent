@@ -29,17 +29,17 @@ def _wait_terminal(experiment_id: str, deadline_s: float = 60) -> dict:
     return status
 
 
-def test_validate_route_no_longer_exists(client: TestClient) -> None:
-    """The raw validate door retired with the config picker: the browser never submits a typed
-    config again, so nothing serves ``/validate`` any more. ``preflight_config`` itself keeps
-    its own coverage (tests/test_training_tools.py); this is only the route's absence."""
+def test_the_validate_route_is_not_registered(client: TestClient) -> None:
+    """Nothing serves ``/api/training/validate``: the browser never submits a typed config, so
+    no route validates one. ``preflight_config`` keeps its own coverage in
+    tests/test_training_tools.py; this pins the route's absence alone."""
     resp = client.post("/api/training/validate", json={"config": {}})
     assert resp.status_code == 404
 
 
-def test_launch_route_no_longer_exists(client: TestClient) -> None:
-    """The raw launch door retired with the config picker: a run starts only from a recorded
-    config, through ``/api/training/runs``, never from a client-submitted config again."""
+def test_the_launch_route_is_not_registered(client: TestClient) -> None:
+    """Nothing serves ``/api/training/launch``: a run starts only from a recorded config,
+    through ``/api/training/runs``, never from a client-submitted one."""
     resp = client.post("/api/training/launch", json={"config": {}, "output_dir": ""})
     assert resp.status_code == 404
 
@@ -104,11 +104,10 @@ def test_list_runs_returns_shape(client: TestClient) -> None:
     assert "runs" in body
 
 
-def test_training_metrics_route_no_longer_exists(client: TestClient, tmp_path: Path) -> None:
-    """The HTTP metrics route is gone; the WebSocket stream (below) is the single serving
-    surface a run's metrics rows reach the browser through. Pinning the router itself as
-    registered (the sibling GET below) is what makes the 404 discriminate the one deleted
-    route rather than a router that failed to mount at all."""
+def test_the_http_metrics_route_is_not_registered(client: TestClient, tmp_path: Path) -> None:
+    """No HTTP metrics route is registered: the WebSocket stream (below) is the single serving
+    surface a run's metrics rows reach the browser through. The sibling GET pins the router as
+    mounted, so the 404 discriminates this one route rather than a router that never mounted."""
     resp = client.get(
         "/api/training/runs/foo-xxx/metrics",
         params={"project_root": str(tmp_path)},
@@ -388,8 +387,7 @@ def test_list_runs_reconstructs_from_experiments(tmp_path, monkeypatch) -> None:
 
 def test_list_runs_route_is_a_pure_pass_through_to_the_tool(tmp_path, monkeypatch) -> None:
     """Post-unification the route adds nothing of its own: its rows equal the tool's
-    ``launched_only=True`` view, exactly. Before unification the route's own reconstruction
-    added rows the tool lacked."""
+    ``launched_only=True`` view, exactly, so the route holds no reconstruction of its own."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment, update_status
@@ -557,7 +555,7 @@ def test_list_runs_route_names_the_run_s_selection_metric(
     """A launched (subprocess-delegated) run's row carries the metric the trainer itself
     stamped on its metrics-log rows, and the best value read back beside it, so the Training
     tab can label its best value instead of showing nothing (the parent's placeholder
-    ``inf``) or a name with no value (``None``, the pre-fix disk reconstruction)."""
+    ``inf``) or a name with no value (a ``None`` best value)."""
     import math
 
     monkeypatch.chdir(tmp_path)

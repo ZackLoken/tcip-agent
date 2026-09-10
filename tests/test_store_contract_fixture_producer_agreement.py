@@ -1,8 +1,8 @@
-"""Six of ``test_store_contract.py``'s ``REGISTERED`` goldens (the schema stability audit's
-cross-cutting note) pinned a shape their producer no longer writes: a golden there proves
-placement and encoding, never shape, so nothing caught the drift. Each case here re-derives the
-true shape from the same real producer and checks the registered golden still agrees, so a
-golden hand-edited back to a stale shape is caught here rather than silently standing again.
+"""Six of ``test_store_contract.py``'s ``REGISTERED`` goldens, checked against their producers.
+
+A golden there proves placement and encoding, never shape. Each case here derives the shape from
+the same producer the platform ships and checks the registered golden agrees with it, so a
+golden carrying a shape no producer writes is caught here.
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ def test_the_experiment_validations_golden_carries_the_resolvers_full_selection_
     fresh = _real_selection_disjointness()
 
     assert golden == fresh
-    assert len(golden) == 12, "the resolver never produces the four-key shape this used to pin"
+    assert len(golden) == 12, "the resolver produces twelve keys, never a four-key shape"
 
 
 def test_the_shared_validation_row_fixtures_selection_disjointness_agrees_too():

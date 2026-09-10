@@ -1,14 +1,13 @@
 """Config-driven multi-trait TraitSpec authoring + derived class-id + read-semantics.
 
-Pins the softened scope-tentative behavior: registering trait #2 is a breeder-authored config
-edit (cross-checked against the crops.yml controlled vocab, never agent-invented), the open
-class id is a mapping fact derived from subjects.json by name (never a pinned default), and the
-crossing-unconfirmed 95%-mapping marker travels with the delivery. There are no built-in traits:
-bud_opening is authored the same way as any other trait; this module's ``pytestmark`` requests
+Registering a second trait is a breeder-authored config edit (cross-checked against the
+crops.yml controlled vocab, never agent-invented), the positive class id is a mapping fact
+derived from subjects.json by name (never a pinned default), and the crossing-unconfirmed
+95%-mapping marker travels with the delivery. There are no built-in traits: the fixture trait is
+authored the same way as any other, through this module's ``pytestmark`` request for
 ``conftest.py``'s ``seed_bud_trait_spec``, which writes a real config file matching
 ``tests/_trait_fixtures.BUD_OPENING`` into this test's pinned platform state root, so
-``get_trait("bud_opening")`` keeps resolving by default the way it did when a builtin was
-unconditionally present.
+``get_trait`` resolves it.
 """
 
 from __future__ import annotations

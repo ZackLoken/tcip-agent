@@ -1,7 +1,6 @@
-"""A second registered trait, driven
-through both delivery doors (the JSON curve/milestone doors and export_csv), asserting its own
-schema and that an unvalidated row is refused. ``registered_traits()`` returning only
-``bud_opening`` was the standing gap this closes.
+"""A second registered trait, driven through both delivery doors (the JSON curve and milestone
+doors and export_csv), asserting its own schema and that an unvalidated row is refused, so the
+delivery path is exercised against more than one registered trait.
 
 ``currant_bloom`` is authored here, in this test file's own pinned platform state root, honestly
 tentative: no domain expert has confirmed it, and it exists to prove the delivery mechanism

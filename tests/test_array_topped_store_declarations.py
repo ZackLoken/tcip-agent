@@ -1,8 +1,8 @@
 """Three registered stores wrap a top-level JSON array of entries rather than a keyed record: the
 project dataset registry and the web job registry declare ``cannot_carry_field`` naming the
 array-top shape, since neither has an object to hold ``schema_version`` on. The model registry
-index used to be the same shape; it now wraps into ``{entries: [...]}`` (the relative-paths
-family) and declares a cleared ``cannot_carry_field``, covered separately below.
+index wraps into ``{entries: [...]}`` and declares a cleared ``cannot_carry_field``, covered
+separately below.
 """
 
 from __future__ import annotations

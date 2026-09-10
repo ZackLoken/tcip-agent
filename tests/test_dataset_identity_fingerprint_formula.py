@@ -1,9 +1,8 @@
-"""A dataset identity carrying a bare, pre-prefix fingerprint (from before ``dataset_fingerprint``
-started stamping a ``v<n>:`` formula-version prefix) is refused rather than admitted as the
-dataset's current identity, both by the identity decoder and by the project registry reader:
-re-registering through ``register_dataset`` is the remedy either names. A fixture registers a
-dataset for real and hand-edits its identity to a bare value afterwards, standing in for a
-dataset registered before this family.
+"""A dataset identity whose fingerprint carries no ``v<n>:`` formula-version prefix is refused
+rather than admitted as the dataset's current identity, both by the identity decoder and by the
+project registry reader: re-registering through ``register_dataset`` is the remedy either names.
+No writer mints a bare value, so the fixture registers a dataset for real and hand-edits its
+identity to one afterwards.
 """
 
 from __future__ import annotations

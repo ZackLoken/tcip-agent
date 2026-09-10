@@ -2,11 +2,10 @@
 ``list_logical_images``' own stem-collision refusal, raising ``AmbiguousImageStem`` the way
 every other reader of a bucket does, never picking one member of a stem-collided pair silently.
 
-``ingest_images`` itself already refuses to create a stem-collided pair (the ingest-collision
-family's own rail), so the pair a test needs here is built the only way one can actually reach
-disk: one real file ingested through that door, then a second, case-differing raw file added
-directly into the same bucket, standing in for a dataset an external tool or a manual copy
-touched after ingestion.
+``ingest_images`` itself refuses to create a stem-collided pair, so the pair a test needs here
+is built the only way one can actually reach disk: one real file ingested through that door,
+then a second, case-differing raw file added directly into the same bucket, standing in for a
+dataset an external tool or a manual copy touched after ingestion.
 """
 
 from __future__ import annotations

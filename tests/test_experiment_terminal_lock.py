@@ -1,12 +1,11 @@
 """The terminal lock protects an experiment's provenance writers, not just its own members.
 
-subprocess_worker's two config.json patches and persist_split_manifest's split.json write had no
-state precondition at all: a run whose experiment record turned terminal mid-flight (the wall-clock
-watchdog marking it failed while the child was still building its dataset) would have those writes
-land anyway. They now share experiments.refuse_if_terminal with log_metrics/record_artifact, and a
-refusal there raises ExperimentTerminal rather than degrading to a logged warning, so the worker
-exits non-zero with the reason on stderr instead of training against, and silently patching, a
-record that already closed.
+subprocess_worker's two config.json patches and persist_split_manifest's split.json write share
+experiments.refuse_if_terminal with log_metrics and record_artifact, so a run whose experiment
+record turned terminal mid-flight (the wall-clock watchdog marking it failed while the child was
+still building its dataset) cannot have those writes land anyway. A refusal there raises
+ExperimentTerminal rather than degrading to a logged warning, so the worker exits non-zero with
+the reason on stderr instead of training against, and silently patching, a record that closed.
 """
 
 from __future__ import annotations

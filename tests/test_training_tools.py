@@ -788,8 +788,8 @@ def test_apply_hpo_params_preserves_base_config_stages():
 
 
 def test_apply_hpo_params_derives_backbone_ratio_not_frozen():
-    """backbone_lr must scale by whatever ratio the agent's own base_config expressed, not
-    a frozen *0.1: a pinned constant here discards a deliberate agent choice (derive, don't pin)."""
+    """backbone_lr must scale by whatever ratio the agent's own base_config expressed, never a
+    multiplier pinned in the tool."""
     from tcip_mcp.tools.training_tools import _apply_hpo_params
 
     base = {"model_source": {"builder": "x:y", "task": "detection"},
@@ -798,7 +798,7 @@ def test_apply_hpo_params_derives_backbone_ratio_not_frozen():
     assert out["optimizer"]["head_lr"] == pytest.approx(0.02)
     assert out["optimizer"]["backbone_lr"] == pytest.approx(0.004)  # 0.02 * 0.2, not 0.002
 
-    # No explicit ratio expressed at all -> default 1.0, not the old frozen 0.1.
+    # No explicit ratio in base_config -> the ratio is 1.0, so head_lr and backbone_lr agree.
     base_no_ratio = {"model_source": {"builder": "x:y", "task": "detection"}}
     out2 = _apply_hpo_params(base_no_ratio, {"lr": 0.02})
     assert out2["optimizer"]["backbone_lr"] == pytest.approx(0.02)

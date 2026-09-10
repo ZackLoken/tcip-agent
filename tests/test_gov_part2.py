@@ -46,8 +46,8 @@ def test_distill_worksheet_gathers_reports_captures_and_themes(tmp_path):
     distill = _load_distill()
     _seed_report(tmp_path, "r", {"category": "needs_human_judgment",
                                  "detail": "the EXIF orientation thing"})
-    # This bites on the database leg (nothing lands at the old literal .tcip/learning_capture.jsonl
-    # path there); the file leg is coverage only, since its own locator resolves to that same path.
+    # This bites on the database leg (nothing lands at the literal .tcip/learning_capture.jsonl
+    # path there); the file leg is coverage only, since its own locator resolves to that path.
     _seed_capture(tmp_path, "s1")
 
     ws = distill.build_worksheet(tmp_path)

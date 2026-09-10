@@ -2,11 +2,9 @@
 
 `agent_terminal.settings.json`'s own `_comment` pairs its WebFetch allowlist with the cv-research
 skill: the skill names the academic hosts an agent may reason it can fetch, and the allowlist is
-the one that actually grants fetching them. When two hand-maintained declarations state the same
-fact, they drift apart silently unless something checks them against each other (CLAUDE.md: when
-two code paths must agree, a consistency check needs an independent recheck, not shared
-implementation, to mean anything). This is that recheck, parsed from both files directly rather
-than from a copy of either.
+the one that actually grants fetching them. Two hand-maintained declarations of the same fact
+drift apart silently unless something checks them against each other, so this parses both files
+directly rather than a copy of either.
 
 Host agreement is checked one-directionally on the www prefix, matching how the fence actually
 grants hosts: `arxiv.org` and `semanticscholar.org` each carry a bare and a www rule side by
