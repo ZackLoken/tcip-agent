@@ -333,10 +333,10 @@ def resolve_group_key_fn(
 ) -> Callable[[str], str]:
     """Resolve a grouping policy to a callable, raising loudly rather than silently degrading.
 
-    Replaces every ``GROUP_KEY_FNS.get(group_by, default_group_key)`` call site: an unrecognized
-    ``group_by`` string, or a ``group_key_map`` missing coverage for some of
-    ``stems``, is a policy error the caller must see immediately, not a silent fallback to the
-    tile-prefix default that could mis-group a dataset without anyone noticing.
+    The one resolution every call site goes through: an unrecognized ``group_by`` string, or a
+    ``group_key_map`` missing coverage for some of ``stems``, is a policy error the caller must
+    see immediately, not a silent fallback to the tile-prefix default that could mis-group a
+    dataset without anyone noticing.
     """
     if group_key_map is not None:
         missing = sorted(s for s in stems if s not in group_key_map)

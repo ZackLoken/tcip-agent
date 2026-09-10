@@ -514,8 +514,8 @@ class GenericPredictor:
         ``prior``/``progress`` (both default ``None``) forward to :meth:`_tiled_infer_core` for the
         windowed-reader source only, the resume seam a raster too large to decode whole needs; see
         that method's own docstring. The whole-decode source never resumes (a plain directory-of-
-        images pass writes its files all at the end, unchanged), so a caller of that path leaves
-        both unset; passing either against a whole-decode source refuses by name rather than
+        images pass writes its files all at the end), so a caller of that path leaves both
+        unset; passing either against a whole-decode source refuses by name rather than
         silently dropping the resume state the caller thinks it handed over.
         """
         if not hasattr(source, "read_window") and (prior is not None or progress is not None):

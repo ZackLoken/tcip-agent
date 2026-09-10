@@ -109,9 +109,8 @@ def loader_worker_init(worker_id: int, seed: int | None = None,
     Always configures the platform GDAL cache budget: a spawned worker starts a fresh process
     on GDAL's stock default, not the budget the parent configured. Scaled by ``num_workers``
     (each worker gets ``1 / num_workers`` of the budget) so the fleet of workers together
-    commits what the platform intended, not that amount each; ``None`` (a caller that has not
-    been updated to pass it) keeps the pre-scaling full-budget behavior. Per-worker numpy/random
-    seeding applies only when the run is seeded.
+    commits what the platform intended, not that amount each; ``None`` gives every worker the
+    whole budget, unscaled. Per-worker numpy/random seeding applies only when the run is seeded.
     """
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 
@@ -368,9 +367,9 @@ def resolve_selection_metric(
     Default: ``"objective"`` for detection/instance_seg, else ``"loss"``. An explicit
     ``requested`` is honored, except it is rejected when
     ``trait`` is a center-match trait and ``requested`` names a metric that trait's own
-    localization criterion demotes to comparability-only (``evaluation.CENTER_MATCH_COMPARABILITY_KEYS``)
-, selecting checkpoints by a metric the trait doesn't trust is a defensibility regression, not a
-    legitimate choice.
+    localization criterion demotes to comparability-only
+    (``evaluation.CENTER_MATCH_COMPARABILITY_KEYS``): a checkpoint selected by a metric the trait
+    does not trust does not rest on the trait's own criterion.
 
     Reads the trait's recorded localization kind (``TraitSpec.localization`` is derived
     once from real GT and persisted, never authored). This runs at preflight time, before any GT is
@@ -561,8 +560,9 @@ def train(
     - ``mixed_precision`` (bool, default True), AMP, only when ``device`` is cuda.
     - ``stages`` (list of ``{freeze_to, epochs}``; a per-stage ``lr`` is accepted but ignored,
       see ``optimizer`` below), default a single 10-epoch full-unfreeze stage.
-    - ``optimizer`` (``{name, backbone_lr, head_lr, weight_decay}``, default adamw/1e-4/1e-3/1e-4)
-, the one source of learning rate, applied uniformly across every stage.
+    - ``optimizer`` (``{name, backbone_lr, head_lr, weight_decay}``, default
+      adamw/1e-4/1e-3/1e-4), the one source of learning rate, applied uniformly across
+      every stage.
     - ``scheduler`` (``{type, ...}``; ``type`` in cosine/plateau/onecycle/step, default cosine).
     - ``lr_scaling`` (``{enabled, reference_effective_batch, scale_power, max_lr}``, default
       disabled), effective-batch LR scaling at stage boundaries.
@@ -680,7 +680,7 @@ def train(
             # Restore RNG state after the fresh `set_seed()` call above (never skip that
             # call, it also configures cudnn.deterministic/benchmark) so the resumed streams
             # overwrite the freshly-seeded ones rather than starting over from stream position
-            # zero. Older checkpoints predating this field degrade gracefully to the fresh seed.
+            # zero. A checkpoint carrying no RNG state degrades to the fresh seed instead.
             if "torch_rng_state" in ckpt:
                 restore_rng_state(ckpt)
                 run.rng_state_restored = True

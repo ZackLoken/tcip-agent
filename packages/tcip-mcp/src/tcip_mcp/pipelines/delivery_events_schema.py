@@ -251,7 +251,7 @@ class DeliveryEventRecord(BaseModel):
         Union[PlantMappingDisclosure, PlantRegistryDisclosure, CanopySegmentDisclosure]
     ]
     documents: dict[str, DocumentBinding]
-    # Keyed by the reconciler the delivering door's gate ran; None on a record predating these.
+    # Keyed by the reconciler the delivering door's gate ran; None when the record carries none.
     document_reconciliations: Optional[dict[str, ReconciledDocument]] = None
     dimension_reconciliations: Optional[dict[str, ReconciledDimension]] = None
     produced_at: str

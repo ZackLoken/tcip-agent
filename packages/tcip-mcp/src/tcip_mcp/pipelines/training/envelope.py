@@ -401,8 +401,8 @@ def _snapshot_run_provenance(ctx: TrainContext) -> None:
     """Snapshot env (+ bespoke model source) into the immutable experiment dir. Best-effort.
 
     ``env.json`` records the library versions, seed and model kind for every run. For a bespoke
-    ``model_source`` / ``training_source`` run, the
-    per-file source snapshot is added by ``snapshot_model_source``."""
+    ``model_source`` / ``training_source`` run, the per-file source snapshot is added by
+    ``snapshot_model_source``."""
     if ctx.experiment_id is None:
         return
     try:

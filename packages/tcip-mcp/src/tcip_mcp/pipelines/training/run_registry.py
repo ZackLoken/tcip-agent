@@ -44,7 +44,7 @@ class TrainRun:
     # Set by cancel_run() to request a graceful stop; the train loop polls it.
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
     # Set on resume, True if the checkpoint carried RNG state and it was restored, False
-    # if the checkpoint predates RNG capture (fresh-seed stream stands). None on a non-resumed run.
+    # if the checkpoint carried none, the fresh-seed stream stands. None on a non-resumed run.
     rng_state_restored: bool | None = None
     # None means the loop runs in-process (cancel_event alone is authoritative); set once the
     # parent spawns the subprocess a run's body executes in, when should_cancel polls the sentinel.

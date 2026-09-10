@@ -42,9 +42,9 @@ class AmbiguousImageStem(ValueError):
     variant such as ``Foo.jpg``), or a raw file and a ``.bandgroup`` manifest recorded under a
     different exact stem than its own.
 
-    Raised from :func:`list_logical_images` rather than silently keeping only one identity (which
+    Raised from :func:`list_logical_images` rather than silently keeping only one identity, which
     would make the other vanish from every listing, including training, splits, review, and
-    gallery, with no error): CLAUDE.md's "no silent fallback on ambiguous identity" rule.
+    gallery, with no error.
     """
 
 # ``.npy``/``.npz`` are a multi-band raster; ``.bandgroup`` a manifest standing in for the image it
@@ -67,9 +67,9 @@ def stem_collision_key(name: str) -> str:
 def _scan_identities(d: Path) -> dict[str, list[tuple[Path, "BandGroupRef | None"]]]:
     """One manifest glob and one ``d.iterdir()`` walk with one extension test, the shared
     enumeration :func:`list_logical_images` and :func:`bucket_logical_identities` both build on,
-    so directory enumeration happens once per call rather than two independent walks. Keyed
-    by :func:`stem_collision_key`; a key's list holds more than one entry
-    exactly when it is ambiguous.
+    so directory enumeration happens once per call rather than two independent walks. Keyed by
+    :func:`stem_collision_key`; a key's list holds more than one entry exactly when it is
+    ambiguous.
 
     A readable manifest is one identity under its own exact stem, paired with the parsed
     :class:`BandGroupRef` so a caller building :func:`list_logical_images`'s result never re-reads

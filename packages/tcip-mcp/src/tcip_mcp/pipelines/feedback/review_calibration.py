@@ -208,10 +208,8 @@ def _same_producer(entry_identity: dict, target: dict) -> bool:
 
 def _matches_any_bucket(identity: dict | None, bucket_identities: list[dict]) -> bool:
     """True when ``identity`` (a verdict/image's own recorded producer fact, or ``None``) names the
-    same producer as any of ``bucket_identities``. ``None``/empty never matches, a verdict with no
-    recorded identity (written before producer-identity scoping existed, or authored by a caller
-    that never resolved one) fails closed rather than being grandfathered in (CLAUDE.md's
-    no-back-compat rule)."""
+    same producer as any of ``bucket_identities``. ``None``/empty never matches: a verdict with no
+    recorded identity fails closed."""
     if not identity:
         return False
     return any(_same_producer(identity, target) for target in bucket_identities)
@@ -258,16 +256,14 @@ def review_to_records(
       - an image with verdict entries: only entries whose ``producer_identity`` matches any of
         ``bucket_identities`` contribute to ``gt``/``dt``. If none of an image's entries match, the
         whole image is dropped, it carries no evidence for this bucket, so it must not silently
-        count as a zero-bias/zero-object agreement for it (this closes a real contamination path:
-        model A's review verdicts must not validate model B's bucket).
+        count as a zero-bias/zero-object agreement for it (model A's review verdicts must not
+        validate model B's bucket).
       - an image with zero verdict entries (a confirmed negative via ``mark_complete``) carries its
         producer identity at the image level instead (``img_data["producer_identity"]``), checked
         the same way; a mismatch or missing stamp drops the image entirely rather than counting it
         as a negative for the wrong bucket.
 
-    A verdict/image with no recorded identity at all (written before producer-identity scoping
-    existed) always fails closed here, excluded, never grandfathered (CLAUDE.md's no-back-compat
-    rule; this platform has no users yet).
+    A verdict/image with no recorded identity at all always fails closed here, excluded.
 
     Each returned record also carries ``adjudication_covered``, ``True`` when there is
     positive evidence a human could have caught a missed object on this image:
@@ -301,7 +297,7 @@ def review_to_records(
     ``resolve_operating_point_from_review`` passes this field to ``resolve_operating_point`` as a
     gate, every record must satisfy it or the whole reference is refused, never a per-record
     filter (a filter here is a fail-open: the excluded set correlates with the quantity being
-    measured, see ``resolve_operating_point``'s own docstring for the reproduced scenario).
+    measured, see ``resolve_operating_point``'s docstring).
 
     ``image_dims`` maps image name (with extension, as review state keys it) -> ``(width, height)``
     to denormalize boxes to pixels (the faithful scale); omit it to keep records on the normalized
@@ -309,11 +305,9 @@ def review_to_records(
     is not a confirmed reference).
 
     Each record carries ``image_id=Path(img_name).stem``, the stem, not the extensioned review-
-    state key. Training stems (``split.json``'s ``"train"`` list) never carry an
-    extension, so an extensioned ``image_id`` here could never match a training stem in
-    ``_train_disjointness``, the leak the disjointness check exists to catch went entirely
-    undetected on this path. Stemming also restores tile-group coherence: ``_TILE_GROUP_RE`` only
-    matches a bare stem, so an extensioned id degenerated to one group per tile.
+    state key. Training stems (``split.json``'s ``"train"`` list) never carry an extension, so
+    only a stemmed ``image_id`` can match a training stem in ``_train_disjointness``. Stemming
+    also keeps tile groups coherent: ``_TILE_GROUP_RE`` matches only a bare stem.
     """
     dims = image_dims or {}
     records: list[dict] = []
@@ -490,7 +484,7 @@ def resolve_operating_point_from_review(
     every verdict rather than silently admitting them all).
 
     ``staged_conf_floor`` is the effective floor the reviewed predictions were staged/shown
-    at, ``max(generation_conf, review_conf_threshold)`` per the design, computed by the caller
+    at, ``max(generation_conf, review_conf_threshold)``, computed by the caller
     (``routes/review.py``, which has both the buckets' ``operating_point.json`` sidecars and
     ``review_conf_threshold``'s recorded-verdict computation) and passed straight through to
     ``resolve_operating_point``. This function does not derive it.

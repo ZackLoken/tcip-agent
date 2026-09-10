@@ -466,7 +466,7 @@ def _train_disjointness(
     ``group_key_map`` route (the map was never persisted) even though both are legitimate, disjoint
     training regimes. Instead, group-level resolution is attempted per stem:
 
-      - a named, recognized strategy (``tile_prefix``/``stem``) resolves every stem, as before.
+      - a named, recognized strategy (``tile_prefix``/``stem``) resolves every stem.
       - ``group_by == "explicit_map"`` resolves via the persisted ``group_key_map`` for whichever
         stems it actually covers; stems it doesn't cover are treated as unresolvable for that stem
         only, not a blanket failure.
@@ -1431,7 +1431,7 @@ def resolve_classifier_operating_point(
     count_bias = statistics.fmean(per_image_bias) if per_image_bias else 0.0
     # Sample stdev (ddof=1/Bessel's correction), matching the detection path's
     # np.std(biases, ddof=1) exactly: a population estimator is systematically more
-    # permissive, worst at small n, which is exactly where the equivalence test's SE penalty is
+    # permissive, worst at small n, which is exactly where the equivalence test's SE penalty
     # must bite hardest.
     count_bias_std = statistics.stdev(per_image_bias) if n_bias_images > 1 else 0.0
     # The same relative-tolerance shape the detection path uses, the positive class's own typical
@@ -1480,9 +1480,8 @@ def resolve_classifier_operating_point(
     if n_bias_images < 2:
         # Same minimum the detection path requires (hb["n_present"] < 2, present-scoped like
         # n_bias_images): without this, a single-image holdout forces count_bias_std to 0.0
-        # (no images to vary across), so the equivalence test's SE penalty vanishes and a lone image
-        # can pass at exactly the tolerance
-        # with zero uncertainty discount.
+        # (no images to vary across), so the equivalence test's SE penalty vanishes and a lone
+        # image can pass at exactly the tolerance with zero uncertainty discount.
         failures.append("insufficient_holdout_images")
     if not count_bias_ok:
         failures.append("count_bias_exceeds_tolerance")
