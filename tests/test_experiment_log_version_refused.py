@@ -22,7 +22,7 @@ from tcip_store.file_backend import FileBackend
 
 def _plant_poisoned_line(key: ts.Key, entry: dict) -> None:
     """One already-poisoned log line, written directly to disk: what a newer writer's row
-    looks like to this reader, never reachable through this store's own append any more."""
+    looks like to this reader, never reachable through this store's own append."""
     data = ts.get_descriptor(key.store).codec.encode(entry)
     with open(FileBackend().path_for(key), "ab") as handle:
         handle.write(data + b"\n")

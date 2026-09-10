@@ -675,7 +675,7 @@ def test_write_phenology_csv_fully_validated_acknowledgement_leaves_the_tail_and
 
 
 def test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns(tmp_path):
-    """No ``stamp`` parameter exists any more: the writer composes its own provenance cells and
+    """There is no ``stamp`` parameter: the writer composes its own provenance cells and
     returns them, so this pins that the set it returns is exactly the schema's provenance columns
     plus the trait's own majority crossing-unconfirmed marker and the write's own
     ``delivery_event_recorded`` flag (not a schema column; the CSV itself never carries it)."""

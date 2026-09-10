@@ -462,9 +462,9 @@ def _replace_boxes(pred_path: Path, boxes: list[tuple[float, float, float, float
 def test_deliver_orthomosaic_plant_counts_refuses_unvalidated_then_delivers_once_validated(
     tmp_path, monkeypatch,
 ):
-    """This door takes no acknowledgement, so a bare unvalidated count always refuses with a
-    TypeError rather than a quieter admission; the same delivery ships once the bucket earns a
-    real reference."""
+    """A bare unvalidated count refuses, naming the unvalidated dimension; passing an
+    acknowledgement raises TypeError rather than a quieter admission, since this door takes
+    none; the same delivery ships once the bucket earns a real reference."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 

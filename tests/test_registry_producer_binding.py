@@ -145,7 +145,7 @@ def test_resumed_run_records_and_binds_its_own_weights(tmp_path, monkeypatch):
 def test_forged_tag_never_feeds_the_experiment_s_own_recorded_checkpoint(tmp_path, monkeypatch):
     """An entry registered through explicit mode with an ``experiment:<id>`` tag, for a run
     that never registered itself, never makes ``corroborated_producer`` name that run: the tag
-    is caller metadata read by no producer resolver any more. Registered before the run's own
+    is caller metadata read by no producer resolver. Registered before the run's own
     name (coverage: replaced by name once the run registers) and under another name (coverage:
     never scanned at all)."""
     from tcip_mcp.experiments import create_experiment, update_status

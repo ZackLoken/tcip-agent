@@ -42,5 +42,5 @@ def check_schema_version(descriptor: StoreDescriptor, doc: Any) -> None:
         raise SchemaVersionRefused(
             f"{descriptor.name} document is schema_version {version}, above the "
             f"{descriptor.schema_version} this reader knows: a value above this store's own "
-            "ceiling is refused rather than read, whatever wrote it"
+            "ceiling is refused, whatever wrote it"
         )

@@ -1568,8 +1568,7 @@ def test_review_action_requires_dataset_root(
 ) -> None:
     """No read or write happens before the refusal: an empty ``dataset_root`` is named rather
     than resolving to the process cwd. In this test environment the process cwd does not
-    resolve under an allowed root, so the pre-refusal baseline answered the path guard's 403,
-    not the 200 a resolvable cwd would reach; the guard is the 400 assertion. The location a
+    resolve under an allowed root, and the 400 assertion is the guard. The location a
     lost guard would leave a mark at is the process cwd, not this fixture's own
     ``dataset_root`` tree, so the write probe reads the cwd's review-verdict store and audit
     store (coverage on the gate's tree, where the cwd's ``.tcip`` already exists)."""
@@ -1648,8 +1647,7 @@ def test_review_mark_complete_answers_409_with_the_committed_body_on_a_lost_audi
 def test_review_mark_complete_requires_dataset_root(client: TestClient) -> None:
     """No read or write happens before the refusal: an empty ``dataset_root`` is named rather
     than resolving to the process cwd. In this test environment the process cwd does not
-    resolve under an allowed root, so the pre-refusal baseline answered the path guard's 403,
-    not the 200 a resolvable cwd would reach; the guard is the 400 assertion. The location a
+    resolve under an allowed root, and the 400 assertion is the guard. The location a
     lost guard would leave a mark at is the process cwd, not a directory this test never
     creates, so the write probe reads the cwd's review-verdict store and audit store (coverage
     on the gate's tree, where the cwd's ``.tcip`` already exists)."""
@@ -1686,7 +1684,7 @@ def test_review_mark_complete_refusal_persists_nothing(
     client: TestClient, dataset_root: Path, tmp_path: Path,
 ) -> None:
     """A 400 on the unreadable GT read must leave the image exactly as it was: no review mark, no
-    audit line, because a claim derived from a document nobody can read is a claim about nothing."""
+    audit line."""
     gt = tmp_path / "gt.json"
     gt.write_text("not json {][", encoding="utf-8")
 
@@ -2269,8 +2267,8 @@ def test_state_socket_broadcasts_a_mutation_while_open(client: TestClient) -> No
 
 
 def test_dataset_state_route_is_retired(client: TestClient) -> None:
-    """``/api/dataset/state`` duplicated ``/api/state`` over the same singleton snapshot and had
-    no browser caller; ``/api/state`` is the one route left over it."""
+    """``/api/dataset/state`` is not registered; ``/api/state`` is the one route over the
+    singleton snapshot."""
     assert client.get("/api/dataset/state").status_code == 404
 
 

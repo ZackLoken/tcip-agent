@@ -410,8 +410,7 @@ def test_a_fresh_sqlite_project_authors_and_updates_a_spec_with_no_specs_directo
 
 
 def test_file_backend_locates_a_trait_spec_at_the_shared_state_trait_specs_path(tmp_path: Path):
-    # Direct lookup and enumeration land at <state>/trait_specs/<trait>.json on disk, the
-    # byte-identical placement the store's self-rooted predecessor already used.
+    # Direct lookup and enumeration land at <state>/trait_specs/<trait>.json on disk.
     from tcip_store.file_backend import FileBackend
 
     import tcip_store as ts
