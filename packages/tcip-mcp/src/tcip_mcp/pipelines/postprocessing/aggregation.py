@@ -217,9 +217,7 @@ def _unit_from_value_key(value_key: str) -> tuple[str, str] | None:
     declared unit vocabulary). Delegates to :func:`mask_geometry.unit_from_value_key`, the single
     owner of the naming convention, vocabulary-driven rather than a field-name whitelist, so a
     bespoke agent-composed measurement (an arc length, a landmark distance) is recognized the same
-    way mask_geometry's own fields are, rather than re-deriving the pattern with a local regex (two
-    independent parsers of the same convention is exactly the drift class that let a wrong pattern
-    fabricate unit labels from unrelated keys like ``plant_id`` or ``detections_total``)."""
+    way mask_geometry's own fields are, rather than re-deriving the pattern with a local regex."""
     from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
 
     return unit_from_value_key(value_key)
@@ -240,9 +238,9 @@ def _resolve_units(
     declared unit is a cross-check only, never a fallback source under ``operating_point``. A
     value_key with no recognized physical-unit suffix (px, count, or a trailing token outside
     crops.yml's declared unit vocabulary) yields ``("", None)`` under ``operating_point``, exactly
-    like a count trait already does: it never inherits crops.yml's declared unit unopposed, which was
-    the actual defect there, a pixel-space value shipping labeled with the trait's declared mm/cm/m
-    because nothing derived a unit to check it against.
+    like a count trait already does: it never inherits crops.yml's declared unit unopposed, or a
+    pixel-space value would ship labeled with the trait's declared mm/cm/m because nothing derived
+    a unit to check it against.
 
     Under a scalar head (``ordinal_operating_point``/``regression_operating_point``), a value_key
     with no unit suffix at all (a bare ``value`` or the trait's own bare name, e.g.

@@ -403,7 +403,7 @@ def center_match_pairs(gt_centers: list[tuple[float, float]], dt_centers: list[t
     ``policy="score_first"`` walks ``dt_centers`` in the order given (a caller passing detections
     score-descending resolves a duplicate claim on one ground truth by keeping the
     higher-confidence detection); among equidistant unused ground truths the last index wins, the
-    count's existing semantics, unchanged by this primitive's introduction. A detection with no
+    count's own semantics. A detection with no
     recorded score cannot be placed in that order at all, so a caller using this policy refuses
     such a record before it ever reaches here, never passing a stand-in score in its place.
 
@@ -761,7 +761,7 @@ def derive_operating_point_curve(per_image: list[dict], *, tolerance: float,
         if len(class_ids) == 1:
             # Filtering to the only class present is a no-op on both gt and dt, so the pooled entry
             # is that class's entry, reused rather than recomputed, which keeps the single-class
-            # sweep (every reference the platform builds today) at its original cost.
+            # sweep (every reference the platform builds) at one pass's cost.
             per_class = {str(class_ids[0]): pooled}
         else:
             per_class = {str(cid): _count_stats_at_conf(per_image, tolerance=tolerance, conf=conf,
@@ -798,18 +798,17 @@ def pick_count_unbiased(sweep: dict) -> float | None:
     same curve that the gate would accept
     (see ``test_pick_serves_the_worst_class_not_the_pooled_total``). Picking pooled there refuses a
     model that has a valid operating point, and tells the breeder to fix a model that is not broken.
-    On a single-class reference the two objectives are the same number, so this changes no operating
-    point the platform picks today.
+    On a single-class reference the two objectives are the same number.
 
-    The final ``-c["conf"]`` tie-break is a completion of the existing
-    tie-break, not a new selection objective: when |bias| and F1 and |abs error| are all exactly
+    The final ``-c["conf"]`` tie-break orders equals and is no selection objective of its own:
+    when |bias| and F1 and |abs error| are all exactly
     tied across several confs, which happens on a reference filtered to a floor, since nothing
     below the floor is visible to distinguish them, defaulting to the lowest tied conf (e.g. the
     grid's seeded 0.0) would be generically the worst of the tied candidates in practice
     (it admits the most low-confidence noise for no better count agreement) and, combined with the
     conf-censoring guard, could make a genuinely trustworthy pick read as censored merely because the
     tie resolved to the search floor. Preferring the highest tied conf breaks ties toward the most
-    conservative, best-supported candidate among equals, it does not change what is optimized.
+    conservative, best-supported candidate among equals.
     """
     curve = sweep.get("curve") or []
     if not curve:

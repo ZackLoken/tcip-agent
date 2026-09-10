@@ -290,7 +290,7 @@ class TiledDetectionDataset(BaseImageDataset):
     dropped first and counted in ``tiles_dropped_past_extent``, since they can never lie inside
     a rect clipped to the image; tiles no rect contains count in
     ``tiles_dropped_outside_regions``. Without ``keep_regions`` both counts stay 0 and
-    overhanging tiles are kept, zero-padded, as always.
+    overhanging tiles are kept and zero-padded.
     """
 
     task_type = "detection"
@@ -1105,7 +1105,7 @@ def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Da
     if tiling and tiling.get("enabled", True) and task == "detection":
         transforms = kwargs.pop("transforms", None)
         base = cls(**kwargs)
-        # Before constructing the tiler: its __init__ indexes every image, and that pass must measure frames at the band count the tiles will be decoded at. Stamping only the wrapper
+        # The tiler's __init__ indexes every image at this band count; stamping only the wrapper
         # afterwards leaves the index built at 3 channels and the tiles read at N.
         base.expected_channels = num_channels
         ds = TiledDetectionDataset(base, transforms=transforms, **tile_kwargs_from_tiling(tiling))

@@ -300,8 +300,8 @@ def run_full_frame_evaluation(
         dt = [{"category_id": int(lab), "bbox": xywh(*b), "score": float(s)}
               for b, s, lab in zip(r["boxes"], r["scores"], r["labels"])]
         rec = build_coco_image_record(w, h, gt, dt, image_id=p.stem)
-        # predict_tiled stamps cap_hit itself now; read it rather than re-deriving, falling back
-        # to the equivalent direct computation for a predictor stub that predates that stamp.
+        # cap_hit is read off the result, with the direct computation as the fallback for a
+        # predictor that does not stamp it.
         rec["cap_hit"] = r.get("cap_hit", len(dt) >= max_dets)
         per_image.append(rec)
 

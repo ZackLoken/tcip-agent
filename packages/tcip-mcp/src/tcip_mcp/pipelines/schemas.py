@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 class StageSpec(BaseModel):
     # A stage is a progressive-unfreeze step. The trainer reads ``freeze_to`` and ``epochs``;
     # the optimizer LR comes from the top-level ``optimizer`` block, not per stage. extra is
-    # allowed, so an old config still carrying a per-stage ``lr`` validates (it's ignored).
+    # allowed, so a config carrying a per-stage ``lr`` validates and the value is ignored.
     model_config = ConfigDict(extra="allow")
     epochs: int
     freeze_to: int | None = None
@@ -54,7 +54,7 @@ class ImageStatsSampling(BaseModel):
 
 
 class ModelSourceSchema(BaseModel):
-    # extra="forbid": a misspelled key here is dropped silently by every reader today; refuse
+    # extra="forbid": a misspelled key here is dropped silently by every reader; refuse
     # it by name instead of building at the builder's own defaults.
     model_config = ConfigDict(extra="forbid")
     builder: str | None = None

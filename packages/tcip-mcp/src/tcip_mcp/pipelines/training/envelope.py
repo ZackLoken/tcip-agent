@@ -11,7 +11,7 @@ plus the envelope-owned sinks (``log_metrics`` / ``save_checkpoint`` / ``record_
 ``should_cancel`` / ``tb`` / ``set_final_weights`` / ``report_objective``), the seams that keep a
 hand-rolled loop audited + immutable.
 
-When no ``training_source`` is set, ``ctx.default_train()`` runs today's
+When no ``training_source`` is set, ``ctx.default_train()`` runs
 ``generic_trainer.train()``, and the envelope adds only provenance/audit *around* it.
 ``dispatch_train_body`` is the shared dispatch-then-derive-final-weights step both the full
 envelope (``run_training_envelope``) and an HPO trial (``training_tools._run_hpo_trial``) call,
@@ -111,7 +111,7 @@ class TrainContext:
 
     # ---- the default trainer: one optional convenience ----
     def default_train(self) -> Any:
-        """Run today's strong default policy (progressive unfreeze / differential-LR / AMP+accum /
+        """Run the default policy (progressive unfreeze / differential-LR / AMP+accum /
         selection+early-stop / checkpoint cadence)."""
         from tcip_mcp.pipelines.training.generic_trainer import train
 
@@ -400,8 +400,8 @@ class TrainContext:
 def _snapshot_run_provenance(ctx: TrainContext) -> None:
     """Snapshot env (+ bespoke model source) into the immutable experiment dir. Best-effort.
 
-    Closes the 'no source/env provenance' hole for every run: ``env.json`` records the library
-    versions + seed + model kind. For a bespoke ``model_source`` / ``training_source`` run, the
+    ``env.json`` records the library versions, seed and model kind for every run. For a bespoke
+    ``model_source`` / ``training_source`` run, the
     per-file source snapshot is added by ``snapshot_model_source``."""
     if ctx.experiment_id is None:
         return
@@ -428,8 +428,8 @@ def _snapshot_run_provenance(ctx: TrainContext) -> None:
 
 
 def dispatch_train_body(ctx: TrainContext) -> None:
-    """Run the training body, an agent's ``training_source`` if set, else ``ctx.default_train()``
-, then resolve ``ctx.final_weights`` generically for either path.
+    """Run the training body, an agent's ``training_source`` if set, else
+    ``ctx.default_train()``, then resolve ``ctx.final_weights`` generically for either path.
 
     The ``model_best.pt``/``model_final.pt`` convention must not live inside ``default_train()``
     alone, or a bespoke loop that never calls ``ctx.set_final_weights()`` itself would leave
@@ -451,7 +451,7 @@ def dispatch_train_body(ctx: TrainContext) -> None:
             # (it returned without cancelling or raising).
             run.status = "cancelled" if run.should_cancel() else "completed"
     else:
-        ctx.default_train()  # today's trainer
+        ctx.default_train()  # the default trainer
 
     if ctx.final_weights is None:
         from tcip_store import blob_path

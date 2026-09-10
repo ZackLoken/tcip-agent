@@ -182,9 +182,9 @@ def _bias_equivalence_ok(mean: float, std: float, n: int, *, tolerance_frac: flo
 
     The tolerance itself is computed here, in one place, via :func:`_effective_count_bias_tolerance`,
     every caller passes the breeder-authored fraction and the scope's own derived typical count as
-    keyword-only arguments, never a raw already-converted tolerance float, so a future caller cannot
+    keyword-only arguments, never a raw already-converted tolerance float, so a caller cannot
     silently pass ``trait.count_bias_tolerance_frac`` straight through as if it were already an
-    absolute count (the old, wrong shape this signature makes impossible to spell).
+    absolute count.
 
     ``mean``/``std``/``n`` must all be measured over the same population the ``typical_count`` was:
     the samples that actually carry the thing being counted. Passing a bias averaged over a wider
@@ -207,8 +207,8 @@ def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
 
     Checked in this order, the first that exposes any of :data:`OPERATING_POINT_ATTRS`: the module
     itself, its ``.detector``'s ``roi_heads`` (two-stage detectors), its ``.detector`` (one-stage).
-    A composed torchvision detector under ``.detector`` resolves the way it always has; a bespoke
-    module exposing a knob on itself, with no ``.detector`` to route through, now reaches it too,
+    A composed torchvision detector resolves under ``.detector``; a bespoke module exposing a
+    knob on itself, with no ``.detector`` to route through, resolves on the module itself,
     independently of what a given call actually sets. Returns ``(None, None)`` when no candidate
     exposes any of the three: nothing here can govern which boxes exist.
 
@@ -831,8 +831,8 @@ def resolve_operating_point(
     pass output; ``records_over_loader`` produces it. ``tile_size`` may be model-derived (imgsz).
 
     ``cal_rects``/``hold_rects`` are optional and additive, forwarded verbatim to
-    :func:`_train_disjointness` (see its own docstring): every existing caller omits them and gets
-    exactly today's lexical/stem-based disjointness check, unchanged. A block-calibration caller
+    :func:`_train_disjointness` (see its own docstring): omitting them gets the lexical,
+    stem-based disjointness check. A block-calibration caller
     (a mosaic's own reserved calibration/test regions) supplies them to get the geometric
     containment check instead, the only shape that can prove disjointness for a within-mosaic
     reference with no separate image identity of its own.
@@ -1017,7 +1017,7 @@ def resolve_operating_point(
             # reference on either side can't validate a count operating point.
             cal_gt_count = sum(len(r.get("gt", [])) for r in calibration_records)
             hold_gt_count = sum(len(r.get("gt", [])) for r in holdout_records)
-            # The mean+SE equivalence/CI criterion, replacing a bare mean check, degrades correctly
+            # The mean+SE equivalence/CI criterion, rather than a bare mean, degrades correctly
             # at small n (SE grows, so less evidence is harder to pass, not easier) and needs no
             # second, unrelated tolerance constant.
             #
@@ -1091,8 +1091,7 @@ def resolve_operating_point(
             # ...and a class the holdout never carries is not a class that passed: its entry is all
             # zeros, so the test above reads bias 0.0 and says nothing. A class confused entirely
             # within the calibration half would otherwise read clean on every per-class entry the
-            # gate can see, and the stamp would land anyway (reproduced in
-            # `test_a_class_the_holdout_never_carries_cannot_be_validated_by_its_absence`). So every
+            # gate can see, and the stamp would land anyway. So every
             # class the calibration reference actually evidences at the shipped conf must be
             # evidenced in the holdout too, the same positive-evidence rule (never an inference from
             # absence) the per-side `insufficient_*_gt` conjuncts already apply to the pooled count.
@@ -1115,7 +1114,7 @@ def resolve_operating_point(
             # not an oversight: each is its own measurement question rather than a mechanical repeat
             # of the bias one, a per-class localization floor refuses a rare class whose single
             # detection lands just outside tolerance, and a per-class dispersion floor reads a
-            # tolerance no trait has authored (count_error_tolerance is None everywhere today).
+            # tolerance no trait has authored (count_error_tolerance is unset on every trait).
             # Every equivalence test above, pooled and per-class alike, reads its scope's own
             # present-scoped bias, dispersion and evidence count, so the bias and the typical count
             # it is judged against are measured over the same images and a scope scarce in the
@@ -1358,7 +1357,7 @@ def resolve_classifier_operating_point(
     otherwise disjoint and unbiased; it is not reachable at all when no calibration/holdout is given.
 
     ``split_manifest_dir``/``calibration_date`` gate ``selection_disjointness`` the same way
-    :func:`resolve_operating_point` does; the classifier door draws no manifest today, so
+    :func:`resolve_operating_point` does; the classifier door draws no manifest, so
     ``split_manifest_dir`` is never populated, and its one caller states ``calibration_date``
     from its own calibration GT directory (``manifest_date_key`` for a flat one, never the bare
     ``annotation_date`` result). ``calibration_date is None`` means the caller derived no date at
@@ -1371,7 +1370,7 @@ def resolve_classifier_operating_point(
     if validated_reference not in accepted_references("annotations"):
         raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
                          f"got {validated_reference!r}")
-    get_trait(trait_name)  # validates the trait exists; classification mode needs no trait-shaped fields today
+    get_trait(trait_name)  # validates the trait exists; classification mode reads no trait-shaped field
     if not calibration_items or not holdout_items:
         return {
             "validated_against": VALIDATED_FALSE, "passed": False,
@@ -1431,9 +1430,9 @@ def resolve_classifier_operating_point(
     n_bias_images = len(per_image_bias)
     count_bias = statistics.fmean(per_image_bias) if per_image_bias else 0.0
     # Sample stdev (ddof=1/Bessel's correction), matching the detection path's
-    # np.std(biases, ddof=1) exactly, pstdev's population estimator was systematically more
+    # np.std(biases, ddof=1) exactly: a population estimator is systematically more
     # permissive, worst at small n, which is exactly where the equivalence test's SE penalty is
-    # supposed to bite hardest.
+    # must bite hardest.
     count_bias_std = statistics.stdev(per_image_bias) if n_bias_images > 1 else 0.0
     # The same relative-tolerance shape the detection path uses, the positive class's own typical
     # per-image count, reusing `hold_by_image` rather than a second pass over `holdout_items`.
@@ -1480,7 +1479,7 @@ def resolve_classifier_operating_point(
         failures.append("insufficient_holdout_items")
     if n_bias_images < 2:
         # Same minimum the detection path requires (hb["n_present"] < 2, present-scoped like
-        # n_bias_images now is): without this, a single-image holdout forces count_bias_std to 0.0
+        # n_bias_images): without this, a single-image holdout forces count_bias_std to 0.0
         # (no images to vary across), so the equivalence test's SE penalty vanishes and a lone image
         # can pass at exactly the tolerance
         # with zero uncertainty discount.
@@ -1501,8 +1500,10 @@ def resolve_classifier_operating_point(
         "count_bias_tolerance_frac_source": ("trait" if trait.count_bias_tolerance_frac is not None
                                              else "default"),
         "typical_positive_count": typical_positive_count,
-        # Never the bare "count_bias_tolerance" name for this derived value: reusing the authored value's own name here would silently swap what the same key means. Not named to match the detector
-        # path's "pooled_count_bias_tolerance" either: this sidecar has no "pooled" vs "per-class" split to distinguish from, so it needs its own name.
+        # Never the bare "count_bias_tolerance" name for this derived value: reusing the authored
+        # value's own name would silently swap what the same key means. Deliberately not named to
+        # match the detector path's "pooled_count_bias_tolerance" either: this sidecar has no
+        # "pooled" vs "per-class" split to distinguish from, so it needs its own name.
         "count_bias_tolerance_absolute": _effective_count_bias_tolerance(
             count_bias_tolerance_frac, typical_positive_count, n_bias_images),
         "kappa": kappa, "kappa_floor": agreement_floor,

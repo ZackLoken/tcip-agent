@@ -27,8 +27,8 @@ EMPTY_SCORES = np.zeros((0,), dtype=np.float32)
 
 class MaskPatch(NamedTuple):
     """One detection's instance-seg mask, kept tile-local rather than expanded to a full-raster
-    canvas: ``patch`` is a small dense soft-mask array (today, always tile-sized: the tile-local
-    array a per-tile model forward already produced), ``offset_x``/``offset_y`` place its ``[0, 0]``
+    canvas: ``patch`` is a small dense soft-mask array (tile-sized as a per-tile model forward
+    produces it), ``offset_x``/``offset_y`` place its ``[0, 0]``
     pixel in full-image (or full-raster) pixel space. A consumer that needs full-image pixel
     coordinates (a polygon for export, a composited canvas) adds the offset at the point of use,
     the same "defer the expansion" convention ``export.py`` already uses for the untiled path's own

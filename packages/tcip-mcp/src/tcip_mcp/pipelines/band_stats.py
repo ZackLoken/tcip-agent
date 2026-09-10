@@ -85,7 +85,7 @@ def full_scale_denominator(band, source_dtype, *, sampled_maximum: float | None 
 
     An integer raster divides by its dtype's maximum, the scale ``image_utils.pil_to_tensor``
     applies for training; a float raster has no such ceiling and divides by its own maximum, so a
-    mixed-sign band (a vegetation index, say) renders and reports bounds exactly as it always has.
+    mixed-sign band (a vegetation index, say) renders and reports bounds against its own range.
     A band with no positive data divides by the magnitude of its minimum instead, so it lands on a
     positive scale rather than flipping the sign of every pixel; a band whose whole range is
     exactly zero still divides by 1.0, so an empty float band renders black instead of raising.

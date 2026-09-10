@@ -209,8 +209,9 @@ def _default_trial_resources(max_concurrent: int) -> dict[str, float]:
     otherwise ``device_count / max_concurrent`` capped at 1.0, so ``max_concurrent`` trials the
     agent asked to run at once actually get non-overlapping (or fairly-shared) GPU allocations
     instead of every trial silently defaulting to Ray's own 0-GPU request and all contending for
-    whatever `TrainContext.device` happens to resolve to. ``max_concurrent=1`` (today's default)
-    yields ``gpu=1.0``, byte-identical to today's implicit whole-device behavior when unset.
+    whatever `TrainContext.device` happens to resolve to. ``max_concurrent=1`` (the default)
+    yields ``gpu=1.0``, the whole device, rather than the 0-GPU request Ray makes when nothing
+    states one.
     """
     try:
         import torch
@@ -579,7 +580,7 @@ def tune_search(
             Required: trial results land where the caller says, never Ray's own
             home-directory default. ``run_hyperparameter_search`` resolves it for a training sweep (the
             project's own ``.tcip/hpo``); a bespoke search names its own directory. Accepts
-            a local path today; Ray's ``storage_path`` also takes a cloud URI, the seam a
+            a local path; Ray's ``storage_path`` also takes a cloud URI, the seam a
             central store would use.
         resources_per_trial: Ray resource request per trial (``{"cpu": ..., "gpu": ...}``, GPU as
             a fraction for sharing). Omit to derive one from the host's real GPU count and
