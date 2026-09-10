@@ -505,9 +505,12 @@ def extract_response(family: str, stdout: str, last_message: pathlib.Path | None
 def run_one(family: str, question_id: str, condition_name: str, prompt: str,
             cwd: pathlib.Path, out_root: pathlib.Path, timeout: int,
             model: str | None, effort: str | None,
-            images: list[pathlib.Path] | None = None) -> dict:
+            images: list[pathlib.Path] | None = None,
+            prompt_source: str | None = None) -> dict:
     condition = CONDITIONS[condition_name]
     run_dir = out_root / question_id / condition_name / family
+    # A prior meta.json here is this family's own earlier run under the same question and condition.
+    rerun = (run_dir / "meta.json").is_file()
     run_dir.mkdir(parents=True, exist_ok=True)
 
     resolved_images = tuple(image.resolve() for image in images or [])
@@ -591,6 +594,8 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
         "guidance_injected": condition["guidance"],
         "prompt_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
         "prompt_chars": len(body),
+        "prompt_source": prompt_source,
+        "rerun": rerun,
         "images": [str(image) for image in resolved_images],
         "started": started,
         "duration_s": round(duration, 1),
@@ -623,6 +628,10 @@ def main() -> int:
     parser.add_argument("--image", action="append", type=pathlib.Path, default=[],
                         help="An image file to attach to the question; repeatable. Each family "
                              "receives it the way that harness takes an image.")
+    parser.add_argument("--family-prompt", action="append", default=[], metavar="FAMILY=PATH",
+                        help="Override the shared --prompt-file for one family alone; repeatable, "
+                             "e.g. --family-prompt codex=docs/audit/codex-only-prompt.txt. Every "
+                             "other family still gets --prompt-file.")
     args = parser.parse_args()
 
     missing_images = [str(image) for image in args.image if not image.is_file()]
@@ -633,6 +642,19 @@ def main() -> int:
     unknown = [f for f in families if f not in BUILDERS]
     if unknown:
         parser.error(f"unknown families: {unknown}. Known: {sorted(BUILDERS)}")
+
+    family_prompt_files: dict[str, pathlib.Path] = {}
+    for item in args.family_prompt:
+        name, sep, path_text = item.partition("=")
+        name = name.strip()
+        if not sep or not name:
+            parser.error(f"--family-prompt must be FAMILY=PATH, got {item!r}")
+        if name not in BUILDERS:
+            parser.error(f"--family-prompt names an unknown family {name!r}. Known: {sorted(BUILDERS)}")
+        path = pathlib.Path(path_text.strip())
+        if not path.is_file():
+            parser.error(f"--family-prompt file not found for {name}: {path}")
+        family_prompt_files[name] = path
 
     missing = []
     for family in families:
@@ -649,6 +671,14 @@ def main() -> int:
               "second family.\n")
 
     prompt = args.prompt_file.read_text(encoding="utf-8-sig")
+    prompt_source = str(args.prompt_file)
+
+    def prompt_for(family: str) -> tuple[str, str]:
+        override = family_prompt_files.get(family)
+        if override is None:
+            return prompt, prompt_source
+        return override.read_text(encoding="utf-8-sig"), str(override)
+
     print(f"question : {args.question_id}")
     print(f"condition: {args.condition} ({CONDITIONS[args.condition]['description']})")
     print(f"families : {', '.join(families)}")
@@ -659,17 +689,20 @@ def main() -> int:
     results = []
     if args.serial:
         for family in families:
-            results.append(run_one(family, args.question_id, args.condition, prompt,
+            family_prompt, family_prompt_source = prompt_for(family)
+            results.append(run_one(family, args.question_id, args.condition, family_prompt,
                                    args.cwd, args.out, args.timeout, args.model,
-                                   args.effort, images=args.image))
+                                   args.effort, images=args.image,
+                                   prompt_source=family_prompt_source))
     else:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(families)) as pool:
-            futures = {
-                pool.submit(run_one, family, args.question_id, args.condition, prompt,
-                            args.cwd, args.out, args.timeout, args.model,
-                            args.effort, images=args.image): family
-                for family in families
-            }
+            futures = {}
+            for family in families:
+                family_prompt, family_prompt_source = prompt_for(family)
+                futures[pool.submit(run_one, family, args.question_id, args.condition,
+                                    family_prompt, args.cwd, args.out, args.timeout, args.model,
+                                    args.effort, images=args.image,
+                                    prompt_source=family_prompt_source)] = family
             for future in concurrent.futures.as_completed(futures):
                 family = futures[future]
                 try:
@@ -696,7 +729,16 @@ def main() -> int:
               "was only a pointer to it.")
 
     summary = args.out / args.question_id / args.condition / "summary.json"
-    summary.write_text(json.dumps(results, indent=2), encoding="utf-8")
+    # A re-run naming a subset of families must not drop the rows of the families it did not
+    # touch: merge onto whatever summary.json already holds, keyed by family.
+    previous_rows: dict[str, dict] = {}
+    if summary.is_file():
+        for row in json.loads(summary.read_text(encoding="utf-8")):
+            previous_rows[row["family"]] = row
+    for row in results:
+        previous_rows[row["family"]] = row
+    merged = sorted(previous_rows.values(), key=lambda r: r["family"])
+    summary.write_text(json.dumps(merged, indent=2), encoding="utf-8")
     print(f"\nwrote {summary}")
     faults = [(m["family"], m["fault"]) for m in results if m["fault"]]
     print_verdict(faults, len(results))
