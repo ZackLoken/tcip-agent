@@ -926,7 +926,7 @@ class ModelRegistry:
         ``metrics_source`` of ``None`` is not malformed, it is the honest pairing for an entry with
         no metrics. ``experiment_ids``, when given, narrows ranking to entries whose own
         ``experiment_id`` is in the set (an explicit-mode entry, whose ``experiment_id`` is
-        ``None``, is never in it); ``None`` (the default) ranks the whole registry, unchanged.
+        ``None``, is never in it); ``None`` (the default) ranks the whole registry.
         """
         malformed = [m.get("name") for m in self._index if "metrics_source" not in m]
         if malformed:

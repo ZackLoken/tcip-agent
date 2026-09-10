@@ -153,7 +153,7 @@ def rank_registered_models(
         experiment_ids: Narrow to entries produced by one of these experiments (the comparison
             view's own marked set), applied before ``available_metrics`` or the unverified
             exclusions are derived, so both describe only the marked set. ``None`` (the default)
-            covers the whole registry, unchanged. With ``metric=""``, a narrowing that leaves
+            covers the whole registry. With ``metric=""``, a narrowing that leaves
             nothing simply returns an empty listing rather than refusing.
         tag: Optional tag filter, applied to both the listing and the ranking.
     """

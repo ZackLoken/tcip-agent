@@ -486,8 +486,8 @@ def _train_disjointness(
     selection (val) side instead of its training side.
 
     ``cal_rects``/``hold_rects`` (keyed by source stem, one pixel rect ``(x0, y0, x1, y1)`` per
-    stem) are optional and additive: every existing caller omits them and gets exactly the
-    behavior above, unchanged. When either is given and the persisted split is
+    stem) are optional and additive: omitting them gets exactly the
+    behavior above. When either is given and the persisted split is
     ``group_by == "spatial_strip"``, the check becomes geometric containment against the
     persisted ``train_region``/``val_region``/``test_region`` rects
     (:func:`_spatial_strip_geometric_disjointness`) instead of the lexical same-source check
