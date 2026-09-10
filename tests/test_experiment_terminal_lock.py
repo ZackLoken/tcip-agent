@@ -272,7 +272,7 @@ def test_id_map_patch_raises_when_the_refusal_audit_append_fails(tmp_path, monke
 
 
 def test_overwrite_config_if_pristine_still_succeeds_over_a_pristine_experiment(tmp_path):
-    """P6-26's transaction narrowing changes no accepted call: a genuinely pristine experiment's
+    """The narrowed transaction changes no accepted call: a genuinely pristine experiment's
     config is still overwritten."""
     from tcip_mcp.experiments import create_experiment, overwrite_config_if_pristine
 

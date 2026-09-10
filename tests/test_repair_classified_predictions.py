@@ -743,11 +743,10 @@ def test_a_classified_rewrite_under_no_dataset_root_writes_one_entry_consistent_
     Fails at the baseline on ``entry["outcome"]``/``outcome`` itself, on the sqlite leg only: this
     bucket resolves under no real dataset root (``dataset_layout.dataset_root_of`` finds no
     canonical segment in its path) on both backends, so the no-verdict-store note belongs in the
-    outcome regardless of backend; the unfixed code omitted it on the database backend, where
-    ``dataset_scope_of`` answers the bucket itself and the old code read that alone as a real
-    dataset root. The scope-consistency assertions below (where the entry is filed) pass against
-    the unfixed source too; they are coverage of a fact this fix leaves untouched, not this pin's
-    own claim.
+    outcome regardless of backend; on the database backend, ``dataset_scope_of`` answers the
+    bucket itself, which must not by itself be read as a real dataset root. The scope-consistency
+    assertions below (where the entry is filed) hold independently of this note; they are
+    coverage of a separate fact, not this pin's own claim.
     """
     import tcip_mcp.audit as audit_module
     from tcip_mcp.audit import dataset_scope_of

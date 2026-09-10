@@ -824,10 +824,9 @@ def test_import_project_admits_a_registered_checkpoint_with_no_disclosure(
 ):
     """A run's own checkpoint, registered under the project's own tree, comes back from an
     archive/import round trip with nothing to disclose: the writer already spelled it relative
-    to the registry's scope root, so the moved tree's registry still resolves under it, unlike
-    the pre-family behavior this test used to pin (every checkpoint_path was stored absolute, so
-    the imported registry always named the exporting root's stale path). The stored entry itself
-    stays relative; the resolved response is absolute; weights load by digest either way, since
+    to the registry's scope root, so the moved tree's registry still resolves under it. The
+    stored entry itself stays relative; the resolved response is absolute; weights load by
+    digest either way, since
     loading never reads the stored path."""
     from tcip_mcp.experiments import (
         complete_run, create_experiment, experiment_dir, register_model_from_experiment,

@@ -627,8 +627,8 @@ def test_selection_disjointness_applicable_when_a_flat_calibration_matches_a_fla
 def test_selection_disjointness_unresolvable_for_experiment_id_none_under_a_stated_manifest():
     """A calibration that names a manifest but carries no experiment record to check the
     selection side against is unresolvable, not merely not-applicable: the shape a foreign
-    checkpoint's train check allows through cannot be extended to a stated manifest, since the
-    number the ruling forbids is exactly one whose provenance cannot be checked."""
+    checkpoint's train check allows through cannot be extended to a stated manifest, since a
+    number whose provenance cannot be checked is exactly what this refusal exists for."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     cal, hold = good_cal_holdout()

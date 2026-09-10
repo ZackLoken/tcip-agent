@@ -491,7 +491,7 @@ def _native_frame_regime_predictor():
 
 def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_the_persisted_one(
         tmp_path):
-    """The reproduction the ruling asked for: a checkpoint whose only tiling basis is its own
+    """A checkpoint whose only tiling basis is its own
     uniform untiled training frame reaches the delivery-grade gate and produces the identical
     counts, metrics and box coordinates a persisted tiled regime already trusted would, even though
     its recorded augmentation chain pins a real resize the native-frame regime alone must run each

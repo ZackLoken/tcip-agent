@@ -579,10 +579,10 @@ def test_registration_digest_and_load_digest_agree(tmp_path, monkeypatch):
 def test_register_model_from_experiment_applies_the_same_version_check_as_load_registered_checkpoint(
     tmp_path, monkeypatch,
 ):
-    """Before this fix, register_model_from_experiment ran its own torch.load(weights_only=False)
-    with no version check, so a payload above the ceiling would register with its real metrics.
-    Routed through the shared _load_verified_payload, this payload's metrics are read no
-    differently than any other payload this reader cannot act on: empty, never fabricated."""
+    """register_model_from_experiment routes through the shared _load_verified_payload, so a
+    payload above the ceiling never registers with its real metrics: this payload's metrics are
+    read no differently than any other payload this reader cannot act on, empty, never
+    fabricated."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
 

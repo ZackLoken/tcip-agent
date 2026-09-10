@@ -166,7 +166,7 @@ def test_a_web_route_writes_its_delivery_event_under_the_payloads_root_not_the_p
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A web-backend process can serve more than one project, so its process-pinned root can
-    diverge from the project a specific request names, the same divergence D11 already closes
+    diverge from the project a specific request names, the same divergence already closed
     for the operationalization record. A request naming a different project than the process
     pin must still land its delivery_events record under the project it named."""
     from fastapi.testclient import TestClient

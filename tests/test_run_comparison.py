@@ -391,9 +391,8 @@ def test_compare_best_route_404_leaves_the_registry_directory_uncreated(
 def test_compare_best_route_409s_when_the_index_will_not_decode(
     client: TestClient, tmp_path, monkeypatch,
 ):
-    """A corrupt or version-refused index is not a project with no models: before this fix, the
-    route's own except Exception swallowed RegistryVersionRefused/DecodeError into the same 404
-    an absent index answers."""
+    """A corrupt or version-refused index is not a project with no models: the route answers
+    409, not the 404 an absent index answers."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     import tcip_mcp.model_registry as model_registry
     from tcip_mcp.model_registry import RegistryVersionRefused
@@ -417,8 +416,9 @@ def test_compare_best_route_409s_when_the_index_carries_a_stale_schema_version_t
 ):
     """A dev-era index stamped schema_version 2, predating the version-1 reset, refuses through
     the seam's own ceiling check (SchemaVersionRefused), a sibling of RegistryVersionRefused
-    under StoreError rather than a subclass of it: before this fix the route's except tuple
-    named only RegistryVersionRefused/DecodeError, so this refusal escaped uncaught."""
+    under StoreError rather than a subclass of it: the route's except tuple must catch
+    StoreError itself, not only RegistryVersionRefused/DecodeError, or this refusal escapes
+    uncaught."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     import os
     import sqlite3

@@ -1,8 +1,8 @@
 """CI guardrail: the neutral-name sweep of the pilot crop's trait vocabulary out of tests/ holds.
 
-CLAUDE.md's "No pilot vocabulary as framing" invariant, and owner-decisions.md Part 30 Q3 and
-Part 31 Q35, rule that a trait's own name or state never names a general mechanism in identifiers,
-comments, or docs; the fixtures under tests/ were swept to neutral names. This test is coverage:
+CLAUDE.md's "No pilot vocabulary as framing" invariant rules that a trait's own name or state
+never names a general mechanism in identifiers, comments, or docs; the fixtures under tests/
+were swept to neutral names. This test is coverage:
 it holds that sweep in CI, and guards no fix of its own.
 
 The word list is assembled from split string literals so this file's own text never carries the

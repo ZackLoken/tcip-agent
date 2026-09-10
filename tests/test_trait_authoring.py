@@ -31,7 +31,7 @@ from tests._trait_fixtures import BUD_OPENING
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
-# ── R1: config-driven authoring, crops.yml-cross-checked ──────────────────
+# ── config-driven authoring, crops.yml-cross-checked ────────────────────────
 
 def _write_spec(directory: Path, name: str, spec: dict) -> None:
     """Write a raw trait-spec record, stamped at the current schema ceiling: most call sites here
