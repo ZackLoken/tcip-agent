@@ -69,7 +69,7 @@ def test_request_archives_marks_and_hides_the_project(client, tmp_path):
     body = resp.json()
     assert Path(body["archive_path"]).is_file()
     assert target.is_dir()  # nothing moved yet: phase one only marks
-    # coverage: the baseline carries neither field.
+    # coverage: the response carries recorded_in_open_project and audit_note.
     assert body["recorded_in_open_project"] is True
     assert "sample_plot_open" in body["audit_note"]
     assert "''s" not in body["audit_note"]
@@ -136,9 +136,9 @@ def test_listing_carries_removal_refusal_matching_the_doors_own_answer(client, t
 def test_listing_carries_no_reason_naming_no_project_open_with_nothing_bound(
     client, tmp_path, tmp_path_factory, monkeypatch,
 ):
-    """coverage of the landing's own behavior (the baseline already answers so): with nothing
-    bound and no marker set, every card's removal_refusal is null and removal_releasable is
-    false, the home of the fact the deleted no-project-open vitest once pinned."""
+    """coverage of the landing's own behavior: with nothing bound and no marker set, every card's
+    removal_refusal is null and removal_releasable is false, the home of the fact the deleted
+    no-project-open vitest once pinned."""
     ws = tmp_path.parent
     ws.mkdir(exist_ok=True)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path_factory.mktemp("unrelated_root")))
@@ -154,7 +154,7 @@ def test_listing_carries_no_reason_naming_no_project_open_with_nothing_bound(
 
 def test_listing_carries_dependency_warnings_and_problem_through_the_route(client, tmp_path):
     """coverage: dependency_warnings/dependency_problem, converted through DependencyWarning,
-    have no assertion through GET /api/projects at the baseline: the pending, moved and damaged
+    get their assertion through GET /api/projects here, covering the pending, moved and damaged
     cases."""
     from tests._record_damage_fixtures import damage_record
     from tcip_mcp.tools.project_tools import dataset_registry_key, register_dataset
@@ -360,11 +360,10 @@ def test_admits_the_request_with_no_project_bound_and_records_both_lines_under_t
 def test_refuses_the_markers_own_project_with_no_platform_root_bound(
     client, tmp_path, tmp_path_factory, monkeypatch,
 ):
-    """GUARDS: the baseline refuses this with the "no project is open" string, since its
-    identity_conflict never reaches the marker check once nothing is bound; the marker spelling
-    now runs whether or not a project is bound, so the answer carries the marker's own text
-    instead. The first request runs before the marker is written, so the backend's own startup
-    binding falls to the inherited (unrelated) root rather than adopting the marker's own
+    """A guard: the marker's own project's removal request, with no platform root bound, refuses
+    naming the marker's own text ("opens by default") rather than the generic "no project is
+    open" string. The first request runs before the marker is written, so the backend's own
+    startup binding falls to the inherited (unrelated) root rather than adopting the marker's own
     project, keeping "no platform root bound" genuinely true afterward."""
     ws = tmp_path.parent
     ws.mkdir(exist_ok=True)
@@ -384,9 +383,8 @@ def test_refuses_the_markers_own_project_with_no_platform_root_bound(
 def test_refuses_the_canvas_bound_project_with_no_platform_root_bound(
     client, tmp_path, tmp_path_factory, monkeypatch,
 ):
-    """GUARDS through the message alone: at the baseline, the canvas spelling is only checked
-    once a project is bound, so with none bound the baseline answers the "no project is open"
-    string for this same 409 (VACUOUS on the status alone)."""
+    """A guard through the message alone: the canvas-bound project's removal request refuses
+    naming "the GUI has open" in the detail, not just the same 409 status."""
     ws = tmp_path.parent
     ws.mkdir(exist_ok=True)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path_factory.mktemp("unrelated_root")))
@@ -593,7 +591,8 @@ def test_dependent_project_is_listed_and_never_refused(client, tmp_path):
 
 
 def test_a_dependents_own_log_carries_the_dependency_line(client, tmp_path):
-    """GUARDS: the baseline admits the request and writes no dependency_pending_removal line."""
+    """A guard: the dependent's own log carries a dependency_pending_removal line for the
+    request."""
     from tcip_mcp.tools.project_tools import register_dataset
 
     ws = tmp_path.parent
@@ -672,8 +671,7 @@ def test_a_pending_dependent_still_gets_its_own_line(client, tmp_path):
 
 
 def test_an_unreadable_dependent_gets_no_dependency_line(client, tmp_path):
-    """coverage: the request line and the dependent's own naming both pass at the baseline too;
-    this only pins that a registry the door cannot read never gets a dependency line either."""
+    """coverage: a registry the door cannot read never gets a dependency line either."""
     from tests._record_damage_fixtures import damage_record
 
     from tcip_mcp.tools.project_tools import dataset_registry_key, register_dataset
@@ -860,7 +858,9 @@ def test_workspace_child_of_a_missing_path_the_workspace_an_external_root_and_th
 def test_dependency_warnings_present_true_while_pending_then_false_after_the_move(
     client, tmp_path,
 ):
-    """coverage: dependency_warnings does not exist at the baseline."""
+    """coverage: dependency_warnings answers present while the target is pending removal, false
+    once the holding move completes, and stays that way even if the holding directory is renamed
+    by hand afterward."""
     from tcip_mcp.project_removal import dependency_warnings
     from tcip_mcp.tools.project_tools import register_dataset
 
@@ -958,11 +958,10 @@ def test_dependency_problem_named_for_a_damaged_registry(tmp_path):
 def test_dependency_warnings_names_a_no_id_entry_as_a_problem_not_a_null_id_warning(
     client, tmp_path,
 ):
-    """coverage: a no-id entry already routes to the registry problem,
-    so both assertions hold at this test's own baseline. The entry names a target already
-    pending removal, the one state a no-id entry would otherwise reach the warning branch
-    through, so this exercises the malformed-entry rule rather than a state (a live target)
-    that never turns into a warning."""
+    """coverage: a no-id entry already routes to the registry problem. The entry names a target
+    already pending removal, the one state a no-id entry would otherwise reach the warning
+    branch through, so this exercises the malformed-entry rule rather than a state (a live
+    target) that never turns into a warning."""
     from tcip_mcp.project_removal import dependency_warnings
     from tcip_mcp.tools.project_tools import registry_path_for, upsert_dataset
 
@@ -1019,7 +1018,8 @@ def test_a_canvas_binding_with_no_project_name_is_read_as_no_binding(client, tmp
 def test_release_clears_the_marker_and_the_canvas_binding_both_naming_the_project(
     client, tmp_path,
 ):
-    """coverage: neither release_project_binding nor its route exists at the baseline."""
+    """coverage: release clears both the marker and the canvas binding, naming the project in
+    the route's own response, and bumps the canvas binding's generation."""
     from tcip_mcp.web_client import read_canvas_binding
 
     ws = tmp_path.parent
@@ -1174,9 +1174,9 @@ def test_release_canvas_failure_after_the_marker_cleared_names_both_in_the_line_
 def test_release_canvas_record_decode_error_after_the_marker_cleared_still_records_the_line(
     client, tmp_path,
 ):
-    """GUARDS: the baseline's narrower except clause lets a DecodeError from the canvas record's
-    read escape the route uncaught (an unhandled 500), the marker already cleared with no line
-    naming it."""
+    """A guard: a DecodeError from the canvas record's read is folded into the 409, with the
+    marker already cleared and the project_binding_released line recorded naming it, rather than
+    escaping the route uncaught."""
     from tests._record_damage_fixtures import damage_record
     from tcip_mcp.web_client import canvas_open_binding_key
 
@@ -1209,8 +1209,9 @@ def test_release_canvas_record_decode_error_after_the_marker_cleared_still_recor
 def test_release_canvas_record_missing_generation_after_the_marker_cleared_still_records_the_line(
     client, tmp_path,
 ):
-    """GUARDS: the baseline lets a KeyError on the record's missing generation field escape the
-    route uncaught (an unhandled 500), the marker already cleared with no line naming it."""
+    """A guard: a KeyError on the record's missing generation field is folded into the 409, with
+    the marker already cleared and the project_binding_released line recorded naming it, rather
+    than escaping the route uncaught."""
     from tcip_mcp.web_client import canvas_open_binding_key
 
     ws = tmp_path.parent
@@ -1251,9 +1252,10 @@ def test_release_canvas_record_missing_generation_after_the_marker_cleared_still
 def test_release_canvas_record_of_a_malformed_shape_after_the_marker_cleared_still_records_the_line(
     client, tmp_path, record,
 ):
-    """GUARDS: the baseline folds only a record with no generation field; a string generation,
-    a root that is not a path, or a record that is not a mapping raised a TypeError or an
-    AttributeError out of the route after the marker was already cleared, with no line."""
+    """A guard: a string generation, a root that is not a path, or a record that is not a
+    mapping is folded into the 409 the same way, with the marker already cleared and the
+    project_binding_released line recorded naming it, rather than raising a TypeError or an
+    AttributeError out of the route."""
     from tcip_mcp.web_client import canvas_open_binding_key
 
     ws = tmp_path.parent
@@ -1281,9 +1283,8 @@ def test_release_canvas_record_of_a_malformed_shape_after_the_marker_cleared_sti
 def test_release_with_an_unreadable_marker_clears_nothing_for_it_and_does_not_500(
     client, tmp_path,
 ):
-    """GUARDS: the baseline reads the marker with no fold, so a damaged marker raises out of the
-    route as an unhandled 500 rather than folding to "no marker" the way its sibling reader
-    does."""
+    """A guard: a damaged marker folds to "no marker" the way its sibling reader does, rather
+    than raising out of the route as an unhandled 500."""
     from tests._record_damage_fixtures import damage_record
 
     ws = tmp_path.parent
@@ -1381,8 +1382,8 @@ def test_gui_binding_matches_is_false_on_a_released_record(client, tmp_path):
 
 
 def test_release_route_answers_404_for_an_unknown_project(client, tmp_path):
-    """VACUOUS at the baseline: the route does not exist there either, so FastAPI's own
-    unmatched-route 404 coincidentally answers the same status."""
+    """coverage: the route answers 404 for an unknown project, the same status FastAPI's own
+    unmatched-route 404 would give."""
     ws = tmp_path.parent
     _seed(ws)
     resp = client.post(

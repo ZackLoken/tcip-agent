@@ -142,8 +142,7 @@ def _restore_platform_root_env():
         os.environ.pop("TCIP_STATE_ROOT", None)
     else:
         os.environ["TCIP_STATE_ROOT"] = saved
-    # getattr, not a plain import: a fail-before run against a tree that predates
-    # restore_binding must still collect every other test in this file.
+    # getattr, not a plain import, so this file still collects without restore_binding.
     restore = getattr(project_paths, "restore_binding", None)
     if restore is not None:
         restore(saved_binding)

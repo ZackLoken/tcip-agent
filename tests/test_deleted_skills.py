@@ -31,9 +31,9 @@ def _tracked_files() -> tuple[list[Path], bool]:
     """Every file's path (except this one), plus whether the git-free fallback had to run.
 
     `git ls-files` is the paths of record: exactly what the tree commits, gitignore included.
-    Without git (a fail-before proof's git-archive baseline), the fallback walks the
-    filesystem directly, which necessarily also sweeps this repo's own gitignored trees (docs/
-    among them), since a plain walk has no index to check paths against.
+    Without git, the fallback walks the filesystem directly, which necessarily also sweeps this
+    repo's own gitignored trees (docs/ among them), since a plain walk has no index to check
+    paths against.
     """
     try:
         out = subprocess.run(

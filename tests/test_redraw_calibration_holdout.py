@@ -82,8 +82,7 @@ def test_force_redraw_raises_and_stays_committed_when_its_audit_line_fails(
     AuditEntryNotWritten before ``@audited`` ever reaches its own post-body append, and the new
     lock stands. Before the emitter raised, that call was best-effort (``record_event``), so the
     body returned and ``@audited``'s own append, also refused, was the one that failed first there,
-    raising MutationCommittedWithoutAuditLine instead; a fail-before proof against that baseline
-    hits that exception, not this one."""
+    raising MutationCommittedWithoutAuditLine instead."""
     import tcip_mcp.audit as audit_module
     from tcip_mcp.pipelines.data.splits import (
         cal_holdout_lock_key, resolve_locked_cal_holdout_split,

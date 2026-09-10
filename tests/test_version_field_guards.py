@@ -1,8 +1,8 @@
 """Guards for the reader branch of the store's ``schema_version`` refusal.
 
 Nothing here imports ``tcip_store.SchemaVersionRefused``: each test pins the refusal through
-its message text and the content a reader hands back, so the module collects against any
-baseline that lacks the class.
+its message text and the content a reader hands back, so the module collects without that
+class.
 """
 
 from __future__ import annotations

@@ -27,7 +27,7 @@ FOREIGN_ORIGIN = "http://evil.example"
 _PARAM_RE = re.compile(r"\{[^}]*\}")
 _STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 """The methods this walk exercises, named independently of trust_boundary.STATE_CHANGING_METHODS
-so a baseline that predates that constant still collects and runs this walk."""
+so this module still collects without that constant."""
 
 
 def _route_generator():
@@ -159,11 +159,9 @@ def test_an_exposed_arrival_admits_its_own_origin_only_by_name(
 def test_a_reverse_proxy_forwarding_its_own_name_is_admitted_once_advertised(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A same-machine reverse proxy that rewrites Host to a public name is admitted by both
-    the Host check and the Origin check once that name is advertised with its port written
-    out: the combined case, rather than Host and Origin proven admitted separately. Passes at
-    the baseline too, since no HTTP origin check existed there: coverage for the check now in
-    the middleware, not a guard for this change."""
+    """Coverage: a same-machine reverse proxy that rewrites Host to a public name is admitted by
+    both the Host check and the Origin check once that name is advertised with its port written
+    out, the combined case rather than Host and Origin proven admitted separately."""
     monkeypatch.setenv("TCIP_WEB_ALLOW_INSECURE", "1")
     monkeypatch.setenv("TCIP_WEB_ADVERTISED_HOSTS", "gui.example:80")
     lan = TestClient(app, base_url="http://192.168.1.23:8765")
@@ -174,10 +172,9 @@ def test_a_reverse_proxy_forwarding_its_own_name_is_admitted_once_advertised(
 
 
 def test_the_local_method_set_matches_the_canonical_one() -> None:
-    """The literal above exists only so this module still collects at a baseline that
-    predates trust_boundary.STATE_CHANGING_METHODS; this pins it to that constant going
-    forward, imported here rather than at module scope so that baseline collection stays
-    unaffected by this one test."""
+    """Coverage: the literal above exists so this module still collects without
+    trust_boundary.STATE_CHANGING_METHODS; this pins it to that constant, imported here rather
+    than at module scope so only this test's collection depends on the constant existing."""
     from tcip_web.trust_boundary import STATE_CHANGING_METHODS
 
     assert _STATE_CHANGING_METHODS == STATE_CHANGING_METHODS

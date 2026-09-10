@@ -173,7 +173,7 @@ def test_parse_coco_annotations_keeps_an_empty_string_accepted_by():
     it (is not None, never a truthiness test), and the COCO reader now shares that presence test."""
     coco = _sample_coco_detect()
     coco["annotations"][0]["accepted_by"] = ""
-    parsed = parse_coco_annotations(coco, image_id=1)  # GUARDS: dropped at the baseline
+    parsed = parse_coco_annotations(coco, image_id=1)  # a guard: the empty string must survive
     assert parsed[0].accepted_by == ""
 
 

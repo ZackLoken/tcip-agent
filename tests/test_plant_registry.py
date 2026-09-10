@@ -202,7 +202,7 @@ def test_the_happy_path_through_the_platforms_own_producers_refuses_at_the_class
 def test_a_deleted_registry_refuses_at_delivery_naming_the_registry_and_the_mapping(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """GUARDS: a registry deleted after the mapping was built refuses the delivery by name,
+    """A guard: a registry deleted after the mapping was built refuses the delivery by name,
     rather than verifying an empty plant_csvs_unverified list against nothing."""
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
@@ -224,7 +224,7 @@ def test_a_deleted_registry_refuses_at_delivery_naming_the_registry_and_the_mapp
 def test_a_registry_digest_mismatch_refuses_at_delivery(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """GUARDS: a registry whose stored digest no longer matches what the mapping was built
+    """A guard: a registry whose stored digest no longer matches what the mapping was built
     against (a hand-edited or store-corrupted record) refuses rather than verifying against the
     wrong plants."""
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones

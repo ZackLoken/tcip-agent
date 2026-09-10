@@ -111,7 +111,7 @@ def test_a_verified_claim_writes_the_marker_beside_the_person(
     raw = json.loads(gt_path.read_text(encoding="utf-8"))
     record = raw["annotations"][0]
     expected_identity = f"{validated_by['experiment_id']}:{validated_by['record_digest']}"
-    assert record.get("accepted_by_rule") == expected_identity  # GUARDS: absent at the baseline
+    assert record.get("accepted_by_rule") == expected_identity  # a guard: now carries the identity
     assert record.get("accepted_by", "").startswith("user:")
     assert "score" not in record
 
@@ -149,7 +149,8 @@ def test_ordinary_accept_on_the_same_bucket_writes_none(
 def test_refusal_unvalidated_stamp(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """GUARDS: at the baseline pydantic ignores rule_admitted and the accept answers 200."""
+    """A guard: an accept against an unvalidated stamp refuses (400) even when rule_admitted is
+    set."""
     dataset_root = tmp_path / "data"
     built = build_published_bucket(
         tmp_path, monkeypatch, experiment_id="exp-unvalidated", dataset_root=dataset_root,
@@ -341,8 +342,8 @@ def test_refusal_stale_detection(
 def test_refusal_wrong_action(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """GUARDS: at the baseline pydantic ignores rule_admitted and a reject answers 200 (rejecting
-    an fp is always a no-op on ground truth, claim or not)."""
+    """A guard: rule_admitted on a reject action refuses (400) naming "rejected", rather than the
+    no-op a plain reject on an fp always is."""
     built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-wrong-action")
     payload = _accept_payload(built, det_type="fp", gt_idx=None, pred_idx=0, rule_admitted=True)
     payload["action"] = "rejected"
@@ -354,8 +355,8 @@ def test_refusal_wrong_action(
 def test_refusal_wrong_det_type(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """GUARDS: at the baseline an accept on a fn no-ops (only dt=='fp' appends), so it answers
-    200 rather than refusing the claim by name."""
+    """A guard: rule_admitted on an fn accept refuses (400) naming "fn", rather than the no-op an
+    accept on an fn otherwise is."""
     built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-wrong-dettype")
     payload = _accept_payload(built, det_type="fn", gt_idx=None, pred_idx=0, rule_admitted=True)
     resp = client.post("/api/review/action", json=payload)
@@ -366,8 +367,8 @@ def test_refusal_wrong_det_type(
 def test_refusal_out_of_range_pred_idx(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """GUARDS: at the baseline _names_prediction already guards the accept branch itself, so an
-    out-of-range pred_idx silently no-ops (200) rather than refusing the claim by name."""
+    """A guard: rule_admitted with an out-of-range pred_idx refuses (400) naming "pred_idx",
+    rather than the silent no-op it otherwise is."""
     built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-oor-pred-idx")
     payload = _accept_payload(built, det_type="fp", gt_idx=None, pred_idx=5, rule_admitted=True)
     resp = client.post("/api/review/action", json=payload)

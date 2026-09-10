@@ -42,7 +42,7 @@ def _cited_mapping(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str
 def test_a_cited_rebuild_refuses_naming_the_citing_events(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """GUARDS: a same-name rebuild whose current record a delivery event cites refuses unless
+    """A guard: a same-name rebuild whose current record a delivery event cites refuses unless
     supersede=True."""
     images_root, _ = _cited_mapping(tmp_path, monkeypatch)
     before = plant_mapping.load_mapping(tmp_path, "valley")

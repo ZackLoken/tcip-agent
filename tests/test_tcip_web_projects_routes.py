@@ -286,9 +286,9 @@ def test_list_reports_site_fields_across_four_project_states(client, workspace_d
 
 
 def test_list_route_reports_the_recorded_site(client, workspace_dir):
-    """Minimal, single-claim sibling of the four-state test above: only ``initialize_project``, so a
-    fail-before run against a tree that predates the ``site`` parameter observes a real
-    behavioral gap (the key absent) rather than the whole test file failing to import."""
+    """Minimal, single-claim sibling of the four-state test above: uses only
+    ``initialize_project``, so a missing ``site`` key surfaces here as a real behavioral gap,
+    not as the whole test file failing to import."""
     from tcip_mcp.tools.project_tools import initialize_project
 
     recorded = workspace_dir / "currant_bud_recorded"

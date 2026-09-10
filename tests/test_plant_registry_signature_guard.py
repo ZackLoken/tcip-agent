@@ -18,7 +18,7 @@ from tcip_mcp.tools.phenology_tools import build_plant_mapping
 def test_build_plant_mapping_refuses_plant_csv_paths_argument(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """GUARDS: the door's signature takes plant_registry, not plant_csv_paths."""
+    """A guard: the door's signature takes plant_registry, not plant_csv_paths."""
     from tests.test_plant_mapping_binding import _init
 
     _init(tmp_path, monkeypatch)
@@ -28,7 +28,7 @@ def test_build_plant_mapping_refuses_plant_csv_paths_argument(
 
 
 def test_deliver_orthomosaic_plant_counts_refuses_plant_csv_paths_argument() -> None:
-    """GUARDS: the door's signature takes plant_registry, not plant_csv_paths."""
+    """A guard: the door's signature takes plant_registry, not plant_csv_paths."""
     with pytest.raises(TypeError):
         deliver_orthomosaic_plant_counts(  # type: ignore[call-arg]
             predictions_dir="preds", raster_path="raster.tif", plant_csv_paths=["nope.csv"],

@@ -1474,8 +1474,7 @@ def test_manifest_fields_reports_not_relaunchable_for_an_infinite_split_draws_va
 
 def test_invalid_split_draws_reason_matches_what_the_marker_tests_assert_literally() -> None:
     """Coverage: the two tests above assert the marker's reason as a literal string, not the
-    imported constant, since a test proving baseline behavior cannot import a name the baseline
-    predates; this pins that literal to the module's own constant composed with the
+    imported constant; this pins that literal to the module's own constant composed with the
     missing-fields text's own ": cannot relaunch" suffix, so a reword of either half is caught
     here."""
     from tcip_web.routes.tuning import _INVALID_SPLIT_DRAWS_REASON

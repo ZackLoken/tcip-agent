@@ -55,7 +55,7 @@ def _dataset(tmp_path: Path, *, negative: bool = False, subjects=(Subject(name="
     return tmp_path
 
 
-# (a) fail-before: the fingerprint was blind to confirmed-negative membership.
+# (a) guard: the fingerprint changes when confirmed-negative membership changes.
 def test_dataset_fingerprint_changes_with_confirmed_negatives(tmp_path):
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 
