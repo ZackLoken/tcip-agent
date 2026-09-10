@@ -61,7 +61,7 @@ model = build_detector("faster_rcnn", adapter, num_classes=n,
 
 Every data-sounding `derived_from` label a value carries must map to a real implementation in
 `DERIVATION_IMPLEMENTATIONS` (`pipelines.derivations`); `test_provenance_honesty` enforces it, so
-a derivation label can never again be stamped without a computation behind it.
+a derivation label is never stamped without a computation behind it.
 
 ## The three bespoke seams (parallel; each imported, never `exec`'d)
 

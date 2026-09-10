@@ -148,8 +148,8 @@ Defer annotation mechanics to the annotation skill. Chestnut-specific difficulti
 
 Per the CLAUDE.md measurement-integrity invariant (never a geometric/pixel proxy; validate
 against a reference sized to the trait: GT annotations, or a breeder-confirmed sample of the
-model's own outputs (review-confirmation), before any result, not dense GT for every trait; see
-the catkin-elongation cautionary tale there). Chestnut-specific traps:
+model's own outputs (review-confirmation), before any result, not dense GT for every trait).
+Chestnut-specific traps:
 
 - `catkin_sex_ratio`: a size split or a made-up male/female class fabricates the ratio. The
   breeder defines what is counted (catkin types vs flower counts) and at which pollen phase.

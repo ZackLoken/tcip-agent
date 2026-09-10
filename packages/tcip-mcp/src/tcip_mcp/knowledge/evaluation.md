@@ -97,7 +97,7 @@ verified pass), `redraw_calibration_holdout` and `evaluate_model` all take
 a named `split_manifest` record instead of every labelled stem with an image, a side
 `draw_splits` drew held out from both training and checkpoint selection (see the `training`
 skill's Dataset Splits section). `evaluate_model` is the one whose purpose is a held-out score:
-without `split_manifest_dir` it scores the whole directory, as today; with it, the loader's own
+without `split_manifest_dir` it scores the whole directory; with it, the loader's own
 admitted count is recorded as `evaluated_stem_count`, refused by name when it falls short of the
 universe the manifest drew. The manifest's own subject/attribute must match this call's
 (`redraw_calibration_holdout` takes `subject`/`attribute` directly; `run_inference` and
@@ -109,7 +109,7 @@ refuses by name without one, since a labels-only universe can include a stem who
 
 A calibration under a named manifest also earns a `selection_disjointness` check: whether the
 cal/holdout stems it drew also sit on the checkpoint being calibrated's own selection (`val`)
-side, the leak this whole family of checks closes (a checkpoint chosen on a side, then
+side, the leak these disjointness checks close (a checkpoint chosen on a side, then
 calibrated over that same side, would otherwise clear every other gate while measuring the
 operating point on exactly the data the shipped weights were picked to fit). It rides beside
 `train_disjointness` in the validation row and floors `verify_stamp_binding` when a manifest-scoped
