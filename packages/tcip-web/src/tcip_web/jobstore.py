@@ -271,7 +271,7 @@ class JobRegistry:
         passes: ``job_root``'s own share, then the whole dict), then persist every live job if
         this registry does. ``job_root`` is the job's own ``platform_root`` for a per-root
         registry, or ``None`` for one with no root concept, matching :func:`evict_terminal`'s
-        own contract -- distinct from :meth:`list`'s ``root``, where ``None`` means every root
+        own contract, distinct from :meth:`list`'s ``root``, where ``None`` means every root
         this process holds rather than an exact match against ``None``."""
         with self.lock:
             self.jobs[job_id] = job

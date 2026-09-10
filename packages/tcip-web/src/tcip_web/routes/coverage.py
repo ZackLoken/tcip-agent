@@ -3,7 +3,7 @@ from, and the per-image record of two per-cell facts: which cells were served to
 native resolution (a delivery fact) and which cells have, at some point this session or an
 earlier one, sat fully on screen at some recorded scale (``cells_seen_at_scale``, a bound).
 Neither is an attention claim. Whether a seen cell counts as "swept" is derived against a
-subject's working scale -- the breeder's own set inspection zoom for that subject
+subject's working scale, the breeder's own set inspection zoom for that subject
 (:func:`tcip_mcp.dataset_layout.coverage_grid_zoom_key`), served by ``get_completeness`` below
 and never stored on this record. The one comparison (``lib/coverage.ts``'s ``meetsBar``) lives in
 the browser; this route never compares a recorded scale against it.
@@ -23,7 +23,7 @@ store is advisory: training never reads it, and unswept cells warn rather than b
 Every write that changes the record is audited (``record_event_or_raise``, after the transaction
 commits, since a log append cannot join a record transaction): an append that cannot land still
 raises (``AuditEntryNotWritten``, named by a stable marker in the 500 body) rather than warning,
-but by then the record is already committed, so the missing line stays missing -- a retry of the
+but by then the record is already committed, so the missing line stays missing: a retry of the
 same payload merges to no change and writes and audits nothing. The 500 tells the caller the true
 guarantee (the change landed, its line did not), never that its own retry is what recovers it.
 
@@ -35,8 +35,8 @@ as ``routes/subjects.py``'s image-status store, and a stale attestation (a cell'
 content edited or deleted since it was attested) is detected on every read, not trusted forever.
 An attestation also records its own scale provenance (``cells_attested_view``): the view scale
 the breeder pressed at, the working scale (the set zoom) in effect at write time, and
-whether this image's own coverage record shows the cell seen on a matching lattice -- facts
-only, no verdict, since whether an unswept cell should have blocked the attestation stays
+whether this image's own coverage record shows the cell seen on a matching lattice. These are
+facts only, no verdict, since whether an unswept cell should have blocked the attestation stays
 advisory. See ``dataset_layout.region_completeness_path`` and
 ``tcip_mcp.pipelines.region_completeness``.
 """
@@ -333,7 +333,7 @@ def get_grid(
     "Re-derive lattice" only when it would actually change something. Otherwise ``grid`` is
     derived fresh from ``subject``'s set zoom and the ``viewport_w``/``viewport_h`` the canvas
     host measured at fetch time; with no zoom set for ``subject``, or no viewport supplied yet,
-    ``grid`` is ``null`` and ``reason`` names why -- "set the grid zoom to derive a coverage
+    ``grid`` is ``null`` and ``reason`` names why: "set the grid zoom to derive a coverage
     lattice for <subject>" when nothing is set, since no default zoom exists.
 
     ``serving`` never depends on any of this: it is always the display-derived region-serving
@@ -715,7 +715,7 @@ def get_completeness(
 
     ``working_scale`` (subject -> ``WorkingScale`` or ``null``) is every subject with a
     completeness record on this raster, plus the requested ``subject`` when it has none, each
-    read fresh through :func:`_subject_zoom` -- the breeder's own set inspection zoom for that
+    read fresh through :func:`_subject_zoom`, the breeder's own set inspection zoom for that
     subject, never derived from any annotation or echoed back from the browser; the same function
     the grid route and ``post_completeness`` read a zoom through, so a store that will not decode
     or an entry whose ``zoom`` is not a positive number is refused the same way everywhere. Where
@@ -828,8 +828,8 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
     ``complete=True`` stamps the cell's current annotation-content digest, whether or not the
     cell was already complete (a re-attest restamps and clears staleness), and its scale
     provenance in ``cells_attested_view`` (the pressed ``view_scale``, the subject's working
-    scale in effect at write time, and whether this image's own view-coverage record -- read
-    under ``status_bucket(subject, date)`` by the image's file name, on a matching grid only --
+    scale in effect at write time, and whether this image's own view-coverage record, read
+    under ``status_bucket(subject, date)`` by the image's file name and on a matching grid only,
     shows the cell already seen); ``complete=False`` clears both the digest stamp and the
     ``cells_attested_view`` entry.
 
@@ -842,7 +842,7 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
 
     An attestation stamps the working scale the breeder actually swept against: the subject's own
     set grid zoom, read once ahead of the transaction through :func:`_subject_zoom` (never this
-    image's label file or pixel size) -- an absent zoom simply stamps a null working scale, while
+    image's label file or pixel size). An absent zoom simply stamps a null working scale, while
     an entry :func:`_subject_zoom` itself refuses (a store that will not decode, or a ``zoom``
     that is not a positive number) refuses this write outright, the same way it refuses the grid
     route and ``get_completeness``, rather than stamping the malformed value.

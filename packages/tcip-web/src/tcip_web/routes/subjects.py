@@ -288,8 +288,8 @@ def _stamp_digest(dataset_root: str, bucket: str, subject: str | None,
     sidecar itself just leaves these images unstamped (admitted, not quarantined, on read; see
     ``stale_finished_names``), because the status the human recorded is already committed by the
     time this runs. Returns ``None`` when there was nothing to stamp (no subject, no
-    ``subjects.json``, an unreadable or subject-less registry) -- not a failure, since no
-    confirmation was ever asserted against a schema that says nothing about this subject --
+    ``subjects.json``, an unreadable or subject-less registry), not a failure, since no
+    confirmation was ever asserted against a schema that says nothing about this subject;
     ``True`` once the stamp lands, and ``False`` only when the write itself raised, so a caller
     can tell a mark it is about to clear still describes reality."""
     if not subject:
