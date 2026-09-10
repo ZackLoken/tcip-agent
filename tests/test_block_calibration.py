@@ -739,13 +739,10 @@ def test_run_inference_raster_claim_scope_admits_a_band_group_trained_export_ove
 
 def test_run_inference_raster_without_reserved_region_names_the_real_gap(tmp_path: Path):
     """A checkpoint whose training experiment has no reserved calibration region (an ordinary
-    3-way split) refuses trait+raster_path, but with a message naming the missing reserved
-    region and the remedy (reserve_calibration_fraction) -- not baseline's blanket "not
-    supported" refusal, which fired unconditionally for every trait+raster_path call regardless
-    of whether a reserved region existed. Asserting on message content (not just "error" in
-    result) is required here: baseline's blanket refusal also satisfies a bare "error" in
-    result check, so that alone can't distinguish the old behavior from the new reserved-region
-    check this test exists to guard."""
+    3-way split) refuses trait+raster_path, with a message naming the missing reserved region
+    and the remedy (reserve_calibration_fraction). Asserting on message content, not just
+    "error" in result, matters: a bare "error" check cannot tell this reserved-region refusal
+    apart from any other refusal reason."""
     exp = _build_experiment(tmp_path, reserve_frac=0.0, experiment_id="exp_no_reserve")
 
     from tcip_mcp.tools.inference_tools import run_inference
@@ -831,12 +828,10 @@ def test_run_inference_raster_raw_path_stamps_default_conf_source_when_omitted(
 
 
 def test_select_gt_for_band_matches_the_dt_sides_center_inclusion_rule():
-    """GT selection must apply the same center-in-band-rect keep test the DT side already applies
-    (independent review finding: clip-and-keep on GT paired against center-filter-and-drop on DT
-    biased the reference at every band boundary). A box centered inside is kept at full extent,
-    translated to local coordinates; a box centered outside is dropped entirely, even one that
-    overlaps the band substantially -- clipping a straddling box's visible remainder must never
-    happen on this path anymore."""
+    """GT selection must apply the same center-in-band-rect keep test the DT side already applies:
+    a box centered inside is kept at full extent, translated to local coordinates; a box centered
+    outside is dropped entirely, even one that overlaps the band substantially. Clipping a
+    straddling box's visible remainder must never happen on this path."""
     import numpy as np
 
     from tcip_mcp.pipelines.block_calibration import _select_gt_for_band

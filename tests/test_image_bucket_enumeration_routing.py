@@ -1,7 +1,6 @@
-"""Several raw directory walks over one bucket of ``images/`` used to stay outside
-``list_logical_images``' own stem-collision refusal, so each could pick one member of a
-stem-collided pair rather than raising ``AmbiguousImageStem`` the way every other reader of a
-bucket does. Each is now routed through that shared enumeration instead.
+"""Every raw directory walk over one bucket of ``images/`` routes through
+``list_logical_images``' own stem-collision refusal, raising ``AmbiguousImageStem`` the way
+every other reader of a bucket does, never picking one member of a stem-collided pair silently.
 
 ``ingest_images`` itself already refuses to create a stem-collided pair (the ingest-collision
 family's own rail), so the pair a test needs here is built the only way one can actually reach

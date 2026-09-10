@@ -405,7 +405,7 @@ def test_an_unread_captures_bytes_going_bad_is_disclosed_never_opened(
     assert pm["captures_unverified"] == [f"{DATES[0]}/{p2_stem}.jpg"]
 
 
-def test_an_unread_captures_bytes_changing_in_place_no_longer_refuses(
+def test_an_unread_captures_bytes_changing_in_place_does_not_refuse_delivery(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The same unread capture as above, but changed to a different, still-readable image rather
@@ -531,13 +531,12 @@ def test_full_coverage_still_catches_an_in_place_exif_timestamp_change(
     assert not out_csv.exists()
 
 
-def test_an_unmapped_raster_no_longer_blocks_the_whole_date_digest_from_catching_a_change(
+def test_an_unmapped_raster_does_not_block_the_whole_date_digest_from_catching_a_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An unmapped raster capture beside two fully-read mapped plants used to make the whole-date
-    recompute structurally unreachable (it required reading every recorded stem, and an unmapped
-    capture is never delivery-read); now the trigger is every mapped capture read, so an in-place
-    EXIF timestamp change on a mapped capture still refuses even with the raster never read."""
+    """An unmapped raster capture beside two fully-read mapped plants does not block the
+    whole-date recompute: the trigger is every mapped capture read, so an in-place EXIF
+    timestamp change on a mapped capture still refuses even with the raster never read."""
     _init(tmp_path, monkeypatch)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])

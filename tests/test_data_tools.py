@@ -438,10 +438,10 @@ def test_draw_splits_materialize_places_a_complete_band_group(tmp_path: Path):
 def test_draw_splits_materialize_places_a_complete_band_group_under_a_relative_output_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
-    """A relative ``output_path`` used to refuse ``BadKey`` on the destination manifest's own key
-    after the bands had already landed, since the manifest key is derived from ``dest_dir``
-    itself inside ``place_logical_image`` while the per-band keys (``flat_image_key``) already
-    absolutized theirs; ``place_logical_image`` now absolutizes ``dest_dir`` once at entry."""
+    """A relative ``output_path`` must not refuse ``BadKey`` on the destination manifest's own key
+    after the bands have already landed: ``place_logical_image`` absolutizes ``dest_dir`` once at
+    entry, so the manifest key derived from it agrees with the already-absolutized per-band keys
+    (``flat_image_key``)."""
     import numpy as np
 
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
@@ -816,8 +816,8 @@ def test_draw_splits_group_key_map_never_straddles(tmp_path: Path):
 
 
 def test_draw_splits_unrecognized_group_by_refuses_without_writing(tmp_path: Path):
-    """A silent ``GROUP_KEY_FNS.get(group_by, default_group_key)`` fallback used to mis-group a
-    dataset without anyone noticing; it must refuse loudly and write nothing instead."""
+    """An unrecognized ``group_by`` must refuse loudly and write nothing, never fall back to
+    ``GROUP_KEY_FNS.get(group_by, default_group_key)`` and mis-group a dataset silently."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = draw_splits(str(root), output_path=str(out), group_by="not_a_real_key", subject="bud",

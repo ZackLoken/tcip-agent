@@ -142,9 +142,9 @@ def test_evaluation_section_agrees_with_the_hoist_precedence_on_four_shapes():
         assert evaluation_section(cfg) == via_hoist(cfg)
 
 
-def test_stage_spec_tolerates_but_no_longer_declares_lr():
-    # Per-stage lr was a lie (train() never reads it; the optimizer block sets LR). The field
-    # is gone, but extra="allow" means an old config carrying stage lr still validates.
+def test_stage_spec_declares_no_lr_field_but_tolerates_one():
+    # train() never reads a per-stage lr; the optimizer block sets LR. extra="allow" means a
+    # config carrying stage lr still validates.
     from tcip_mcp.pipelines.schemas import StageSpec
 
     assert "lr" not in StageSpec.model_fields

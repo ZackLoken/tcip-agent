@@ -79,7 +79,7 @@ def test_predict_tiled_stamps_cap_hit_when_the_full_frame_cap_truncates(tmp_path
     assert capped["count"] == uncapped["count"] - 1
 
     # Exactly at the cap: no slicing occurs, but cap_hit still reads True (matching
-    # records_from_detector's own >= convention -- sitting at the ceiling is still uncertain).
+    # records_from_detector's own >= convention: sitting at the ceiling is still uncertain).
     pred.max_dets = uncapped["count"]
     at_cap = pred.predict_tiled(img, tile_size=TILE, overlap=0.2)
     assert at_cap["cap_hit"] is True

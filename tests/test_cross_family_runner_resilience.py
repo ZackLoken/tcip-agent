@@ -1,10 +1,10 @@
 """One harness returning nothing must not destroy the other families' answers.
 
 The cross-family runner poses one question to several agent harnesses concurrently and writes each
-one's transcript. A harness that produces no stdout used to raise inside the worker, and the
-exception escaped the result-collection loop, so the sibling families' completed runs were lost with
-it. That is the expensive failure: the runs that succeeded are the artifact, and a harness that
-returns nothing is a normal outcome rather than a programming error.
+one's transcript. A harness that produces no stdout must not raise inside the worker: an exception
+there would escape the result-collection loop and lose the sibling families' completed runs with
+it. That loss is the failure to avoid: the runs that succeeded are the artifact, and a harness
+that returns nothing is a normal outcome rather than a programming error.
 """
 
 from __future__ import annotations

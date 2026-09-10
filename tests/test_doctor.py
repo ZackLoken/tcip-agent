@@ -88,9 +88,9 @@ def test_doctor_help_prints_the_dispatchers_prog_argument(capsys):
     assert "usage: tcip doctor " in capsys.readouterr().out
 
 
-def test_doctor_flags_the_field_session_bug_family(tmp_path):
+def test_doctor_flags_registry_checkpoint_path_under_a_temp_directory(tmp_path):
     root = _project(tmp_path)
-    # registry entry pointing at a pytest temp checkpoint (the leak the field session found)
+    # registry entry pointing at a pytest temp checkpoint
     reg = root / ".tcip" / "models"
     reg.mkdir(parents=True)
     (reg / "registry.json").write_text(json.dumps({"entries": [

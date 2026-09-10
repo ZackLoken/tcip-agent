@@ -646,7 +646,7 @@ def test_assign_detections_to_plants_default_tolerance_is_pitch_derived(tmp_path
     assert 0 < derived_tol < NN_TOLERANCE_METERS  # the scenario must actually tell them apart
 
     # ~5 m from plant 0 (10 px at 0.5 m/px): farther than the derived tolerance but closer than
-    # the old hardcoded 10 m fallback.
+    # the NN_TOLERANCE_METERS fallback.
     det_px = (20.0, 10.0)
     lat, lon = georef.pixel_to_wgs84(*det_px)
     plant0_lat, plant0_lon = georef.pixel_to_wgs84(*_PLANT_PIXELS[0])

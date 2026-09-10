@@ -210,7 +210,7 @@ def test_class_distribution_on_a_shared_coco_scopes_to_its_own_stems(tmp_path):
                            stems=stems[2:])
 
     assert train_ds._coco is val_ds._coco is shared_coco  # the actual sharing this bug depends on
-    # img0 (1 box) + img1 (2 boxes) = 3; img2 (3 boxes) + img3 (4 boxes) = 7 -- not the shared
+    # img0 (1 box) + img1 (2 boxes) = 3; img2 (3 boxes) + img3 (4 boxes) = 7: not the shared
     # dict's own total of 10, and not identical between the two splits.
     assert train_ds.class_distribution == {0: 3}
     assert val_ds.class_distribution == {0: 7}
@@ -545,7 +545,7 @@ def test_instance_seg_dataset_excludes_partially_labeled_stem_from_training(tmp_
     ], 100, 100)
     json_io.write_annotations(labels_dir / "partial.json", [
         _poly([(4, 4), (12, 4), (12, 12), (4, 12)], opening="closed"),
-        _poly([(40, 40), (60, 40), (60, 60), (40, 60)]),  # unlabeled -- no opening attribute
+        _poly([(40, 40), (60, 40), (60, 60), (40, 60)]),  # unlabeled: no opening attribute
     ], 100, 100)
     _reg, id_map = _reg_id_map(attribute="opening", values=("open", "closed"))
 
@@ -1062,7 +1062,7 @@ def test_json_det_targets_skips_unlabeled_instead_of_raising(tmp_path):
 
 def test_detection_dataset_excludes_partially_labeled_stem_from_training(tmp_path):
     """DetectionDataset's fixed-length self.stems must not include a stem with any instance
-    unlabeled for `attribute` -- __getitem__ can't act on this per-call (the dataset length is
+    unlabeled for `attribute`: __getitem__ can't act on this per-call (the dataset length is
     fixed at construction), so the exclusion has to happen here, matching the delivery-gating
     paths (run_full_frame_evaluation, operating-point calibration) that already exclude the whole
     image rather than silently training on its labeled subset."""
@@ -1076,7 +1076,7 @@ def test_detection_dataset_excludes_partially_labeled_stem_from_training(tmp_pat
     ], 100, 100)
     json_io.write_annotations(labels_dir / "partial.json", [
         _box(10, 10, 30, 30, opening="closed"),
-        _box(40, 40, 60, 60),  # unlabeled -- no opening attribute at all
+        _box(40, 40, 60, 60),  # unlabeled: no opening attribute at all
     ], 100, 100)
     _reg, id_map = _reg_id_map(attribute="opening", values=("open", "closed"))
 
@@ -1090,7 +1090,7 @@ def test_detection_dataset_excludes_partially_labeled_stem_from_training(tmp_pat
     assert ds.sample_counts["skipped_incomplete_attribute"] == 1
     assert ds.sample_counts["annotated"] == 1
     assert ds.sample_counts["skipped_unconfirmed_empty"] == 0  # not a false reason
-    # The surviving stem's own target read is unaffected -- one real box, fully labeled.
+    # The surviving stem's own target read is unaffected: one real box, fully labeled.
     boxes, labels = ds._det_targets("complete", "")
     assert len(boxes) == 1
 

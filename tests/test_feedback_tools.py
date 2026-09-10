@@ -371,9 +371,9 @@ def test_triage_predictions_explicit_auto_threshold_stamps_breeder_confirmation(
 def test_unresolvable_scorer_raises_valueerror_not_an_import_error():
     """The refusal is a ValueError whatever the name looks like.
 
-    ``build_scorer``'s callers catch ``ValueError`` to turn a refusal into an error dict. A dotted
-    name that fails to import used to raise ``ModuleNotFoundError`` straight out of the audited
-    MCP tool instead.
+    ``build_scorer``'s callers catch ``ValueError`` to turn a refusal into an error dict: a
+    dotted name that fails to import must raise ``ValueError`` too, never
+    ``ModuleNotFoundError`` straight out of the audited MCP tool.
     """
     import pytest
 

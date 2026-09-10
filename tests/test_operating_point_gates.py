@@ -55,12 +55,12 @@ def _records(idp="c", *, shift: float = 0.0):
 # Every other holdout fixture in this module gives the holdout its own detection scores drawn from
 # the same set calibration used, so the holdout's own auto-built conf grid (``derive_operating_point_curve``
 # with no explicit ``conf_grid``) already contains the calibration-picked conf exactly, meaning the
-# deleted nearest-neighbor snap (``count_bias_at``, no longer a symbol anywhere; reconstructed below
-# as ``_old_nearest_neighbor_bias`` to prove the two approaches differ) and the current exact-conf
+# nearest-neighbor comparator (reconstructed below as ``_nearest_neighbor_bias_comparator``, since
+# production code holds no such symbol) and the current exact-conf
 # call (``derive_operating_point_curve(holdout_records, conf_grid=[conf])``) would land on the identical
 # curve point in every one of those tests. These two fixtures instead give the holdout a sparse
 # detection-score set that deliberately excludes the calibration-picked conf (0.9), so the nearest
-# grid point the old snap would have found is a genuinely different threshold with genuinely
+# grid point the comparator finds is a genuinely different threshold with genuinely
 # different tp/fp/fn: the scenario this exact-conf evaluation exists to catch.
 
 def _cal_picks_conf_point_nine():
@@ -72,8 +72,8 @@ def _cal_picks_conf_point_nine():
                          miss_pattern=[0] * n, fp_pattern=[1] * n, score=0.9, fp_score=0.05)
 
 
-def _old_nearest_neighbor_bias(holdout_records, tolerance, conf):
-    """Reconstruction of the deleted ``count_bias_at``: the curve entry nearest ``conf`` on the
+def _nearest_neighbor_bias_comparator(holdout_records, tolerance, conf):
+    """A nearest-neighbor comparator: the curve entry nearest ``conf`` on the
     holdout's own auto-built grid, not an exact evaluation at ``conf`` itself."""
     from tcip_mcp.pipelines.training.evaluation import derive_operating_point_curve
 
@@ -81,14 +81,14 @@ def _old_nearest_neighbor_bias(holdout_records, tolerance, conf):
     return min(sweep["curve"], key=lambda c: abs(c["conf"] - conf))
 
 
-def test_exact_conf_eval_catches_a_catastrophic_bias_the_old_snap_would_have_missed():
-    """Direction 1: the old snap would have misled, reading a validated-looking zero bias off a
-    holdout whose true bias, at the conf that will actually ship, is catastrophic.
+def test_exact_conf_eval_catches_a_catastrophic_bias_a_nearest_neighbor_comparator_misses():
+    """Direction 1: a nearest-neighbor comparator reads a validated-looking zero bias off a
+    holdout whose bias, at the conf that will actually ship, is catastrophic.
 
     Holdout detections all score 0.05 (well below the calibration-picked 0.9) with zero false
     positives. Evaluated exactly at 0.9, every detection is filtered out -> total miss, bias -80/image
-    (80 objects/image). The old snap, with no holdout score anywhere near 0.9, would find its own
-    grid's nearest point at 0.05 (closer to 0.9 than the grid's other point, 0.0) -- at which every
+    (80 objects/image). The comparator, with no holdout score anywhere near 0.9, finds its own
+    grid's nearest point at 0.05 (closer to 0.9 than the grid's other point, 0.0), at which every
     detection survives and the bias reads as a perfect 0.0.
     """
     from tcip_mcp.pipelines.training.evaluation import gt_class_avg_size
@@ -100,7 +100,7 @@ def test_exact_conf_eval_catches_a_catastrophic_bias_the_old_snap_would_have_mis
     assert {d["score"] for r in hold for d in r["dt"]} == {0.05}  # sparse, excludes the picked 0.9
 
     tol = 0.5 * gt_class_avg_size(hold)
-    old = _old_nearest_neighbor_bias(hold, tol, 0.9)
+    old = _nearest_neighbor_bias_comparator(hold, tol, 0.9)
     assert old["conf"] == pytest.approx(0.05)         # snapped to the nearest grid point, not 0.9
     assert old["count_bias_mean"] == pytest.approx(0.0)  # ...which misleadingly reads as unbiased
 
@@ -109,19 +109,19 @@ def test_exact_conf_eval_catches_a_catastrophic_bias_the_old_snap_would_have_mis
     conf = b.get("conf")
     hb = conf.gate_evidence["holdout_bias"]
     assert hb["conf"] == pytest.approx(0.9)           # evaluated at the conf that will actually ship
-    assert hb["count_bias_mean"] == pytest.approx(-80.0)  # the TRUE bias at that conf: total miss
+    assert hb["count_bias_mean"] == pytest.approx(-80.0)  # the real bias at that conf: total miss
     assert hb["count_bias_mean"] != pytest.approx(old["count_bias_mean"])  # the two approaches differ
     assert conf.validated_against == "false"            # exact eval correctly refuses...
-    assert "count_bias_exceeds_tolerance" in conf.gate_evidence["failures"]  # ...the old snap would not have
+    assert "count_bias_exceeds_tolerance" in conf.gate_evidence["failures"]  # ...a comparator would not have
 
 
-def test_exact_conf_eval_admits_a_reference_the_old_snap_would_have_unfairly_failed():
-    """Direction 2: the old snap would have unfairly refused a reference the exact evaluation
-    correctly admits.
+def test_exact_conf_eval_admits_a_reference_a_nearest_neighbor_comparator_would_fail():
+    """Direction 2: a nearest-neighbor comparator would unfairly refuse a reference the exact
+    evaluation correctly admits.
 
     Holdout true-match detections score 0.99 (above 0.9); its false positives score 0.89 (just below
     0.9). Evaluated exactly at 0.9, the false positives are filtered out and the true matches survive
-    -> zero bias, clean pass. The old snap's nearest grid point to 0.9 is 0.89 (closer than 0.99) --
+    -> zero bias, clean pass. The comparator's nearest grid point to 0.9 is 0.89 (closer than 0.99),
     at which the false positives also survive, reading as a +2.0/image overcount that exceeds
     bud_opening's count-bias tolerance regardless of the exact value.
     """
@@ -134,7 +134,7 @@ def test_exact_conf_eval_admits_a_reference_the_old_snap_would_have_unfairly_fai
     assert {d["score"] for r in hold for d in r["dt"]} == {0.99, 0.89}  # excludes the picked 0.9
 
     tol = 0.5 * gt_class_avg_size(hold)
-    old = _old_nearest_neighbor_bias(hold, tol, 0.9)
+    old = _nearest_neighbor_bias_comparator(hold, tol, 0.9)
     assert old["conf"] == pytest.approx(0.89)          # snapped to the nearest grid point, not 0.9
     assert old["count_bias_mean"] == pytest.approx(2.0)  # ...which reads as an over-tolerance bias
 
@@ -143,10 +143,10 @@ def test_exact_conf_eval_admits_a_reference_the_old_snap_would_have_unfairly_fai
     conf = b.get("conf")
     hb = conf.gate_evidence["holdout_bias"]
     assert hb["conf"] == pytest.approx(0.9)            # evaluated at the conf that will actually ship
-    assert hb["count_bias_mean"] == pytest.approx(0.0)  # the TRUE bias at that conf: clean
+    assert hb["count_bias_mean"] == pytest.approx(0.0)  # the real bias at that conf: clean
     assert hb["count_bias_mean"] != pytest.approx(old["count_bias_mean"])  # the two approaches differ
     assert conf.validated_against == "held_out_annotations"  # exact eval correctly admits...
-    assert conf.gate_evidence["failures"] == []                  # ...what the old snap would have refused
+    assert conf.gate_evidence["failures"] == []                  # ...what a comparator would have refused
 
 
 # ── Dispersion and localization-quality floor ──────────────────────────────
@@ -187,7 +187,7 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch
 
     n_images, objects_per_image = 10, 50
     # One image drops 10 objects, none elsewhere -> mean bias -1.0, but the p90 tail is 1.0 (driven
-    # by that single bad image among many good ones) -- exactly the "one bad plant among many"
+    # by that single bad image among many good ones): exactly the "one bad plant among many"
     # scenario a population mean/SE alone can hide.
     miss = [0] * (n_images - 1) + [10]
     fp = [0] * n_images
@@ -547,7 +547,7 @@ def test_same_noisy_detector_reference_size_fixed_but_density_varied_crosses_adm
 
     sparse = _run(30)
     dense = _run(100)
-    # Same noise, same n, same mean/std -- density is the only thing that differs.
+    # Same noise, same n, same mean/std: density is the only thing that differs.
     assert sparse.get("conf").gate_evidence["holdout_bias"]["count_bias_std"] == pytest.approx(
         dense.get("conf").gate_evidence["holdout_bias"]["count_bias_std"])
     assert sparse.get("conf").gate_evidence["holdout_bias"]["count_bias_mean"] == pytest.approx(0.0)

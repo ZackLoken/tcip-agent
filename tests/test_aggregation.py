@@ -421,10 +421,9 @@ def test_units_never_fall_back_with_no_value_key_at_all():
 
 @pytest.mark.parametrize("value_key", ["plant_id", "detections_total", "open_fraction", "pct_open"])
 def test_unit_from_value_key_never_fabricates_from_an_unrelated_key(value_key):
-    """The unit-suffix regex used to match any trailing underscore-word, so 'detections_total' read
-    as unit='total' and 'plant_id' as unit='id'. Only a trailing token that is one of crops.yml's own
-    declared units (or a mechanically-squared form of one) may imply a unit: 'id'/'total'/'fraction'/
-    'open' are none of those, regardless of what precedes them."""
+    """Only a trailing token that is one of crops.yml's own declared units (or a
+    mechanically-squared form of one) may imply a unit: 'id'/'total'/'fraction'/'open' are none
+    of those, regardless of what precedes them."""
     from tcip_mcp.pipelines.postprocessing.aggregation import _unit_from_value_key
 
     assert _unit_from_value_key(value_key) is None

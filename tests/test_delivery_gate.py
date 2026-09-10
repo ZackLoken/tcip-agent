@@ -1215,9 +1215,8 @@ def test_gui_launch_with_no_tile_field_derives_from_the_checkpoint_not_a_default
 
 def test_gui_launch_with_no_tile_field_and_no_checkpoint_geometry_stays_untiled(
         tmp_path, monkeypatch):
-    """The mirror case, and the one a fixed ``DEFAULT_TILED=True`` used to get silently wrong: a
-    checkpoint with no persisted training geometry, launched with the tile field unset, must run
-    untiled rather than tiling at a scale nothing justifies."""
+    """The mirror case: a checkpoint with no persisted training geometry, launched with the tile
+    field unset, must run untiled rather than tiling at a scale nothing justifies."""
     job, out_dir = _run_gui_inference_worker(
         tmp_path, monkeypatch, tile=None, tile_source="default")
     assert job.status == "completed"

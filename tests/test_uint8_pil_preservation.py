@@ -56,7 +56,7 @@ def test_unfaithful_inputs_return_unchanged():
 
 def test_four_channel_converts_to_rgba_only_when_the_source_declares_alpha():
     """RGBA is a faithful *pixel* round-trip for any 4-channel uint8 array, but PIL's
-    augmentation chain treats an alpha channel differently than a color one -- correct only when
+    augmentation chain treats an alpha channel differently than a color one: correct only when
     the 4th channel really is transparency. band_interpretations (the same GDAL-color-
     interpretation fact raster_source's other consumers already read) is the only signal that
     settles it; with no signal, or a signal naming something other than alpha, the array must

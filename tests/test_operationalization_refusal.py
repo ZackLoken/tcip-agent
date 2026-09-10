@@ -1187,11 +1187,10 @@ def test_ordinal_and_count_aggregates_need_their_own_records(delivery_root: Path
     assert ordinal_record.value["confirmed_by"] == "user:grüne"
 
 
-def test_a_count_csv_no_longer_ships_under_no_trait_at_all(delivery_root: Path, tmp_path: Path):
-    """The permissive delivery this door used to allow, named directly: a count under no trait.
-
-    A confirmed meaning is keyed by the trait, so a call naming none has nothing to check against
-    and wrote the file regardless. The argument is required now and nothing is written without it.
+def test_export_detection_csv_refuses_with_no_trait_argument(delivery_root: Path, tmp_path: Path):
+    """A count CSV named under no trait: a confirmed meaning is keyed by the trait, so a call
+    naming none has nothing to check against. ``trait`` is required, and nothing is written
+    without it.
     """
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
@@ -1202,10 +1201,10 @@ def test_a_count_csv_no_longer_ships_under_no_trait_at_all(delivery_root: Path, 
     assert not out_csv.exists()
 
 
-def test_the_count_tool_no_longer_tabulates_under_no_trait_at_all(
+def test_deliver_per_image_counts_refuses_with_no_trait_argument(
     delivery_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
-    """The same permissive delivery at the tool, which used to hand back the counts as well."""
+    """The same refusal at the tool: a count delivery named under no trait."""
     import tcip_mcp.tools.inference_tools as itools
 
     monkeypatch.setattr(itools, "_run_inference_verified", lambda *args, **kwargs: {
@@ -1219,14 +1218,12 @@ def test_the_count_tool_no_longer_tabulates_under_no_trait_at_all(
     assert not out_csv.exists()
 
 
-def test_a_per_plant_csv_no_longer_ships_under_the_writers_own_default_name(
+def test_export_aggregated_csv_refuses_with_no_delivered_phenotype_argument(
     delivery_root: Path, tmp_path: Path,
 ):
-    """The other permissive delivery: a per-plant CSV whose delivered_phenotype came from a default.
-
-    That default shipped a delivered-phenotype column holding a word the crop vocabulary does not
-    carry, so no record could be keyed by it. The argument is required now and nothing is written
-    without it.
+    """A per-plant CSV named under no ``delivered_phenotype``: a default value would ship a
+    delivered-phenotype column holding a word the crop vocabulary does not carry, so no record
+    could be keyed by it. ``delivered_phenotype`` is required, and nothing is written without it.
     """
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 

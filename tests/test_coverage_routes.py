@@ -1094,7 +1094,7 @@ class TestCoverageRecord:
         """``tcip_store`` refuses a log append inside an open transaction, so the state write
         commits before the audit line is attempted; a failed append cannot roll that back. What
         it still guarantees: the caller is told 500, not a silent 200, so it never trusts a
-        change that landed with no trail -- a retry of the same payload recovers neither the
+        change that landed with no trail: a retry of the same payload recovers neither the
         write nor the missing line (proven next)."""
         from tcip_mcp.audit import AuditEntryNotWritten
 
@@ -1124,7 +1124,7 @@ class TestCoverageRecord:
         self, client, dated_dataset, monkeypatch,
     ):
         """The 500's own guarantee, proven: the record already committed on the first post, so
-        an identical retry merges to no change and neither writes nor audits -- the caller's own
+        an identical retry merges to no change and neither writes nor audits: the caller's own
         retry can never be what recovers the missing line."""
         from tcip_mcp.audit import AuditEntryNotWritten
 
@@ -1355,8 +1355,8 @@ class TestCompletenessRoute:
     def test_get_completeness_serves_a_conformed_record_with_an_empty_attested_view(
         self, client, dated_dataset,
     ):
-        """A record whose ``cells_attested_view`` is present but empty -- the shape an unattest
-        leaves it in, and the shape the conform script write-forwards onto a pre-field record --
+        """A record whose ``cells_attested_view`` is present but empty (the shape an unattest
+        leaves it in, and the shape the conform script write-forwards onto a pre-field record)
         reads and attests normally. Built through the route's own ``_toggle`` producer (attest,
         unattest, attest again) rather than a hand-built record."""
         root, path = dated_dataset
@@ -1571,7 +1571,7 @@ class TestCompletenessRoute:
         """Unlike post_coverage's own merge, a repeat attest is never a no-op: it always
         restamps the digest and scale provenance and always attempts to audit, so a retry under
         the same standing audit gap answers 500 again, not the 200 an unchanged post_coverage
-        push gets -- the retry never recovers the missing line by itself."""
+        push gets: the retry never recovers the missing line by itself."""
         from tcip_mcp.audit import AuditEntryNotWritten
 
         root, path = dated_dataset

@@ -1257,7 +1257,7 @@ def test_run_hpo_trial_writes_resolved_config_with_unconsumed_params(monkeypatch
 
     def fake_train(run, train_loader, val_loader, task="detection",
                    epoch_callback=None, resume_from=""):
-        run.config.get("lr")  # a known key, consumed -- but "totally_bogus_key" never read
+        run.config.get("lr")  # a known key, consumed, but "totally_bogus_key" never read
         run.best_metric = 1.0
         run.status = "completed"
         return run

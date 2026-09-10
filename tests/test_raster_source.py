@@ -525,7 +525,7 @@ def test_is_georeferenced_true_only_for_a_real_geotransform(tmp_path: Path) -> N
     """A raster with real ModelPixelScale/ModelTiepoint/GeoKeyDirectory tags (a stitched,
     georectified orthomosaic) answers True; an ordinary capture with none of those tags (this
     module's own fixtures, and an .npy, which has no tag mechanism at all) answers False,
-    regardless of pixel dimensions -- the decider is georeferencing, never size."""
+    regardless of pixel dimensions: the decider is georeferencing, never size."""
     plain_path = tmp_path / "plain.tif"
     _write_striped_tiff(plain_path, _distinctive_array(24, 20), rowsperstrip=4)
     assert raster_source.is_georeferenced(plain_path) is False
@@ -750,7 +750,7 @@ def test_raster_content_identity_deterministic_under_matching_recorded_parameter
     tmp_path: Path,
 ) -> None:
     """A training-time and an export-time call agree when both recompute under the identity's own
-    recorded seed/window_size/max_windows -- the parameters that must travel with the identity."""
+    recorded seed/window_size/max_windows: the parameters that must travel with the identity."""
     from tcip_mcp.pipelines.raster_source import raster_content_identity
 
     path = tmp_path / "content.npy"
@@ -808,12 +808,12 @@ def test_raster_content_identity_refuses_only_when_unopenable(tmp_path: Path) ->
 # ── content_identity: raster_content_identity under the platform's own budget ────────────────
 
 
-def test_content_identity_with_an_explicit_channel_count_matches_the_old_spelling(
+def test_content_identity_with_an_explicit_channel_count_matches_the_direct_call(
     tmp_path: Path,
 ) -> None:
     """A caller with its own channel count (a model's ``in_chans``, a training-time probe) gets
     exactly the value the direct ``raster_content_identity`` call under the platform's constants
-    used to compute, never the route's own derivation.
+    computes, never the route's own derivation.
 
     A grayscale photograph is the discriminating input: ``probe_channels`` reads it at 1
     (its own band count) while ``image_route_channel_count`` reads it at 3 (a plain serve's PIL

@@ -476,11 +476,11 @@ def test_backup_sweep_and_per_file_capture_share_one_baseline(
 
 
 def test_plain_compute_matches_can_never_produce_a_tp_for_a_classified_trait() -> None:
-    # The reproduced defect: an attribute-scoped detector's predictions carry the classified VALUE
+    # An attribute-scoped detector's predictions carry the classified value
     # on `subject` (a joint detect-and-classify class space, subject_registry.assign_class_ids), while
     # GT keeps the real object type on `subject` and the confirmed value in `attributes[attribute]`.
     # Plain compute_matches groups strictly by identical `subject`, so these two vocabularies never
-    # intersect -- a correctly classified instance could never register as a match, regardless of
+    # intersect: a correctly classified instance could never register as a match, regardless of
     # model quality.
     gt = [Annotation(subject="bud", geometry=BBox(100, 100, 200, 200),
                      attributes={"opening": "open"})]
@@ -529,7 +529,7 @@ def test_compute_classified_trait_matches_excludes_unassessed_and_out_of_scope_i
     gt = [
         # never assessed for `opening` yet: a soft, expected gap, not a confirmed negative
         Annotation(subject="bud", geometry=BBox(100, 100, 200, 200)),
-        # a different, enabling subject sharing the same labels dir -- must not enter the match pool
+        # a different, enabling subject sharing the same labels dir: must not enter the match pool
         Annotation(subject="bush", geometry=BBox(300, 300, 400, 400), attributes={"opening": "open"}),
     ]
     preds = [Annotation(subject="bud", geometry=BBox(102, 102, 198, 198), score=0.9,

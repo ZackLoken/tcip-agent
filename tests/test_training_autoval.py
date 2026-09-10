@@ -299,10 +299,10 @@ def test_spatial_manifest_tied_test_calibration_fractions_place_by_declared_orde
     assert "seed" not in manifest
 
 
-def test_spatial_manifest_distinct_fractions_layout_is_unaffected_by_the_fixed_tie_break(
+def test_spatial_manifest_layout_with_distinct_fractions_never_engages_tie_break(
     tmp_path: Path,
 ):
-    """Coverage, not a guard: with no tied shares (0.65/0.25/0.1), the fixed declared-order
+    """Coverage, not a guard: with no tied shares (0.65/0.25/0.1), the declared-order
     tie-break never runs, so the layout comes from the fractions and tile geometry alone. Regions
     pinned against this exact width/height/tile_size/overlap/fractions."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)

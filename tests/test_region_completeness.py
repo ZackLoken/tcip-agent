@@ -115,7 +115,7 @@ class TestCellAnnotationDigest:
 
 class TestCellAnnotationDigests:
     """The binned, one-pass-over-annotations sibling of cell_annotation_digest: must agree with
-    it exactly, for every cell, in the same call -- the only property that matters here, since a
+    it exactly, for every cell, in the same call: the only property that matters here, since a
     binning bug that silently assigns an annotation to the wrong cell is a real staleness-check
     correctness bug, not just a performance regression."""
 
@@ -134,7 +134,7 @@ class TestCellAnnotationDigests:
         got = cell_annotation_digests(anns, "bud", cells, tile_size=64)
         expected = {c.name: cell_annotation_digest(anns, "bud", c) for c in cells}
         assert got == expected
-        assert len(got) == 4  # A1, A2, B1, B2 -- the grid this fixture actually derives
+        assert len(got) == 4  # A1, A2, B1, B2: the grid this fixture actually derives
 
     def test_empty_cell_list_returns_empty(self):
         assert cell_annotation_digests([], "bud", [], tile_size=64) == {}
@@ -154,7 +154,7 @@ class TestCellAnnotationDigests:
 
 
 class TestAnnotationsByCell:
-    """The shared binning cell_annotation_digests now calls: subject's annotations grouped by
+    """The shared binning cell_annotation_digests calls: subject's annotations grouped by
     cell name, one pass over annotations."""
 
     def _cells(self, width=128, height=128, tile_size=64, overlap=0.0):
@@ -177,9 +177,9 @@ class TestAnnotationsByCell:
         assert set(got) == {c.name for c in cells}
         assert all(v == [] for v in got.values())
 
-    def test_feeds_cell_annotation_digests_identically_to_before(self):
-        """cell_annotation_digests, refactored to call this, must still agree with the per-cell
-        digest exactly -- the property TestCellAnnotationDigests already proves, restated here
+    def test_feeds_cell_annotation_digests_with_agreeing_results(self):
+        """cell_annotation_digests, which calls this, must still agree with the per-cell
+        digest exactly: the property TestCellAnnotationDigests already proves, restated here
         against the shared binning directly."""
         cells = self._cells()
         anns = [

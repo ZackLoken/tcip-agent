@@ -1,9 +1,9 @@
 """A trial whose actor never answered Ray's first bookkeeping call (it died during actor start,
 or never received one) comes back from the grid with no ``config``, since
 ``ray.air.result.Result.config`` is a property reading ``metrics.get("config")`` and Ray fills
-that key only once the actor answers. ``tune_search`` used to assert every result carried a
-config, which crashed the whole sweep's result assembly the moment one trial died that way; it
-now records the death as an honest ``ERROR`` row instead.
+that key only once the actor answers. ``tune_search`` must not assert every result carries a
+config: a trial that died that way records as an honest ``ERROR`` row, never a crash of the
+whole sweep's result assembly.
 
 Ray is faked here the same way ``test_hpo_ray_lifecycle.py`` fakes it (``tune_search`` imports
 Ray inside the function body, so a stand-in on ``sys.modules`` is enough), except the fake

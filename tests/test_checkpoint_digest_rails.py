@@ -790,9 +790,9 @@ def test_run_inference_refuses_a_sweep_whose_evidence_the_codec_cannot_carry(
     tmp_path, monkeypatch,
 ):
     """A body the codec refuses (RECORD_JSON's allow_nan=False; a NaN in the resolver's inputs
-    is the natural one) makes the door return its own error and write no bucket, rather than
-    the swallowed warning the pre-family code left behind. The admitting half of this branch is
-    already covered: test_a_bespoke_module_exposing_its_own_knob_reaches_a_validated_point in
+    is the natural one) makes the door return its own error and write no bucket, never a
+    swallowed warning. The admitting half of this branch is already covered:
+    test_a_bespoke_module_exposing_its_own_knob_reaches_a_validated_point in
     test_detector_operating_point_holder.py is an ordinary calibrated run surviving it."""
     import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools

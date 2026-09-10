@@ -2,10 +2,10 @@
 git repository the test builds itself, so a baseline whose failure never reached the code under
 test is distinguished from one whose failure is the assertion the guard actually names.
 
-Before this fix a baseline failure counted as GUARDS whenever its headline was not a missing
-import, whatever raised it: a fixture constructor called with a keyword the baseline lacks, or a
-setup fixture erroring outright, scored the same as the test's own assertion failing or the code
-under test raising. Each case here builds a two-revision scratch repository (a baseline commit
+A baseline failure counts as GUARDS only when its headline is the test's own assertion failing
+or the code under test raising, never a missing import, a fixture constructor called with a
+keyword the baseline lacks, or a setup fixture erroring outright. Each case here builds a
+two-revision scratch repository (a baseline commit
 the fault sits in, a second commit with the fix and the guard test) and runs the real script
 against it, exactly as a caller would.
 """
@@ -186,8 +186,8 @@ def test_a_fixture_calling_package_code_that_raises_is_refused(tmp_path):
     """A fixture that builds its value by calling package code, and that call raises before the
     fixture returns, never lets the test body run: fixture-shaped even though the crash frame
     sits in the package's own file, outside tests/, which the crash-frame test alone would read
-    as the code under test raising. Before this fix, ``_failure_kind`` never read the failure's
-    phase and scored this GUARDS."""
+    as the code under test raising. ``_failure_kind`` reads the failure's phase, so this scores
+    REFUSED, not GUARDS."""
     repo = _scratch_repo(tmp_path)
     _write(repo / "widgets.py",
            "def make_widget():\n"
@@ -227,9 +227,9 @@ def test_a_key_error_on_a_package_result_guards(tmp_path):
     """An assertion that inspects a package result by key, where the baseline's result lacks
     that key, raises KeyError at the assert line itself, inside the test file: the code under
     test was reached and its result found wanting. Admits the call-phase residue rule (nothing
-    but the call-signature-mismatch TypeError shape is fixture-shaped in the call phase); before
-    this fix, a crash frame inside tests/ that was neither AssertionError/Failed nor outside
-    tests/ fell through to fixture-shaped and this scored REFUSED instead."""
+    but the call-signature-mismatch TypeError shape is fixture-shaped in the call phase): a crash
+    frame inside tests/ that is neither AssertionError/Failed nor outside tests/ still scores
+    GUARDS rather than falling through to fixture-shaped."""
     repo = _scratch_repo(tmp_path)
     _write(repo / "widgets.py",
            "def describe():\n"
