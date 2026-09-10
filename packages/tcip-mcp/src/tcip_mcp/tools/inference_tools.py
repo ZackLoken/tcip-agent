@@ -1687,9 +1687,9 @@ def clear_prediction_bucket(
     the source between that preflight and the last document's delete is not caught by it either:
     the moved documents cannot be unmoved once moved, and it is counted once more after the last
     delete and reported in ``review_state_landed_during_clear`` instead. The resolver's own
-    document-guard publishers (``resolve_writable_bucket``) count a detection verdict alone; widening
-    that guard is a separate change, so refusing here is not yet a platform-wide
-    lock against writing beside review state; it is this door's own gate. A publisher that resolved
+    document-guard publishers (``resolve_writable_bucket``) count a detection verdict alone;
+    refusing here is this door's own gate, not a platform-wide lock against writing beside
+    review state. A publisher that resolved
     this bucket clean before the clear began can still write into it during or after: its document
     and stamp writes are unconditional, and a resume that finds a fresh ``operating_point`` stamp
     beside documents the clear had not yet moved reads it as a re-publication and leaves those
@@ -2090,8 +2090,8 @@ def _export_predictions_raster(
     it has already confirmed the checkpoint's training experiment reserved a calibration region
     (:func:`~tcip_mcp.pipelines.block_calibration.reserved_calibration_region_available`); in that
     case this runs block calibration first (small reserved bands, not the whole mosaic), gates on
-    the mosaic's own claim scope (:func:`~tcip_mcp.pipelines.raster_source.raster_identity_matches`
-    -- the block-validated reference must be *this* raster, not a different one reusing the same
+    the mosaic's own claim scope (:func:`~tcip_mcp.pipelines.raster_source.raster_identity_matches`:
+    the block-validated reference must be *this* raster, not a different one reusing the same
     checkpoint), then applies the calibrated conf/cross_tile_nms to the real whole-mosaic pass with
     ``max_dets`` deliberately uncapped (never the block bundle's own band-scoped density-derived
     value, which would truncate a whole-mosaic count to roughly one band's worth of objects).

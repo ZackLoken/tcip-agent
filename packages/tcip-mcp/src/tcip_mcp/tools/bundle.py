@@ -215,7 +215,7 @@ def unresolved_registered_checkpoints(tree: Path) -> tuple[str, ...]:
     :func:`_registered_checkpoint_paths` (the same reader, the same per-entry resolution) leaves
     out. Version 2's own external entries are never counted here, however they resolve; see
     :func:`external_registered_checkpoints` for those. A relative entry a moved tree carries,
-    one ``import_project``'s own rename left behind, that no longer names a real file is
+    one ``import_project``'s own rename left behind, that names no real file is
     exactly the case this discloses, rather than the registry rewriting itself, which stays
     no door's job here. Propagates :class:`~tcip_mcp.model_registry.RegistryVersionRefused` and
     :class:`tcip_store.SchemaVersionRefused`: an unconformed or above-ceiling registry is a

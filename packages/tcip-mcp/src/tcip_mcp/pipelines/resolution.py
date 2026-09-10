@@ -1838,8 +1838,8 @@ class StampBinding:
     """Whether a stamp's claim is answered for by a record outside the bucket that made it.
 
     ``claimed`` says whether the stamp asserts validation at all: a stamp that asserts nothing has
-    nothing to bind, so ``ok`` stays true and the dimension floors on its own merits exactly as it
-    did before. ``experiment_id`` is the experiment the record lives in, which for a calibration
+    nothing to bind, so ``ok`` stays true and the dimension floors on its own merits.
+    ``experiment_id`` is the experiment the record lives in, which for a calibration
     earned outside a training run is not the run that produced the predictions;
     ``producing_experiment_id`` is that run, and is what a delivery's producer column reports.
     """
@@ -2207,8 +2207,8 @@ def delivered_tail(
     come from :func:`delivered_provenance`; ``produced_at`` is this call's own write time, computed
     once here rather than accepted from ``asserted``, which is refused when it carries a real
     (non-``None``) ``produced_at`` of its own rather than silently overridden, since the column is
-    this composition's own fact and a second source pretending to it is exactly the drift this
-    removes -- a ``None``-valued key (a caller that composed ``{"produced_at": x.get(...)}`` over
+    this composition's own fact and a second source asserting it would disagree with this one: a
+    ``None``-valued key (a caller that composed ``{"produced_at": x.get(...)}`` over
     something carrying none) is absence, not an assertion, the same convention
     :func:`corroborated_producer` uses; and every validity column ``columns`` actually carries
     (``_DIMENSION_TO_COLUMN``'s owned columns present in ``columns``, ``operating_point_validated``
@@ -2524,8 +2524,8 @@ def record_delivery_binding_event(
     ``project_root`` names the project this event belongs to, for a caller (a web route) whose
     process can serve more than one project: an MCP tool leaves it unset and gets the process-pinned
     root, correct since that process serves exactly one project, but a web route already holding its
-    own guarded, resolved root passes it explicitly, the same divergence D11 already closes for the
-    operationalization record.
+    own guarded, resolved root passes it explicitly, the same divergence the operationalization
+    record already closes.
 
     ``measurement_documents`` names which sidecar document(s) the delivery's own gate reconciled
     (the count-delivery door's single-element statement, or the phenology doors' fixed
@@ -3261,8 +3261,8 @@ every reconciler that feeds them resolves through a ``_DOCUMENT_PARAM`` entry de
 ``"operating_point"``. A dimension cleared by nothing (an empty tuple) states a missing
 prerequisite rather than a reference of any kind, see ``check_delivery_gate``'s
 cleared-by-nothing refusal arm; no production dimension reaches that arm today
-(``deliver_per_image_counts``'s in-memory pass with no ``predictions_dir`` now floors through
-``export_detection_csv``'s own no-``pred_dirs`` operating_point floor instead), so this stays
+(``deliver_per_image_counts``'s in-memory pass with no ``predictions_dir`` floors through
+``export_detection_csv``'s own no-``pred_dirs`` operating_point floor), so this stays
 documentation of a mechanism a future floor-only dimension can use, not a live assertion."""
 
 

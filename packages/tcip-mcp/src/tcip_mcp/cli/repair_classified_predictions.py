@@ -1,7 +1,7 @@
 """Repair a project's classified prediction buckets into the writer rail's shape: an
 ``operating_point.json`` stamp carrying its ``(subject, attribute)`` pair, and per-image documents
 that carry the decoded value under ``attributes[attribute]`` with the object class in ``subject``,
-the shape ``write_predictions_json`` now writes and every reader now holds a bucket to.
+the shape ``write_predictions_json`` writes and every reader holds a bucket to.
 
 A logged operator command: bind, walk, one outcome line per unit, exit 2 on any refusal. Its
 units are prediction buckets. For each named project

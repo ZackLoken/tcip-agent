@@ -91,7 +91,7 @@ def _bin_annotations(
     annotations: list[Annotation], cells: list[Cell], tile_size: int, overlap: float,
 ) -> dict[str, list[Annotation]]:
     """Every one of ``annotations`` whose center falls in one of ``cells``, one pass over
-    ``annotations`` -- O(annotations + cells) instead of O(annotations x cells), the real cost at
+    ``annotations``: O(annotations + cells) instead of O(annotations x cells), the real cost at
     real orthomosaic scale (thousands of annotations, up to hundreds of reserved-region cells).
     No subject filter: :func:`annotations_by_cell` and :func:`annotation_counts_by_cell` apply
     theirs after, so the one pass over ``annotations`` here serves either.
@@ -142,7 +142,7 @@ def annotation_counts_by_cell(
     annotations: list[Annotation], cells: list[Cell], tile_size: int, overlap: float = 0.0,
 ) -> dict[str, dict[str, int]]:
     """Every subject's per-cell annotation count over ``cells``, one pass over ``annotations``
-    (:func:`_bin_annotations`) regardless of how many subjects are present -- the completeness
+    (:func:`_bin_annotations`) regardless of how many subjects are present: the completeness
     route's ``annotation_counts`` field, read once per raster rather than once per subject.
     """
     by_cell = _bin_annotations(annotations, cells, tile_size, overlap)

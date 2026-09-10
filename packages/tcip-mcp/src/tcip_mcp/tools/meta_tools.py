@@ -4,8 +4,6 @@ Tools that let Claude sessions leave the system smarter than they started:
 - report_friction: structured friction logging when Claude hits a problem
 - write_retrospective: end-of-project reflection written to markdown
 - load_project_memory: read recent reports or retrospectives at session start (closes the loop)
-
-See docs/vision.md §6 for the design rationale.
 """
 
 from __future__ import annotations

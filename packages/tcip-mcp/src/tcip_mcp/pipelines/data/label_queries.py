@@ -248,8 +248,7 @@ def trainable_stems(
       (``confirmed_negative_names``, the Complete in ``.tcip/state/image_status.json``).
 
     An image with no label file, or an empty label file nobody confirmed, is unannotated, not a
-    negative. Enumerating samples from ``images_dir`` instead served both as zero-box samples, so a
-    project where the breeder labelled 30 of 400 images trained on 370 images asserted to be empty.
+    negative.
 
     Returns ``(stems, counts)`` where counts carries ``annotated`` / ``confirmed_negative`` /
     ``skipped_unannotated`` / ``skipped_unconfirmed_empty`` / ``skipped_incomplete_attribute`` /
@@ -259,8 +258,7 @@ def trainable_stems(
     since changed and the confirmation can no longer be trusted as-is, a different situation from
     nobody ever having looked, and one a reproduce-a-number chain must be able to tell apart (see
     :func:`confirmed_negative_records`'s and :func:`stale_finished_names`'s shared quarantine
-    logic, :func:`_stale_finished`). A count recorded under the narrower rule counted negatives
-    alone, so counts across that boundary are not comparable.
+    logic, :func:`_stale_finished`).
 
     ``date`` states which capture date's confirmations this partition may admit, ``None`` for a
     tree that carries no date, and is passed through to ``confirmed_negative_names`` as the bucket
