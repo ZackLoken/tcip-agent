@@ -20,6 +20,14 @@ Exit 0 when the tables match the tree, 1 when any named path is missing, any tab
 parse, or (when an inventory JSON is supplied) any count or zero-importer drifts. Defaults resolve
 ARCHITECTURE.md and the repo root relative to this script, so CI invokes it as
 `python tools/check_architecture_doc.py`.
+
+`--fix` (requires `--inventory-json`) rewrites the document in place instead of only reporting
+drift: every module row's description and counts refreshed from the inventory, a row added after
+its root's last row for an inventory module the document never named, a row dropped whose path
+the inventory no longer carries, the zero-importer table and its header count regenerated, the
+per-root Modules/Lines summary table and its introductory sentence regenerated, and both HEAD
+sentences moved to `--head` (default: `git rev-parse --short=8 HEAD`). Without `--fix` nothing
+here changes; the checker only reports.
 """
 
 from __future__ import annotations
@@ -424,14 +432,187 @@ def check_head_sentences(
     return findings, skips
 
 
+def _module_row_text(entry: dict, queued: str | None) -> str:
+    """A module-ownership table row for ``entry``, in the shape :data:`ROW_RE` parses back,
+    carrying forward the row's own ``queued:`` marker (a separate, pending-decision fact the
+    inventory says nothing about) rather than dropping it on refresh."""
+    owns = (entry.get("owns") or "(none found)").replace("|", "\\|").replace("\n", " ")
+    imports = len(entry.get("imports", []))
+    imported_by = entry.get("imported_by_count", len(entry.get("imported_by", [])))
+    row = f"| {entry['path']} | {owns} | {imports} | {imported_by} |"
+    if queued:
+        row += f" <!-- {queued.strip()} -->"
+    return row
+
+
+def _fix_module_rows(lines: list[str], modules: dict[str, dict]) -> list[str]:
+    """Rewrite every module-ownership table: an existing row refreshed from the inventory when
+    its path still belongs to the same root, dropped when the inventory no longer carries its
+    path (or the row is a repeat), and a root's inventory modules the tables never named added,
+    sorted, after that root's last retained row.
+
+    The root a ``## <heading>`` introduces is known only when the inventory itself records a
+    module under that name, never from a fixed list, so a root the inventory adds or drops is
+    handled here without an edit to this function.
+    """
+    known_roots = {entry["root"] for entry in modules.values()}
+    by_root: dict[str, list[dict]] = {}
+    for entry in modules.values():
+        by_root.setdefault(entry["root"], []).append(entry)
+
+    out: list[str] = []
+    seen: set[str] = set()
+    last_row_index: dict[str, int] = {}
+    current_root: str | None = None
+
+    def flush(root: str) -> None:
+        at = last_row_index.get(root)
+        if at is None:
+            return
+        remaining = sorted(
+            (e for e in by_root.get(root, []) if e["path"] not in seen), key=lambda e: e["path"]
+        )
+        for offset, entry in enumerate(remaining, start=1):
+            out.insert(at + offset, _module_row_text(entry, None))
+            seen.add(entry["path"])
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        header = re.match(r"^## (.+)$", line)
+        if header:
+            if current_root is not None:
+                flush(current_root)
+            title = header.group(1).strip()
+            current_root = title if title in known_roots else None
+            out.append(line)
+            i += 1
+            continue
+        if current_root is not None and line.strip() == TABLE_HEADER:
+            out.append(line)
+            out.append(lines[i + 1])  # markdown separator row
+            i += 2
+            while i < len(lines) and lines[i].startswith("|"):
+                m = ROW_RE.match(lines[i])
+                if m:
+                    path = m.group("path").strip()
+                    resolved = modules.get(path)
+                    if resolved is not None and resolved["root"] == current_root and path not in seen:
+                        out.append(_module_row_text(resolved, m.group("comment")))
+                        seen.add(path)
+                        last_row_index[current_root] = len(out) - 1
+                i += 1
+            continue
+        out.append(line)
+        i += 1
+    if current_root is not None:
+        flush(current_root)
+    return out
+
+
+def _fix_zero_importer_section(text: str, inventory: dict) -> str:
+    """Replace the "Modules with zero importers" header count and every data row with what the
+    inventory records now, ordered by root then path (the checker's own membership check reads
+    the rows as a set, so row order carries no meaning it must reproduce)."""
+    all_records = inventory.get("python_modules", []) + inventory.get("typescript_modules", [])
+    zero = sorted(
+        (e for e in all_records if e["imported_by_count"] == 0),
+        key=lambda e: (e["root"], e["path"]),
+    )
+    lines = text.splitlines()
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = ZERO_IMPORTERS_HEADER_RE.match(lines[i].strip())
+        if not m:
+            out.append(lines[i])
+            i += 1
+            continue
+        out.append(f"## Modules with zero importers ({len(zero)})")
+        i += 1
+        while i < len(lines) and lines[i].strip() != ZERO_IMPORTERS_TABLE_HEADER:
+            out.append(lines[i])
+            i += 1
+        out.append(lines[i])      # table header
+        out.append(lines[i + 1])  # markdown separator row
+        i += 2
+        while i < len(lines) and ZERO_IMPORTER_ROW_RE.match(lines[i]):
+            i += 1
+        for entry in zero:
+            out.append(f"| {entry['root']} | {entry['path']} |")
+    return "\n".join(out)
+
+
+def fix_architecture_doc(md_text: str, inventory: dict, head: str) -> str:
+    """The full ``--fix`` regeneration: module-ownership tables, the zero-importer section, the
+    per-root Modules/Lines summary table, and both HEAD sentences, all from ``inventory`` and
+    ``head`` rather than hand-edited.
+    """
+    modules = {
+        entry["path"]: entry
+        for entry in inventory.get("python_modules", []) + inventory.get("typescript_modules", [])
+    }
+    lines = md_text.splitlines()
+    text = "\n".join(_fix_module_rows(lines, modules))
+    text = _fix_zero_importer_section(text, inventory)
+
+    real_modules_by_root, real_lines_by_root = _real_module_stats(inventory)
+    for package in real_modules_by_root:
+        n = real_modules_by_root[package]
+        total_lines = real_lines_by_root.get(package, 0)
+        text = re.sub(
+            rf"^\| {re.escape(package)} \| \d+ \| \d+ \|$",
+            f"| {package} | {n} | {total_lines} |",
+            text, flags=re.M,
+        )
+
+    total_modules = sum(real_modules_by_root.values())
+    total_lines_all = sum(real_lines_by_root.values())
+    text = re.sub(
+        r"^HEAD [0-9a-f]+ has \d+ modules across the six scanned roots \(\d+ total lines\):$",
+        f"HEAD {head} has {total_modules} modules across the six scanned roots ({total_lines_all} total lines):",
+        text, flags=re.M,
+    )
+    text = re.sub(
+        r"^Source: the module inventory `tools/build_module_inventory\.py` produces, run at HEAD [0-9a-f]+\.$",
+        f"Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD {head}.",
+        text, flags=re.M,
+    )
+    return text if text.endswith("\n") else text + "\n"
+
+
+def _default_head(repo_root: Path) -> str:
+    result = _run_git(["rev-parse", "--short=8", "HEAD"], repo_root)
+    if result.returncode != 0:
+        raise SystemExit(f"could not resolve HEAD at {repo_root}: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("architecture_md", nargs="?", default=str(_REPO_ROOT / "ARCHITECTURE.md"))
     ap.add_argument("repo_root", nargs="?", default=str(_REPO_ROOT))
     ap.add_argument("--inventory-json", default=None)
+    ap.add_argument("--fix", action="store_true",
+                    help="rewrite the document from --inventory-json instead of only reporting")
+    ap.add_argument("--head", default=None,
+                    help="the hash --fix stamps into both HEAD sentences (default: "
+                         "git rev-parse --short=8 HEAD)")
     args = ap.parse_args()
 
     repo_root = Path(args.repo_root)
+
+    if args.fix:
+        if not args.inventory_json:
+            ap.error("--fix requires --inventory-json")
+        inventory = json.loads(Path(args.inventory_json).read_text(encoding="utf-8"))
+        head = args.head or _default_head(repo_root)
+        md_path = Path(args.architecture_md)
+        fixed = fix_architecture_doc(md_path.read_text(encoding="utf-8"), inventory, head)
+        md_path.write_text(fixed, encoding="utf-8", newline="\n")
+        print(f"fixed {md_path} at head {head}")
+        return 0
+
     md_text = Path(args.architecture_md).read_text(encoding="utf-8")
     rows = parse_module_rows(md_text)
     parsed = [r for r in rows if not r.get("unparsed")]

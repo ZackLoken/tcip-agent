@@ -3,6 +3,7 @@ file under a covered root must be named."""
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 import subprocess
 import sys
@@ -336,6 +337,149 @@ def test_neither_head_sentence_present_is_not_a_finding():
 
     assert findings == []
     assert skips == []
+
+
+# ── --fix ────────────────────────────────────────────────────────────────────
+
+_FIX_INVENTORY = {
+    "python_modules": [
+        {
+            "path": "packages/tcip-mcp/src/tcip_mcp/kept.py", "root": "tcip-mcp", "lines": 10,
+            "owns": "Kept module, refreshed rather than dropped.",
+            "imports": ["a", "b"], "imported_by_count": 1,
+        },
+        {
+            "path": "packages/tcip-mcp/src/tcip_mcp/new_module.py", "root": "tcip-mcp", "lines": 4,
+            "owns": "A module the document never named.",
+            "imports": [], "imported_by_count": 0,
+        },
+    ],
+    "typescript_modules": [],
+    "counts": {
+        "python_by_root": {
+            "tcip-mcp": 2, "tcip-annotation": 0, "tcip-web": 0, "tcip-store": 0, "tools": 0,
+        },
+        "typescript_total": 0,
+    },
+}
+
+
+def _fix_fixture_doc() -> str:
+    return (
+        "## tcip-mcp\n\n"
+        "| Module path | Ownership (one line) | In-repo imports | Imported by |\n"
+        "|---|---|---|---|\n"
+        "| packages/tcip-mcp/src/tcip_mcp/kept.py | (none found) | 99 | 99 |\n"
+        "| packages/tcip-mcp/src/tcip_mcp/gone.py | (none found) | 0 | 0 |\n"
+        "\n"
+        "## Modules with zero importers (0)\n\n"
+        "| Root | Module path |\n"
+        "|---|---|\n"
+        "\n"
+        "## Module count summary\n\n"
+        "Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD "
+        "aaaaaaaa.\n\n"
+        "HEAD aaaaaaaa has 1 modules across the six scanned roots (1 total lines):\n\n"
+        "| Package (root) | Modules | Lines |\n"
+        "|---|---|---|\n"
+        "| tcip-mcp | 1 | 1 |\n"
+        "| tcip-annotation | 0 | 0 |\n"
+        "| tcip-web | 0 | 0 |\n"
+        "| tcip-store | 0 | 0 |\n"
+        "| tcip-web-frontend | 0 | 0 |\n"
+        "| tools | 0 | 0 |\n"
+    )
+
+
+def test_fix_produces_a_document_the_checker_then_passes():
+    checker = _load()
+    fixed = checker.fix_architecture_doc(_fix_fixture_doc(), _FIX_INVENTORY, head="deadbeef")
+
+    rows = [r for r in checker.parse_module_rows(fixed) if not r.get("unparsed")]
+    assert checker.check_counts(rows, _FIX_INVENTORY) == []
+
+    header_count, zero_rows = checker.parse_zero_importer_section(fixed)
+    assert checker.check_zero_importers(header_count, zero_rows, _FIX_INVENTORY) == []
+
+    summary_sentence, summary_rows = checker.parse_module_count_summary(fixed)
+    assert checker.check_module_count_summary(summary_sentence, summary_rows, _FIX_INVENTORY) == []
+
+    source_sentence = checker.parse_source_sentence(fixed)
+    assert source_sentence == {"line_no": source_sentence["line_no"], "head": "deadbeef"}
+    assert summary_sentence["head"] == "deadbeef"
+
+
+def test_fix_drops_a_rows_whose_path_the_inventory_no_longer_carries():
+    checker = _load()
+    fixed = checker.fix_architecture_doc(_fix_fixture_doc(), _FIX_INVENTORY, head="deadbeef")
+
+    assert "gone.py" not in fixed
+
+
+def test_fix_adds_a_row_for_a_module_the_document_never_named():
+    checker = _load()
+    fixed = checker.fix_architecture_doc(_fix_fixture_doc(), _FIX_INVENTORY, head="deadbeef")
+
+    assert "packages/tcip-mcp/src/tcip_mcp/new_module.py" in fixed
+    assert "A module the document never named." in fixed
+
+
+def test_fix_regenerates_the_zero_importer_header_count():
+    checker = _load()
+    fixed = checker.fix_architecture_doc(_fix_fixture_doc(), _FIX_INVENTORY, head="deadbeef")
+
+    header_count, rows = checker.parse_zero_importer_section(fixed)
+    assert header_count == 1
+    assert [r["path"] for r in rows] == ["packages/tcip-mcp/src/tcip_mcp/new_module.py"]
+
+
+def test_fix_preserves_a_rows_queued_marker_while_refreshing_its_counts():
+    """Round-tripping "<!-- queued: TEXT -->" through the shared ROW_RE always yields the
+    comment group with one trailing space (whatever precedes the closing "-->", by the
+    format's own convention); fixing a row must reproduce that same, stable shape rather than
+    accumulating whitespace on repeated fixes, never strip the marker outright."""
+    checker = _load()
+    doc = _fix_fixture_doc().replace(
+        "| packages/tcip-mcp/src/tcip_mcp/kept.py | (none found) | 99 | 99 |\n",
+        "| packages/tcip-mcp/src/tcip_mcp/kept.py | (none found) | 99 | 99 | "
+        "<!-- queued: a pending decision --> \n",
+    )
+    fixed_once = checker.fix_architecture_doc(doc, _FIX_INVENTORY, head="deadbeef")
+    fixed_twice = checker.fix_architecture_doc(fixed_once, _FIX_INVENTORY, head="deadbeef")
+
+    rows = [r for r in checker.parse_module_rows(fixed_once) if not r.get("unparsed")]
+    kept = next(r for r in rows if r["path"] == "packages/tcip-mcp/src/tcip_mcp/kept.py")
+    assert kept["imports"] == 2
+    assert kept["imported_by"] == 1
+    assert kept["queued"].strip() == "queued: a pending decision"
+    assert fixed_twice == fixed_once, "a second --fix must be a no-op, not accumulate whitespace"
+
+
+def test_fix_requires_inventory_json():
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--fix"], cwd=str(REPO_ROOT), capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert "--inventory-json" in result.stderr
+
+
+def test_without_fix_the_checker_reports_only_and_does_not_write(tmp_path):
+    """A legitimate call with drift and no --fix still exits, reporting rather than rewriting."""
+    doc_path = tmp_path / "ARCHITECTURE.md"
+    doc_path.write_text(_fix_fixture_doc(), encoding="utf-8")
+    inventory_path = tmp_path / "inventory.json"
+    inventory_path.write_text(json.dumps(_FIX_INVENTORY), encoding="utf-8")
+    before = doc_path.read_text(encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(doc_path), str(tmp_path),
+         "--inventory-json", str(inventory_path)],
+        cwd=str(REPO_ROOT), capture_output=True, text=True,
+    )
+
+    assert doc_path.read_text(encoding="utf-8") == before
+    assert result.returncode == 1
+    assert "COUNT DRIFT" in result.stdout
 
 
 def test_architecture_md_head_sentences_match_and_are_real_on_this_checkout():
