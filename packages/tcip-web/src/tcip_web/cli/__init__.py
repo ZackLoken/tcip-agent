@@ -2,10 +2,10 @@
 
 Declared as the ``tcip`` console script in this package's own ``pyproject.toml``, the top of the
 stack whose install guarantees every command's imports. Each subcommand's own module lives in
-the package the platform's restructure brief names for it (``tcip_mcp.cli.<name>`` for all but
+the package that owns it (``tcip_mcp.cli.<name>`` for all but
 one; ``distill-learnings`` in this package, since its own imports need nothing tcip_mcp adds) and
 exposes ``main(argv)``, returning the exit code the command's own ``main`` returned. A command
-module keeps its prior script's argparse interface, docstring and behavior; this dispatcher moves
+module keeps its own script's argparse interface, docstring and behavior; this dispatcher moves
 nothing but where a command is invoked from.
 
 Run as ``python -m tcip_web.cli <command> [args...]`` (what a test spawns, so it holds without a
@@ -43,7 +43,7 @@ COMMANDS: dict[str, str] = {
 }
 """Command name (as typed after ``tcip``) to the module exposing its ``main(argv)``, named after
 the script it replaces with underscores respelled as hyphens; the two renamed commands
-(``write-project-site``, ``repair-classified-predictions``) carry the owner's ruling's name,
+(``write-project-site``, ``repair-classified-predictions``) carry their current name,
 never the retired conform name."""
 
 

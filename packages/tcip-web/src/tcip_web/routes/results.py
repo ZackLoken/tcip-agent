@@ -366,14 +366,12 @@ def list_plant_mappings() -> dict:
 class PhenologyPayload(BaseModel):
     """The inputs a phenology measurement is computed from: never the measurement itself.
 
-    Every Results door takes this shape. A caller-composed ``rows`` table was tried here before,
-    with the server inferring what it meant (inference predicates over row shape, an
-    ``export_kind`` declaration), but both were defeated because the caller controls the column
-    names and the declaration. The real problem: the server was classifying data it did not
-    produce, and that information is not in the payload. A table with a ``ratio`` column is a
-    phenology curve or an unrelated QC table depending on where it came from, which is exactly what a
-    caller-supplied payload erases. So no door accepts rows: they accept a request to compute
-    rows, and the server knows what it produced because it produced it.
+    Every Results door takes this shape: a caller-supplied ``rows`` table cannot be classified
+    here, since the caller controls the column names and any declared shape. A table with a
+    ``ratio`` column is a phenology curve or an unrelated QC table depending on where it came
+    from, which is exactly what a caller-supplied payload erases. So no door accepts rows: they
+    accept a request to compute rows, and the server knows what it produced because it produced
+    it.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -567,10 +565,8 @@ def _measure_phenology(
     pred_dirs = list(predictions_by_date.values())
     recon = reconcile_operating_point_validity(pred_dirs, trait=payload.trait)
     classifier_recon = reconcile_classifier_validity(pred_dirs)
-    # The same binding deliver_phenology_milestones applies, from the same shared owner rather than a second
-    # copy: a classifier stamp calibrated for another trait or against a run that did not produce
-    # these predictions does not validate this delivery. Without it the web door accepted a stamp
-    # the MCP door rejects, and this route writes that stamp into the delivered CSV.
+    # The same binding deliver_phenology_milestones applies, from the same shared function: a
+    # mismatched classifier stamp must not validate this delivery or land in the delivered CSV.
     classifier_state, binding_note = bind_classifier_validity(
         classifier_recon["validated"], pred_dirs, pred_dirs, trait=payload.trait,
     )
@@ -684,13 +680,9 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
     """Both phenology projections (the per-(plant, date) curve and the per-plant milestone
     dates) from one ``_measure_phenology`` run.
 
-    The two used to be separate doors that each ran the full measurement independently for the
-    same payload, though ``per_plant_phenology`` (called once inside ``_measure_phenology``) was
-    already their one shared producer; ResultsTab always called both on one Compute click. One
-    door removes the two-computation shape structurally rather than by convention: gated on the
-    same reconciled evidence either projection used to gate on separately, refused unless
-    ``show_unvalidated`` asks to see the numbers anyway, in which case both ship marked with
-    unvalidated dimensions rather than bare.
+    One door computes both projections from the one ``_measure_phenology`` run and gates both on
+    the same reconciled evidence, refused unless ``show_unvalidated`` asks to see the numbers
+    anyway, in which case both ship marked with unvalidated dimensions rather than bare.
 
     Looking at a number on screen is not delivering it: this route records no delivery event
     either way, only an audit line, since a delivery event is a fact about an artifact that
@@ -1238,7 +1230,7 @@ def _trait_spec_statement_body(project_root: Path, trait: str) -> dict:
     """One trait's authoring statement as the confirming surface reads it.
 
     Mirrors ``_operationalization_body``: ``confirmed_current`` is read-time drift detection
-    against the live spec (``traits.trait_spec_statement_current``, A1's own mechanism), so the
+    against the live spec (``traits.trait_spec_statement_current``), so the
     panel and the delivery precondition cannot disagree about whether a confirmation still
     holds. ``statement_fields`` carries the authored ``TraitSpec`` fields exactly as the statement
     recorded them, a flat mapping the record itself already holds, never re-nested or re-derived
@@ -1333,7 +1325,7 @@ def confirm_trait_spec_statement(payload: ConfirmTraitSpecPayload) -> dict:
     since the surface read it, the body then carrying what is on file so the panel re-renders that
     and the breeder confirms what they see.
 
-    The confirmation write itself must not land silently unrecorded (A8): a failed audit append
+    The confirmation write itself must not land silently unrecorded: a failed audit append
     does not refuse an otherwise-successful confirmation, it rides back as ``audit_warning`` on an
     ordinary 200 body, since the confirmation itself already committed.
     """
