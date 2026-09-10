@@ -1,7 +1,7 @@
 /**
  * The generalized confirmation surface for a statement record: the agent states, the breeder
  * confirms or withdraws, and a moved/superseded record re-renders what is on file rather than what
- * was last shown. Extends the pattern that shipped first for operationalization records
+ * was last shown. Generalizes the operationalization-record pattern
  * (`OperationalizationPanel`/`OperationalizationRow` in `ResultsTab.tsx`) to any statement kind
  * sharing the same shape: a trait-spec authoring statement today, and any future kind without a
  * new panel needing to be built for it.

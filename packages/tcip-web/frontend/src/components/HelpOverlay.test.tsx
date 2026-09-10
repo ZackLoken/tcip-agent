@@ -40,8 +40,7 @@ describe("HelpOverlay", () => {
     fireEvent.keyDown(document.body, { key: "?" });
 
     // Verdicts author GT: accepting an FP adds the prediction, rejecting a TP/FN
-    // deletes the object. The old "does not change GT" wording must not come back:
-    // it told reviewers a destructive key was safe.
+    // deletes the object, never merely a non-destructive read of it.
     expect(screen.getByText(/adds the prediction to GT/)).toBeInTheDocument();
     expect(screen.getByText(/deletes the ground-truth object/)).toBeInTheDocument();
     expect(screen.getByText(/Save the edited shape to ground truth/)).toBeInTheDocument();

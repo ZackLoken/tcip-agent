@@ -29,7 +29,7 @@ describe("computeFilteredIndices", () => {
 
   // An explicit `order` (e.g. an active-learning priority ranking) replaces positional
   // traversal, with the same filter/isNavigable predicates still applied on top of it.
-  it("omitting order behaves exactly as before (regression pin)", () => {
+  it("omitting order traverses in positional index order over the filtered set", () => {
     expect(computeFilteredIndices(LIST, STATUS, "all", undefined, undefined)).toEqual([0, 1, 2, 3]);
   });
   it("traverses in the supplied order instead of positional order", () => {

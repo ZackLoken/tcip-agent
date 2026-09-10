@@ -62,7 +62,7 @@ export function CanvasStage(props: CanvasStageProps) {
   const wrapper = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
   // Start at 0 so the one-shot fit waits for a real measurement (below) instead of fitting
-  // to a placeholder size: a stale-dims fit left the image mis-scaled/off-screen on first open.
+  // to a placeholder size: a stale-dims fit leaves the image mis-scaled/off-screen on first open.
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const view = useStore((s) => s.gui.view);
   const setView = useStore((s) => s.setView);
@@ -174,10 +174,7 @@ export function CanvasStage(props: CanvasStageProps) {
     };
   }, []);
 
-  // Fit the image to the canvas once per image, not on every container resize. Refitting
-  // on resize reset the user's zoom/pan, and when a reflow briefly reported a near-zero
-  // height (e.g. the Review filter shelf expanding) it collapsed the image to sub-pixel
-  // scale so it appeared to vanish. The key omits dims so a later resize can't re-fit;
+  // Fit the image to the canvas once per image, not on every container resize: refitting on resize resets the user's zoom/pan, and when a reflow briefly reports a near-zero height (e.g. the Review filter shelf expanding) it collapses the image to sub-pixel scale so it appears to vanish. The key omits dims so a later resize can't re-fit;
   // it's keyed on image identity + native size so a genuine image change still fits.
   const didFit = useRef<string | null>(null);
   useEffect(() => {

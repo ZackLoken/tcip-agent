@@ -285,7 +285,7 @@ describe("TrainingTab run launcher mark", () => {
         run({
           experiment_id: "train-other-value",
           status: "running",
-          // external true carries no weight on the sentence any more: the record is the fact.
+          // external true carries no weight on the sentence: the record is the fact.
           external: true,
           launched_by: { launcher: "bespoke-cli" },
         }),
