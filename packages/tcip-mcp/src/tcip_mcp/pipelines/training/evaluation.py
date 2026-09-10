@@ -483,12 +483,10 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
     recorded kind (via ``derivations.derive_localization_kind``), persisted through
     ``traits.write_trait_spec_fields`` and recorded in the platform audit log naming the trait,
     the field, the value and the derivation basis, and read from the recorded value on every
-    later call.
-    A recorded kind is also
-    cheaply re-checked against what the current data would derive, every real call, divergence
-    surfaces a warning (``kind_diverged`` in the returned dict) rather than silently switching,
-    per the standing "constrain by observation, not permission" rule; only an explicit re-derive
-    changes the recorded value. This is also the single point every consumer of a trait's
+    later call. A recorded kind is also cheaply re-checked against what the current data would
+    derive, every real call, divergence surfaces a warning (``kind_diverged`` in the returned
+    dict) rather than silently switching; only an explicit re-derive changes the recorded value.
+    This is also the single point every consumer of a trait's
     localization criterion goes through, ``generic_trainer.py`` reads the recorded field directly
     (it runs before any GT loads, so it cannot call this), but every site with real GT in hand
     (phenology_tools.py's classifier-calibration matching, this module's own count/selection
@@ -734,9 +732,9 @@ def derive_operating_point_curve(per_image: list[dict], *, tolerance: float,
     evaluates exactly those points, the exact-conf holdout evaluation (no nearest-neighbor snap)
     relies on this. Returns ``{tolerance, class_id, curve:[{conf, tp, fp, fn, precision, recall, f1,
     count_bias_mean, abs_count_error_mean, count_error_p90, count_bias_std, n_images, n_present,
-    count_bias_mean_present, count_bias_std_present, per_class}]}``
-, the dispersion + reference-sufficiency terms are per-conf statistics across ``per_image`` that
-    the operating-point gate reads, never recomputes. See :func:`_count_stats_at_conf` for why the
+    count_bias_mean_present, count_bias_std_present, per_class}]}``. The dispersion and
+    reference-sufficiency terms are per-conf statistics across ``per_image`` that the
+    operating-point gate reads, never recomputes. See :func:`_count_stats_at_conf` for why the
     bias travels in two scopes and which consumer reads which.
 
     ``per_class`` carries the same statistics measured within each class the records carry,

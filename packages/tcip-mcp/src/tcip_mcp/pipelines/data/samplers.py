@@ -336,7 +336,7 @@ def build_sampler(name: str, dataset: BaseDataset, *, num_workers: int | None = 
 
     ``num_workers``/``batch_size`` are the loader context, forwarded only to samplers whose
     constructor accepts them; a sampler that needs one and was built without it refuses,
-    naming what to pass. Samplers that ignore the context keep building unchanged.
+    naming what to pass. A sampler whose constructor takes neither is built without them.
     """
     if name not in _SAMPLER_MAP:
         raise ValueError(f"Unknown sampler '{name}'. Available: {list(_SAMPLER_MAP.keys())}")

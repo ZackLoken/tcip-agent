@@ -85,8 +85,8 @@ def persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict,
     directory's own capture date (``manifest_date_key``'s empty string for a flat tree, never
     ``None``), for every run, bound or not, so a later selection check can scope itself to one
     date without re-deriving it from the config, and can tell a flat run's own date apart from a
-    caller that derived no date to compare at all.
-    When ``data_cfg["split"]`` carries a ``manifest_binding`` (a run bound to a
+    caller that derived no date to compare at all. When ``data_cfg["split"]`` carries a
+    ``manifest_binding`` (a run bound to a
     ``data.split.manifest_dir`` split manifest, see :func:`auto_train_val`), its counts and the
     two dataset hashes ride into this record too, so a reviewer opening this one file can see
     that a recorded partition, not a drawn one, governed the run.

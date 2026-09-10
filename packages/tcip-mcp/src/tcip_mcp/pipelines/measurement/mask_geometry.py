@@ -243,10 +243,7 @@ def mask_geometry(mask: Any, *, scale: float | None = None, unit: str,
 
     ``scale`` is a plain float (per-pixel, in ``unit``), never a ``ResolvedParam``. The firewall
     belongs at the delivery door that resolves/validates the scale (:func:`resolve_scale`), not
-    inside this primitive: forcing every call (including diagnostics, visualization, and training-
-    loop geometry that are never deliveries) through the firewall would train reflexive
-    breeder-acknowledgement boilerplate and degrade the escape hatch's signal value at the real
-    delivery doors.
+    inside this primitive.
 
     Returns pixel measurements always, and ``{unit}``-suffixed physical measurements when a scale is
     given::
