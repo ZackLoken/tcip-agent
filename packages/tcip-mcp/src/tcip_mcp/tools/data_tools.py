@@ -1099,11 +1099,11 @@ class _NegativeCarry:
     the names the label content contradicted (excluded from every slice, reported to the caller)."""
 
     def __init__(self, by_split: dict[str, dict[str, dict[str, str]]], contradicted: set[str],
-                digest: str | None, src_classes: Path | None) -> None:
+                digest: str | None, src_registry: Path | None) -> None:
         self.by_split = by_split
         self.contradicted = contradicted
         self.digest = digest
-        self.src_classes = src_classes
+        self.src_registry = src_registry
 
 
 def _compute_negative_carry(label_map: dict, parts: dict, image_map: dict,
@@ -1142,25 +1142,25 @@ def _compute_negative_carry(label_map: dict, parts: dict, image_map: dict,
         negatives.update(confirmed_negative_records(
             d, subject=subject, date=date, contradicted_out=contradicted))
     if not negatives:
-        return _NegativeCarry(by_split={}, contradicted=contradicted, digest=None, src_classes=None)
+        return _NegativeCarry(by_split={}, contradicted=contradicted, digest=None, src_registry=None)
 
     # A best-effort registry read: without a stamp, a split tree can never quarantine a stale
     # confirmation later (a permanent no-op, not "admit until proven stale").
     digest = None
-    src_classes: Path | None = None
+    src_registry: Path | None = None
     for d in src_dirs:
         root = dataset_root_of(d)
         if root is None:
             continue
-        cp = subjects_path(root)
-        if not cp.is_file():
+        registry_path = subjects_path(root)
+        if not registry_path.is_file():
             continue
         try:
-            candidate = attribute_schema_digest(read_registry(cp), subject)
+            candidate = attribute_schema_digest(read_registry(registry_path), subject)
         except (OSError, RegistryError):
             candidate = None
         if candidate is not None:
-            digest, src_classes = candidate, cp
+            digest, src_registry = candidate, registry_path
             break
 
     by_split: dict[str, dict[str, dict[str, str]]] = {}
@@ -1170,7 +1170,7 @@ def _compute_negative_carry(label_map: dict, parts: dict, image_map: dict,
         if carried:
             by_split[split_name] = carried
     return _NegativeCarry(by_split=by_split, contradicted=contradicted, digest=digest,
-                          src_classes=src_classes)
+                          src_registry=src_registry)
 
 
 def _apply_negative_carry(carry: "_NegativeCarry | None", out_dir: Path,
@@ -1190,6 +1190,6 @@ def _apply_negative_carry(carry: "_NegativeCarry | None", out_dir: Path,
         split_root = out_dir / split_name
         split_root.mkdir(parents=True, exist_ok=True)
         replace_image_status_store(split_root, {bucket_key: carried})
-        if carry.digest is not None and carry.src_classes is not None:
-            copy_registry(carry.src_classes, subjects_path(split_root))
+        if carry.digest is not None and carry.src_registry is not None:
+            copy_registry(carry.src_registry, subjects_path(split_root))
             stamp_image_status_digests(split_root, bucket_key, carried, carry.digest)
