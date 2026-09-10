@@ -4,8 +4,8 @@ dataset registries share when they decide whether a target sits under their own 
 The registry's entries-mapping convention (see ``model_registry.py``) is the value's own carrier:
 relative POSIX exactly when the target lives under the registry's scope root, absolute exactly
 when external.
-The dataset registry (``tools/project_tools.py``) has spelled the same convention since before
-this module existed; this module holds the one containment walk and the one absolute-form test
+The dataset registry (``tools/project_tools.py``) spells the same convention; this module holds
+the one containment walk and the one absolute-form test
 both registries build on, so they cannot silently drift onto two different notions of "under the
 root".
 """
@@ -34,8 +34,8 @@ def is_external_form(stored: str) -> bool:
     ``Path.is_absolute()`` alone is host-grammar-dependent: a Windows drive or UNC spelling
     reads as relative under a bare ``PurePosixPath`` and would be joined under the root on
     POSIX; a POSIX root spelling reads as relative under ``PureWindowsPath`` with no drive.
-    Either grammar recognizing ``stored`` as absolute is enough to call it external, so a
-    pre-family absolute-under-root spelling can never be misread as designed-external on the
+    Either grammar recognizing ``stored`` as absolute is enough to call it external, so an
+    absolute-under-root spelling can never be misread as designed-external on the
     wrong platform.
     """
     return PurePosixPath(stored).is_absolute() or PureWindowsPath(stored).is_absolute()

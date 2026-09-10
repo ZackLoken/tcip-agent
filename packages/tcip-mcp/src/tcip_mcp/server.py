@@ -74,8 +74,8 @@ def main() -> None:
     from tcip_store.binding import bind_default
 
     bind_default()
-    # Pin before any tool resolves a .tcip path: inside the agent terminal this binds from
-    # the marker, elsewhere it keeps the historical setdefault; activate_project repins later.
+    # Pin before any tool resolves a .tcip path: inside the agent terminal this binds from the
+    # marker, elsewhere the inherited variable or the repo root; activate_project repins later.
     from tcip_mcp.project_paths import pin_platform_root
 
     pin_platform_root(from_marker=binds_from_marker(os.environ))

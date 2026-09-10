@@ -2,10 +2,7 @@
 (ordinal-rank or continuous-value) trait against a disjoint held-out split, and earning a
 validated count operating point over an already-published prediction bucket.
 
-The first two moved here from their prior donor modules (``inference_tools.py``,
-``phenology_tools.py``): neither has anything specific to detection inference or phenology left
-in its body, and grouping them here keeps the calibration-administration surface discoverable in
-one place.
+Grouping them here keeps the calibration-administration surface discoverable in one place.
 """
 
 from __future__ import annotations

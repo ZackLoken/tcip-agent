@@ -5,14 +5,14 @@ registry, anchors here so a whole project is self-contained under one ``<root>/.
 
 Resolution order (``platform_state_root`` / ``resolve_state``, evaluated at use time):
   1. ``$TCIP_STATE_ROOT`` if set.
-  2. otherwise the current working directory, the historical default, so nothing changes
-     for tests or an un-pinned run.
+  2. otherwise the current working directory, the fallback when nothing else pins a root, so
+     nothing changes for tests or an un-pinned run.
 
 A long-lived process binds the variable once at startup, through :func:`pin_platform_root`.
 A process that opts in (``from_marker=True``: the web backend always, the MCP server inside
 the platform's own agent terminal) binds from the workspace's active-project marker when one
 names an adoptable project, else keeps whatever it inherited, else the repo root. A process
-that does not opt in keeps the historical ``setdefault``: the inherited variable, else the repo
+that does not opt in falls back to the inherited variable, else the repo
 root. Either way the decision is recorded in a :class:`RootBinding`, kept module-level and
 returned by :func:`root_binding`, since no process in this repo configures logging and an info
 line would otherwise reach nothing; ``inspect_project`` and the workspace projects list route
@@ -102,7 +102,7 @@ def resolve_state(path: Path) -> Path:
     - A relative ``path`` is prefixed with ``$TCIP_STATE_ROOT`` when pinned, so a process
       launched from a subdir still writes to the one platform ``.tcip/``.
     - When unpinned, a relative ``path`` is returned as-is → resolved against the current
-      directory at use, preserving the historical default (and per-test cwd isolation).
+      directory at use, preserving the same fallback (and per-test cwd isolation).
     """
     if path.is_absolute():
         return path
@@ -217,7 +217,7 @@ def pin_platform_root(*, from_marker: bool) -> RootBinding:
     ``marker_problem`` rather than raised: the process must start regardless.
 
     ``from_marker=False`` (every other process): the inherited variable, else the repo root,
-    the historical ``setdefault`` behaviour, now recorded rather than only applied.
+    recorded in the returned binding rather than only applied.
 
     Call once, after the process has bound a storage backend (a marker read needs one) and
     before anything resolves a ``.tcip`` path. Returns the :class:`RootBinding`, which

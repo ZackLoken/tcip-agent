@@ -1740,7 +1740,7 @@ def _running_trial_dirs(sweep_root: Path) -> list[Path]:
     Used by :func:`cancel_hyperparameter_search` to decide which trial directories still need the run-level
     cancel sentinel written into them; a sentinel dropped into a trial that already wrote its
     resolved config is inert. The sweep :class:`~tcip_mcp.pipelines.training.hpo.Stopper`'s own
-    ``stop_all`` no longer reads this: a trial Ray killed outright may never reach its own
+    ``stop_all`` does not read this: a trial Ray killed outright may never reach its own
     ``finally``, so the stopper tracks Ray's own live-trial reports instead (see
     ``_build_sweep_stopper``).
     """
@@ -3644,9 +3644,8 @@ def evaluate_model(
 
     # One kwargs-builder shared with the training path (_dataset_source_kwargs), not a second
     # hand-rolled copy: two independent implementations of "which data_cfg keys does this task
-    # read" is exactly what let classification/ordinal/regression drift out of sync with training
-    # (evaluate_model never threaded a CSV path, so OrdinalDataset/RegressionDataset construction
-    # always failed here). labels_dir doubles as the CSV path for the non-geometry tasks, the same
+    # read" would let classification/ordinal/regression drift out of sync with training. labels_dir
+    # doubles as the CSV path for the non-geometry tasks, the same
     # single "wherever this task's GT lives" slot it already serves for masks_dir/semantic_seg.
     data_cfg = {"images_dir": images_dir, "labels_dir": labels_dir, "masks_dir": labels_dir,
                 "csv_path": labels_dir, "subject": subject, "attribute": attribute, "date": date}
