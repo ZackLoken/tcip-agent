@@ -550,7 +550,9 @@ def write_subject_registry(
     Args:
         dataset_root: Dataset root; the registry is written to ``<dataset_root>/subjects.json``.
         subjects: Nested ``{subject: {description?, defined_by?, defined_at?, attributes?}}`` dict.
-        output_path: Optional explicit path (overrides ``<dataset_root>/subjects.json``).
+        output_path: Optional explicit path whose directory, not its file name, is what the write
+            is keyed by (``_registry_key``); the write always lands at ``<directory>/subjects.json``
+            regardless of what file name is given here.
         allow_removals: State a dropped name, or a stored registry that will not decode, as a
             deliberate removal/repair rather than refusing it.
         allow_type_changes: State a same-values attribute type flip (categorical to ordinal or
@@ -576,5 +578,6 @@ def write_subject_registry(
             allow_type_changes=allow_type_changes)
     except (subject_registry.RegistryError, VersionConflict) as exc:
         return {"error": str(exc)}
-    return {"subjects_path": str(out), "subjects": [s.name for s in registry.subjects],
+    return {"subjects_path": str(subjects_path(out.parent)),
+            "subjects": [s.name for s in registry.subjects],
             "schema_change_sweep": result["schema_change_sweep"]}
