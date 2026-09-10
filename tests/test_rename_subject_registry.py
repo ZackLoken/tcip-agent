@@ -249,7 +249,8 @@ def test_a_curated_tree_materialized_without_an_experiment_id_is_conformed_when_
 ) -> None:
     """``materialize_review_dataset`` called with no ``experiment_id`` records no
     ``curated_dataset`` artifact, so ``store_catalogue.project_roots`` cannot reach the tree it
-    wrote; the conform's direct-root form is the only way to it (D7)."""
+    wrote; the conform's direct-root form is the only way to it. Coverage of the direct-root
+    form over a real curated tree, not a guard."""
     from tcip_mcp.pipelines.resolution import write_sidecar
     from tcip_mcp.prediction_buckets import review_state_dir_of
     from tcip_mcp.tools.feedback_tools import materialize_review_dataset
@@ -387,12 +388,10 @@ def test_the_trait_spec_writes_compare_and_set_against_the_version_the_scan_itse
     })
 
     real_read_versioned = ts.read_versioned
-    calls = {"n": 0}
 
     def _read_then_race(k, *args, **kwargs):
         result = real_read_versioned(k, *args, **kwargs)
-        calls["n"] += 1
-        if calls["n"] == 1 and k == key:
+        if k == key:
             ts.replace(k, {**result.value, "notes": "moved by a concurrent writer"},
                       expect=result.version)
         return result
@@ -434,7 +433,8 @@ def test_a_stamped_2_trait_spec_still_carrying_the_old_key_is_rewritten(tmp_path
     """A record already stamped ``schema_version: 2`` but still carrying ``positive_class_name``
     (never written by the current encoder, but not ruled out by ``trait_spec_unconformed``, whose
     reason is about the stamp alone) is rewritten to ``positive_value`` all the same: the key
-    check runs independently of the version reason."""
+    check runs independently of the version reason. Coverage of a case the conform already
+    holds, not a guard."""
     project_root = tmp_path / "proj"
     (project_root / ".tcip").mkdir(parents=True)
     key = _seed_raw_trait_spec(project_root, {

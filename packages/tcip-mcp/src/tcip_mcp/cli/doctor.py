@@ -604,10 +604,10 @@ def check_retired_subject_registry(root: Path, findings: list) -> None:
     status, split-manifest binding, curated-artifact and lineage records) and the project's
     registered-datasets record, no sweep manifest; a root holding those as loose records under
     the database backend cannot be enumerated, a fact about that unrelated store, not this
-    check's own subject. This is the doctor's only check that catches ``StoreError``: it is the
-    only one that enumerates roots through ``project_roots`` at all, reading stores none of the
-    doctor's other checks touch, so a refused read here would otherwise end the whole doctor run
-    rather than being reported at the soft level with the walk stopping where it could not read.
+    check's own subject. This is the only check that enumerates roots through ``project_roots``,
+    reading stores none of the doctor's other checks touch, so a ``StoreError`` from that
+    enumeration is reported at the soft level with the walk stopping where it could not read,
+    rather than ending the whole doctor run.
     """
     from tcip_store import StoreError
     from tcip_store.layout_claims import ROOT, SPLITS

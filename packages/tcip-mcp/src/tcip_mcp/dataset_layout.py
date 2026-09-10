@@ -52,8 +52,9 @@ SUBJECTS_FILENAME = "subjects.json"
 RETIRED_SUBJECTS_FILENAME = "classes.json"
 """No writer places a document under this name. :func:`tcip_mcp.subject_registry.
 retired_document` reads it, answering present whenever the file decodes as a registry, whether
-or not ``subjects.json`` is beside it; the doctor, the conform command,
-:func:`tcip_mcp.audit.dataset_scope_of` and the two bundle doors read that answer."""
+or not ``subjects.json`` is beside it, and the doctor reads that answer; the conform command,
+:func:`tcip_mcp.audit.dataset_scope_of` and the two bundle doors test for the file by this name
+themselves."""
 
 UNDATED_BUCKET = "undated"
 """The bucket a dateless capture lands in: ``ingest_images`` writes it, and any store key that

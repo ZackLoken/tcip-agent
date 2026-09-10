@@ -2,7 +2,9 @@
 absence refusals, the doctor's finding, dataset_scope_of's evidence and the two bundle doors,
 all against a dataset still holding the pre-rename document. Each refusal is paired with what
 still admits, per CLAUDE.md's rail rule: a bare dataset root with no registry file at all works
-at every one of these sites exactly as before the subject-registry rename.
+at every one of these sites exactly as before the subject-registry rename. Every case here is
+coverage of behavior the tree holds, with nothing to disable that would make it fail; none is a
+guard.
 """
 
 from __future__ import annotations
