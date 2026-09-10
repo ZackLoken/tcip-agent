@@ -39,8 +39,8 @@ import yaml
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
-# The one-leg pytest run; kept as history, not a
-# comparable baseline, and never overwritten by a later run.
+# The one-leg pytest run; kept as history, not a comparable baseline, and never
+# overwritten by a later run.
 RECORDED_BASELINE = REPO_ROOT / "docs" / "audit" / "phase0" / "gate-baseline"
 
 PARSED_JOBS = ("mypy", "python", "typescript")
