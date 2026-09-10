@@ -49,6 +49,14 @@ recorded, so a later reader can check the verdict rather than trust it.
 ``--test-rev`` takes the test tree from a revision instead of the working tree, which is how a guard
 claim already in the history gets checked. It requires an explicit baseline, since the revision
 before a test commit is the tree a one-file-per-commit history makes untrustworthy.
+
+``--baseline-from-working-tree`` snapshots the current working tree (tracked modifications and
+untracked files, ignored files excluded) into a commit object, printing its hash, without touching
+the working tree, the index, or the stash list. It computes no verdict by itself: take the
+snapshot *before* applying the fix under test, since a snapshot that already holds the fix is a
+baseline the change does not precede, and a passing run against it is the same INDETERMINATE case
+as any other baseline already containing the change, never evidence the test guards anything.
+Apply the fix, then re-run normally with ``--baseline <the printed hash>``.
 """
 from __future__ import annotations
 
@@ -260,6 +268,57 @@ def _changed_source_files(baseline: str, declared: list[str], test_rev: str | No
             note += f"; declared but identical at the baseline, so not counted: {', '.join(ignored)}"
         return kept, note
     return changed, how
+
+
+def _snapshot_via_temporary_index(head: str, index_path: Path) -> str | None:
+    """Build the snapshot commit through a scratch index; ``None`` if this form fails here."""
+    env = {**os.environ, "GIT_INDEX_FILE": str(index_path)}
+    read = subprocess.run(["git", "read-tree", head], cwd=REPO, env=env, capture_output=True, text=True)
+    if read.returncode != 0:
+        return None
+    added = subprocess.run(["git", "add", "-A"], cwd=REPO, env=env, capture_output=True, text=True)
+    if added.returncode != 0:
+        return None
+    tree = subprocess.run(["git", "write-tree"], cwd=REPO, env=env, capture_output=True, text=True)
+    if tree.returncode != 0 or not tree.stdout.strip():
+        return None
+    commit = subprocess.run(
+        ["git", "commit-tree", tree.stdout.strip(), "-p", head, "-m",
+         "prove_test_fails_before.py working-tree snapshot"],
+        cwd=REPO, env=env, capture_output=True, text=True,
+    )
+    if commit.returncode != 0 or not commit.stdout.strip():
+        return None
+    return commit.stdout.strip()
+
+
+def _snapshot_via_stash_create() -> str | None:
+    """The fallback when the temporary-index form fails here: covers tracked changes only, and
+    touches neither the tree, the index, nor the stash list, same as the form it falls back from."""
+    out = subprocess.run(
+        ["git", "stash", "create", "prove_test_fails_before.py working-tree snapshot"],
+        cwd=REPO, capture_output=True, text=True,
+    )
+    hashed = out.stdout.strip()
+    return hashed or None
+
+
+def snapshot_working_tree() -> tuple[str, str]:
+    """A commit object for the working tree exactly as it stands now: tracked modifications and
+    untracked files, ignored files excluded. Returns ``(commit_hash, method)``. Touches neither
+    the working tree, the real index, nor the stash list.
+    """
+    with tempfile.TemporaryDirectory(prefix="failbefore-index-") as scratch:
+        head = git_output("rev-parse", "HEAD").strip()
+        commit = _snapshot_via_temporary_index(head, Path(scratch) / "index")
+        if commit:
+            return commit, "temporary index (git add -A, git write-tree)"
+    commit = _snapshot_via_stash_create()
+    if commit:
+        return commit, "git stash create (tracked changes only)"
+    raise RuntimeError(
+        "could not snapshot the working tree: the temporary-index form failed here and git "
+        "stash create produced nothing, most likely because there are no tracked changes to stash")
 
 
 def materialize(rev: str, dest: Path) -> None:
@@ -521,6 +580,10 @@ def main() -> int:
     ap.add_argument("--baseline", default=None,
                     help="pre-change revision; default is HEAD for uncommitted work, else the "
                          "merge-base against the integration branch")
+    ap.add_argument("--baseline-from-working-tree", action="store_true",
+                    help="snapshot the current working tree into a commit and print its hash; "
+                         "computes no verdict. Take this before applying the fix, then re-run "
+                         "normally with --baseline <the printed hash>.")
     ap.add_argument("--integration", default="main",
                     help="branch to take a merge-base against (default main)")
     ap.add_argument("--test-rev", default=None,
@@ -531,6 +594,23 @@ def main() -> int:
     ap.add_argument("--json", dest="json_out", default=None, help="write the full record here")
     ap.add_argument("--timeout", type=int, default=900, help="seconds to allow pytest (default 900)")
     args = ap.parse_args()
+
+    if args.baseline_from_working_tree:
+        if args.baseline:
+            ap.error("--baseline-from-working-tree and --baseline name the baseline two ways at once")
+        commit, method = snapshot_working_tree()
+        expr_flag = f"-k {args.expr!r} " if args.expr else ""
+        print(f"snapshot {commit} ({method})")
+        print(
+            "computes no verdict by itself. This is the working tree as it stands right now: a "
+            "snapshot that already holds the fix is a baseline the change does not precede, and a "
+            "passing run against it is the same INDETERMINATE case as any other baseline already "
+            "containing the change, never evidence the test guards anything. Apply the fix now, "
+            "then run:\n"
+            f"  python tools/prove_test_fails_before.py {args.test_file} {expr_flag}"
+            f"--baseline {commit}"
+        )
+        return 0
 
     record: dict = {"test_file": args.test_file, "k": args.expr, "verdict": None,
                     "test_tree_from": args.test_rev or "the working tree"}

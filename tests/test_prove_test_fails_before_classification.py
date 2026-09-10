@@ -12,6 +12,7 @@ against it, exactly as a caller would.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -221,6 +222,91 @@ def test_a_fixture_calling_package_code_that_raises_is_refused(tmp_path):
     assert "REFUSED" in result.stdout
     assert "fixture-shaped" in result.stdout
     assert "[fixture]" in result.stdout
+
+
+# ── --baseline-from-working-tree ────────────────────────────────────────────
+
+
+def _snapshot(repo: Path, test_file: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(repo / "tools" / "prove_test_fails_before.py"),
+         test_file, "--baseline-from-working-tree"],
+        cwd=str(repo), capture_output=True, text=True, timeout=60,
+    )
+
+
+def test_baseline_from_working_tree_captures_tracked_and_untracked_changes_untouched(tmp_path):
+    """A tracked modification and an untracked file both land in the printed snapshot's tree,
+    and the working tree, the index, and the stash list are all unchanged afterward."""
+    repo = _scratch_repo(tmp_path)
+    _write(repo / "widgets.py", "def double(x):\n    return x\n")
+    _commit_all(repo, "double is a no-op")
+
+    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    _write(repo / "untracked.py", "NEW = True\n")
+    status_before = _git(repo, "status", "--porcelain")
+
+    proc = _snapshot(repo, "tests/test_widgets.py")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    match = re.search(r"snapshot ([0-9a-f]{40})", proc.stdout)
+    assert match, proc.stdout
+    snapshot = match.group(1)
+
+    assert "x * 2" in _git(repo, "show", f"{snapshot}:widgets.py")
+    assert "NEW = True" in _git(repo, "show", f"{snapshot}:untracked.py")
+    assert _git(repo, "status", "--porcelain") == status_before
+    assert _git(repo, "stash", "list").strip() == ""
+
+
+def test_baseline_from_working_tree_excludes_ignored_files(tmp_path):
+    repo = _scratch_repo(tmp_path)
+    _write(repo / ".gitignore", "ignored.txt\n")
+    _write(repo / "widgets.py", "def double(x):\n    return x\n")
+    _commit_all(repo, "double is a no-op")
+    _write(repo / "ignored.txt", "should not appear\n")
+
+    proc = _snapshot(repo, "tests/test_widgets.py")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    snapshot = re.search(r"snapshot ([0-9a-f]{40})", proc.stdout).group(1)
+
+    listing = _git(repo, "ls-tree", "-r", "--name-only", snapshot)
+    assert "ignored.txt" not in listing
+
+
+def test_baseline_from_working_tree_together_with_baseline_is_refused(tmp_path):
+    repo = _scratch_repo(tmp_path)
+    _write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = _commit_all(repo, "double is a no-op")
+
+    proc = subprocess.run(
+        [sys.executable, str(repo / "tools" / "prove_test_fails_before.py"),
+         "tests/test_widgets.py", "--baseline-from-working-tree", "--baseline", baseline],
+        cwd=str(repo), capture_output=True, text=True, timeout=60,
+    )
+    assert proc.returncode != 0
+
+
+def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(tmp_path):
+    """The honest shape: snapshot before the fix, apply the fix, then run normally with
+    --baseline <the printed hash>, exactly as an operator would."""
+    repo = _scratch_repo(tmp_path)
+    _write(repo / "widgets.py", "def double(x):\n    return x\n")
+    _commit_all(repo, "double is a no-op")
+
+    _write(repo / "tests" / "test_widgets.py",
+           "def test_double_doubles():\n"
+           "    from widgets import double\n"
+           "    assert double(3) == 6\n")
+
+    proc = _snapshot(repo, "tests/test_widgets.py")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    snapshot = re.search(r"snapshot ([0-9a-f]{40})", proc.stdout).group(1)
+
+    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+
+    result = _run(repo, "tests/test_widgets.py", snapshot)
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    assert "GUARDS" in result.stdout
 
 
 def test_a_key_error_on_a_package_result_guards(tmp_path):
