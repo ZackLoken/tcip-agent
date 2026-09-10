@@ -25,17 +25,17 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 29630d8a.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD cbd16804.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 29630d8a has 435 modules across the six scanned roots (145286 total lines):
+HEAD cbd16804 has 435 modules across the six scanned roots (145294 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 137 | 64327 |
+| tcip-mcp | 137 | 64335 |
 | tcip-annotation | 12 | 4346 |
 | tcip-web | 40 | 14081 |
 | tcip-store | 13 | 5281 |
@@ -1320,17 +1320,17 @@ refused by every registry writer until the file is renamed to `subjects.json` by
 platform door conforms it. See S20 below.
 
 Writer: `tcip_mcp.subject_registry.replace_registry`,
-`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:424`, the one write both registry doors call
+`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:427`, the one write both registry doors call
 (the GUI's `save_subjects` and the tool's `write_subject_registry`,
 `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:513`).
 
-Readers: `tcip_mcp.subject_registry.read_registry`, `subject_registry.py:247`;
+Readers: `tcip_mcp.subject_registry.read_registry`, `subject_registry.py:249`;
 `tcip_mcp.dataset_layout.list_subjects` (delegates to `subject_registry`),
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:744`.
 
-`assign_class_ids`, `subject_registry.py:568`, derives the training-time name-to-id map from this
+`assign_class_ids`, `subject_registry.py:573`, derives the training-time name-to-id map from this
 file's declared attribute order; no integer id is stored in the file itself.
-`attribute_schema_digest`, `subject_registry.py:196`, hashes a subject's attribute
+`attribute_schema_digest`, `subject_registry.py:198`, hashes a subject's attribute
 name/type/values for the `image_status_digest.json` staleness stamp (format 6).
 
 Seam S20 ("subjects.json subject registry"), verdict `both-sides-one-implementation`,
@@ -1373,13 +1373,13 @@ attributed to a split by
 `negative_carry = _compute_negative_carry(label_map, bare_parts, image_map, subject, only_date)`
 `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:990`, then applied by
 `_apply_negative_carry(negative_carry, out_dir, subject)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:1087`).
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:1088`).
 
 Readers: `tcip_mcp.pipelines.data.label_queries.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:577`; `_status_bucket_for`,
 `packages/tcip-web/src/tcip_web/routes/sessions.py:239`;
 `tcip_mcp.subject_registry._sweep_schema_change`,
-`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:330`, which enumerates every bucket of a
+`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:333`, which enumerates every bucket of a
 subject whose attribute schema is about to change so the confirmations under it can be stamped
 before the outgoing digest is gone; `routes.subjects.get_image_status`,
 `packages/tcip-web/src/tcip_web/routes/subjects.py:319`, through
@@ -1411,8 +1411,8 @@ Path: `<dataset_root>/.tcip/state/image_status_digest.json`.
 Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/subjects.py:283`, called from
 `set_image_status`/`set_image_status_bulk` at confirmation time; and
 `tcip_mcp.subject_registry._sweep_schema_change`,
-`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:330`, called through `replace_registry`
-(`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:424`) by both registry writers,
+`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:333`, called through `replace_registry`
+(`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:427`) by both registry writers,
 `save_subjects` (`packages/tcip-web/src/tcip_web/routes/subjects.py:165`) and `write_subject_registry`
 (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:513`), before the new registry lands.
 A status and its stamp are two transactions, status first, so unstamped confirmations
@@ -1434,7 +1434,7 @@ rather than trained by its stored confirmation, complete or negative alike,
 Seam S23 ("image_status_digest.json attribute-schema stamp"), verdict `both-sides-restated`,
 `phase0_implementation: once, shared`: `tests/test_confirmations_travel_with_dataset.py:119-266`,
 `tests/test_coco_training_assembly.py:591-680`. The shared function across both sides is
-`attribute_schema_digest`, `subject_registry.py:196`. Both sides run their real implementations
+`attribute_schema_digest`, `subject_registry.py:198`. Both sides run their real implementations
 end to end in `tests/test_status_digest_stamp_writer.py` (the HTTP status routes produce the
 sidecar, `confirmed_negative_names` reads it) and in
 `tests/test_schema_change_staleness_sweep.py` (both registry writers run the sweep,
@@ -2407,7 +2407,7 @@ Phase 3 verdict: single.
 ## S21. Training name-to-id assignment versus inference decode map
 
 Must agree: a prediction's integer label decodes to the class name the run trained it as.
-Side A: `packages/tcip-mcp/src/tcip_mcp/subject_registry.py:568` (`def assign_class_ids(`, the one assignment, reached by the loader through `pipelines/data/label_queries.py:122` (`return registry, subject_registry.assign_class_ids(registry, subject, attribute)`)).
+Side A: `packages/tcip-mcp/src/tcip_mcp/subject_registry.py:573` (`def assign_class_ids(`, the one assignment, reached by the loader through `pipelines/data/label_queries.py:122` (`return registry, subject_registry.assign_class_ids(registry, subject, attribute)`)).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:241` (`def resolve_decode_id_map(`, the one resolution every entry point that decodes predictions or reads GT by id calls: the private pass at `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:837` (`id_map = resolve_decode_id_map(predictor, images_dir)`), the raster regime at `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:2155` (`id_map = resolve_decode_id_map(predictor, None)`), the GUI worker at `packages/tcip-web/src/tcip_web/routes/inference.py:281`, and block calibration at `pipelines/block_calibration.py:274`, which hands over the run's own scope rather than restating the prefer-recorded-else-derive rule).
 Phase 3 verdict: single.
 
@@ -2422,7 +2422,7 @@ Phase 3 verdict: single.
 
 Must agree: writer and reader compute the digest the same way for a stale stamp to be detectable.
 Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:1054` (`def stamp_image_status_digests(`, the one transactional read-merge writer, called by the web route, the materializer, the split tools and the schema-change sweep `subject_registry._sweep_schema_change`, which passes `only_unstamped` so a confirmation-time stamp is never re-dated).
-Side B: `packages/tcip-mcp/src/tcip_mcp/subject_registry.py:196` (`attribute_schema_digest`, the one digest computation).
+Side B: `packages/tcip-mcp/src/tcip_mcp/subject_registry.py:198` (`attribute_schema_digest`, the one digest computation).
 Phase 3 verdict: single.
 
 ## S24. view_coverage.json advisory coverage record
@@ -2533,7 +2533,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP writer, the loader, and the GUI trait list agree on the spec fields and the reason a spec was skipped.
 Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:358` (`def trait_specs_dir(`, the one placement, with `TRAIT_SPECS_STORE`, `traits.py:399`, and `trait_spec_key`, `traits.py:419`, addressing one spec).
-Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:460` (`load_trait_specs_with_errors`, the one scan and the one skip-reason list) and `traits.py:547` (`revise_trait_spec_fields`, the one write that reads, merges and compare-and-sets against the version it read, with `write_trait_spec_fields` its wrapper). `packages/tcip-web/src/tcip_web/routes/results.py:443` and `packages/tcip-mcp/src/tcip_mcp/cli/doctor.py:588` name the project and let the placement resolve here.
+Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:462` (`load_trait_specs_with_errors`, the one scan and the one skip-reason list) and `traits.py:549` (`revise_trait_spec_fields`, the one write that reads, merges and compare-and-sets against the version it read, with `write_trait_spec_fields` its wrapper). `packages/tcip-web/src/tcip_web/routes/results.py:443` and `packages/tcip-mcp/src/tcip_mcp/cli/doctor.py:588` name the project and let the placement resolve here.
 Phase 3 verdict: single.
 
 ## S39. Phenology CSV column vocabulary
