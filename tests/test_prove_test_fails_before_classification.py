@@ -12,6 +12,7 @@ against it, exactly as a caller would.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 import subprocess
 import sys
@@ -336,6 +337,51 @@ def test_a_bare_file_not_found_error_outside_the_assertion_is_refused_not_guards
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     assert "REFUSED" in result.stdout
     assert "[unreached]" in result.stdout
+
+
+# ── --per-test-timeout ───────────────────────────────────────────────────────
+
+
+def _load_tool():
+    """Import the real module under test by path, for a pure classification-logic check that
+    needs no scratch repository or subprocess of its own."""
+    spec = importlib.util.spec_from_file_location("prove_test_fails_before_under_test", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_signal_method_timeout_message_is_a_timeout_not_a_behavioral_pass():
+    """Where SIGALRM exists, pytest-timeout raises pytest.fail(PYTEST_FAILURE_MESSAGE), a Failed
+    exception that would otherwise misread as a genuine assertion failure (GUARDS)."""
+    tool = _load_tool()
+    entry = {"headline": "Timeout (>5.0s) from pytest-timeout.", "phase": "call",
+              "exc_typename": "Failed"}
+    assert tool._failure_kind(entry, Path(".")) == "timeout"
+
+
+def test_a_hung_test_under_per_test_timeout_reports_indeterminate_naming_it(tmp_path):
+    """On this project's harness (no SIGALRM), pytest-timeout kills the process outright; the
+    tool must still say which test hung, from the logstart marker it writes as each test starts,
+    rather than reporting a bare no-outcome refusal that reads the same as any other crash."""
+    repo = _scratch_repo(tmp_path)
+    _write(repo / "tests" / "test_widgets.py",
+           "import time\n"
+           "\n"
+           "\n"
+           "def test_hangs_forever():\n"
+           "    time.sleep(30)\n")
+    _commit_all(repo, "a test that hangs")
+
+    proc = subprocess.run(
+        [sys.executable, str(repo / "tools" / "prove_test_fails_before.py"),
+         "tests/test_widgets.py", "--baseline", "HEAD", "--per-test-timeout", "1"],
+        cwd=str(repo), capture_output=True, text=True, timeout=60,
+    )
+
+    assert proc.returncode == EXIT["INDETERMINATE"], proc.stdout + proc.stderr
+    assert "INDETERMINATE" in proc.stdout
+    assert "test_hangs_forever" in proc.stdout
 
 
 def test_a_key_error_on_a_package_result_guards(tmp_path):
