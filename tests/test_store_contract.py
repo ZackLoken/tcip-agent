@@ -2189,7 +2189,17 @@ REGISTERED = {
         "predictions/live/2026-03-04/.tcip/raster_pass_progress/identity.json",
         root_of=_stamp_bucket),
     "trait_specs": Registered(
-        {"name": TRAIT_UNDER_TEST, "delivers": ["measure_one"], "notes": "ü",
+        # A full TraitSpec, run through the real encoder (traits._encode_spec) rather than
+        # hand-typed, so this golden cannot drift from every field the encoder writes silently.
+        {"name": TRAIT_UNDER_TEST, "count_objective": "", "localization": "",
+         "localization_tolerance": "half_class_avg_size", "localization_tolerance_frac": 0.5,
+         "positive_value": "", "milestone_fractions": [], "milestone_on": "",
+         "majority_milestone": "", "majority_provisional": False, "phenology_prefix": "",
+         "majority_label": "", "sliver_policy": "class_avg_size", "sliver_frac": 0.5,
+         "count_bias_tolerance_frac": None, "count_error_tolerance": None,
+         "classifier_agreement_floor": None, "ordinal_agreement_floor": None,
+         "regression_skill_floor": None, "scale_tolerance_frac": None,
+         "holdout_match_quality_floor": None, "delivers": ["measure_one"], "notes": "ü",
          "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
         _trait_spec_key, f".tcip/state/trait_specs/{TRAIT_UNDER_TEST}.json",
         root_of=_trait_specs_root),

@@ -10,17 +10,22 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import tcip_store as ts
 
+from tcip_mcp import operationalization as op
+from tcip_mcp import traits
 from tcip_mcp.subject_registry import (
     Subject,
     SubjectRegistry,
     SubjectRegistryUnconformed,
     copy_registry,
     read_registry,
+    registry_for_dataset_root,
     replace_registry,
     retired_document,
     write_registry,
 )
+from tests import _operationalization_fixtures as fx
 
 
 def _dataset(root: Path, *, with_registry: bool = True) -> Path:
@@ -384,3 +389,192 @@ def test_import_project_refuses_naming_the_retired_document_and_the_hand_recipe(
     assert "classes.json" in result["error"]
     assert "rename it to subjects.json" in result["error"]
     assert not dest.exists() or not any(dest.iterdir())
+
+
+# ── the GUI save route answers 400 ──────────────────────────────────────────────────────────
+
+
+def test_save_subjects_route_answers_400_beside_the_retired_document(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from tcip_web.app import app
+
+    root = _dataset(tmp_path)
+    _retire(root)
+    client = TestClient(app, base_url="http://127.0.0.1")
+
+    resp = client.post("/api/subjects/save", json={
+        "project_root": str(root), "dataset_root": str(root),
+        "subjects": {"bud": {}}, "version": None})
+
+    assert resp.status_code == 400
+    assert "classes.json" in resp.text
+    assert "tcip rename-subject-registry" in resp.text
+    assert not (root / "subjects.json").exists()
+
+
+# ── materialize_review_dataset answers {"error": ...} naming the conform ───────────────────
+
+
+def _seed_classified_verdict(state_dir: Path, *, bucket: str) -> None:
+    """One accepted classified call: a classified review's own verdict shape, whose class_name
+    is the confirmed value, never the object's subject."""
+    from tcip_annotation.review_engine import ReviewEngine
+
+    state = {"verdicts": {
+        (bucket, "imgA.png"): {"img_status": "completed", "detections": [
+            {"action": "accepted", "class_name": "healthy",
+             "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
+    }}
+    engine = ReviewEngine(str(state_dir))
+    engine.raw_state.update(state)
+    engine.save_review_state()
+
+
+def test_materialize_review_dataset_answers_error_beside_the_retired_document(tmp_path):
+    """A classified scope's own registry copy (materialize.py's
+    _copy_source_registry_for_classified_scope, through copy_registry) refuses at a destination
+    already carrying the retired document, before anything else is written, and
+    materialize_review_dataset answers {"error": ...} naming the conform."""
+    from PIL import Image
+
+    from tcip_mcp.pipelines.resolution import write_sidecar
+    from tcip_mcp.prediction_buckets import review_state_dir_of
+    from tcip_mcp.tools.feedback_tools import materialize_review_dataset
+
+    bucket = "predictions/classifier/2026-03-05"
+    dataset_root = tmp_path / "dataset"
+    _seed_classified_verdict(review_state_dir_of(dataset_root), bucket=bucket)
+    write_sidecar(dataset_root / bucket, {"id_map": {"healthy": 0, "diseased": 1},
+                                          "subject": "leaf", "attribute": "condition"})
+
+    source_root = tmp_path / "source"
+    (source_root / "images").mkdir(parents=True)
+    Image.new("RGB", (32, 32)).save(source_root / "images" / "imgA.png")
+    write_registry(source_root / "subjects.json", SubjectRegistry(subjects=(Subject(name="leaf"),)))
+
+    out = tmp_path / "out"
+    out.mkdir()
+    write_registry(out / "subjects.json", SubjectRegistry(subjects=(Subject(name="leaf"),)))
+    _retire(out)
+
+    result = materialize_review_dataset(
+        str(dataset_root), str(source_root / "images"), str(out), bucket=bucket)
+
+    assert "error" in result
+    assert "classes.json" in result["error"]
+    assert "tcip rename-subject-registry" in result["error"]
+
+
+# ── the absence answers, with only the retired document on the root ────────────────────────
+
+
+def test_absence_answers_at_every_reader_with_only_the_retired_document_present(tmp_path):
+    """A root holding only the retired classes.json answers exactly as one holding no registry
+    at all, at every reader that does not itself refuse: list_subjects, registry_for_dataset_root,
+    the load route's draft, the fingerprint's empty registry term, and resolve_decode_id_map's
+    attribute-scope precondition (the narrowest function under run_inference that carries this
+    answer: an attribute-scoped run with no subjects.json returns id_map=None)."""
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    from tcip_mcp.dataset_layout import list_subjects
+    from tcip_mcp.pipelines.data.dataset_fingerprint import _registry_term
+    from tcip_mcp.tools.inference_tools import resolve_decode_id_map
+    from tcip_web.app import app
+
+    root = _dataset(tmp_path)
+    _retire(root)
+
+    assert list_subjects(root) == []
+    assert registry_for_dataset_root(root) is None
+    assert _registry_term(root) == ""
+
+    predictor = SimpleNamespace(config={"data": {"subject": "bud", "attribute": "condition"}})
+    assert resolve_decode_id_map(predictor, str(root / "images" / "2026-03-04")) is None
+
+    client = TestClient(app, base_url="http://127.0.0.1")
+    resp = client.get("/api/subjects/load", params={
+        "project_root": str(root), "dataset_root": str(root),
+        "annotations_dir": str(root / "annotations" / "2026-03-04")})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["version"] is None
+    assert set(body["subjects"]) == {"bud"}  # drafted from the labels, never from classes.json
+
+
+# ── the transition: a statement or confirmation still carrying the old key ─────────────────
+
+
+def test_a_trait_spec_statement_rewritten_to_the_old_key_is_stale_and_the_state_door_refuses(
+    tmp_path,
+):
+    """A trait_spec_statements record confirmed through the real producers, its snapshot then
+    rewritten on disk to carry positive_class_name instead of positive_value (standing in for a
+    statement confirmed before the subject-registry rename), reads stale against the live spec
+    (which still carries positive_value), and state_operationalization refuses naming it."""
+    root = tmp_path / "proj"
+    fx.write_spec(root, fx.CROSSING_SPEC)
+    fx.seed_positive_class(root, "flower", fx.CROSSING_SPEC.positive_value)
+    fx.confirm_spec_statement(root, fx.CROSSING_TRAIT)
+
+    key = traits.trait_spec_statement_key(
+        traits.trait_spec_statements_scope(root), fx.CROSSING_TRAIT)
+    versioned = ts.read_versioned(key)
+    fields = dict(versioned.value["statement_fields"])
+    fields["positive_class_name"] = fields.pop("positive_value")
+    ts.replace(key, {**versioned.value, "statement_fields": fields}, expect=versioned.version)
+
+    spec = traits.get_trait_for(fx.CROSSING_TRAIT, root)
+    statement = ts.read_versioned(key).value
+    assert traits.trait_spec_statement_stale(spec, statement)
+
+    with pytest.raises(traits.TraitSpecUnconfirmed, match="no longer matches"):
+        op.state_operationalization(
+            root, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES,
+            statement="s", mechanism="m", measured_subject="flower",
+            delivered_phenotypes=list(fx.CROSSING_SPEC.delivers),
+            registry=registry_for_dataset_root(root),
+        )
+
+
+def test_confirmed_fields_rewritten_to_the_old_key_reads_state_3_and_passes_after_reconfirmation(
+    tmp_path,
+):
+    """A trait_operationalizations record confirmed through the real producers, its
+    confirmed_fields then rewritten on disk to carry positive_class_name instead of
+    positive_value, reads through _moved_fields as positive_value moved from None to the live
+    value (state 3); confirm_trait_operationalization admits valid work, replacing
+    confirmed_fields whole under the current key, and the check passes again."""
+    root = tmp_path / "proj"
+    fx.write_spec(root, fx.CROSSING_SPEC)
+    fx.seed_positive_class(root, "flower", fx.CROSSING_SPEC.positive_value)
+    record = fx.state_crossing(root)
+    confirmed = fx.confirm(root, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES, record)
+
+    key = op.operationalization_key(
+        op.operationalizations_scope(root), fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES)
+    versioned = ts.read_versioned(key)
+    document = dict(versioned.value)
+    confirmed_fields = dict(document["confirmed_fields"])
+    confirmed_fields["positive_class_name"] = confirmed_fields.pop("positive_value")
+    document["confirmed_fields"] = confirmed_fields
+    ts.replace(key, document, expect=versioned.version)
+
+    spec, stored, _specs_dir = op.resolve_trait_and_record(
+        fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES, project_root=root)
+    check = op.check_operationalization(
+        spec, stored, op.STATE_CROSSING_DATES, registry=registry_for_dataset_root(root))
+    assert check.state == 3
+    assert check.superseded[0]["field"] == "positive_value"
+
+    fx.confirm(root, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES, confirmed)
+
+    spec, stored, _specs_dir = op.resolve_trait_and_record(
+        fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES, project_root=root)
+    passed = op.check_operationalization(
+        spec, stored, op.STATE_CROSSING_DATES, registry=registry_for_dataset_root(root))
+    assert passed.state is None
+    assert "positive_value" in stored.value["confirmed_fields"]
+    assert "positive_class_name" not in stored.value["confirmed_fields"]
