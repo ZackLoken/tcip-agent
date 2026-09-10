@@ -2,7 +2,9 @@
 (ordinal-rank or continuous-value) trait against a disjoint held-out split, and earning a
 validated count operating point over an already-published prediction bucket.
 
-Grouping them here keeps the calibration-administration surface discoverable in one place.
+``redraw_calibration_holdout``, ``calibrate_scalar_operating_point`` and
+``calibrate_count_operating_point`` sit together so the calibration-administration surface is
+discoverable in one place.
 """
 
 from __future__ import annotations
@@ -182,7 +184,7 @@ def redraw_calibration_holdout(
             return {"error": str(exc)}
     elif labels_dir:
         # The same labels-intersect-images scan calibrate_operating_point uses, not a second
-        # independent glob (images_dir omitted degrades to the prior labels-only scan).
+        # independent glob (images_dir omitted degrades to the labels-only scan).
         stems, _ = label_image_stems(labels_dir, images_dir)
         try:
             annotation_counts = {

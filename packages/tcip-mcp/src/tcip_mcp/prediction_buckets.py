@@ -37,7 +37,7 @@ A bucket's documents leave it through exactly one audited door,
 experiment's own recorded bucket into a dated archive so the path re-publishes; it is a different
 act from anything here, since it moves the whole bucket rather than resolving a writer's target,
 and this module's guards never see the archive it moves into. A bucket emptied by hand, outside
-that door, is invisible to every guard here the same way it always was.
+that door, is invisible to every guard here.
 """
 
 from __future__ import annotations
@@ -352,7 +352,7 @@ def resolve_writable_bucket(
     whatever ``overwrite`` says, naming the document count and the suggested first variant free of
     both a verdict and a document (or ``None``, see below). With verdicts on the requested bucket:
     the verdict check runs first, ahead of any document check, so a bucket a reviewer has already
-    verdicted redirects (or refuses on ``overwrite=True``) the same way it always has, whether or
+    verdicted redirects (or refuses on ``overwrite=True``) whether or
     not it also holds a document. ``overwrite=False`` (default) picks the next ``<requested>@r2``
     / ``@r3`` variant free of a verdict (and, with ``refuse_documents``, also free of a document);
     ``overwrite=True`` raises :class:`BucketHasVerdicts`. Either exception's suggestion is the one
@@ -363,8 +363,7 @@ def resolve_writable_bucket(
     redirect or a suggestion onto an unchecked directory is the overwrite this guard exists to
     refuse. This exhaustion refusal fires whether or not ``refuse_documents`` is set:
     ``stage_prediction_shapes``, the one caller that leaves it off, is gated on verdicts alone,
-    but on exhaustion meets this same raise rather than the unchecked ``@r100`` fallback it
-    received before this change.
+    but on exhaustion meets this same raise rather than an unchecked ``@r100`` fallback.
 
     A raster pass' own progress records, kept under a bucket's ``<out>/.tcip/`` subdirectory,
     never register as a document either: :func:`bucket_document_stem_count`'s
