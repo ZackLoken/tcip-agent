@@ -142,9 +142,8 @@ def test_a_readable_vocabulary_is_still_checked_rather_than_refused(tmp_path) ->
 
 
 def test_off_crop_tokens_catches_single_word_mis_assignment(tmp_path) -> None:
-    """Fails before the fix: a single-word real trait referenced on the wrong crop's skill was
-    invisible to the old regex-extraction-based `off_crop_tokens`, so a real mis-assignment went
-    undetected. `dbh` is a real crops.yml trait not assigned to currant."""
+    """A single-word real trait referenced on the wrong crop's skill is caught by
+    `off_crop_tokens`. `dbh` is a real crops.yml trait not assigned to currant."""
     allnames, by_crop = guardrail.load_vocab()
     assert "dbh" in allnames
     assert "dbh" not in by_crop.get("currant", set())

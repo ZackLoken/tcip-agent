@@ -285,8 +285,8 @@ def test_regression_e2e(tmp_path: Path):
 
 def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     """evaluate_model must actually run for ordinal, not just build_dataset/train directly: it
-    previously never threaded a CSV path into its own dataset build, so this failed before the
-    fix (ds_kwargs stayed images_dir-only, OrdinalDataset's required csv_path was never set)."""
+    threads a CSV path into its own dataset build, since OrdinalDataset requires csv_path and
+    ds_kwargs must not stay images_dir-only."""
     from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.training_tools import evaluate_model
 

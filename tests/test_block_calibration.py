@@ -276,10 +276,9 @@ def test_block_calibration_admits_valid_work_once_attested(tmp_path: Path):
 
 
 def test_block_calibration_prefers_plant_pitch_over_gt_spacing_when_configured(tmp_path: Path):
-    """A training experiment whose config.json carries data.plant_csv_paths (report 9814, real
-    threading of plant-CSV data into block calibration) resolves the block scale from the real
-    planting-grid pitch, not the GT-object-spacing fallback -- report 9814's whole point: the
-    plant-pitch derivation path existed but had no production caller before this fix."""
+    """A training experiment whose config.json carries data.plant_csv_paths resolves the block
+    scale from the real planting-grid pitch, not the GT-object-spacing fallback: the plant-pitch
+    derivation path has a production caller here."""
     plant_csv = tmp_path / "plants.csv"
     _write_plant_csv(plant_csv)
     exp = _build_experiment(tmp_path, plant_csv_paths=[str(plant_csv)])

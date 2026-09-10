@@ -958,7 +958,7 @@ def test_dependency_problem_named_for_a_damaged_registry(tmp_path):
 def test_dependency_warnings_names_a_no_id_entry_as_a_problem_not_a_null_id_warning(
     client, tmp_path,
 ):
-    """coverage: the fix-up before this one already routes a no-id entry to the registry problem,
+    """coverage: a no-id entry already routes to the registry problem,
     so both assertions hold at this test's own baseline. The entry names a target already
     pending removal, the one state a no-id entry would otherwise reach the warning branch
     through, so this exercises the malformed-entry rule rather than a state (a live target)

@@ -1,4 +1,4 @@
-"""``tcip rename-subject-registry``: the conform for the subject-registry rename (D7).
+"""``tcip rename-subject-registry``: the conform for the subject-registry rename.
 
 Renames a dataset root's retired ``classes.json`` back to ``subjects.json``, and stamps a
 ``trait_specs`` record still carrying ``positive_class_name`` to ``positive_value`` with

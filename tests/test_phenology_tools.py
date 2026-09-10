@@ -1255,12 +1255,13 @@ def test_resolve_classifier_operating_point_refuses_single_image_holdout() -> No
 
 def test_resolve_classifier_operating_point_bias_is_scoped_to_present_images() -> None:
     """count_bias/count_bias_std must be measured over the same population typical_positive_count
-    is already scoped to (images carrying a true or predicted positive), the same present-scoped fix
-    the pooled detector gate already has, mirroring _count_stats_at_conf's own `if gt or dt`. Before
-    the fix, an all-negative image (no true positive, no predicted positive -- a confirmed-closed
-    bud the classifier correctly called negative) contributed a certain zero to the bias mean/std
-    while never counting toward typical_positive_count, diluting a real systematic miscall by
-    n_bias_images/n_present exactly as the detector path's own dilution did."""
+    is already scoped to (images carrying a true or predicted positive), matching the pooled
+    detector gate's own present-scoping, mirroring _count_stats_at_conf's own `if gt or dt`.
+    Without that scoping, an all-negative image (no true positive, no predicted positive -- a
+    confirmed-closed bud the classifier correctly called negative) would contribute a certain
+    zero to the bias mean/std while never counting toward typical_positive_count, diluting a real
+    systematic miscall by n_bias_images/n_present exactly as the detector path's own dilution
+    would."""
     from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
 
     cal = [

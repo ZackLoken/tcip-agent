@@ -439,7 +439,7 @@ def test_reconcile_scale_validity_unit_mismatch_floors(tmp_path):
 
 def test_reconcile_scale_validity_trait_mismatch_floors(tmp_path):
     """A scale earned for one trait does not answer for a delivery of another (the same trait
-    binding P4-86 gives the count/ordinal/regression reconcilers, extended to the scale document)."""
+    binding the count/ordinal/regression reconcilers apply, extended to the scale document)."""
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, reconcile_scale_validity
 
     d = _write_bound_scale_sidecar(tmp_path / "preds", tmp_path)

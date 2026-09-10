@@ -1,4 +1,4 @@
-"""Guards each MCP tool rename named in the ruling: the new name registers, and the old name
+"""Guards each MCP tool rename: the new name registers, and the old name
 survives nowhere the platform ships. CHANGELOG.md and everything under docs/ are project
 history, never edited by a rename, and are excluded from every sweep in this module.
 

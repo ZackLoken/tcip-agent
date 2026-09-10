@@ -263,8 +263,7 @@ def test_a_count_stamp_earned_for_one_trait_floors_a_delivery_of_another(tmp_pat
 
 def test_a_delivery_naming_no_measurement_document_refuses(tmp_path):
     """A record set that states nothing about which sidecar document its value rests on refuses
-    naming the field, rather than falling through to any particular reconciler (the statement rail
-    that replaces the old task-omission gap, count-delivery-door design section 5, P4-20)."""
+    naming the field, rather than falling through to any particular reconciler."""
     ordinal_only = _ordinal_bucket(tmp_path, "ordinal_preds")
     rows = [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency"}]
 

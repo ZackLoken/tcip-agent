@@ -614,7 +614,7 @@ def test_a_config_naming_an_unregistered_trait_still_lists(tmp_path, monkeypatch
     assert rows[0]["best_metric_name"] is None  # train() never ran, so nothing was stamped yet
 
 
-# preflight_config's reserve_calibration_fraction feasibility check (N7): a training-launch-time
+# preflight_config's reserve_calibration_fraction feasibility check: a training-launch-time
 # refusal through this module's own validation surface, never review_calibration._FAILURE_MESSAGES.
 
 def _reserve_cal_big_single_source(root, width=4000, height=3000, tile_size=128):
@@ -1180,8 +1180,8 @@ def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_
     """The tile geometry stamp_effective_data_geometry records off the same tiled dataset a
     training body's auto_train_val returns must be present in resolved_config.json's own
     data.tiling block, the record a caller reads back to know what the trial actually trained
-    on. Coverage, not a guard: before the tracker held the data block the stamp landed on the
-    plain merged dict the snapshot was written from, so this passed by that path too."""
+    on. Coverage, not a guard: the stamp lands on the plain merged dict the snapshot was written
+    from regardless of whether the tracker holds the data block, so this passes either way."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
 

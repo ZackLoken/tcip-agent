@@ -1634,7 +1634,7 @@ def test_export_aggregated_csv_regression_head_delivers_a_dimensional_value_with
 def test_export_aggregated_csv_refuses_a_declared_unit_trait_with_a_pixel_space_key(tmp_path):
     """A trait declaring a physical unit (fruit_diameter, mm in crops.yml) whose delivered
     value_key implies none refuses under operating_point: a value with no unit suffix delivered
-    under a unit-declared trait is not that trait's number (P4-45). The value_key itself
+    under a unit-declared trait is not that trait's number. The value_key itself
     ('fruit_diameter', no unit suffix) is confirmed for stem_count-style count aggregation in the
     fixture above, so only the document differs from the passing regression scenario elsewhere in
     this file."""
@@ -1691,7 +1691,7 @@ def test_aggregate_per_plant_refuses_a_plant_whose_images_disagree_on_the_statem
 
 def test_a_plant_with_no_value_at_all_refuses_naming_the_plant(tmp_path):
     """A per-plant row whose value is None (no observation carried the value_key) refuses at the
-    door, naming the plant, rather than writing an empty cell beside a validated stamp (P4-46)."""
+    door, naming the plant, rather than writing an empty cell beside a validated stamp."""
     from tcip_mcp.pipelines.postprocessing.aggregation import (
         aggregate_per_plant,
         export_aggregated_csv,

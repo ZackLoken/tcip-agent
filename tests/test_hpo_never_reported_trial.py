@@ -200,7 +200,7 @@ def test_every_trial_reporting_yields_the_unchanged_row_shape(monkeypatch):
 
 
 def test_ray_s_config_property_is_none_only_when_metrics_never_carried_one():
-    """The premise the fix relies on is Ray's own ``Result.config`` behavior, not an assumption
+    """The premise this rests on is Ray's own ``Result.config`` behavior, not an assumption
     this test suite invents: a result with no metrics, or with only Ray's own bookkeeping and
     no ``config`` key, has no config; a result whose metrics carry one answers it back."""
     empty = Result(metrics={}, checkpoint=None, error=None, path="/fake/trial_0")

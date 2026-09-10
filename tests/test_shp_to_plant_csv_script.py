@@ -112,17 +112,17 @@ def test_point_geometry_reprojects_to_correct_unswapped_wgs84(tmp_path: Path) ->
 def test_swapped_axis_order_would_fail_this_test(tmp_path: Path) -> None:
     """Pins the failure mode this converter guards against: transforming with the default
     (authority-compliant, lat/lon) axis order instead of ``always_xy`` lands outside a plausible
-    longitude range for UTM 15N. Exercises the same pyproj call the script makes, with the fix
-    deliberately omitted, so a regression that drops the fix would be caught by the assertion
-    above failing, not by this test passing either way."""
+    longitude range for UTM 15N. Exercises the same pyproj call the script makes, with
+    ``always_xy=True`` deliberately omitted, so a regression that drops it would be caught by
+    the assertion above failing, not by this test passing either way."""
     import pyproj
 
-    # Deliberately no always_xy=True, the fix the script applies.
+    # Deliberately no always_xy=True, the parameter the script applies.
     transform = pyproj.Transformer.from_crs(f"EPSG:{UTM_15N_EPSG}", "EPSG:4326")
     a, b = transform.transform(*POINT_NATIVE)
 
-    # With no axis fix pyproj returns (lat, lon): the first coordinate lands in latitude's
-    # plausible range, not longitude's, i.e. exactly the swap the fix prevents.
+    # With no axis correction pyproj returns (lat, lon): the first coordinate lands in latitude's
+    # plausible range, not longitude's, i.e. exactly the swap ``always_xy=True`` prevents.
     assert 35 < a < 50
     assert not (-100 < a < -85)
 

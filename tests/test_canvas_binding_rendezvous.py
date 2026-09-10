@@ -1,6 +1,6 @@
 """The canvas_open_binding record as the source at every rendezvous with a browser: the
 lifespan's startup read, the WS connect/resync re-read, and the select route's own ordering
-against the dataset it names. Covers the fix-up round's three named live-reproduced cases:
+against the dataset it names. Covers three live-reproduced cases:
 a restart, a deleted record, and an external bump followed by a resync.
 """
 

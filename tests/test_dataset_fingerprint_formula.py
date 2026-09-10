@@ -1,4 +1,4 @@
-"""The fingerprint formula-version prefix (Part 14 Q2): two values computed under different
+"""The fingerprint formula-version prefix: two values computed under different
 formulas must never compare as equal or unequal by accident, so dataset_fingerprint stamps its
 own formula version and every comparator that reads a stored value checks for it first.
 """

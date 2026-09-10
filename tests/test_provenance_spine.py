@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 
-# ── R4: capture_env records code + library fingerprint ────────────────────────
+# ── capture_env records code + library fingerprint ────────────────────────────
 
 def test_capture_env_records_code_and_libraries():
     from tcip_mcp.pipelines.model_build import capture_env
@@ -24,7 +24,7 @@ def test_capture_env_records_code_and_libraries():
     assert env["python"]
 
 
-# ── R1: stamp_model_ref carries experiment_id (optional) ──────────────────────
+# ── stamp_model_ref carries experiment_id (optional) ───────────────────────────
 
 def test_stamp_model_ref_stamps_experiment_id():
     from tcip_mcp.pipelines.model_build import stamp_model_ref
@@ -42,7 +42,7 @@ def test_stamp_model_ref_stamps_experiment_id():
     assert "experiment_id" not in payload3
 
 
-# ── R2: identity resolved off a verified, registry-matched checkpoint ───────
+# ── identity resolved off a verified, registry-matched checkpoint ──────────────
 
 def test_resolve_model_identity_from_registry(tmp_path, monkeypatch):
     """A registered checkpoint that carries no stamped experiment_id still resolves one, through
@@ -120,7 +120,7 @@ def test_resolve_model_identity_caller_experiment_id_wins_over_stamp(tmp_path):
     assert ident["experiment_id"] == "expCaller"
 
 
-# ── R3: terminal-state lock is additive-only ───────────────────────────────
+# ── terminal-state lock is additive-only ────────────────────────────────────
 
 @pytest.fixture()
 def exp_store(tmp_path, monkeypatch):
@@ -158,7 +158,7 @@ def test_lineage_additive_first_write_allowed_overwrite_refused(exp_store):
     exp = exp_store
     exp.create_experiment("t3", {})
     exp.update_status("t3", "completed")
-    # First write into a still-empty field is permitted (R1's predictions link relies on this).
+    # First write into a still-empty field is permitted (a later predictions link relies on this).
     exp.update_lineage("t3", predictions="/preds/run")
     lin = ts.read(exp.lineage_key("t3"))
     assert lin["predictions"] == "/preds/run"
@@ -181,7 +181,7 @@ def test_record_artifact_additive_only_when_terminal(exp_store):
     assert arts["predictions"]["path"] == "/preds"
 
 
-# ── R5: draw_splits manifest embeds dataset_hash + seed ───────────────────────
+# ── draw_splits manifest embeds dataset_hash + seed ─────────────────────────────
 
 def test_draw_splits_manifest_embeds_hash_and_seed(data_dir, tmp_path):
     import tcip_store as ts
@@ -211,7 +211,7 @@ def test_draw_splits_manifest_embeds_hash_and_seed(data_dir, tmp_path):
     assert set(manifest["splits"]) == {"train", "val", "calibration"}
 
 
-# ── R2: delivery CSVs carry the producing-model provenance columns ────────────
+# ── delivery CSVs carry the producing-model provenance columns ─────────────────
 
 def _run_with_a_recorded_checkpoint(tmp_path, experiment_id):
     """A run whose own record answers for the checkpoint a delivery names it by."""
@@ -375,7 +375,7 @@ def test_delivered_tail_treats_a_none_valued_produced_at_key_as_absent(tmp_path)
         delivered_tail({"produced_at": "2020-01-01T00:00:00+00:00"}, {}, gate, columns=columns)
 
 
-# ── R2: phenology CSV schema carries producing-model identity ─────────────────
+# ── phenology CSV schema carries producing-model identity ──────────────────────
 
 def test_phenology_columns_include_producer_identity():
     from tcip_mcp.pipelines.postprocessing.phenology import phenology_csv_columns

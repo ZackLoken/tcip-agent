@@ -125,9 +125,8 @@ def test_manifest_compatibility_reports_a_subject_mismatch_and_a_date_disagreeme
 
 
 def test_preflight_names_the_manifest_directory_in_the_date_block_message(tmp_path: Path):
-    """The date-block refusal names the directory it read, restoring what the message carried
-    before the shared function existed, reached through preflight_config so the proof runs
-    against a signature the fix under test did not itself change."""
+    """The date-block refusal names the directory it read, reached through preflight_config so
+    the proof runs against the real call signature."""
     from tcip_mcp.tools.training_tools import preflight_config
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")

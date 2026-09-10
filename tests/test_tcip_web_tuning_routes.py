@@ -1493,13 +1493,13 @@ def test_list_sweeps_serves_a_manifest_with_an_infinite_split_draws_value_beside
     (tcip_store.replace goes through the same encode that refuses a non-finite number on write),
     so it is hand-written directly to the file this key resolves to, bound to the file backend
     explicitly rather than through whichever backend the ambient test run is on: the store's own
-    write-side refusal makes the file backend the only producer of this manifest. Before the
-    projection fix the route still answered 200 (FastAPI's own response_model handling for this
-    route's -> dict annotation already renders a non-finite float as JSON null rather than
-    raising, so the raw value never crashed the listing the way a bare Starlette JSONResponse
-    would), but the row it served was wrong on both fields this fixes: relaunchable stayed True,
-    computed from the raw in-memory inf before that silent null coercion ever touched it, and
-    split_draws read null by that same accident rather than by a deliberate coercion."""
+    write-side refusal makes the file backend the only producer of this manifest. The route still
+    answers 200 (FastAPI's own response_model handling for this route's -> dict annotation
+    already renders a non-finite float as JSON null rather than raising, so the raw value never
+    crashes the listing the way a bare Starlette JSONResponse would); relaunchable and
+    split_draws must both be computed from that coerced null rather than from the raw in-memory
+    inf, or relaunchable would stay True and split_draws would read null by accident rather than
+    by a deliberate coercion."""
     import tcip_store
     from datetime import datetime, timezone
     from tcip_store.file_backend import FileBackend

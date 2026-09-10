@@ -722,8 +722,8 @@ def test_capture_live_canvas_render_last_known_with_nothing_pushed_names_the_div
 
 
 def test_capture_live_canvas_unreadable_binding_store_is_reported_distinctly(tmp_path, monkeypatch):
-    """An unreadable binding store must not read as absent (which would misname the fix as
-    'open a project') nor escape the audited tool as a raw exception."""
+    """An unreadable binding store must not read as absent (which would suggest the wrong
+    remedy, 'open a project') nor escape the audited tool as a raw exception."""
     import tcip_store as ts
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
