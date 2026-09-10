@@ -175,8 +175,7 @@ def _attach_physical(result: dict, scale: float, unit: str) -> None:
     """Add ``{unit}``-suffixed physical fields from a linear per-pixel scale in that unit (area
     scales by the square). The unit is real data the caller states, never assumed: a scale in cm/px
     passed with ``unit="cm"`` produces ``area_cm2``/``principal_axis_extent_cm``/etc, not a
-    silently-wrong ``_mm`` label (the previous hardcoded-mm behavior mislabeled any trait whose real
-    unit wasn't mm)."""
+    silently-wrong ``_mm`` label."""
     s = float(scale)
     result[f"{unit}_per_px"] = s
     result[f"area_{unit}2"] = result["area_px"] * s * s

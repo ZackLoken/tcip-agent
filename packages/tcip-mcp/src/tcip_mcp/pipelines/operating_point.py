@@ -3,13 +3,13 @@ ordinal and regression points) per dataset, at runtime.
 
 This is the single place the calibrated consumers, train-eval, test-eval, inference, export and the
 phenology delivery's classifier gate, get an operating point, so the same model + images can't yield
-different counts by entry point (the audit's divergent-defaults bug); the raw and
+different counts by entry point; the raw and
 block-calibrated-export regimes live in ``resolution.py`` and share ``resolve_tile_size_param``. The confidence threshold requires validation against an annotations
 reference: derived by a center-match count-unbiased sweep over a reference sized to the trait,
 and validated on a disjoint held-out split of that reference, GT annotations
 (``VALIDATED_HELD_OUT``) OR a breeder-confirmed sample of the model's own outputs
 (``VALIDATED_REVIEW_CONFIRMED``), the same gate either way, or carried as ``validated=false`` when
-no reference exists (never a frozen literal). See the scope doc and traits.py.
+no reference exists (never a frozen literal). See traits.py.
 """
 
 from __future__ import annotations
@@ -393,7 +393,7 @@ def _content_overlap(cal_records: list[dict], hold_records: list[dict]) -> dict:
     image, and the classifier path (``resolve_classifier_operating_point``) groups its per-instance
     items back to one record per ``image_id`` before calling this, so two images sharing an
     instance's coordinates never hash equal unless their whole classified content agrees. The cost
-    of the ruling this enforces: two genuinely independent images that happen to share both
+    of this refusal: two genuinely independent images that happen to share both
     dimensions and identical labelled geometry read as shared content and refuse. On the classifier
     path the grouping key is the record's ``image_id``, which the platform's classifier door
     (``calibrate_classifier_operating_point``) sets to the label file's own stem.
@@ -657,9 +657,9 @@ def _selection_disjointness(
     calibration_labels_dir: str | None = None, split_manifest_sha256: str | None = None,
 ) -> dict:
     """Whether the cal/holdout images were also on the checkpoint's own selection side (its
-    ``split.json``'s ``val``), the check the manifest family's own ruling exists for: a checkpoint
-    chosen on a side and then calibrated over that same side would clear every other gate while
-    measuring the operating point on exactly the data the shipped weights were picked to fit.
+    ``split.json``'s ``val``): a checkpoint chosen on a side and then calibrated over that same
+    side would clear every other gate while measuring the operating point on exactly the data
+    the shipped weights were picked to fit.
 
     Unlike :func:`_train_disjointness` (date-blind, checked on every calibration), this check is
     ``applicable`` only when a selection side could plausibly be touched: the calibration names a
@@ -674,9 +674,9 @@ def _selection_disjointness(
     ``calibration_date`` other than the record's own ``date`` (a bare stem means the same image
     only under one date). Unresolvable, rather than not-applicable, when the calibration names a
     manifest but there is no experiment record to check it against
-    (``experiment_id is None``): the ruling forbids exactly the number whose provenance can't be
-    checked, and a foreign checkpoint's train check being merely skipped is not license to skip
-    this one silently too.
+    (``experiment_id is None``): a number whose provenance can't be checked is refused, and a
+    foreign checkpoint's train check being merely skipped is not license to skip this one
+    silently too.
 
     Returns the same shape :func:`_train_disjointness` does, plus ``applicable``/``reason``, and
     on the applicable path the four label-movement keys plus ``calibration_labels_dir``
@@ -1353,8 +1353,8 @@ def resolve_classifier_operating_point(
     own fields) via :func:`tcip_mcp.pipelines.resolution.reconcile_classifier_validity`.
 
     ``experiment_id is None`` (a foreign/unregistered checkpoint) skips the train-disjointness check
-    rather than failing closed, the same owner decision :func:`resolve_operating_point` follows, the
-    classifier-validity *stamp* is still reachable for a foreign checkpoint whose cal/holdout is
+    rather than failing closed, matching :func:`resolve_operating_point`'s own handling of the same
+    case; the classifier-validity *stamp* is still reachable for a foreign checkpoint whose cal/holdout is
     otherwise disjoint and unbiased; it is not reachable at all when no calibration/holdout is given.
 
     ``split_manifest_dir``/``calibration_date`` gate ``selection_disjointness`` the same way
@@ -1501,12 +1501,8 @@ def resolve_classifier_operating_point(
         "count_bias_tolerance_frac_source": ("trait" if trait.count_bias_tolerance_frac is not None
                                              else "default"),
         "typical_positive_count": typical_positive_count,
-        # Never the bare "count_bias_tolerance" name once used for the authored value here: reusing
-        # that exact name for the derived effective value would silently swap what the same key
-        # means, the reuse-a-name-for-a-different-concept footgun CLAUDE.md's global rules warn
-        # about. Deliberately not named to match the detector path's "pooled_count_bias_tolerance"
-        # either, this sidecar has no "pooled" vs "per-class" split to distinguish from, so it needs
-        # its own name, not a borrowed one.
+        # Never the bare "count_bias_tolerance" name for this derived value: reusing the authored value's own name here would silently swap what the same key means. Not named to match the detector
+        # path's "pooled_count_bias_tolerance" either: this sidecar has no "pooled" vs "per-class" split to distinguish from, so it needs its own name.
         "count_bias_tolerance_absolute": _effective_count_bias_tolerance(
             count_bias_tolerance_frac, typical_positive_count, n_bias_images),
         "kappa": kappa, "kappa_floor": agreement_floor,

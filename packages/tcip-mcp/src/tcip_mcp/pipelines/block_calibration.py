@@ -68,7 +68,7 @@ def _band_rects(
 
     Recurses :func:`spatial_strip_split` over the region's own local extent (its lattice starts at
     local ``(0, 0)``), then translates every returned rect back by the region's own origin
-    (``+ x0, + y0``), the clean, lattice-phase-safe translation confirmed by design review.
+    (``+ x0, + y0``), the clean, lattice-phase-safe translation.
     """
     from tcip_mcp.pipelines.data.splits import spatial_strip_split
 

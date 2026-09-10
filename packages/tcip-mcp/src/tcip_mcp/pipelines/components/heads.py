@@ -52,7 +52,7 @@ class ClassificationHead(BaseHead):
         self.drop = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         self.num_classes = num_classes
         # Opt-in registry loss (e.g. focal / weighted_ce) as a submodule so its
-        # class-weight buffer follows the model to device. None -> today's behavior.
+        # class-weight buffer follows the model to device. None uses cross_entropy.
         self._loss = None
         if loss is not None:
             from tcip_mcp.pipelines.components.losses import build_loss
@@ -165,7 +165,7 @@ class RegressionHead(BaseHead):
             nn.Linear(in_channels, 1),
         )
         # Opt-in registry loss (e.g. huber) as a submodule, same pattern as ClassificationHead.
-        # None -> today's smooth_l1 behavior.
+        # None uses smooth_l1.
         self._loss = None
         if loss is not None:
             from tcip_mcp.pipelines.components.losses import build_loss
