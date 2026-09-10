@@ -194,12 +194,11 @@ def check_negatives(root: Path, findings: list, *, seen: "set[str] | None" = Non
 
 
 def check_data_quality(root: Path, findings: list, *, seen: "set[str] | None" = None) -> None:
-    """Per-file annotation quality, any supported format, folded in from the retired per-file
-    quality tool: stem matching between images and labels, an empty per-image
-    label with no human confirmation the image is a negative, a file whose format cannot be
-    determined, and a file present but unreadable. Format is decided per label file, never once
-    for the whole dataset, so a store mixing shapes cannot report clean because one file's shape
-    happened to be detected first.
+    """Per-file annotation quality, any supported format: stem matching between images and
+    labels, an empty per-image label with no human confirmation the image is a negative, a file
+    whose format cannot be determined, and a file present but unreadable. Format is decided per
+    label file, never once for the whole dataset, so a store mixing shapes cannot report clean
+    because one file's shape happened to be detected first.
 
     Reuses ``data_tools._scan_dataset``'s own image/label census and root-candidate walk rather
     than re-deriving them, so this check and ``scan_dataset`` can never silently disagree on what

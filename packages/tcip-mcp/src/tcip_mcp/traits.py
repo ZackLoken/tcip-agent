@@ -390,15 +390,15 @@ def _trait_specs_state_root(specs_dir: Path) -> Path:
     if specs_dir.name != "trait_specs":
         raise ValueError(
             f"{specs_dir} does not end in 'trait_specs', so it cannot name this store's "
-            "directory: trait specs live under a fixed 'trait_specs' segment now, never a "
+            "directory: trait specs live under a fixed 'trait_specs' segment, never a "
             "caller-chosen name"
         )
     return specs_dir.parent
 
 
 TRAIT_SPECS_STORE = "trait_specs"
-# The record's shape moved (positive_class_name renamed to positive_value): every write stamps
-# this ceiling, and trait_spec_unconformed refuses a stored record with no stamp or 1.
+# Every write stamps this ceiling; trait_spec_unconformed refuses a stored record with no stamp
+# or 1.
 TRAIT_SPEC_SCHEMA_VERSION = 2
 _SPEC_FILE = RootedFileLocator(prefix=("trait_specs",), suffix=SPEC_SUFFIX)
 register_store(
@@ -531,9 +531,8 @@ def write_trait_spec_fields(
 ) -> TraitSpec:
     """Update one or more fields on an already-registered trait spec, returning it as written.
 
-    Creating a new trait is a separate, still-manual authoring step, out of scope here. Every
-    existing call keeps working unchanged; ``rationale`` and ``relayed_note`` are new,
-    keyword-only. A thin wrapper over :func:`revise_trait_spec_fields`, which holds the
+    ``rationale`` and ``relayed_note`` feed the trait-spec authoring statement this call states
+    or restates. A thin wrapper over :func:`revise_trait_spec_fields`, which holds the
     compare-and-set loop and the trait-spec statement it restates; the ``revise_trait_spec`` MCP
     tool calls that function directly for its fuller return, while the derived localization kind
     and every other field-only caller keep calling this one for its plain ``TraitSpec``.

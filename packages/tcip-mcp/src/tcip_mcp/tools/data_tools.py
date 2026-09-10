@@ -1,5 +1,5 @@
 """Data management tools: census a dataset, split data. Per-file quality checks live in
-the ``doctor`` command's ``check_data_quality``, the retired per-file quality tool folded in there."""
+the ``doctor`` command's ``check_data_quality``."""
 
 from __future__ import annotations
 

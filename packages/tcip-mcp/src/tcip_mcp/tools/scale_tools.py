@@ -1,13 +1,13 @@
 """Physical per-pixel scale calibration: the delivery-gating producer for ``resolve_scale.json``.
 
-Before this tool, no platform code produced a validated physical scale; every ``resolve_scale.json``
-on disk was hand-authored and floored at delivery for want of a record that answered for it (see
+``calibrate_physical_scale`` is the producer of a validated ``resolve_scale.json``: it reads a
+breeder's own reference measurements, runs
+``pipelines.measurement.scale_calibration.resolve_physical_scale``'s locked calibration/holdout
+gate over them, and stamps the result into a prediction bucket's ``resolve_scale.json``, an audit
+seam and a delivery-gating write and therefore a tool rather than a script. A hand-authored
+``resolve_scale.json`` floors at delivery for want of a record that answers for it (see
 ``pipelines.measurement.mask_geometry.resolve_scale`` and ``pipelines.resolution.
-reconcile_scale_validity``). ``calibrate_physical_scale`` closes that gap: it reads a breeder's own
-reference measurements, runs ``pipelines.measurement.scale_calibration.resolve_physical_scale``'s
-locked calibration/holdout gate over them, and stamps the result into a prediction bucket's
-``resolve_scale.json``, an audit seam and a delivery-gating write and therefore a tool rather than a
-script.
+reconcile_scale_validity``).
 """
 
 from __future__ import annotations
