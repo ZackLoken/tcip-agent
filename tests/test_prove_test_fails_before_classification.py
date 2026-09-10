@@ -384,6 +384,20 @@ def test_a_hung_test_under_per_test_timeout_reports_indeterminate_naming_it(tmp_
     assert "test_hangs_forever" in proc.stdout
 
 
+# ── the sandbox carries what build_module_inventory.py needs ───────────────
+
+
+def test_materialize_writes_a_git_marker_so_a_root_walking_script_resolves_inside_it(tmp_path):
+    """build_module_inventory.py finds its own repo root by walking up for a .git ancestor;
+    git archive never carries one into what it extracts, so every test importing that module
+    inside the sandbox failed its root walk (SystemExit) until materialize supplied the marker
+    itself."""
+    tool = _load_tool()
+    dest = tmp_path / "tree"
+    tool.materialize("dae4c15b", dest)
+    assert (dest / ".git").exists()
+
+
 def test_a_key_error_on_a_package_result_guards(tmp_path):
     """An assertion that inspects a package result by key, where the baseline's result lacks
     that key, raises KeyError at the assert line itself, inside the test file: the code under
