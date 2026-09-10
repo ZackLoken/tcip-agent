@@ -1,9 +1,8 @@
 """The calibrate/summarize pair every inference entry point shares: resolve a per-dataset operating
 point from a labeled split, and its compact, response-safe gate-evidence summary.
 
-Live here, not in ``tools/inference_tools.py``: ``inference_tools._run_inference_verified``
-calls both, and a dozen-plus test files exercise them directly, so no single tools module is
-their home.
+``inference_tools._run_inference_verified`` calls both, ``calibration_tools.py`` calls
+``gate_evidence_summary`` on its own, and the test suite exercises each of them directly.
 """
 
 from __future__ import annotations
