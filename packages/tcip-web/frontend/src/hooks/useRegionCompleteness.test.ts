@@ -98,7 +98,7 @@ describe("useRegionCompleteness", () => {
   });
 
   it("an attestation on another grid is never rendered on the current one, and its count is stated", async () => {
-    // Guards the live defect: effectiveComplete() alone ignores which grid a record was
+    // effectiveComplete() alone ignores which grid a record was
     // accumulated against; sameGrid() must gate rendering, the record's own dims still reported.
     vi.spyOn(api.coverage, "completeness").mockResolvedValue(
       response({ bush: record("bush", ["A1", "B1"], [], OTHER_GRID) }),

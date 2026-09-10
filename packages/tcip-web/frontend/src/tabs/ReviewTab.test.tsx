@@ -586,7 +586,7 @@ describe("ReviewTab audit-gap handling", () => {
 });
 
 describe("ReviewTab Conf >= filter censoring warning", () => {
-  it("shows no warning today when the filter sits at or below generation confidence (fail-before baseline)", async () => {
+  it("shows no censoring warning when the filter sits at or below generation confidence", async () => {
     vi.spyOn(api.review, "generationConf").mockResolvedValue({
       generation_conf: 0.5,
       admission_rule: null,
@@ -1046,8 +1046,8 @@ describe("ReviewTab class filter", () => {
 
     const select = screen.getByLabelText("Class filter") as HTMLSelectElement;
     const values = Array.from(select.options).map((o) => o.value);
-    // Without the change, availableClasses reads a.subject on every record, so both entries
-    // collapse to one "subject_a" option instead of the two confirmed/predicted values.
+    // availableClasses reads each record's own subject value, not always a.subject, so
+    // confirmed and predicted subjects stay separate options instead of collapsing to one.
     expect(values).toEqual(["all", "ripe", "unripe"]);
   });
 });
@@ -1058,8 +1058,8 @@ describe("ReviewTab under a classified scope", () => {
     render(<ReviewTab />);
     await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
 
-    // Without the change, these read "Keep this ground-truth object (A)" and "Delete this
-    // ground-truth object (R)", describing a presence verdict this review never adjudicated.
+    // These titles name the confirmed value, not a presence verdict this classified review
+    // never adjudicated.
     expect(screen.getByTitle("Keep this confirmed value (A)")).toBeInTheDocument();
     const rejectBtn = screen.getByTitle(/detector-scope action/i);
     expect(rejectBtn).toBeDisabled();
@@ -1072,8 +1072,8 @@ describe("ReviewTab under a classified scope", () => {
     render(<ReviewTab />);
     await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
 
-    // Without the change, these read "Add this prediction to ground truth (A)" and "Discard this
-    // prediction; ground truth unchanged (R)".
+    // These titles name the predicted value for the object, not a presence verdict this
+    // classified review never adjudicated.
     expect(
       screen.getByTitle("Confirm this predicted value for the object (A)"),
     ).toBeInTheDocument();
@@ -1090,8 +1090,8 @@ describe("ReviewTab under a classified scope", () => {
     await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
 
     fireEvent.click(screen.getByTitle(/detector-scope action/i));
-    // Without the change, reject stays enabled on a fn under a classified scope, so this click
-    // would raise the delete-confirmation dialog the design says a classified review never shows.
+    // Reject stays disabled on a fn under a classified scope, so this click raises no
+    // delete-confirmation dialog; a classified review never shows one.
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 
@@ -1102,8 +1102,8 @@ describe("ReviewTab under a classified scope", () => {
     render(<ReviewTab />);
     await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
 
-    // Without the change, the hotkey guards only on current/edit/reviewLocked/canReview, so 'r'
-    // raises the delete-confirmation dialog and posts a request the backend refuses.
+    // The 'r' hotkey also guards on the disabled-reject state, so it raises no
+    // delete-confirmation dialog and posts no request the backend would refuse.
     fireEvent.keyDown(window, { key: "r" });
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(actionSpy).not.toHaveBeenCalled();
@@ -1114,8 +1114,8 @@ describe("ReviewTab under a classified scope", () => {
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
 
-    // Without the change, the control stays enabled and posting a missed object under a
-    // classified scope would 400 only after the reviewer draws the box.
+    // The missed-object control stays disabled under a classified scope, so no missed-object
+    // post reaches the backend to 400 after the reviewer draws the box.
     const btn = screen.getByTitle(/fabricate a state nobody assessed/i);
     expect(btn).toBeDisabled();
   });

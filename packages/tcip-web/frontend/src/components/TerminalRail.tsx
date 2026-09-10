@@ -162,13 +162,8 @@ export function TerminalRail() {
     term.focus();
     termRef.current = term;
 
-    // Copy fix (root cause): Claude Code turns on SGR mouse tracking, which hands every mouse +
-    // wheel event to it and disables xterm's own selection + scrollback. Swallow the mouse-mode
-    // set/reset (DEC private 1000-1016) so tracking never engages and xterm stays a normal
-    // selectable terminal: drag selects, the wheel scrolls the scrollback, drag-to-edge
-    // auto-scrolls, a selection survives streaming output, and it works at the shell prompt after
-    // /exit too. Claude is keyboard-driven; the wheel now scrolls the terminal scrollback instead
-    // of Claude's view, which is what you want when copying.
+    // Claude Code turns on SGR mouse tracking, which hands every mouse and wheel event to it and disables xterm's own selection and scrollback. Swallowing the mouse-mode
+    // set/reset (DEC private 1000-1016) keeps tracking from engaging, so xterm stays a normal selectable terminal: drag selects, the wheel scrolls the scrollback, drag-to-edge auto-scrolls, a selection survives streaming output, and it works at the shell prompt after /exit too.
     const MOUSE_MODES = new Set([1000, 1001, 1002, 1003, 1005, 1006, 1015, 1016]);
     const swallowMouseMode = (params: (number | number[])[]) => {
       for (const p of params) if (MOUSE_MODES.has(Array.isArray(p) ? p[0] : p)) return true;
@@ -177,11 +172,8 @@ export function TerminalRail() {
     term.parser.registerCsiHandler({ prefix: "?", final: "h" }, swallowMouseMode);
     term.parser.registerCsiHandler({ prefix: "?", final: "l" }, swallowMouseMode);
 
-    // Paste: Ctrl/Cmd+V fires a native paste event on xterm's hidden textarea, but the
-    // browser doesn't always route it there (focus, or the app swallowing the key), so
-    // Ctrl+V "did nothing". Intercept in the capture phase and hand the text to
-    // term.paste(), which wraps it in bracketed-paste mode, so a multi-line paste
-    // reaches Claude Code as one paste, not a line-per-Enter burst.
+    // Paste: Ctrl/Cmd+V fires a native paste event on xterm's hidden textarea, but the browser doesn't always route it there (focus, or the app swallowing the key). Intercept in the capture phase and hand the text to
+    // term.paste(), which wraps it in bracketed-paste mode, so a multi-line paste reaches Claude Code as one paste, not a line-per-Enter burst.
     const onPaste = (e: ClipboardEvent) => {
       const text = e.clipboardData?.getData("text");
       if (text) {

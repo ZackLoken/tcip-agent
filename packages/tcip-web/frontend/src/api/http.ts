@@ -1,8 +1,8 @@
 /**
  * Shared fetch helpers. Every API call goes through `asJson`, so a non-2xx response
  * surfaces as a thrown Error carrying the backend's `detail`, instead of being
- * silently parsed as if it were a success body (which yielded `undefined` fields and
- * crashed callers on the next render). Callers catch and route errors to a toast.
+ * silently parsed as if it were a success body, which yields `undefined` fields and
+ * crashes callers on the next render. Callers catch and route errors to a toast.
  *
  * A backend refusal carries `detail` as either a string or an object. `decodeRefusal` reads a
  * non-2xx body once and is the only place either shape is turned into an error, so a path that

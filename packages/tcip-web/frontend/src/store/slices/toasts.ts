@@ -44,7 +44,7 @@ export const createToastSlice: StateCreator<AppState, [], [], ToastSlice> = (set
         const id = nextToastId++;
         return { toasts: [...withoutStanding, { id, message, level, channel, count }].slice(-4) };
       }
-      // No channel: today's behavior, an identical toast still on screen collapses in place
+      // With no channel, an identical toast still on screen collapses in place
       // rather than stacking a second one, so a flaky poll can't flood the screen.
       const repeat = s.toasts.find((t) => t.message === message && t.level === level && !t.channel);
       if (repeat) {

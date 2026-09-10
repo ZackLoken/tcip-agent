@@ -1,6 +1,6 @@
 // Compiles index.css through PostCSS + Tailwind (same pipeline as the real
 // build) and asserts the keyboard focus-visible ring rules exist on the shared
-// component classes. Guards the accessibility fix: a typo'd token or dropped
+// component classes: a typo'd token or dropped
 // @apply utility fails here instead of silently shipping invisible focus.
 import postcss, { type Declaration, type Rule } from "postcss";
 import tailwindcss from "tailwindcss";

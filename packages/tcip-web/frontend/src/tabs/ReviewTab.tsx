@@ -566,7 +566,7 @@ export function ReviewTab() {
     if (!bbox) return;
     const [x1, y1, x2, y2] = bbox;
     // The detection's own width/height as the per-axis pad reproduces the 3x fit; the offset
-    // clamp zoomToRect applies is a deliberate change (an edge detection now pins to the edge).
+    // clamp zoomToRect applies pins an edge detection to the edge rather than centering past it.
     const dw = Math.max(1, x2 - x1);
     const dh = Math.max(1, y2 - y1);
     // Dims come from the store's freshest matches: the render closure's copy is one image stale
@@ -583,8 +583,7 @@ export function ReviewTab() {
 
   useEffect(() => {
     // Debounce so dragging the IoU/Conf sliders doesn't fire a /matches recompute per
-    // tick, and abort the in-flight request so a slow earlier response can't clobber a
-    // newer one (out-of-order responses previously won).
+    // tick, and abort the in-flight request so a slow earlier response can't clobber a newer one.
     const ac = new AbortController();
     const t = setTimeout(() => void reloadMatches(undefined, ac.signal), 180);
     return () => {
@@ -1737,8 +1736,8 @@ export function ReviewTab() {
           </label>
         </div>
 
-        {/* Its own full-width line, never sharing the button row: the caveat stayed inline once
-            crowded that row into tall columns even with the shelf closed. */}
+        {/* Its own full-width line, never sharing the button row: sharing it would crowd the row
+            into tall columns even with the shelf closed. */}
         {admissionConf != null && (
           <div className="px-3 pb-1.5 text-[11px] text-tcip-muted">
             Pre-admitted by count, not by box: a confident false positive at or above{" "}

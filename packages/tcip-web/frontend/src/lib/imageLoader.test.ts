@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe("loadImage header parsing", () => {
-  it("parses X-TCIP-Stats-Source as the structured StatsSource it now carries", async () => {
+  it("parses X-TCIP-Stats-Source as the structured StatsSource it carries", async () => {
     stubFetch(404, {
       "X-TCIP-Stats-Source": JSON.stringify({
         read: "window_sample",
@@ -38,7 +38,7 @@ describe("loadImage header parsing", () => {
     expect(result.headerParseError).toBeNull();
   });
 
-  it("parses X-TCIP-Display-Bounds as the JSON list of pairs it now carries", async () => {
+  it("parses X-TCIP-Display-Bounds as the JSON list of pairs it carries", async () => {
     stubFetch(404, {
       "X-TCIP-Display-Bounds": JSON.stringify([
         [0, 1000],

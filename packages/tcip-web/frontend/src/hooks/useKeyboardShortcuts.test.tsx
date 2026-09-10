@@ -31,8 +31,8 @@ describe("useKeyboardShortcuts", () => {
     document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
     expect(onKey).toHaveBeenCalledTimes(1);
 
-    // Same key while a <select> is the target → ignored (regression: arrow keys /
-    // digits on an open dropdown must change the dropdown, not step images).
+    // Same key while a <select> is the target → ignored: arrow keys and
+    // digits on an open dropdown must change the dropdown, not step images.
     getByTestId("sel").dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
     expect(onKey).toHaveBeenCalledTimes(1);
   });

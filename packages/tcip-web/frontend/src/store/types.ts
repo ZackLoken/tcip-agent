@@ -51,7 +51,7 @@ export interface GuiState {
   dataset: DatasetSelection;
   view: ViewState;
   mode: Mode;
-  // The subject a new shape is authored for (was an integer active_class). Client-owned.
+  // The subject a new shape is authored for. Client-owned.
   active_subject: string | null;
   review: ReviewFilters;
 }

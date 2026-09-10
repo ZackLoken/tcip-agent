@@ -123,7 +123,7 @@ export function ProjectBreadcrumb() {
 
   const projectName = dataset.dataset_root.split(/[/\\]/).slice(-1)[0];
   const current = projects?.find((p) => p.path === dataset.project_root) ?? null;
-  // Every recent project lists, the open one marked as current and inert (a menu hiding it
+  // Every recent project lists, the open one marked as current and inert (hiding it would
   // read as broken in a one-project workspace); name-or-path matching catches a moved project.
   const isCurrent = (r: { name: string; path: string }) =>
     r.path === dataset.project_root || r.name === projectName;

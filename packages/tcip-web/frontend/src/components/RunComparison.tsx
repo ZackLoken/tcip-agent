@@ -29,8 +29,7 @@ export interface MarkedRun {
   experimentId: string;
 }
 
-/** Columns the detail region fits at 1440px, the tokens' minimum column width; the design
- * record's own layout-derived default (docs/audit/remediation/batch9/u3-comparison-design.md). */
+/** Columns the detail region fits at 1440px, the tokens' minimum column width. */
 export const MAX_MARKED_RUNS = 4;
 
 const UNRECORDED = "unrecorded";
