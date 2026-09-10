@@ -123,3 +123,18 @@ def test_the_experiment_split_golden_carries_every_key_persist_split_manifest_wr
     assert isinstance(golden, dict)
 
     assert set(golden) == set(fresh)
+
+
+def test_the_trait_specs_golden_carries_every_field_the_encoder_writes():
+    """``_encode_spec`` writes every ``TraitSpec`` field plus the ``schema_version`` stamp; the
+    golden carries exactly those keys, so a field added to the dataclass is caught here."""
+    from tcip_mcp import traits
+
+    from tests.test_store_contract import TRAIT_UNDER_TEST
+
+    fresh = traits._encode_spec(traits.TraitSpec(name=TRAIT_UNDER_TEST))
+    golden = REGISTERED["trait_specs"].golden
+    assert isinstance(golden, dict)
+
+    assert set(golden) == set(fresh)
+    assert golden["schema_version"] == fresh["schema_version"] == traits.TRAIT_SPEC_SCHEMA_VERSION

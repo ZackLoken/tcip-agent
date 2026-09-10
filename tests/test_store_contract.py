@@ -2189,8 +2189,8 @@ REGISTERED = {
         "predictions/live/2026-03-04/.tcip/raster_pass_progress/identity.json",
         root_of=_stamp_bucket),
     "trait_specs": Registered(
-        # A full TraitSpec, run through the real encoder (traits._encode_spec) rather than
-        # hand-typed, so this golden cannot drift from every field the encoder writes silently.
+        # Every TraitSpec field at its default plus the encoder's schema stamp; the
+        # producer-agreement module holds this golden's keys to what _encode_spec writes.
         {"name": TRAIT_UNDER_TEST, "count_objective": "", "localization": "",
          "localization_tolerance": "half_class_avg_size", "localization_tolerance_frac": 0.5,
          "positive_value": "", "milestone_fractions": [], "milestone_on": "",
