@@ -782,9 +782,9 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `redraw_calibration_holdout` | `calibration_tools.py:22` | yes | Deliberately redraw a locked calibration/holdout split. |
-| `calibrate_scalar_operating_point` | `calibration_tools.py:258` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
-| `calibrate_count_operating_point` | `calibration_tools.py:461` | yes | Calibrate and validate the count operating point against held-out GT, earning a claim |
+| `redraw_calibration_holdout` | `calibration_tools.py:24` | yes | Deliberately redraw a locked calibration/holdout split. |
+| `calibrate_scalar_operating_point` | `calibration_tools.py:260` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
+| `calibrate_count_operating_point` | `calibration_tools.py:463` | yes | Calibrate and validate the count operating point against held-out GT, earning a claim |
 
 ### ingest_tools.py (1 tool)
 
@@ -838,8 +838,8 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `deliver_per_plant_csv` | `delivery_tools.py:30` | yes | The general per-plant CSV door: `aggregate_per_plant`'s own output plus the existing |
-| `supersede_delivery` | `delivery_tools.py:194` | yes | Record that a delivered file's number is withdrawn or replaced, without touching the file |
+| `deliver_per_plant_csv` | `delivery_tools.py:29` | yes | The general per-plant CSV door: `aggregate_per_plant`'s own output plus the existing |
+| `supersede_delivery` | `delivery_tools.py:193` | yes | Record that a delivered file's number is withdrawn or replaced, without touching the file |
 
 ### phenology_tools.py (4 tools)
 
@@ -901,7 +901,7 @@ anything.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `capture_live_canvas` | `vision_tools.py:731` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
+| `capture_live_canvas` | `vision_tools.py:730` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
 
 ## 2. HTTP routes and WebSocket endpoints
 
@@ -1273,7 +1273,7 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
 `packages/tcip-annotation/src/tcip_annotation/review_engine.py:844`;
 `tcip_mcp.prediction_buckets.stage_prediction_shapes`,
-`packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:443`.
+`packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:442`.
 
 Readers: `tcip_annotation.json_io.read_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:541`;
@@ -1516,7 +1516,7 @@ demoted from them): bare, a platform event; `@audited(scope_arg=...)` names the 
 a dataset or project location, resolved via `dataset_scope_of` (`audit.py:266`) (through the tool's own
 canonicalizer when the declaration passes one as `scope_via`). Ten doors declare one: eight
 dataset-scoped (`save_annotations`, `tools/annotation_tools.py:147`; `write_subject_registry`,
-`tools/annotation_tools.py:513`; `redraw_calibration_holdout`, `tools/calibration_tools.py:22`;
+`tools/annotation_tools.py:513`; `redraw_calibration_holdout`, `tools/calibration_tools.py:24`;
 `materialize_review_dataset`, `tools/feedback_tools.py:167`; `run_inference`,
 `tools/inference_tools.py:291`; `register_dataset`, `tools/project_tools.py:189`;
 `propose_annotations`, `tools/proposal_tools.py:182`; `stage_proposals`, `tools/proposal_tools.py:752`)
@@ -1546,7 +1546,7 @@ when its guard resolves one and platform-scoped otherwise (a label path confined
 root but outside any dataset tree), `resolution.py`'s `record_delivery_binding_event`
 (`resolution.py:2473`, dataset-scoped when a
 delivery's buckets share one dataset root, platform-scoped otherwise), and
-`calibration_tools.py`'s redraw event (`redraw_calibration_holdout_result`, `tools/calibration_tools.py:214`).
+`calibration_tools.py`'s redraw event (`redraw_calibration_holdout_result`, `tools/calibration_tools.py:216`).
 Project-scoped: `routes/results.py`'s `_audit` (`routes/results.py:164`, its delivery and confirmation routes) and
 `pipelines/postprocessing/plant_mapping.py`'s `persist_mapping` (`pipelines/postprocessing/plant_mapping.py:1211`), whose two callers file
 its receipt under two different categories: the MCP tool `build_plant_mapping` passes the
@@ -1805,10 +1805,10 @@ outright (`BucketHoldsDocuments`) whatever `overwrite` says, regardless of a dat
 Path: `<dataset_root>/predictions/<model_name>/[<date>/]`, via
 `tcip_mcp.dataset_layout.prediction_dir`.
 
-Writer: `stage_prediction_shapes`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:443`, the
+Writer: `stage_prediction_shapes`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:442`, the
 underlying per-image files written via `tcip_annotation.json_io.write_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:841` (format 1's writer).
-`resolve_prediction_bucket`, `prediction_buckets.py:409`, resolves a `(dataset_root, model_name,
+`resolve_prediction_bucket`, `prediction_buckets.py:408`, resolves a `(dataset_root, model_name,
 date)` triple to a writable directory; `resolve_writable_bucket`, `prediction_buckets.py:332`,
 redirects to the next free `<model_name>@r2`/`@r3` variant once any image in a bucket has a
 recorded review verdict; `BucketHasVerdicts`, `prediction_buckets.py:228`, is raised instead when
@@ -2333,7 +2333,7 @@ Phase 3 verdict: single.
 
 Must agree: which root the GUI currently has open, so the push route writes canvas_live.json/canvas_shapes.json under it and capture_live_canvas reads them from that same root rather than trusting its own pinned one to still be live. The filename half is closed (both sides address through one locator pair); the root half used to be open (the writer took the browser payload's own project_root as authority, Part 20's own rejected shape), and is now resolved through the canvas_open_binding record P5-274 added (docs/audit/remediation/batch8/p5-274-canvas-binding-design.md): a pinned-root refusal landed for the old shape and was reverted after a three-family review refuted its anchor (docs/audit/remediation/batch8/xf-canvas-root/), and this binding is the settled replacement.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:182` (`def canvas_open_binding_key(`, the one workspace-scoped record `{generation, root, project_name, issued_at, released}`, declared alongside `canvas_meta_key` (`web_client.py:146`)/`canvas_geometry_key` (`web_client.py:157`) addressing the two per-project documents the binding's root names) and `packages/tcip-web/src/tcip_web/routes/dataset.py:205` (`def _write_canvas_binding(`, called from `select_dataset` before the selection is adopted; `generation` bumps when `root` actually changes or the current record was released) and `packages/tcip-mcp/src/tcip_mcp/project_removal.py:770` (`def release_project_binding(`, the record's second writer, marking it released and bumping `generation` without deleting it, for a project the marker or the binding names).
-Side B: `packages/tcip-web/src/tcip_web/routes/canvas.py:89` (`def push_canvas_state(`, reads the binding, verifies the payload's `binding_generation` against it, and writes both documents under the binding's own `root`, never a client-supplied one) and the binding's three MCP-side readers, each comparing a root it names against the record through the one predicate `packages/tcip-mcp/src/tcip_mcp/web_client.py:353` (`def gui_binding_matches(`): `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:731` (`def capture_live_canvas(`, beside its own pinned root, with a generation fence re-reading the binding after the documents through the same store-error contract so a switch mid-call cannot render a false live result) and `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:73` (`push_panel_event`) and `tools/gui_tools.py:137` (`focus_human_attention`), each against a caller-stated `project_root` rather than a process's own pin). A mismatch or absence on any of the three is named through the shared helper `packages/tcip-mcp/src/tcip_mcp/web_client.py:385` (`def binding_divergence(`).
+Side B: `packages/tcip-web/src/tcip_web/routes/canvas.py:89` (`def push_canvas_state(`, reads the binding, verifies the payload's `binding_generation` against it, and writes both documents under the binding's own `root`, never a client-supplied one) and the binding's three MCP-side readers, each comparing a root it names against the record through the one predicate `packages/tcip-mcp/src/tcip_mcp/web_client.py:353` (`def gui_binding_matches(`): `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:730` (`def capture_live_canvas(`, beside its own pinned root, with a generation fence re-reading the binding after the documents through the same store-error contract so a switch mid-call cannot render a false live result) and `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:73` (`push_panel_event`) and `tools/gui_tools.py:137` (`focus_human_attention`), each against a caller-stated `project_root` rather than a process's own pin). A mismatch or absence on any of the three is named through the shared helper `packages/tcip-mcp/src/tcip_mcp/web_client.py:385` (`def binding_divergence(`).
 Phase 3 verdict: single. The current generation also rides the GuiState broadcast envelope (`packages/tcip-web/src/tcip_web/app.py:185` `SERVER_EPOCH`, read off `StateStore.binding_generation`, `packages/tcip-web/src/tcip_web/state.py:149`) and is adopted with the dataset in one client-side store update (`packages/tcip-web/frontend/src/store/slices/gui.ts:138` `applyRestoredDataset`, and `mergeSnapshot`), so the push's `binding_generation` and the reader's own comparison never straddle a stale identity.
 
 ## S12. Friction reports and retrospectives under .tcip/
@@ -2507,7 +2507,7 @@ Phase 3 verdict: single. One value is still spelled as a literal rather than bou
 
 Must agree: no delivered result ships an unvalidated parameter without an explicit acknowledgement.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:3269` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:3249`, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:3154`, as the one derivation of what a deliverable's validity column carries).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2197` (`def delivered_tail(`, the one composition every delivered tail's validity columns route through, deriving `own_column` from which of `_DIMENSION_TO_COLUMN`'s columns a door's own column list carries, never a second list stating so). `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:341` and `pipelines/postprocessing/aggregation.py:591` (`stamp = delivered_tail(provenance, (operating_point_recon or {}).get("bindings", {}), gate,`, each delivery door composing its tail through it rather than stamping the column itself); `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:465` (`summary = {`, `export_detection_csv`'s own gate-and-reconciliation summary, `tools/inference_tools.py`'s `deliver_per_image_counts` sourcing its `tile_size_validated` response field from that returned summary's own stamp in both regimes that read a bucket, while `operating_point_validated` sources from the delivered tail's own floored cell above instead, neither response field re-deriving its column itself); and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:693` (`delivered_tail(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `deliver_phenology_milestones` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2197` (`def delivered_tail(`, the one composition every delivered tail's validity columns route through, deriving `own_column` from which of `_DIMENSION_TO_COLUMN`'s columns a door's own column list carries, never a second list stating so). `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:341` and `pipelines/postprocessing/aggregation.py:589` (`stamp = delivered_tail(provenance, (operating_point_recon or {}).get("bindings", {}), gate,`, each delivery door composing its tail through it rather than stamping the column itself); `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:465` (`summary = {`, `export_detection_csv`'s own gate-and-reconciliation summary, `tools/inference_tools.py`'s `deliver_per_image_counts` sourcing its `tile_size_validated` response field from that returned summary's own stamp in both regimes that read a bucket, while `operating_point_validated` sources from the delivered tail's own floored cell above instead, neither response field re-deriving its column itself); and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:693` (`delivered_tail(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `deliver_phenology_milestones` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
 Phase 3 verdict: single.
 
 ## S35. ResolvedParam validation firewall
@@ -2613,7 +2613,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: control-message type names and field names match, and output frames are treated as raw text rather than JSON.
 Side A: `packages/tcip-web/src/tcip_web/routes/terminal.py:368` (`@router.websocket("/ws/{session_id}")`).
-Side B: `packages/tcip-web/frontend/src/components/TerminalRail.tsx:313` (`send({ type: "input", data });`).
+Side B: `packages/tcip-web/frontend/src/components/TerminalRail.tsx:318` (`send({ type: "input", data });`).
 Phase 3 verdict: duplicated.
 
 ## S50. Inference job stream WebSocket  <!-- queued: P5-304 unify -->
