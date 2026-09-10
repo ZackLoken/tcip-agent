@@ -81,7 +81,7 @@ def main(workspace: str | None = None) -> int:
             seen = ""
             while time.time() < deadline:
                 seen = ANSI.sub("", session.scrollback_snapshot())
-                # Require the marker OUTSIDE our own echoed prompt line.
+                # Require the marker outside our own echoed prompt line.
                 if seen.count(MARKER) >= 2 or re.search(rf"[●>]\s*{MARKER}", seen):
                     break
                 time.sleep(1.0)

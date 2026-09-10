@@ -116,7 +116,7 @@ def check_coverage(rows: list[dict], repo_root: Path) -> list[dict]:
 
     The existence check reads one direction only (a named path exists); this one reads the
     other, so a module or script that lands with no row fails the gate instead of staying
-    undocumented while both directions of the old check were green.
+    undocumented.
     """
     named = {r["path"].replace("\\", "/") for r in rows if not r.get("unparsed")}
     findings = []
