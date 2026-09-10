@@ -196,14 +196,14 @@ _registry = jobstore.JobRegistry(
 )
 """The dict-plus-lock live registry for this route's own sweeps (see ``jobstore.JobRegistry``),
 the shared home review.py's priority queue and inference.py's jobs adopt too. ``_lock`` below is
-this registry's own lock, bound under its historical name since callers (tests among them, and
+this registry's own lock, kept under this name since callers (tests among them, and
 this module's own ``_workers`` guard) already reach into it directly."""
 
 _lock = _registry.lock
 _workers: dict[str, threading.Thread] = {}
 """Every sweep worker this process has spawned and not yet seen finish, by sweep id. Guarded
 by ``_lock``, the same lock ``_registry`` takes for its own dict; the two are unrelated state
-sharing one mutex, predating the registry adoption, not a stated invariant between them."""
+sharing one mutex, not a stated invariant between them."""
 
 
 def wait_for_workers(*, timeout_s: float) -> tuple[str, ...]:

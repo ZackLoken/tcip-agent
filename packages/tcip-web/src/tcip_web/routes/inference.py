@@ -296,9 +296,7 @@ def _worker(job: InferenceJob) -> None:
         # checkpoint_sha256/experiment_id: the same producing-model identity resolver the MCP door
         # uses (model_registry.resolve_model_identity, never a second implementation), so a bucket
         # the GUI's own Inference tab produces carries the same identity fact the review-verdict
-        # scoping matches against. Without this, a GUI-produced bucket could never be validated via
-        # the review-confirmation route: its sidecar carried neither field, so producer-identity
-        # matching failed closed on every review session no matter how thoroughly it was reviewed.
+        # scoping matches against.
         from tcip_mcp.model_registry import resolve_model_identity
 
         identity = resolve_model_identity(checkpoint)
