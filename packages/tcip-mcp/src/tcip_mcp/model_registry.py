@@ -3,10 +3,10 @@
 The index document is ``{entries: [...]}``, no ``schema_version`` field until this store's first
 bump (absence is the frozen version 1): a stored ``checkpoint_path`` is relative POSIX exactly
 when the checkpoint lives under the registry's own scope root, absolute exactly when it does not,
-so a pre-family absolute-under-root spelling can never read as a designed-external claim. Every
+so an absolute-under-root spelling can never read as a designed-external claim. Every
 response surface (``list_models``, ``get_model``, ``best_model``, both ``register_model`` returns)
 answers the resolved absolute path on a copy, never this internal storage spelling.
-A bare top-level array (the shape this store carried before the family that wrapped it) is
+A bare top-level array is
 never accepted for reading; no operator door rewraps a live project's registry in place, and
 this registry predates the entries-mapping shape the platform writes, so nothing repairs it in
 place. The only door that wraps one into the mapping shape and respells every entry is
@@ -79,9 +79,8 @@ register_store(
 
 
 class RegistryVersionRefused(ValueError):
-    """The registry index document is not a shape this reader accepts: a bare top-level array
-    (the shape this store carried before the family that wrapped it), or a mapping whose
-    ``schema_version``/``entries`` shape this reader does not recognize.
+    """The registry index document is not a shape this reader accepts: a bare top-level array,
+    or a mapping whose ``schema_version``/``entries`` shape this reader does not recognize.
 
     Deliberately not a :class:`~tcip_store.StoreError`: a blanket ``StoreError`` catch (bundle's,
     for one) would otherwise swallow this into an empty answer, and an archive of an unconformed
@@ -94,9 +93,8 @@ def _read_registry_document(raw: object) -> dict:
     """The registry's entries-mapping document, decoded from whatever the store handed back.
 
     ``raw`` absent (``None``, first use) answers the empty document: absence stays legitimate
-    first use, never a refusal. A present bare list is the shape this store carried before the
-    family that wrapped it, refused by name with the remedy rather than accepted or treated as
-    unknown. A mapping is accepted with no ``schema_version`` key or with one equal to the frozen
+    first use, never a refusal. A present bare list is refused by name with the remedy rather
+    than accepted or treated as unknown. A mapping is accepted with no ``schema_version`` key or with one equal to the frozen
     default; any other shape (a ``schema_version`` above the ceiling, ``entries`` missing or not a
     list) refuses naming what it found.
     """
@@ -104,8 +102,8 @@ def _read_registry_document(raw: object) -> dict:
         return {"entries": []}
     if isinstance(raw, list):
         raise RegistryVersionRefused(
-            "the model registry index is a top-level JSON array, the shape this store carried "
-            "before the family that wrapped it into an entries mapping; no operator door "
+            "the model registry index is a top-level JSON array rather than the entries-mapping "
+            "shape this reader accepts; no operator door "
             "rewraps a live project's registry in place, and this registry predates the "
             "entries-mapping shape the platform writes, so nothing repairs it in place"
         )
@@ -305,7 +303,7 @@ def load_registered_checkpoint(
 ) -> VerifiedCheckpoint:
     """Read a checkpoint's bytes once, hash them, and refuse unless the registry names that hash.
 
-    Closes the family of forgeries option B rules out: a checkpoint dropped at any path with no
+    Refuses two forgeries: a checkpoint dropped at any path with no
     registry entry, and a checkpoint whose file is replaced (in place or by rename) between a
     caller checking its identity and a caller loading its weights. In order: the file is read
     into one ``bytes`` object; the digest is taken over that exact object through
@@ -316,8 +314,7 @@ def load_registered_checkpoint(
     :class:`UnregisteredCheckpoint`, naming the path, the digest, the root searched, and the
     remedy. Several entries naming one digest must agree on producer or the load refuses (see
     :func:`_resolve_producer`). Only once the registry has answered is the payload unpickled and
-    version-checked, through :func:`_load_verified_payload`, a narrower sink than the
-    ``weights_only=False`` sniff a predictor build used to run: every deliverable checkpoint this
+    version-checked, through :func:`_load_verified_payload`: every deliverable checkpoint this
     platform's own trainer writes (a state dict, JSON config, numeric metrics and the three
     stamps) loads under it; a payload that will not (a periodic resume checkpoint's RNG/optimizer
     state, or a bespoke loop's own arbitrary object), or that carries a ``schema_version`` this
@@ -560,7 +557,7 @@ def _document_entries_for_conform(raw: object) -> tuple[list[dict], bool, bool]:
 
     Unlike :func:`_read_registry_document`, two dev-era shapes are accepted here rather than
     refused, since wrapping and respelling one of them is exactly this conform's own purpose: a
-    bare top-level array (the shape this store carried before the family that wrapped it), and a
+    bare top-level array, and a
     mapping still carrying a stray ``schema_version: 2`` from before this store's version-1 reset
     (:func:`conform_registry_paths_on_disk` reads such a document directly, bypassing the seam's
     own ceiling refusal, precisely to reach this function; the seam's own read otherwise refuses a

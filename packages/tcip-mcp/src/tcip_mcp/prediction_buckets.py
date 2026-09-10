@@ -252,8 +252,8 @@ class BucketHasVerdicts(Exception):
 class BucketHoldsDocuments(Exception):
     """Raised, for the callers that opt into :func:`resolve_writable_bucket`'s
     ``refuse_documents``, when the requested bucket already holds prediction documents with no
-    review verdict yet recorded against it: a prior run already published there, and this family
-    begins no second publish into a bucket in that state, whatever ``overwrite`` says."""
+    review verdict yet recorded against it: a prior run already published there, and no second
+    publish begins into a bucket in that state, whatever ``overwrite`` says."""
 
     def __init__(self, name: str, document_stem_count: int, suggested: str | None) -> None:
         self.name = name

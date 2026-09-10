@@ -784,7 +784,7 @@ def stage_proposals(
       ``bucket``.
 
     Either regime resolves the dataset root, capture date and stem from ``image_path`` itself
-    (the same resolver ``propose_annotations`` uses), so the explicit regime no longer takes
+    (the same resolver ``propose_annotations`` uses), so the explicit regime takes no
     path fragments a caller must keep consistent with the image. Both write through the one
     verdict-guarded staging door (``prediction_buckets.stage_prediction_shapes``), so a re-run
     never overwrites reviewed predictions or orphans their verdicts. Pair with
