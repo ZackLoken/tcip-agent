@@ -879,8 +879,8 @@ def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> S
             if stale is not None:
                 raise ValueError(
                     f"dataset_root {dataset_root!r} carries only the retired registry at {stale}; "
-                    "conform it first (tcip rename-subject-registry) before a statement's classes "
-                    "can be checked against it."
+                    "rename it to subjects.json by hand before a statement's classes can be "
+                    "checked against it."
                 ) from exc
             raise ValueError(
                 f"dataset_root {dataset_root!r} carries no subject registry of its own. Write one "
@@ -902,8 +902,8 @@ def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> S
         if stale is not None:
             raise ValueError(
                 f"project root {project_root!r} carries only the retired registry at {stale}; "
-                "conform it first (tcip rename-subject-registry) before a statement's classes "
-                "can be checked against it."
+                "rename it to subjects.json by hand before a statement's classes can be "
+                "checked against it."
             ) from exc
         raise ValueError(
             f"project root {project_root!r} carries no subject registry of its own (registered "

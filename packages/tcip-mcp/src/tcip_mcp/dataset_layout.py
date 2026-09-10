@@ -50,9 +50,10 @@ DEFAULT_MODEL = "live"
 TASKS = ("detect", "segment")
 SUBJECTS_FILENAME = "subjects.json"
 RETIRED_SUBJECTS_FILENAME = "classes.json"
-"""No writer places a document under this name. :func:`tcip_mcp.subject_registry.
-retired_document` reads it, answering present whenever the file decodes as a registry, whether
-or not ``subjects.json`` is beside it, and the doctor reads that answer; the conform command,
+"""No writer places a document under this name, and no platform door renames it; a breeder or
+agent renames it to ``subjects.json`` by hand. :func:`tcip_mcp.subject_registry.retired_document`
+reads it, answering present whenever the file decodes as a registry, whether or not
+``subjects.json`` is beside it, and the doctor reads that answer;
 :func:`tcip_mcp.audit.dataset_scope_of` and the two bundle doors test for the file by this name
 themselves."""
 

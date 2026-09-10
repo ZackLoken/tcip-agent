@@ -439,9 +439,10 @@ def trait_spec_unconformed(document: dict) -> str | None:
 
     A mapping with no ``schema_version`` key, or with ``1``, was never written by ``_encode_spec``'s
     unconditional stamp: either a record written before the rename (``positive_class_name`` is now
-    ``positive_value``), conformed by ``tcip rename-subject-registry <project_root>``, or a
-    hand-authored file with no stamp, conformed by hand (``"schema_version": 2``). Distinct from the
-    seam's own too-new refusal (``SchemaVersionRefused``, ``kind: "version_refused"``): that is a
+    ``positive_value``), reauthored through ``author_trait_spec``, or a hand-authored file with no
+    stamp, conformed by hand (``"schema_version": 2`` and ``positive_value`` in place of
+    ``positive_class_name``). Distinct from the seam's own too-new refusal
+    (``SchemaVersionRefused``, ``kind: "version_refused"``): that is a
     document above this store's declared ceiling; this is a document at or under it whose shape the
     ceiling alone does not describe, since a field renamed rather than the store gaining a version.
     """
@@ -449,9 +450,9 @@ def trait_spec_unconformed(document: dict) -> str | None:
     if version is None or version == 1:
         return (
             "this trait spec record predates the subject-registry rename (positive_class_name is "
-            "now positive_value) and carries no schema_version: 2 stamp; conform it with `tcip "
-            'rename-subject-registry <project_root>`, or, for a hand-authored file, add '
-            '"schema_version": 2 to it'
+            "now positive_value) and carries no schema_version: 2 stamp; re-author it through "
+            "author_trait_spec, or, for a hand-authored file, add \"schema_version\": 2 and rename "
+            "positive_class_name to positive_value"
         )
     return None
 

@@ -595,9 +595,10 @@ def check_retired_subject_registry(root: Path, findings: list) -> None:
     this always reads straight off disk.
 
     ``warn``, the level a version refusal gets: a document a reader refuses whole is the soft
-    rail, the operator's next step being the conform command, never a defect in the project's
-    own data. A ``classes.json`` present but not decodable as a registry is a second, distinct
-    ``warn`` line: a stray file of that name, never mistaken for the retired document.
+    rail, the operator's next step being a hand rename to ``subjects.json``, never a defect in
+    the project's own data. A ``classes.json`` present but not decodable as a registry is a
+    second, distinct ``warn`` line: a stray file of that name, never mistaken for the retired
+    document.
 
     ``project_roots`` itself reads the project root's own experiments store members (each run's
     status, split-manifest binding, curated-artifact and lineage records) and the project's
@@ -642,7 +643,7 @@ def check_retired_subject_registry(root: Path, findings: list) -> None:
         stale = retired_document(candidate)
         if stale is not None:
             findings.append(("warn", f"{candidate} still carries the retired registry at "
-                            f"{stale}; conform it with tcip rename-subject-registry"))
+                            f"{stale}; rename it to subjects.json by hand to conform it"))
         else:
             findings.append(("warn", f"{retired_path} exists but does not decode as a subject "
                             "registry; it is a stray file, not the retired document"))

@@ -226,8 +226,8 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
         return {"error": "crop is required (the expert's fact; never inferred from a path or slug)"}
     stale = retired_document(root)
     if stale is not None:
-        return {"error": f"{root} still carries the retired registry at {stale}; conform it "
-                          "first (tcip rename-subject-registry) before registering this dataset"}
+        return {"error": f"{root} still carries the retired registry at {stale}; rename it to "
+                          "subjects.json by hand before registering this dataset"}
 
     ident_key = dataset_identity_key(root)
     try:
@@ -760,9 +760,9 @@ def archive_project(
 
     stale = retired_registry_document(accounting)
     if stale is not None:
-        return {"error": f"{root} still carries the retired registry at {stale}; conform it "
-                          "first (tcip rename-subject-registry) so the archive carries the "
-                          "document that decodes its labels"}
+        return {"error": f"{root} still carries the retired registry at {stale}; rename it to "
+                          "subjects.json by hand so the archive carries the document that "
+                          "decodes its labels"}
 
     # A registered checkpoint is not confined to .tcip/models; blob_home is the one recognizer.
     is_checkpoint = {
@@ -1119,8 +1119,8 @@ def _run_import_into_staging(bp: Path, staging: Path, dest: Path) -> dict:
         return {"error": f"{stale} is the retired registry, carried into the archive from "
                          "before the subject-registry rename; rename it to subjects.json by "
                          "hand at the extracted bundle's root and import the directory, or "
-                         "archive the source project again after conforming it (tcip "
-                         "rename-subject-registry)"}
+                         "archive the source project again after renaming its own retired "
+                         "registry to subjects.json by hand"}
     if accounting.unaccounted:
         named = ", ".join(str(p.relative_to(tree)) for p in accounting.unaccounted)
         return {"error": f"the archive carries member(s) no store or blob home claims ({named}); "
