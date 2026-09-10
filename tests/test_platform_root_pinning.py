@@ -95,9 +95,9 @@ def test_scan_dataset_with_project_writes_its_audit_store_under_the_project(tmp_
 
 
 def _resolve_platform_state_root():
-    """The current resolver, found by attribute rather than ``from ... import`` so this proof
-    still collects (and fails on its own assertion, not an ImportError) against a pre-rename
-    baseline that only carries the old name."""
+    """The current resolver, found by attribute rather than ``from ... import`` so a tree
+    carrying only ``project_root`` collects here and fails on this module's own assertion rather
+    than on an ImportError."""
     import tcip_mcp.project_paths as pp
 
     return getattr(pp, "platform_state_root", None) or pp.project_root  # type: ignore[attr-defined]

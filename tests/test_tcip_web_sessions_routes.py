@@ -82,7 +82,7 @@ def test_negative_confirmation_time_counts_toward_the_session_total(
     client: TestClient, tmp_path: Path
 ) -> None:
     """Real time spent confirming a negative or reviewing existing annotations, with zero new
-    annotations added, must not vanish from total_time_seconds the way it used to."""
+    annotations added, counts toward total_time_seconds rather than vanishing from it."""
     pr = str(tmp_path)
     client.post("/api/sessions/start", json={"project_root": pr, "user": "alice"})
     # 10s reviewed IMG_A, added nothing new (a negative confirmation or pure review).

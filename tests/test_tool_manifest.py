@@ -183,7 +183,7 @@ def test_consolidated_tools_present_and_removed_absent():
         # Old names: must no longer register.
         "validate_config", "get_best_model", "evaluate_predictions",
         "export_results_csv", "get_active_context",
-        # Renamed: the docstring stopped denying its own verb under the old name.
+        # Renamed to stage_proposals; this name must not register.
         "accept_proposals",
         # Renamed tools: the old names must no longer register.
         "focus", "make_splits", "tabulate_counts", "select_best_model",
@@ -215,7 +215,7 @@ def test_consolidated_tools_present_and_removed_absent():
         "visualize",
         # Folded into tcip doctor's check_data_quality; its own function is deleted.
         "validate_data_quality",
-        # Merged into run_inference, which persists the bucket both doors used to.
+        # Merged into run_inference, the one door that persists a prediction bucket.
         "export_predictions",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"

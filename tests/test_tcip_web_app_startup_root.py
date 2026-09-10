@@ -293,9 +293,9 @@ def test_lifespan_binds_before_rehydrate_reads_a_registry(tmp_path, monkeypatch)
 
 
 def test_a_refused_rehydrate_does_not_block_the_other_two_registries(tmp_path, monkeypatch):
-    """One registry's refused rehydrate (an unconformed document) must not skip the other two
-    the way one shared try around all three used to: each gets its own try, and the refusal is
-    recorded for the workspace status route rather than only logged."""
+    """One registry's refused rehydrate (an unconformed document) must not skip the other two:
+    each registry gets its own try, and the refusal is recorded for the workspace status route
+    rather than only logged."""
     import tcip_store
 
     from tcip_mcp.web_client import INFERENCE_JOBS

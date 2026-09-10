@@ -598,7 +598,7 @@ def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(tmp_p
 def test_a_config_naming_an_unregistered_trait_still_lists(tmp_path, monkeypatch):
     """A run's own row never touches the trait registry: naming a trait this platform's
     registry does not carry (an evaluation.trait config field with no matching spec) must not
-    take down the whole run listing, the way a per-row trait lookup used to."""
+    take down the whole run listing."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.pipelines.training.run_registry import create_run, list_runs
 

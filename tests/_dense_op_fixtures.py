@@ -45,8 +45,8 @@ def dense_records(
     miss_pattern[i]``, tp = ``objects_per_image - miss_pattern[i]``, fn = ``miss_pattern[i]``,
     fp = ``fp_pattern[i]``, hand-verifiable without re-running the sweep. ``shift`` offsets every GT
     box's center by that many px; the matching detection's center is not shifted, so it stays put at
-    the original (unshifted) grid position, leaving miss/FP placement geometry unaffected; used to
-    give a holdout fixture content genuinely distinct from calibration's, for a content-overlap gate.
+    the original (unshifted) grid position, leaving miss/FP placement geometry unaffected, so a
+    holdout fixture carries content genuinely distinct from calibration's for a content-overlap gate.
     A caller must not raise ``shift`` past the center-match tolerance without also shifting the
     paired detection to match: past that point every "match" becomes a miss (the shifted GT) plus an
     unmatched detection (the un-shifted one) instead of a true positive, silently turning a clean

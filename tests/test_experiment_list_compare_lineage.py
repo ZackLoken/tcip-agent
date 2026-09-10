@@ -122,8 +122,8 @@ def test_list_experiments_tool_carries_has_model_source(tmp_path, monkeypatch):
 
 
 def test_list_experiments_launched_only_serves_the_absorbed_runs_view(tmp_path, monkeypatch):
-    """launched_only=True switches list_experiments to the view the door it absorbed used to
-    serve: launched runs only, keyed by experiment_id, in the shape _all_training_runs builds."""
+    """launched_only=True switches list_experiments to the absorbed door's view: launched runs
+    only, keyed by experiment_id, in the shape _all_training_runs builds."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment, update_status
