@@ -1,9 +1,9 @@
 """The calibrate/summarize pair every inference entry point shares: resolve a per-dataset operating
 point from a labeled split, and its compact, response-safe gate-evidence summary.
 
-Both moved out of ``tools/inference_tools.py``: their consumers are cross-module
+Live here, not in ``tools/inference_tools.py``, because their consumers are cross-module
 (``inference_tools._run_inference_verified`` calls both, and a dozen-plus test files exercise
-them directly), so a single tools module was no longer their one home.
+them directly): no single tools module is their home.
 """
 
 from __future__ import annotations

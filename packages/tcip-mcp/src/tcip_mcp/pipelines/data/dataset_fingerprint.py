@@ -159,14 +159,14 @@ FINGERPRINT_FORMULA_VERSION = 1
 """Bumped whenever the four terms :func:`dataset_fingerprint` hashes change (a new extension
 walked, a term added or dropped): the value each formula version stamps must never compare as
 same-or-different against a value another formula stamped, so the fingerprint carries this as
-a prefix rather than the bare hex Part 14 Q2 found silently reused across two formula shifts."""
+a prefix rather than a bare hex that could be silently reused across two formula shifts."""
 
 _FINGERPRINT_PATTERN = re.compile(r"^v(\d+):([0-9a-f]+)$")
 
 
 def fingerprint_formula_version(value: object) -> int | None:
     """The formula version a stored fingerprint states, or ``None`` for anything that is not
-    the ``v<n>:<hex>`` shape: a bare legacy value from before this prefix existed, or a value
+    the ``v<n>:<hex>`` shape: a bare legacy value carrying no formula prefix, or a value
     that is not a fingerprint at all. A non-``None`` result never says the formula matches the
     version this code computes under; only equal integers do."""
     if not isinstance(value, str):
@@ -188,21 +188,19 @@ def dataset_fingerprint(dataset_root: str | Path) -> str | None:
     matching ``dataset_hash``'s honesty rather than fabricating identity. Authority is recompute-on-read;
     a stored fingerprint (``dataset.json``) is a cache.
 
-    Adding the confirmations term was a one-time formula-version shift: recomputing against an
-    existing ``dataset.json``/experiment ``lineage.json`` written under the 3-term formula reads as
-    changed even with identical on-disk content. That is expected, not corruption, experiments are
-    immutable, so old lineage records keep their old fingerprint value rather than being rewritten.
-    A second such shift: the image term now walks ``image_utils.IMAGE_EXTS`` (``.heic``/``.npy``/
-    ``.npz``/``.bandgroup`` included, a ``.bandgroup`` manifest hashed as its own bytes like any
-    other file) rather than a narrower photographic-only set, so a dataset holding one of those four
-    extensions gets a new value and a multispectral-only dataset gets a real fingerprint instead of
-    ``None``.
+    A formula-version bump means recomputing against an existing ``dataset.json``/experiment
+    ``lineage.json`` written under an earlier formula reads as changed even with identical
+    on-disk content. That is expected, not corruption: experiments are immutable, so old lineage
+    records keep their old fingerprint value rather than being rewritten. The image term walks
+    ``image_utils.IMAGE_EXTS`` (``.heic``/``.npy``/``.npz``/``.bandgroup`` included, a
+    ``.bandgroup`` manifest hashed as its own bytes like any other file), so a multispectral-only
+    dataset gets a real fingerprint instead of ``None``.
 
     The return value carries its formula version as a ``v<n>:<hex>`` prefix
     (:data:`FINGERPRINT_FORMULA_VERSION`), formula ``1`` being the four-term one this docstring
     describes, so two values computed under different formulas can never read as equal or
     unequal by accident: :func:`fingerprint_formula_version` names the formula a stored value
-    states, and a bare legacy value (from before this prefix existed) names none.
+    states, and a bare legacy value carrying no formula prefix names none.
     """
     from tcip_mcp.dataset_layout import annotation_root, image_root
 

@@ -1687,8 +1687,8 @@ def clear_prediction_bucket(
     the source between that preflight and the last document's delete is not caught by it either:
     the moved documents cannot be unmoved once moved, and it is counted once more after the last
     delete and reported in ``review_state_landed_during_clear`` instead. The resolver's own
-    document-guard publishers (``resolve_writable_bucket``) count a detection verdict alone until a
-    separate, owner-gated family widens that guard, so refusing here is not yet a platform-wide
+    document-guard publishers (``resolve_writable_bucket``) count a detection verdict alone; widening
+    that guard is a separate change, so refusing here is not yet a platform-wide
     lock against writing beside review state; it is this door's own gate. A publisher that resolved
     this bucket clean before the clear began can still write into it during or after: its document
     and stamp writes are unconditional, and a resume that finds a fresh ``operating_point`` stamp

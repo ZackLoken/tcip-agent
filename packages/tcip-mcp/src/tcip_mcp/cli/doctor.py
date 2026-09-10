@@ -1,8 +1,8 @@
 """Data-state doctor: scan a live project for state inconsistencies code audits can't see.
 
-Checks the bug family found in field sessions: status-store vs disk disagreements
-on negatives, registry entries pointing at missing/test-fixture checkpoints, provenance smells,
-and orphaned labels. Read-only. Run at session start:
+Checks status-store vs disk disagreements on negatives, registry entries pointing at
+missing/test-fixture checkpoints, provenance smells, and orphaned labels. Read-only. Run at
+session start:
 
     tcip doctor <project_root>
 

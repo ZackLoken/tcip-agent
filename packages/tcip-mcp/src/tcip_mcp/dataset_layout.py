@@ -391,7 +391,7 @@ def decode_dataset_identity_document(data: bytes, *, dataset_root: str | Path) -
     """A dataset identity document's bytes, decoded and shape/version-checked, whatever its
     ``fingerprint`` states: the raw layer :func:`decode_dataset_identity` (the general reader,
     which also refuses a bare pre-prefix fingerprint) builds on, and ``register_dataset``'s own
-    re-register read calls directly. Re-registering is the fix for a bare fingerprint, so that
+    re-register read calls directly. Re-registering is the remedy for a bare fingerprint, so that
     read (which only ever preserves the minted ``id`` across the rewrite) must not itself refuse
     on the very value it is about to overwrite.
 
