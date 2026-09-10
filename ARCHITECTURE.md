@@ -25,17 +25,17 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 5e9f95bc.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD d3e44d3a.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 5e9f95bc has 436 modules across the six scanned roots (145620 total lines):
+HEAD d3e44d3a has 436 modules across the six scanned roots (145629 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 138 | 64644 |
+| tcip-mcp | 138 | 64653 |
 | tcip-annotation | 12 | 4347 |
 | tcip-web | 40 | 14089 |
 | tcip-store | 13 | 5282 |
@@ -199,7 +199,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/utils/__init__.py | Shared low-level utilities for tcip-mcp. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/web_client.py | HTTP client for MCP tools to push state to the tcip-web backend. | 5 | 19 |
 | packages/tcip-mcp/src/tcip_mcp/workspace.py | Workspace resolver: where TCIP projects live on disk. | 4 | 23 |
-| packages/tcip-mcp/src/tcip_mcp/cli/rename_subject_registry.py | Conform a project's pre-rename state to the subject registry's current shape: rename a dataset root's retired ``classes.json`` to ``subjects.json``, and stamp a ``trait_specs`` record still carrying ``positive_class_name`` to ``positive_value`` with ``schema_version: 2``. | 9 | 0 |
+| packages/tcip-mcp/src/tcip_mcp/cli/rename_subject_registry.py | Conform a project's pre-rename state to the subject registry's current shape. | 9 | 0 |
 
 ## tcip-annotation
 
