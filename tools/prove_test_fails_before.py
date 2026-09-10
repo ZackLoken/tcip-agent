@@ -349,13 +349,20 @@ def snapshot_working_tree() -> tuple[str, str]:
 
 
 def materialize(rev: str, dest: Path) -> None:
-    """Extract a revision's whole tree into `dest`. The working tree is never touched."""
+    """Extract a revision's whole tree into `dest`. The working tree is never touched.
+
+    ``git archive`` never carries a ``.git`` into what it extracts, so a script inside the
+    materialized tree that finds its own repo root by walking up for a ``.git`` ancestor
+    (``tools/build_module_inventory.py``) would otherwise walk past the sandbox entirely and
+    fail; an empty ``.git`` marker is the smallest thing such a script needs to find here.
+    """
     dest.mkdir(parents=True, exist_ok=True)
     archive = subprocess.run(
         ["git", "archive", rev], cwd=REPO, check=True, stdout=subprocess.PIPE
     ).stdout
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r|") as tar:
         tar.extractall(dest, filter="data")
+    (dest / ".git").touch(exist_ok=True)
 
 
 def _overlay_test_tree(dest: Path, test_rev: str | None) -> int:
