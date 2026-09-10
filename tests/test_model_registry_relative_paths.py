@@ -32,9 +32,9 @@ def _seed_v1(root: Path, entries: list[dict]) -> None:
 
 def _plant_registry_schema_version_two(root: Path) -> None:
     """Overwrite an already-written registry index's raw bytes to carry a stray
-    ``schema_version: 2``: the on-disk shape a dev-era writer, predating the version-1 reset,
-    left behind (the seam's own write-side check refuses the field on any ordinary write, so
-    this is the only way to plant it).
+    ``schema_version: 2``: the on-disk shape a dev-era writer left behind (the seam's own
+    write-side check refuses the field on any ordinary write, so this is the only way to plant
+    it).
     """
     key = registry_index_key(root)
     document = ts.read(key, default={"entries": []})
@@ -137,7 +137,7 @@ def test_archive_project_refuses_a_schema_version_two_registry_stating_the_fact(
     result = archive_project(str(project), str(out))
 
     assert "error" in result
-    assert "nothing currently strips in place" in result["error"]
+    assert "above the 1 this reader knows" in result["error"]
     assert not out.exists()
 
 
@@ -499,10 +499,10 @@ def test_a_symlink_to_a_checkpoint_under_root_stores_the_resolved_internal_locat
 
 
 def test_a_relative_root_still_answers_an_absolute_response(tmp_path: Path, monkeypatch):
-    """The relative-root case section 6 names: the resolver's own root argument, not just the
-    entry's stored path, must still answer absolute. The registry key itself refuses a relative
-    project root (``require_absolute_root``), so this is the resolver's own contract, exercised
-    directly rather than through the full ``ModelRegistry`` stack."""
+    """A relative root: the resolver's own root argument, not just the entry's stored path,
+    must still answer absolute. The registry key itself refuses a relative project root
+    (``require_absolute_root``), so this is the resolver's own contract, exercised directly
+    rather than through the full ``ModelRegistry`` stack."""
     from tcip_mcp.registry_paths import resolved_registry_path
 
     monkeypatch.chdir(tmp_path)

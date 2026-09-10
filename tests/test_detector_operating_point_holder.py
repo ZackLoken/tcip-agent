@@ -1,13 +1,12 @@
 """Where a detector's operating-point knobs live: the module itself, its ``.detector.roi_heads``,
 or its ``.detector``, resolved independently of what a given call actually applies.
 
-A module exposing a knob on itself, with no ``.detector`` to route through, already reached a
-validated operating point before this change (the ``getattr`` chain already fell through to the
-module when it had no ``.detector``); what changed is the interface being stated once
-(:func:`~tcip_mcp.pipelines.operating_point.detector_operating_point_holder`), read by both the
-setter and the model contract, and the two unstated-floor producers (a module with no knob, the
-review route's own unknowns) sharing one gate name distinct from a stated floor the pick does not
-clear.
+A module exposing a knob on itself, with no ``.detector`` to route through, reaches a validated
+operating point via the ``getattr`` chain falling through to the module itself. The interface is
+stated once (:func:`~tcip_mcp.pipelines.operating_point.detector_operating_point_holder`), read
+by both the setter and the model contract, and the two unstated-floor producers (a module with no
+knob, the review route's own unknowns) share one gate name distinct from a stated floor the pick
+does not clear.
 """
 
 from __future__ import annotations

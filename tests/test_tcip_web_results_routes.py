@@ -591,14 +591,14 @@ def test_show_unvalidated_shows_a_fabricated_tile_scale_on_screen_but_never_open
 
 def test_export_refuses_when_nothing_was_ever_classified(client: TestClient, tmp_path: Path) -> None:
     # The same refusal deliver_phenology_milestones makes: with no positive-class axis anywhere, the fraction
-    # is not a measurement. Previously only the frontend guarded this on the web side.
+    # is not a measurement.
     body = _phenology_fixture(tmp_path, validated=True, id_map={"bud": 0})
     resp = _export(client, body, "milestones")
     assert resp.status_code == 400
     assert "open" in resp.json()["detail"]
 
 
-def test_caller_composed_rows_are_refused_whatever_export_kind_declares(
+def test_caller_composed_rows_are_refused_even_when_export_kind_declares_diagnostic(
     client: TestClient, tmp_path: Path,
 ) -> None:
     # This door computes what it exports, so none of these caller-composed shapes (a curve, a

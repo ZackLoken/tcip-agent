@@ -676,9 +676,8 @@ def test_acknowledge_still_clears_the_gate_dimensions_in_the_same_call(
     """The two rules are separate, and this is the direction that proves it rather than assumes it.
 
     Same call, same acknowledgement: with the meaning confirmed, the unvalidated evidence ships
-    stamped false exactly as it did before the precondition existed. The MCP tool takes no
-    acknowledgement any more, so this runs through the web export route, the one surface that
-    builds a real one.
+    stamped false. The MCP tool takes no acknowledgement any more, so this runs through the web
+    export route, the one surface that builds a real one.
     """
     body = _delivery(tmp_path, validated=False)
 
@@ -927,7 +926,7 @@ def test_a_confirmed_delivery_with_an_unbound_classifier_stamp_reports_that_refu
     """With the meaning confirmed, the refusal families behind the precondition report unchanged.
 
     A classifier stamp earned for another trait does not validate this delivery, and that is what
-    the breeder is told, in the words that family already used.
+    the breeder is told.
     """
     from tests.test_tcip_web_results_routes import _rewrite_classifier_sidecars
 

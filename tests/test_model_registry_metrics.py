@@ -230,8 +230,8 @@ def test_register_model_sources_metrics_from_checkpoint(tmp_path, monkeypatch):
 
 
 def test_register_model_from_experiment_twice_on_a_completed_record_is_idempotent(tmp_path, monkeypatch):
-    """Documents pre-existing behaviour, not new to this row: _register_entry replaces by name,
-    and the eviction rail admits a replace whose experiment_id is this write's own, so a second
+    """_register_entry replaces by name, and the eviction rail admits a replace whose
+    experiment_id is this write's own, so a second
     register_model_from_experiment call on an already-completed record, with the same
     checkpoint path, succeeds again rather than refusing, the remedy _finalize_run's own
     docstring names for a registration that fails after complete_run succeeded. complete_run is

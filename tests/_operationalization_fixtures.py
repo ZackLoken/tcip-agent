@@ -2,8 +2,8 @@
 
 Traits deliberately not the ones the first pilot uses: a crossing trait delivering bloom dates, a
 count trait delivering a stem count, and the handful of vocabulary phenotypes the aggregate
-deliveries ship under, all real names in the crop vocabulary. A rail's own tests run on a trait
-other than the pilot's, so nothing here generalizes from one trait's vocabulary.
+deliveries ship under, all real names in the crop vocabulary, so nothing here generalizes from
+one trait's vocabulary.
 
 The ``seed_confirmed_*`` half takes whatever a test registered and gives it a confirmed record, for
 the many modules whose subject is a delivery rather than the precondition standing in front of it.

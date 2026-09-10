@@ -301,8 +301,8 @@ def test_block_calibration_prefers_plant_pitch_over_gt_spacing_when_configured(t
 
 
 def test_block_calibration_falls_back_to_gt_spacing_with_no_plant_csv_configured(tmp_path: Path):
-    """No data.plant_csv_paths (the ordinary case, every other test in this file) still resolves
-    the GT-object-spacing fallback exactly as before this feature existed."""
+    """No data.plant_csv_paths (the ordinary case, every other test in this file) resolves the
+    GT-object-spacing fallback."""
     exp = _build_experiment(tmp_path)
     manifest = exp["spatial_manifest"]
     _attest_regions_complete(
@@ -761,10 +761,7 @@ def test_run_inference_raster_without_reserved_region_names_the_real_gap(tmp_pat
 def test_run_inference_raster_with_no_trait_is_byte_identical_to_the_original_raw_path(
     tmp_path: Path,
 ):
-    """Fail-before/no-op: a raster_path export with no trait at all (today's only working raster
-    export shape, unchanged by this phase) still produces the original raw, unvalidated bucket --
-    the real backward-compatible guarantee this phase must not disturb, distinct from the
-    trait+no-reserved-region refusal above, which is new behavior with no baseline to preserve."""
+    """A raster_path export naming no trait produces a raw, unvalidated bucket."""
     exp = _build_experiment(tmp_path, reserve_frac=0.0, experiment_id="exp_no_trait")
 
     from tcip_mcp.tools.inference_tools import run_inference

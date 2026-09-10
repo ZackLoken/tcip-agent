@@ -70,9 +70,8 @@ def test_verdict_redirect_skips_a_variant_that_already_holds_a_document(tmp_path
     """A caller that opts into refuse_documents redirects around a verdicted bucket the same way
     it always has, but the variant search now also skips a candidate that holds a document with
     no verdict of its own: a redirect must never land on a bucket a prior, unreviewed publish
-    already filled. refuse_documents is a keyword this family adds: run against a baseline
-    without it, prove_test_fails_before.py records the call's own TypeError rather than a failed
-    assertion, so this is new-API coverage, not a guard proof."""
+    already filled. Omitting refuse_documents raises TypeError rather than failing this
+    assertion, so this is coverage, not a guard proof."""
     dataset_root = tmp_path / "data"
     review_state_dir = tmp_path / "state"
     _write_bucket(dataset_root, "baseline", "img")
@@ -90,9 +89,8 @@ def test_verdict_redirect_skips_a_variant_that_already_holds_a_document(tmp_path
 def test_document_holding_bucket_with_no_verdicts_refuses_naming_a_free_suggestion(tmp_path):
     """A rail must admit valid work: the suggested bucket a document refusal names is itself
     free of both a verdict and a document, and writing into it (the platform's own producer)
-    succeeds. refuse_documents is a keyword this family adds: run against a baseline without it,
-    prove_test_fails_before.py records the call's own TypeError rather than a failed assertion,
-    so this is new-API coverage, not a guard proof."""
+    succeeds. Omitting refuse_documents raises TypeError rather than failing this assertion, so
+    this is coverage, not a guard proof."""
     dataset_root = tmp_path / "data"
     review_state_dir = tmp_path / "state"
     _write_bucket(dataset_root, "baseline", "img")
@@ -121,9 +119,8 @@ def test_document_refusal_exhaustion_names_no_suggestion(tmp_path):
     """Coverage of the exhausted variant search: when the requested bucket and every
     <name>@r<n> variant up to the ceiling already hold a document, the resolver refuses by name
     with no suggestion, rather than handing back an unchecked, never-searched directory.
-    refuse_documents is a keyword this family adds: run against a baseline without it,
-    prove_test_fails_before.py records the call's own TypeError rather than a failed assertion,
-    so this too is new-API coverage."""
+    Omitting refuse_documents raises TypeError rather than failing this assertion, so this too
+    is coverage."""
     from tcip_mcp.prediction_buckets import resolve_writable_bucket
 
     dataset_root = tmp_path / "data"
@@ -153,9 +150,9 @@ def test_verdict_exhaustion_refuses_by_name_with_the_document_keyword_off(tmp_pa
     """Coverage for a caller that never opts into refuse_documents (stage_prediction_shapes, the
     web route's own resolve_prediction_bucket call): both resolve through this same function, so
     the refusal proven here at the keyword's own default stands in for either rather than
-    re-deriving their own setup. Before this family, an exhausted variant search silently fell
-    back to an unchecked <name>@r100 even here; now it raises by name with no suggestion, since a
-    redirect onto an unchecked directory is the overwrite this guard exists to refuse."""
+    re-deriving their own setup. An exhausted variant search raises by name with no suggestion,
+    rather than falling back to an unchecked <name>@r100: a redirect onto an unchecked directory
+    is the overwrite this guard exists to refuse."""
     from tcip_mcp.prediction_buckets import resolve_writable_bucket
 
     dataset_root = tmp_path / "data"

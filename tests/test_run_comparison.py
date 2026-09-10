@@ -414,11 +414,10 @@ def test_compare_best_route_409s_when_the_index_will_not_decode(
 def test_compare_best_route_409s_when_the_index_carries_a_stale_schema_version_two(
     client: TestClient, tmp_path, monkeypatch,
 ):
-    """A dev-era index stamped schema_version 2, predating the version-1 reset, refuses through
-    the seam's own ceiling check (SchemaVersionRefused), a sibling of RegistryVersionRefused
-    under StoreError rather than a subclass of it: the route's except tuple must catch
-    StoreError itself, not only RegistryVersionRefused/DecodeError, or this refusal escapes
-    uncaught."""
+    """A dev-era index stamped schema_version 2 refuses through the seam's own ceiling check
+    (SchemaVersionRefused), a sibling of RegistryVersionRefused under StoreError rather than a
+    subclass of it: the route's except tuple must catch StoreError itself, not only
+    RegistryVersionRefused/DecodeError, or this refusal escapes uncaught."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     import os
     import sqlite3
@@ -451,7 +450,7 @@ def test_compare_best_route_409s_when_the_index_carries_a_stale_schema_version_t
         "experiment_ids": ["exp-a"], "metric": "val_map50",
     })
     assert resp.status_code == 409
-    assert "nothing currently strips in place" in resp.json()["detail"]
+    assert "above the 1 this reader knows" in resp.json()["detail"]
 
 
 def test_compare_best_route_422s_on_the_tools_own_error(client: TestClient, tmp_path, monkeypatch):

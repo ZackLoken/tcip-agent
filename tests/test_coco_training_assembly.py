@@ -455,8 +455,8 @@ def _rail_fixture(tmp_path):
 def test_only_annotated_and_confirmed_negatives_train(tmp_path, label_format):
     """The rail is a property of the data, not of which kwargs the caller passed.
 
-    Enumerating samples from images_dir served unannotated images as zero-box samples, so a
-    project where the breeder labelled 30 of 400 trained on 370 images asserted to be empty.
+    Samples come from the annotated set, never from an image list: a project where the breeder
+    labelled 30 of 400 images must not train on the other 370 asserted to be empty.
     """
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.data.label_queries import assemble_coco

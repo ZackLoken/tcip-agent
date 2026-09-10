@@ -241,8 +241,8 @@ def test_run_hyperparameter_search_refuses_when_a_non_first_swept_choice_fails_p
     tmp_path, real_hpo_base_config, monkeypatch
 ):
     """The whole space is checked, not only the first sampled corner: a second choice that fails
-    to import must still be caught, even though the first choice the old, narrower check saw
-    is a real builder."""
+    to import must still be caught, even though the first choice in the space is a real
+    builder."""
     import tcip_mcp.tools.training_tools as tt
 
     ran = []

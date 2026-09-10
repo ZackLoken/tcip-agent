@@ -138,8 +138,8 @@ class TestGridRoute:
         assert body["reason"]
 
     def test_a_set_zoom_derives_one_screenful_at_that_zoom(self, client, tmp_path):
-        """The design's own render numbers: a photograph inside a 1416x903 viewport at 1.5x zoom
-        derives a 602 px cell edge, one rule for a photograph and an orthomosaic alike."""
+        """derive_lattice_tile_size's own formula: a photograph inside a 1416x903 viewport at
+        1.5x zoom derives a 602 px cell edge, one rule for a photograph and an orthomosaic alike."""
         from tcip_mcp.pipelines.reference_grid import derive_lattice_tile_size
 
         img_dir = tmp_path / "ds" / "images" / "2026-03-01"
@@ -304,7 +304,7 @@ class TestPinnedLattice:
     """Coverage: the grid route's pinned-lattice branch (``get_grid``'s ``existing_record``): a
     worked image keeps the lattice its coverage was recorded on, ``fresh_derivation_differs``
     names whether the current zoom would derive a different one, and ``rederive=true`` derives
-    fresh anyway. This branch did not exist at the family's own baseline."""
+    fresh anyway."""
 
     def _record_a_lattice(self, client, root, path, zoom: float) -> dict:
         client.post("/api/coverage/grid_zoom", json={
@@ -362,8 +362,7 @@ class TestPinnedLattice:
 class TestMalformedZoomEntry:
     """Coverage: every reader of a subject's stored grid-zoom entry shares one validation
     (``_subject_zoom``), so a malformed entry (here a non-numeric ``zoom``) is refused the same
-    way from every route rather than crashing one and silently misreading another. This shared
-    validation did not exist at the family's own baseline."""
+    way from every route rather than crashing one and silently misreading another."""
 
     @staticmethod
     def _seed(root, subject: str, zoom: object) -> None:
@@ -581,9 +580,9 @@ class TestCompletenessCountsAreBestEffort:
     def test_an_unreadable_label_still_refuses_when_a_record_depends_on_it(
         self, client, dated_dataset,
     ):
-        """The pre-existing rule stays: staleness cannot be computed for an existing record
-        without the label file, so that path still refuses rather than reporting a counts
-        error and serving a record whose staleness is unknown."""
+        """Staleness cannot be computed for an existing record without the label file, so that
+        path still refuses rather than reporting a counts error and serving a record whose
+        staleness is unknown."""
         root, path = dated_dataset
         grid = _grid(client, path, tile_size=64)
         client.post("/api/coverage/completeness", json={
@@ -1443,9 +1442,9 @@ class TestCompletenessRoute:
         assert resp.json()["replaced"] is None
 
     def test_toggle_refuses_when_the_store_holds_an_unrecognized_entry(self, client, dated_dataset):
-        """An entry the normalizer cannot read (a legacy or corrupt shape) must not be silently
-        dropped by a write into an unrelated bucket; the write refuses, naming it, and the entry
-        is still in the store afterwards."""
+        """An entry the normalizer cannot read must not be silently dropped by a write into an
+        unrelated bucket; the write refuses, naming it, and the entry is still in the store
+        afterwards."""
         import tcip_store as ts
         from tcip_mcp.dataset_layout import region_completeness_key
 

@@ -361,7 +361,7 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     # routes/review.py threads a real staged_conf_floor into resolve_operating_point_from_review:
     # max(generation_conf, review_conf_threshold), the generation half read off the bucket's own
     # operating_point.json sidecar, the review half read off the verdicts' own recorded
-    # conf_threshold. This is the design's mandatory acceptance test for the review path: a
+    # conf_threshold. A
     # realistic, disjoint, count-agreeing, adjudication-covered review reference must actually
     # reach review_confirmed end to end through the route.
     proj, pred_dir = _make_dense_reviewed_project(tmp_path)
@@ -474,11 +474,10 @@ def test_route_answers_409_with_the_committed_response_on_a_lost_sealed_record_l
 
 def test_route_requires_dataset_root(client, tmp_path: Path) -> None:
     """No read or write happens before the refusal: the field is named rather than left to a
-    stamp-scope or bucket-confinement error further in. Without this check, the request's real
-    ``pred_dir`` passes the path guard, so the pre-refusal baseline answered the different 400
-    ``_dataset_root_of_all`` raises for a bucket whose own dataset root disagrees with the one
-    the request states ("the predictions at ... belong to dataset ... not to ..."), never the
-    path guard's 403."""
+    stamp-scope or bucket-confinement error further in. The request's real ``pred_dir`` would
+    otherwise pass the path guard, surfacing the different 400 ``_dataset_root_of_all`` raises
+    for a bucket whose own dataset root disagrees with the one the request states ("the
+    predictions at ... belong to dataset ... not to ..."), never the path guard's 403."""
     proj, pred_dir = _make_dense_reviewed_project(tmp_path)
     resp = client.post("/api/review/validate_reference", json={
         "dataset_root": "", "trait": "bud_opening", "pred_dir": pred_dir, "subject": "bud"})

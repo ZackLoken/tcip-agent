@@ -19,10 +19,9 @@ The skill side is parsed structurally, scoped to the source-list bullets between
 allowed/preferred set:" and "Search discipline:", not the whole section's prose: a backticked
 filename mentioned anywhere else in section 1 is never read as a host.
 
-Coverage, not a fail-before proof: the two sides already agree as of this test's introduction, so
-a run today passes by construction. It exists to catch the moment either side adds or drops a host
-without the other; the fixture cases below construct that drift directly against each parser
-rather than waiting for it to happen to the live files.
+Coverage: the two sides agree, so this catches the moment either adds or drops a host. The
+fixture cases below construct that drift directly against each parser rather than waiting for it
+to happen to the live files.
 """
 
 from __future__ import annotations

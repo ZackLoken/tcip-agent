@@ -686,8 +686,8 @@ def test_a_bare_like_rewrite_writes_one_audit_entry_with_its_structured_fields(
     tmp_path, monkeypatch,
 ):
     """A bare directory conformed through --like sits under no dataset root: its one audit entry
-    is filed to the platform log and carries the structured fields rule 8 names, not only the
-    free-text outcome."""
+    is filed to the platform log and carries the structured fields, not only the free-text
+    outcome."""
     import tcip_mcp.audit as audit_module
 
     platform_root = tmp_path / "platform"
@@ -899,10 +899,10 @@ def test_a_second_bare_like_run_over_an_already_conformed_copy_writes_no_entry(
 def test_a_classified_rewrite_with_a_validated_stamp_writes_an_entry_whose_outcome_carries_the_floor_note(
     tmp_path, monkeypatch,
 ):
-    """A rewrite of a bucket whose stamp already claimed validated floors the claim (rule 7),
-    since the rewrite changes the bucket's own content digest away from the one the validation
-    record was earned over. The floor note rides both the returned outcome string and the audit
-    entry's own outcome field."""
+    """A rewrite of a bucket whose stamp already claimed validated floors the claim, since the
+    rewrite changes the bucket's own content digest away from the one the validation record was
+    earned over. The floor note rides both the returned outcome string and the audit entry's own
+    outcome field."""
     import tcip_mcp.audit as audit_module
     from tests._binding_fixtures import file_validation_record
     from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT

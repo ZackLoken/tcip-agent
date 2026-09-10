@@ -168,8 +168,8 @@ def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
 # catches a genuine same-source reference.
 
 def test_train_disjointness_named_group_by_output_unchanged(tmp_path, monkeypatch):
-    """Byte-identical to the pre-spatial-split behavior: a tile_prefix split.json is untouched
-    by the spatial_strip branch in _train_disjointness."""
+    """A tile_prefix split.json is untouched by the spatial_strip branch in
+    _train_disjointness."""
     import tcip_store
 
     from tcip_mcp.experiments import split_key

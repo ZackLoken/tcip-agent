@@ -106,8 +106,8 @@ def test_missing_plant_id_and_no_fn_raises():
 
 
 def test_missing_image_key_and_no_plant_id_raises():
-    """The old fallback silently bucketed a keyless record under 'unknown'; now it raises, same as
-    any other unresolved-identity record."""
+    """A record with no image key and no plant id raises like any other unresolved-identity
+    record."""
     results = [{"count": 1}]
     with pytest.raises(ValueError, match="plant_id_fn|build_plant_mapping"):
         aggregate_per_plant(results, strategy="count", value_key="count")

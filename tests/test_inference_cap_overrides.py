@@ -189,8 +189,8 @@ def test_an_unstated_cap_on_the_raw_path_stamps_the_default_source(inference_cal
 def test_a_stated_cap_on_the_raw_path_stamps_explicit_even_at_the_platform_default(
     inference_call,
 ):
-    """The rail this row exists for: a caller-stated cap that happens to equal the platform
-    default is stamped 'explicit' on the raw path too, never laundered into 'default'."""
+    """A caller-stated cap that happens to equal the platform default is stamped 'explicit' on
+    the raw path too, never laundered into 'default'."""
     from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS
 
     result = inference_call(max_dets=DEFAULT_MAX_DETS, conf_threshold=DEFAULT_CONF)

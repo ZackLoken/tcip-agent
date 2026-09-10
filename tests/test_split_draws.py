@@ -258,8 +258,8 @@ def test_run_hyperparameter_search_refuses_a_caller_split_seed_axis_at_one_draw(
     tmp_path, real_hpo_base_config, monkeypatch, case,
 ):
     """A caller-supplied data.split.seed axis with split_draws at 1 (unset) refuses whatever
-    the sampler and however the axis is typed, reversing the position an older test pinned;
-    tune_search must never be reached, and the error dict carries the remedy."""
+    the sampler and however the axis is typed; tune_search must never be reached, and the error
+    dict carries the remedy."""
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -331,9 +331,8 @@ def test_coerce_split_draws_verdicts(value, expected):
 def test_caller_split_seed_refusal_tolerates_an_infinite_split_draws_value():
     """A JSON Infinity literal decodes to float("inf") through the store's own plain
     json.loads even though its encode refuses to write one, so a manifest of unknown
-    provenance can carry it; int(float("inf")) raises OverflowError, which once escaped
-    caller_split_seed_refusal uncaught. It is now unreadable as a draw count and refuses
-    nothing, the same tolerance an unreadable string already has."""
+    provenance can carry it; int(float("inf")) raises OverflowError. It is unreadable as a draw
+    count and refuses nothing, the same tolerance an unreadable string already has."""
     import tcip_mcp.tools.training_tools as tt
 
     assert tt.caller_split_seed_refusal(

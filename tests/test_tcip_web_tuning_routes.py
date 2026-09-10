@@ -1575,11 +1575,11 @@ def test_list_sweeps_on_the_sqlite_backend_never_sees_a_loose_manifest_beside_th
 
 
 def test_manifest_fields_narrows_a_truthy_non_mapping_param_space_rather_than_crashing() -> None:
-    """A truthy non-mapping param_space (a hand-edited or otherwise malformed manifest) crashed
-    the listing before this change (.keys() on a string); _manifest_fields now narrows it to an
-    empty mapping before the key projection, so param_space_keys renders empty rather than
-    raising. This manifest also carries none of the other relaunch fields, so the marker agrees
-    with what a relaunch of it would 409 on: the missing-fields reason, not a false relaunchable."""
+    """_manifest_fields narrows a truthy non-mapping param_space (a hand-edited or otherwise
+    malformed manifest) to an empty mapping before the key projection, so param_space_keys
+    renders empty rather than raising. This manifest also carries none of the other relaunch
+    fields, so the marker agrees with what a relaunch of it would 409 on: the missing-fields
+    reason, not a false relaunchable."""
     from tcip_web.routes.tuning import _manifest_fields, _missing_relaunch_fields
 
     manifest = {"base_config": {}, "param_space": "not-a-mapping"}
