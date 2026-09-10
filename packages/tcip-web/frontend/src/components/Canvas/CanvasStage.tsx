@@ -174,8 +174,11 @@ export function CanvasStage(props: CanvasStageProps) {
     };
   }, []);
 
-  // Fit the image to the canvas once per image, not on every container resize: refitting on resize resets the user's zoom/pan, and when a reflow briefly reports a near-zero height (e.g. the Review filter shelf expanding) it collapses the image to sub-pixel scale so it appears to vanish. The key omits dims so a later resize can't re-fit;
-  // it's keyed on image identity + native size so a genuine image change still fits.
+  // Fit the image to the canvas once per image, not on every container resize: refitting on
+  // resize resets the user's zoom/pan, and when a reflow briefly reports a near-zero height
+  // (e.g. the Review filter shelf expanding) it collapses the image to sub-pixel scale so it
+  // appears to vanish. The key omits dims so a later resize can't re-fit; it's keyed on image
+  // identity + native size so a genuine image change still fits.
   const didFit = useRef<string | null>(null);
   useEffect(() => {
     if (props.autoFit === false) return; // consumer controls the view (e.g. Review zoom-to-detection)
