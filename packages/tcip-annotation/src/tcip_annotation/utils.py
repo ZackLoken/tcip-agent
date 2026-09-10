@@ -59,7 +59,7 @@ def get_image_dimensions(path: str) -> tuple[int, int]:
     """Return (width, height) of an image, applying EXIF orientation.
 
     Header-only: reads size + orientation without decoding pixels. The transpose-based
-    path forced a full decode of a 24MP frame (~0.5 s) just to learn its dimensions.
+    path costs a full decode of a 24MP frame (~0.5 s) just to learn its dimensions.
     Its one production caller is `image_utils.image_dimensions`, which routes every
     photographic container here.
     """

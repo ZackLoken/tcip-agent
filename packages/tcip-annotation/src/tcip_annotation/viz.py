@@ -59,8 +59,8 @@ rather than imported; a test holds the two strings equal."""
 def _viz_base() -> Path:
     """The ``.tcip`` base for viz output. Honors ``TCIP_STATE_ROOT`` (the platform-state root the
     MCP server / web backend pin to the active project) so renders land under the project, not the
-    process CWD (the agent's CWD is often the repo, which fragmented artifacts away from the
-    project and returned a CWD-relative path callers couldn't resolve). Falls back to CWD-relative
+    process CWD (the agent's CWD is often the repo, which fragments artifacts away from the
+    project and returns a CWD-relative path callers can't resolve). Falls back to CWD-relative
     for standalone ``tcip_annotation`` use."""
     import os
 

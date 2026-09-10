@@ -882,8 +882,7 @@ def target_class_id(a: Annotation, subject: str, attribute: str | None,
     hasn't gotten to it yet, a soft/expected gap), versus the instance was assessed but with a value
     the registry cannot decode (a real decode bug, the registry and the labels disagree). The first
     case returns the distinguishable sentinel ``UNLABELED`` when ``allow_unlabeled=True`` (opt-in,
-    default ``False`` preserves this function's original all-undecodable-cases-raise behavior for any
-    caller that hasn't been updated to handle the three-way split); the second always raises,
+    default ``False`` raises for both failure shapes unless the caller opts in); the second always raises,
     regardless of ``allow_unlabeled``, since a real annotation read as nothing is a measurement bug,
     never something to drop silently.
 
