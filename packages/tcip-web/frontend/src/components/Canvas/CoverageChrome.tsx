@@ -97,8 +97,8 @@ function CoverageKey(props: { panelOpen: boolean }) {
               swept: every part of the cell has been on screen at the working scale, any session
             </li>
             <li>
-              short dashes, no fill: swept this session, not yet saved -- the same cells the "not
-              yet saved" state line names
+              short dashes, no fill: swept this session, not yet saved (the same cells the "not yet
+              saved" state line names)
             </li>
             <li>count in parentheses: saved annotations of the active subject</li>
             <li>solid border: attested complete, active subject</li>

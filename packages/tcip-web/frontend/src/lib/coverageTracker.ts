@@ -2,10 +2,10 @@
  * Session accumulator for the per-image view-coverage record. It records two facts per cell:
  * cells_served_at_native (a region serve's response covered the cell at native resolution) and
  * cells_seen_at_scale (every one of the cell's sub-cells, see subdivideCell, has at some point
- * sat fully inside the viewport at some recorded scale -- a union-of-visibility bound, not "the
+ * sat fully inside the viewport at some recorded scale, a union-of-visibility bound, not "the
  * whole cell was on screen at once," which a raster whose cells exceed any working viewport can
  * never satisfy). Whether a seen cell counts as "swept" is a pure derivation against a subject's
- * working scale -- the breeder's own set grid zoom, served by the completeness read and handed
+ * working scale, the breeder's own set grid zoom, served by the completeness read and handed
  * in through `setWorkingScaleBar`, never accumulated from an authoring commit: a commit never
  * moves it, and an unsaved annotation never does either.
  *
@@ -56,7 +56,7 @@ export interface CoveragePushResponse {
  * Sub-cell grain for the union-of-visibility sweep predicate (see `subdivideCell`): a cell
  * becomes "seen" once every one of its sub-rects has, at some point, been fully on screen.
  * Divisions are derived per cell (`subCellDivisionsFor`) from this target pixel size, not a
- * single fixed division count applied to every cell -- a fixed count scales sub-cell size with
+ * single fixed division count applied to every cell: a fixed count scales sub-cell size with
  * the cell, not the viewport, so it stops working the moment a lattice's cells get big (a low
  * set zoom derives a large cell edge). 128px is a documented default pending a real GUI
  * annotation session to check the target against.
@@ -137,7 +137,7 @@ function coverageLatticeMismatchDetail(err: unknown): ReplaceRequired | null {
 
 /** Whether a failed push can never succeed by retrying the identical payload: any 4xx (an
  *  unknown cell, an unconformed stored record, a refused subject, or the lattice-mismatch 409)
- *  or the audit-gap marker (terminal regardless of status) -- the 409 needs no marker check here,
+ *  or the audit-gap marker (terminal regardless of status). The 409 needs no marker check here,
  *  since a live tracker's own error path (`setHoldFromError`) reads the marker and turns it into
  *  the replace hold before this function or the outbox ever sees the failure. A network failure
  *  or an ordinary 5xx with no marker is not terminal and stays queued. */
@@ -536,7 +536,7 @@ export class CoverageTracker {
   /** Send any owed facts now, at once (called before a reset and on unmount): the identity
    *  switching away must never defer its own outgoing image's push behind the outbox's own
    *  retry cadence, so this posts immediately under the outgoing image's own key and only hands
-   *  the payload to the module outbox when that post itself fails -- the tracker is about to
+   *  the payload to the module outbox when that post itself fails. The tracker is about to
    *  move on (or vanish) and can no longer retry it itself, but a fresh failure there starts the
    *  outbox's own retry timer from the failure, never from this call. While the replace hold
    *  stands and is not armed, nothing is sent and `dirty` stays set: a payload built under the
@@ -579,7 +579,7 @@ export class CoverageTracker {
    *  callers capture their own `keyParts` before sending, so a later `reset` never changes which
    *  identity a settling promise is checked against, and a settled promise for a stale identity
    *  is routed to the module outbox rather than adopted or held against whatever the tracker
-   *  moved on to (or vanished into) -- the one check both `flush` and `postNow` route their
+   *  moved on to (or vanished into). It is the one check both `flush` and `postNow` route their
    *  settled promises through. */
   private staleIdentity(keyParts: CoverageKeyParts): boolean {
     return this.disposed || !sameKeyParts(this.keyParts, keyParts);
