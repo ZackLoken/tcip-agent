@@ -25,19 +25,19 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 2ed26ef9.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 29630d8a.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 2ed26ef9 has 436 modules across the six scanned roots (145572 total lines):
+HEAD 29630d8a has 435 modules across the six scanned roots (145286 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 138 | 64612 |
+| tcip-mcp | 137 | 64327 |
 | tcip-annotation | 12 | 4346 |
-| tcip-web | 40 | 14082 |
+| tcip-web | 40 | 14081 |
 | tcip-store | 13 | 5281 |
 | tcip-web-frontend | 216 | 52297 |
 | tools | 17 | 4954 |
@@ -65,8 +65,8 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/__init__.py | TCIP MCP Server: domain tools for the phenotyping platform. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/__main__.py | Entry point: ``python -m tcip_mcp``. | 1 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/agent_identity.py | Which agent harness this MCP server process is serving, and the session it minted for it. | 0 | 8 |
-| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools. | 5 | 41 |
-| packages/tcip-mcp/src/tcip_mcp/subject_registry.py | The dataset's subject registry, subjects, their attributes, and the deterministic name→id assignment a training run uses (and records, so predictions stay decodable). | 3 | 18 |
+| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools. | 5 | 40 |
+| packages/tcip-mcp/src/tcip_mcp/subject_registry.py | The dataset's subject registry, subjects, their attributes, and the deterministic name→id assignment a training run uses (and records, so predictions stay decodable). | 3 | 17 |
 | packages/tcip-mcp/src/tcip_mcp/cli/__init__.py | Operator command sub-package: each module is one ``tcip`` subcommand's implementation. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/adopt_store.py | Move a root's existing record and log files into a store database. | 6 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/archive_project.py | Export an annotation project as a portable bundle: a ZIP archive, or, with --output-dir, the identical bundle written as a directory tree. | 4 | 0 |
@@ -88,7 +88,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/cli/triage_predictions.py | Sort a checkpoint's own predictions by confidence into auto-accept, needs-review and unscoreable queues, from the command line. | 3 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/visualize.py | Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid, from the command line. | 3 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/write_project_site.py | Write or correct one project's authored site: the record ``initialize_project``/``ingest_images`` themselves cannot reach for a project whose name does not fit the workspace scheme, and the one deliberate overwrite for a site typed wrong once or a record damaged by hand. | 3 | 0 |
-| packages/tcip-mcp/src/tcip_mcp/dataset_layout.py | Canonical dataset-layout resolver: the single source of truth for where an image's ground-truth labels and model predictions live on disk. | 7 | 46 |
+| packages/tcip-mcp/src/tcip_mcp/dataset_layout.py | Canonical dataset-layout resolver: the single source of truth for where an image's ground-truth labels and model predictions live on disk. | 7 | 45 |
 | packages/tcip-mcp/src/tcip_mcp/experiments.py | Experiment tracking for ML training runs. | 11 | 19 |
 | packages/tcip-mcp/src/tcip_mcp/identity.py | The platform's recorded-actor convention, in one place. | 0 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/knowledge/__init__.py | The one canonical domain-knowledge directory and its one reader. | 0 | 4 |
@@ -117,7 +117,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py | The label-store and registry query library: reads a dataset's per-image JSON or assembled COCO labels, its ``subjects.json`` registry, and its confirmed-negative image-status store, and assembles them into the boxes/labels/COCO shapes the dataset classes in ``datasets.py`` and the outside-layer tools (calibration, evaluation, inference, training) consume. | 9 | 13 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/samplers.py | Task-aware data samplers: class-imbalance handling plus read-locality ordering. | 2 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/split_construction.py | Constructing and persisting training splits from a data config, beside ``splits.py``. | 15 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py | Group-aware, annotation-stratified train/val/calibration splitting. | 7 | 19 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py | Group-aware, annotation-stratified train/val/calibration splitting. | 7 | 18 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/tiling.py | Sliding-window tiling geometry for small-object detection (SAHI-style). | 0 | 7 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/delivery_events_schema.py | The ``delivery_events`` record's declared shape, so its writer (``resolution.py``'s ``record_delivery_binding_event``) and its reader (``tcip_web``'s ``list_delivery_events`` route) agree on one shape rather than each independently tolerating whatever the other happens to have written. | 0 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/derivations.py | Tier-A data/model derivations, read the artifact in hand, compute the value. | 8 | 11 |
@@ -171,7 +171,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/registry_paths.py | Where a registry entry's stored path resolves, and the containment core the checkpoint and dataset registries share when they decide whether a target sits under their own scope root. | 0 | 7 |
 | packages/tcip-mcp/src/tcip_mcp/server.py | MCP server entry point: register all domain tools and run on stdio. | 25 | 24 |
 | packages/tcip-mcp/src/tcip_mcp/statements.py | Comparable-value and content-hash primitives shared by every statement kind. | 0 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/store_catalogue.py | The whole store catalogue in one import: every module that registers a store. | 30 | 9 |
+| packages/tcip-mcp/src/tcip_mcp/store_catalogue.py | The whole store catalogue in one import: every module that registers a store. | 30 | 8 |
 | packages/tcip-mcp/src/tcip_mcp/tools/__init__.py | Tool sub-package: each module registers tools with the MCP server. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py | Annotation tools: load, save, and evaluate name-based annotations via MCP. | 13 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/tools/bundle.py | What a project bundle holds: the one membership accounting both doors compose from. | 9 | 1 |
@@ -195,11 +195,10 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py | Training MCP tools, config validation, launch training, HPO, status. | 32 | 13 |
 | packages/tcip-mcp/src/tcip_mcp/tools/trait_spec_authoring_tools.py | The agent-facing surface for authoring and field-editing a trait spec: two doors of one surface, deliberately no more. | 4 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py | Vision tools: render annotations and predictions for visual analysis. | 22 | 5 |
-| packages/tcip-mcp/src/tcip_mcp/traits.py | Trait knowledge, the human-defined *semantics* of each measurable trait (Tier C). | 7 | 23 |
+| packages/tcip-mcp/src/tcip_mcp/traits.py | Trait knowledge, the human-defined *semantics* of each measurable trait (Tier C). | 7 | 22 |
 | packages/tcip-mcp/src/tcip_mcp/utils/__init__.py | Shared low-level utilities for tcip-mcp. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/web_client.py | HTTP client for MCP tools to push state to the tcip-web backend. | 5 | 19 |
 | packages/tcip-mcp/src/tcip_mcp/workspace.py | Workspace resolver: where TCIP projects live on disk. | 4 | 23 |
-| packages/tcip-mcp/src/tcip_mcp/cli/rename_subject_registry.py | Conform a project's pre-rename state to the subject registry's current shape. | 9 | 0 |
 
 ## tcip-annotation
 
@@ -224,13 +223,13 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
-| packages/tcip-store/src/tcip_store/__init__.py | TCIP's storage seam: one interface for the platform's mutable records, logs, and blobs. | 6 | 71 |
+| packages/tcip-store/src/tcip_store/__init__.py | TCIP's storage seam: one interface for the platform's mutable records, logs, and blobs. | 6 | 70 |
 | packages/tcip-store/src/tcip_store/adoption.py | Moving a root's existing record and log files into a database, atomically or not at all. | 6 | 3 |
-| packages/tcip-store/src/tcip_store/binding.py | Which backend a process binds, decided once at its entry point. | 3 | 29 |
+| packages/tcip-store/src/tcip_store/binding.py | Which backend a process binds, decided once at its entry point. | 3 | 28 |
 | packages/tcip-store/src/tcip_store/errors.py | Every refusal the storage seam raises. | 1 | 17 |
 | packages/tcip-store/src/tcip_store/export.py | Writing one root's database back out as the file layout, and saying when it is stale. | 4 | 3 |
 | packages/tcip-store/src/tcip_store/file_backend.py | The filesystem backend: identity to path, atomic replace, file locks, logs, and blobs. | 5 | 39 |
-| packages/tcip-store/src/tcip_store/layout_claims.py | Which store could own which path under a root, as data rather than as locator inversion. | 3 | 14 |
+| packages/tcip-store/src/tcip_store/layout_claims.py | Which store could own which path under a root, as data rather than as locator inversion. | 3 | 13 |
 | packages/tcip-store/src/tcip_store/model.py | Identity and value types the storage seam speaks, identical on every backend. | 0 | 6 |
 | packages/tcip-store/src/tcip_store/registry.py | The store catalogue: what each store is, how its values encode, and how it may be written. | 4 | 8 |
 | packages/tcip-store/src/tcip_store/schema_version.py | The version-field accept rule every frozen store's reader applies. | 2 | 3 |
@@ -556,7 +555,7 @@ holds no edge into the layer above it.
 
 `packages/tcip-web/frontend/src` (`tcip-web-frontend`) has zero in-repo import edges to any Python module in any of the five Python roots: `build_module_inventory.py` resolves a TypeScript specifier only against a relative path or the `@/` alias into `packages/tcip-web/frontend/src` itself (`tools/build_module_inventory.py:307-327`), so no specifier in the frontend source tree can resolve to a file outside that tree.
 
-## Modules with zero importers (153)
+## Modules with zero importers (152)
 
 A module counts as zero-importer when no other module in its own scanned tree resolves an in-repo import to it (`imported_by_count == 0` in the regenerated inventory). This includes package entry points (`__init__.py`, `__main__.py`), CLI scripts under `tools/` invoked as processes, package `cli/` command modules invoked by name through the `tcip` dispatcher rather than imported, and every TypeScript `*.test.ts`/`*.test.tsx` file, none of which are expected to have an in-repo importer.
 
@@ -577,7 +576,6 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/cli/overlay_reference_grid.py |
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/cli/plant_aware_group_splits.py |
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/cli/preflight_config.py |
-| tcip-mcp | packages/tcip-mcp/src/tcip_mcp/cli/rename_subject_registry.py |
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/cli/render_failure_cases.py |
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/cli/repair_classified_predictions.py |
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/cli/scan_dataset.py |
@@ -1317,9 +1315,9 @@ agreement; `phase0_implementation: once, shared` for S19 (`tests/test_mcp_tools_
 
 ## 3. `subjects.json`, subject registry
 
-Path: `<dataset_root>/subjects.json`. A dataset root still carrying the pre-rename
-`classes.json` and no `subjects.json` is pre-rename data, conformed by
-`tcip rename-subject-registry`; see S20 below.
+Path: `<dataset_root>/subjects.json`. A dataset root carrying the retired `classes.json` is
+refused by every registry writer until the file is renamed to `subjects.json` by hand; no
+platform door conforms it. See S20 below.
 
 Writer: `tcip_mcp.subject_registry.replace_registry`,
 `packages/tcip-mcp/src/tcip_mcp/subject_registry.py:424`, the one write both registry doors call
