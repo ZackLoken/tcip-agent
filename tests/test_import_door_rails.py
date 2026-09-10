@@ -360,8 +360,8 @@ def test_dataset_registry_stores_the_relative_dot_after_import(tmp_path):
     """The project's own dataset registers to itself, and that entry's ``path`` survives the
     archive/import round trip as the project-relative ``"."`` rather than an absolute path baked
     in before the move. Bound to the file backend throughout (rather than the ambient default),
-    so this reads what the door itself wrote on either side of the row that introduced the
-    relative form, with no unrelated database-conform refusal in between."""
+    so this reads what the door itself wrote, with no unrelated database-conform refusal in
+    between."""
     from tcip_mcp.tools.project_tools import read_datasets, register_dataset
 
     with bound(FileBackend()):

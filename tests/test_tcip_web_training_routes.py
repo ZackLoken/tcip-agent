@@ -386,8 +386,8 @@ def test_list_runs_reconstructs_from_experiments(tmp_path, monkeypatch) -> None:
 
 
 def test_list_runs_route_is_a_pure_pass_through_to_the_tool(tmp_path, monkeypatch) -> None:
-    """Post-unification the route adds nothing of its own: its rows equal the tool's
-    ``launched_only=True`` view, exactly, so the route holds no reconstruction of its own."""
+    """The route adds nothing of its own: its rows equal the tool's ``launched_only=True`` view,
+    exactly, so the route holds no reconstruction of its own."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment, update_status

@@ -403,7 +403,7 @@ def test_preflight_config_training_source_shape_and_importability(tmp_path):
         "training": {"batch_size": 2},
     }
 
-    # A dict (the old, wrong shape) is rejected.
+    # A dict is rejected.
     cfg = dict(base_cfg, training_source={"train": "tests.bespoke_models:build_bespoke_detection"})
     r = preflight_config(cfg)
     assert any("training_source must be a non-empty" in i for i in r["issues"])

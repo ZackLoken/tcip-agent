@@ -320,8 +320,8 @@ def test_export_aggregated_csvs_produced_at_is_the_write_time_never_a_buckets_ow
 
 
 def test_export_detection_csvs_produced_at_is_present_and_iso_parseable(tmp_path):
-    """Coverage for the family's stated ``produced_at`` meaning: the detection CSV's own cell is
-    a real write-time timestamp, not merely a non-empty string."""
+    """The detection CSV's own ``produced_at`` cell is a real write-time timestamp, not merely a
+    non-empty string."""
     from datetime import datetime
 
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv

@@ -330,10 +330,9 @@ def _stubbed_triage_predictions(tmp_path, monkeypatch, predictions: list[dict], 
 
 
 def test_triage_predictions_auto_threshold_none_refuses_with_zero_auto_accepts(tmp_path, monkeypatch):
-    """Coverage of the door's own auto-accept refusal (absent since the re-point moved this
-    door's tests onto the ranking door): no threshold means zero auto-accepts and the refusal
-    named, while the confident, mid-confidence and unscoreable predictions are still routed
-    honestly rather than silently dropped."""
+    """Coverage of the door's own auto-accept refusal: no threshold means zero auto-accepts and
+    the refusal named, while the confident, mid-confidence and unscoreable predictions are still
+    routed honestly rather than silently dropped."""
     predictions = [
         {"image": "high.jpg", "scores": [0.9]},
         {"image": "mid.jpg", "scores": [0.5]},
@@ -350,9 +349,9 @@ def test_triage_predictions_auto_threshold_none_refuses_with_zero_auto_accepts(t
 
 
 def test_triage_predictions_explicit_auto_threshold_stamps_breeder_confirmation(tmp_path, monkeypatch):
-    """Coverage of the door's own breeder-confirmation stamp (absent since the re-point): an
-    explicit auto_threshold accepts exactly the predictions that clear it and carries the
-    confirmation-required stamp, with the review/unscoreable routing unchanged by its presence."""
+    """Coverage of the door's own breeder-confirmation stamp: an explicit auto_threshold
+    accepts exactly the predictions that clear it and carries the confirmation-required stamp,
+    with the review/unscoreable routing unchanged by its presence."""
     predictions = [
         {"image": "high.jpg", "scores": [0.9]},
         {"image": "mid.jpg", "scores": [0.5]},
@@ -445,7 +444,7 @@ def _stub_scorer(monkeypatch) -> None:
 
 def test_prioritize_review_queue_marks_a_bound_runs_calibration_side(tmp_path, monkeypatch):
     """A checkpoint whose run was bound to a split manifest marks each ranked candidate against
-    that manifest's own calibration side; no mark exists at all before this family."""
+    that manifest's own calibration side."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tests.test_selection_disjointness_label_movement import DATES, _bind_run, _dataset, _draw
 
@@ -775,8 +774,8 @@ def test_prioritize_review_queue_a_corrupted_split_record_yields_marks_unresolve
 
 
 def test_prioritize_review_queue_signature_drops_the_triage_only_parameters():
-    """The confidence-triage capability split off with its own parameters: prioritize_review_queue
-    carries no strategy flag and none of triage_predictions's own knobs."""
+    """prioritize_review_queue carries no strategy flag and none of triage_predictions's own
+    knobs."""
     import inspect
 
     params = inspect.signature(prioritize_review_queue).parameters
@@ -787,7 +786,8 @@ def test_prioritize_review_queue_signature_drops_the_triage_only_parameters():
 
 
 def test_triage_predictions_signature_carries_the_triage_only_parameters():
-    """The door that gained the confidence-triage capability carries its own parameters."""
+    """triage_predictions carries the confidence-triage parameters: low, high and
+    auto_threshold."""
     import inspect
 
     from tcip_mcp.tools.feedback_tools import triage_predictions

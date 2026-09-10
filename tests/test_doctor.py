@@ -687,8 +687,7 @@ def test_doctor_reports_a_version_refused_trait_spec_statement_without_aborting(
 
 
 def test_doctor_warns_on_a_project_with_no_record(tmp_path):
-    """A recordless project is the accepted standing state of one that predates the field: a
-    warning, not an error, and the exit code says so."""
+    """A recordless project is accepted: a warning, not an error, and the exit code says so."""
     root = _layout_project(tmp_path, "2026-03-04")
 
     res = _run(root)

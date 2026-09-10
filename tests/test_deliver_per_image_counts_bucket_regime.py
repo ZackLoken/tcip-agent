@@ -122,9 +122,9 @@ def test_no_output_path_refuses(tmp_path):
     ("postprocess", "nmm"), ("tile_batch_size", 32),
 ])
 def test_each_live_only_parameter_refuses_in_the_bucket_regime(tmp_path, name, value):
-    """Every parameter design section 3 names live-only refuses by name in the bucket regime,
-    including the two non-None-defaulted ones (postprocess, tile_batch_size) away from their own
-    documented default."""
+    """Every parameter named live-only refuses by name in the bucket regime, including the two
+    non-None-defaulted ones (postprocess, tile_batch_size) away from their own documented
+    default."""
     import tcip_mcp.tools.inference_tools as itools
 
     bucket = tmp_path / "preds"
@@ -545,8 +545,8 @@ def test_a_gate_refusal_is_counts_bearing_in_the_bucket_regime(tmp_path):
 def test_a_gate_refusal_names_every_disclosure_field_in_the_live_regime(tmp_path, monkeypatch):
     """Live with predictions_dir, unvalidated conf, no acknowledgement: the bucket lands honestly
     stamped false (the publish bracket only gates tile geometry) and the CSV refuses; the refusal
-    is counts-bearing and names every section 5.9 disclosure field, so the review-promotion
-    workflow can proceed from what landed."""
+    is counts-bearing and names every disclosure field, so the review-promotion workflow can
+    proceed from what landed."""
     import tcip_mcp.tools.inference_tools as itools
 
     monkeypatch.setattr(itools, "_run_inference_verified",

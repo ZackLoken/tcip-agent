@@ -854,8 +854,8 @@ def test_settling_through_append_after_a_crash_installs_the_pending_watermark(
     append to it. The marker's own crash-recovery path runs first, installing the pending
     watermark before the new entry is written, so the log holds exactly the one new entry
     and a replay from the pre-crash cursor returns it rather than a fragment of stale
-    bytes read against an unadvanced base. The guard is the marker assertion below: at
-    baseline the crash leaves the marker at the old base rather than the pending value.
+    bytes read against an unadvanced base. The guard is the marker assertion below: the
+    crash leaves the marker at the old base rather than the pending value.
     The pending-file-gone assertion beside it holds even at baseline, since nothing
     writes a pending file there; it documents the state rather than guarding anything."""
     only_on(store, FILE, _CLEAR_LOG_RACE)
@@ -1702,7 +1702,7 @@ def test_trait_specs_shares_the_state_database_rather_than_gaining_its_own(store
     """The positive proof the trait-spec re-root exists to establish: writing a ``trait_specs``
     record alongside a sibling ``STATE``-rooted store (``trait_operationalizations``) creates
     exactly one database under the project's shared state root, never a second, nested one under
-    ``trait_specs`` itself the way the store's self-rooted predecessor did.
+    ``trait_specs`` itself.
     """
     only_on(store, SQLITE, _DATABASE_MECHANICS)
     spec_key = traits.trait_spec_key(traits.trait_specs_dir(store.root), "bud_opening")
@@ -1946,10 +1946,8 @@ class Registered:
     or wraps an envelope. The canonical spelling itself is pinned once, centrally, by
     ``test_the_canonical_record_codec_writes_the_bytes_this_test_spells_out``.
 
-    This suite no longer reproduces each store's pre-seam writer. That equivalence was the
-    instrument for migrating writers behind the seam, and there are no pre-seam writers left
-    to compare against; each owner module's own tests are where its written content is
-    asserted now. What remains here is placement and encoding, for every store at once.
+    Each owner module's own tests assert its written content; this suite proves placement and
+    encoding, for every store at once.
 
     ``relative`` is the path under the root the store is given. ``root_of`` is the root the
     store's own keys hang off, which for the review shards and the experiment members is a
@@ -1981,7 +1979,7 @@ def _construct_via_scratch_backend(build: Callable[[Path], dict]) -> dict:
 
 def _real_split_manifest() -> dict:
     """The shape ``data_tools.compose_split_manifest`` writes today, called for real into a
-    throwaway directory so this golden cannot drift from the writer silently again."""
+    throwaway directory so this golden cannot drift from the writer silently."""
     return _construct_via_scratch_backend(lambda scratch: data_tools.compose_split_manifest(
         scratch, seed=42, group_by="stem_prefix", dataset_fingerprint="7ac1",
         subject="bud", attribute=None, id_map={"bud": 0},

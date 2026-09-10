@@ -182,10 +182,9 @@ def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_
 
 
 def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(tmp_path):
-    """.bandgroup was not walked before this change (a mixed dataset's changed manifest content
-    certified as identical). It is hashed as its own bytes, like any other file, so changing the
-    manifest alone, with its named band files held byte-for-byte fixed, must change the
-    fingerprint; it also fingerprints deterministically across two calls."""
+    """.bandgroup is hashed as its own bytes, like any other file, so changing the manifest
+    alone, with its named band files held byte-for-byte fixed, must change the fingerprint; it
+    also fingerprints deterministically across two calls."""
     date = "2026-02-11"
     images = tmp_path / "images" / date
     images.mkdir(parents=True)

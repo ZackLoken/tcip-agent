@@ -1050,11 +1050,11 @@ def test_run_inference_staging_escape_writes_and_floors_the_sidecar_stamp(tmp_pa
 
 def test_run_inference_images_dir_gates_before_the_pass_not_after(tmp_path, monkeypatch):
     """The images_dir regime's gate runs before the expensive pass, the same ordering the
-    raster_path regime uses, never only after the verified pass has run. A real checkpoint with
-    no tile geometry at all (no persisted tile size, no untiled training
-    frame to derive a native-ratio edge from, no explicit override) must refuse without ever
-    reaching the model's own forward pass; GenericPredictor's predict_batch is monkeypatched to
-    raise if called at all, so this proves the skip, not just that no bucket got written."""
+    raster_path regime uses, never only after the verified pass has run. A real checkpoint
+    with no tile geometry at all (no persisted tile size, no untiled training frame to derive
+    a native-ratio edge from, no explicit override) must refuse without ever reaching the
+    model's own forward pass; GenericPredictor's predict_batch is monkeypatched to raise if
+    called at all, so this proves the skip, not just that no bucket got written."""
     import numpy as np
     import torch
     from PIL import Image
@@ -1443,12 +1443,12 @@ def test_export_aggregated_csv_ships_dimensional_value_with_a_validated_scale(tm
 
 
 def test_export_aggregated_csv_records_every_reconciliation_the_gate_ran(tmp_path):
-    """A delivery whose gate reconciled the count operating point, claim scope, tile geometry and
-    physical scale together stores every one of them: the recorded delivery event's
+    """A delivery whose gate reconciled the count operating point, claim scope, tile geometry
+    and physical scale together stores every one of them: the recorded delivery event's
     document_reconciliations carries the operating_point entry the gate ran,
-    dimension_reconciliations carries claim_scope, tile_size and scale, each validated equal to
-    what the gate's own flags held, documents equal to the operating_point entry's own bindings,
-    and the audit line names the same verified buckets."""
+    dimension_reconciliations carries claim_scope, tile_size and scale, each validated equal
+    to what the gate's own flags held, documents equal to the operating_point entry's own
+    bindings, and the audit line names the same verified buckets."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_PERSISTED_GEOMETRY,

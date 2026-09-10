@@ -669,9 +669,9 @@ def test_project_roots_skips_a_recorded_run_output_dir_that_no_longer_exists(
 
 def test_external_dataset_paths_admits_a_bare_fingerprint_registry_entry(tmp_path: Path):
     """import_project calls this after extraction to disclose which registered datasets stayed
-    external; a bare pre-prefix fingerprint left over from before the restamp family existed
-    must not make the door raise after the extraction it is reporting on has already run, so it
-    reads through read_datasets_raw rather than read_datasets."""
+    external; a bare pre-prefix fingerprint must not make the door raise after the extraction it
+    is reporting on has already run, so it reads through read_datasets_raw rather than
+    read_datasets."""
     project = tmp_path / "project"
     dataset = tmp_path / "dataset"  # a sibling of project, never nested under it: external
     project.mkdir()
@@ -926,10 +926,10 @@ def test_import_project_keeps_a_relative_entry_relative_when_the_archive_carries
 def test_import_project_conforms_a_genuinely_unconformed_registry_the_archive_carries(
     tmp_path: Path,
 ):
-    """An archive made before this family existed carries a bare version-1 registry array; the
-    import door's own on-disk conform (never exercised by a test whose registry the writer
-    already spelled version-2 relative) must wrap and respell it so the weights load at the new
-    location, not merely leave an already-conformed registry untouched."""
+    """An archive carries a bare version-1 registry array; the import door's own on-disk conform
+    (never exercised by a test whose registry the writer already spelled version-2 relative)
+    must wrap and respell it so the weights load at the new location, not merely leave an
+    already-conformed registry untouched."""
     import zipfile
 
     from tcip_mcp.model_registry import ModelRegistry, read_registry_index, registry_index_key
@@ -971,10 +971,10 @@ def test_import_project_conforms_a_genuinely_unconformed_registry_the_archive_ca
 def test_import_project_conforms_a_stray_schema_version_two_registry_the_archive_carries(
     tmp_path: Path,
 ):
-    """An archive whose registry.json is ``{"schema_version": 2, "entries": [...]}``, the
-    version-1 reset's own dev-era shape (planted by rewriting the bundled index's bytes, the
-    reset's own raw-bytes technique), must still conform through the import door's own on-disk
-    conform, and land with the field dropped rather than refusing the whole import."""
+    """An archive whose registry.json is ``{"schema_version": 2, "entries": [...]}``, a dev-era
+    shape planted by rewriting the bundled index's bytes directly, must still conform through
+    the import door's own on-disk conform, and land with the field dropped rather than refusing
+    the whole import."""
     import zipfile
 
     from tcip_mcp.model_registry import ModelRegistry, read_registry_index, registry_index_key
