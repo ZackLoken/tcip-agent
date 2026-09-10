@@ -382,6 +382,23 @@ def test_write_subject_registry(tmp_path):
         ["closed", "open"]
 
 
+def test_write_subject_registry_response_names_the_store_written_path_not_a_foreign_name(
+    tmp_path,
+):
+    """``output_path``'s directory is what the write is keyed by; the store's own file name is
+    ``subjects.json`` regardless of what file name the caller passed, and the response says so."""
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
+
+    foreign = tmp_path / "c.json"
+    res = write_subject_registry(
+        str(tmp_path), subjects={"bud": {}}, output_path=str(foreign))
+
+    assert "error" not in res
+    assert res["subjects_path"] == str(tmp_path / "subjects.json")
+    assert (tmp_path / "subjects.json").is_file()
+    assert not foreign.exists()
+
+
 def test_write_subject_registry_no_labels(tmp_path):
     from tcip_mcp.tools.annotation_tools import write_subject_registry
     # An empty registry mapping is not authorable: the tool refuses rather than writing nothing.
