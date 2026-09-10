@@ -823,8 +823,8 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `author_trait_spec` | `trait_spec_authoring_tools.py:25` | yes | Register a trait that does not yet exist, and record why, in the breeder's terms. |
-| `revise_trait_spec` | `trait_spec_authoring_tools.py:130` | yes | Update one or more fields on an already-registered trait's spec, and record why. |
+| `author_trait_spec` | `trait_spec_authoring_tools.py:27` | yes | Register a trait that does not yet exist, and record why, in the breeder's terms. |
+| `revise_trait_spec` | `trait_spec_authoring_tools.py:139` | yes | Update one or more fields on an already-registered trait's spec, and record why. |
 
 ### orthomosaic_tools.py (1 tool)
 
@@ -1520,7 +1520,7 @@ dataset-scoped (`save_annotations`, `tools/annotation_tools.py:147`; `write_subj
 `propose_annotations`, `tools/proposal_tools.py:182`; `stage_proposals`, `tools/proposal_tools.py:752`)
 and two project-scoped
 (`state_trait_operationalization`, `tools/operationalization_tools.py:19`; `author_trait_spec`,
-`tools/trait_spec_authoring_tools.py:25`; `dataset_scope_of` admits a `project_root` argument the
+`tools/trait_spec_authoring_tools.py:27`; `dataset_scope_of` admits a `project_root` argument the
 same way it admits a dataset root, since both are directories carrying their own `.tcip/`). A
 resolution that answers "no dataset" leaves the call a platform event; a resolver that raises
 refuses the call rather than filing it there.
@@ -2533,7 +2533,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP writer, the loader, and the GUI trait list agree on the spec fields and the reason a spec was skipped.
 Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:358` (`def trait_specs_dir(`, the one placement, with `TRAIT_SPECS_STORE`, `traits.py:399`, and `trait_spec_key`, `traits.py:419`, addressing one spec).
-Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:462` (`load_trait_specs_with_errors`, the one scan and the one skip-reason list) and `traits.py:549` (`revise_trait_spec_fields`, the one write that reads, merges and compare-and-sets against the version it read, with `write_trait_spec_fields` its wrapper). `packages/tcip-web/src/tcip_web/routes/results.py:443` and `packages/tcip-mcp/src/tcip_mcp/cli/doctor.py:588` name the project and let the placement resolve here.
+Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:464` (`load_trait_specs_with_errors`, the one scan and the one skip-reason list) and `traits.py:551` (`revise_trait_spec_fields`, the one write that reads, merges and compare-and-sets against the version it read, with `write_trait_spec_fields` its wrapper). `packages/tcip-web/src/tcip_web/routes/results.py:443` and `packages/tcip-mcp/src/tcip_mcp/cli/doctor.py:588` name the project and let the placement resolve here.
 Phase 3 verdict: single.
 
 ## S39. Phenology CSV column vocabulary
