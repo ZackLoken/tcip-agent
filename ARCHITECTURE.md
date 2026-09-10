@@ -1995,8 +1995,8 @@ imports it lazily inside the function, and
 `packages/tcip-web/src/tcip_web/agent_session_start.py:72`
 (`workspace.active_project_if_present(create=False)`) reads the marker through the same seam
 `activate_project` writes. Its tests write the marker through `workspace.activate_project`,
-`tests/test_agent_ritual_hooks.py:58`; `test_session_start_hook_runs_as_a_real_subprocess`,
-`tests/test_agent_ritual_hooks.py:115`, runs the hook as a real subprocess against a marker
+`tests/test_agent_ritual_hooks.py:57`; `test_session_start_hook_runs_as_a_real_subprocess`,
+`tests/test_agent_ritual_hooks.py:114`, runs the hook as a real subprocess against a marker
 written that way, so the fresh-interpreter claim is measured rather than inferred.
 
 ## 24. Formats named but not exhaustively enumerated in phase0
