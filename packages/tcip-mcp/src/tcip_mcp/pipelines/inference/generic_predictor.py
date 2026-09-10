@@ -111,9 +111,8 @@ class GenericPredictor:
         self.model.to(self.device)
         self.model.eval()
 
-        # Make the operating point govern which boxes exist (in-model thresholds), not just a
-        # post-hoc filter that can never recover a box the model already discarded (the audit's
-        # finding). No-op for non-detection models. See pipelines/operating_point.py.
+        # Make the operating point govern which boxes exist (in-model thresholds), not just a post-hoc filter that can never recover a box the model already discarded. No-op for
+        # non-detection models. See pipelines/operating_point.py.
         from tcip_mcp.pipelines.operating_point import set_detector_operating_point
         set_detector_operating_point(self.model, score_thresh=score_threshold,
                                      nms_thresh=nms_iou, detections_per_img=max_dets)

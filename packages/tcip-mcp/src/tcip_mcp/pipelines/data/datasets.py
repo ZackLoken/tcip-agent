@@ -1105,9 +1105,8 @@ def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Da
     if tiling and tiling.get("enabled", True) and task == "detection":
         transforms = kwargs.pop("transforms", None)
         base = cls(**kwargs)
-        # Before constructing the tiler: its __init__ indexes every image, and that pass must
-        # measure frames at the band count the tiles will be decoded at. Stamping only the wrapper
-        # afterwards left the index built at 3 channels and the tiles read at N.
+        # Before constructing the tiler: its __init__ indexes every image, and that pass must measure frames at the band count the tiles will be decoded at. Stamping only the wrapper
+        # afterwards leaves the index built at 3 channels and the tiles read at N.
         base.expected_channels = num_channels
         ds = TiledDetectionDataset(base, transforms=transforms, **tile_kwargs_from_tiling(tiling))
     else:

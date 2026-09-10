@@ -76,8 +76,7 @@ class UncertaintyScorer(BaseScorer):
             else:
                 outputs = model(tensor)
                 if isinstance(outputs, dict):
-                    # Multi-head: average classification-style entropy across all heads
-                    # (was first-head-only, which ignored every other head's uncertainty).
+                    # Multi-head: average classification-style entropy across all heads.
                     entropies = [
                         _entropy(v) for v in outputs.values()
                         if isinstance(v, torch.Tensor) and v.dim() >= 2

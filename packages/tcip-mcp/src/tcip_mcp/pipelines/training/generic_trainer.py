@@ -285,8 +285,8 @@ def _save_checkpoint(
 ) -> None:
     """Write a resumable periodic checkpoint.
 
-    Superset of the previous payload, ``GenericPredictor`` reads only the model reference
-    (``model_source``) + the weights and stays compatible.
+    ``GenericPredictor`` reads only the model reference (``model_source``) + the weights, so it
+    stays compatible regardless of what else this payload carries.
     """
     write_checkpoint(stamp_model_ref({
         STATE_DICT_KEY: model.state_dict(),
@@ -365,8 +365,8 @@ def resolve_selection_metric(
     """Resolve the bare metric key (into ``val_metrics``, without the ``val_`` prefix) that drives
     both ``model_best.pt`` and early stopping, deliberately the same key for both.
 
-    Default (unchanged from the prior hardcoded behavior): ``"objective"`` for detection/
-    instance_seg, else ``"loss"``. An explicit ``requested`` is honored, except it is rejected when
+    Default: ``"objective"`` for detection/instance_seg, else ``"loss"``. An explicit
+    ``requested`` is honored, except it is rejected when
     ``trait`` is a center-match trait and ``requested`` names a metric that trait's own
     localization criterion demotes to comparability-only (``evaluation.CENTER_MATCH_COMPARABILITY_KEYS``)
 , selecting checkpoints by a metric the trait doesn't trust is a defensibility regression, not a

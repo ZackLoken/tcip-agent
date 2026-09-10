@@ -1,5 +1,5 @@
-"""Review -> retrain feedback: materialize curated datasets (W5) and reconstruct a review-confirmed
-calibration reference from review verdicts (W1)."""
+"""Review -> retrain feedback: materialize curated datasets and reconstruct a review-confirmed
+calibration reference from review verdicts."""
 
 from tcip_mcp.pipelines.feedback.review_calibration import (
     describe_review_validation,

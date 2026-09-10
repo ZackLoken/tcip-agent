@@ -289,8 +289,7 @@ def coco_detection_metrics(
         except IndexError:
             return base
         coco_eval = COCOeval(coco_gt, coco_dt, iouType=iou_type)
-        # Include 100 so map/map50/map75 stay the standard, cap-comparable AP (the old [1,10,max_dets]
-        # made summarize() report AP=0.0 for any non-100 cap); max_dets adds the operating-cap figures.
+        # Include 100 so map/map50/map75 stay the standard, cap-comparable AP; max_dets adds the operating-cap figures.
         coco_eval.params.maxDets = sorted({1, 100, int(max_dets)})
         coco_eval.params.imgIds = [im["id"] for im in images]
         coco_eval.evaluate()
@@ -1177,7 +1176,7 @@ def evaluate(
     ``trait``: when set, a count trait's derived localization criterion (traits.py, e.g. a
     center-match at half the class-average size) governs the reported detection count and the f1 the
     selection composite optimizes; map50 stays a labeled comparability metric. Absent -> the
-    IoU@``iou_threshold`` convention governs (the prior behavior).
+    IoU@``iou_threshold`` convention governs.
     """
     is_detection = task in ("detection", "instance_seg")
     is_instance_seg = task == "instance_seg"

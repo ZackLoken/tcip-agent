@@ -67,8 +67,8 @@ def stem_collision_key(name: str) -> str:
 def _scan_identities(d: Path) -> dict[str, list[tuple[Path, "BandGroupRef | None"]]]:
     """One manifest glob and one ``d.iterdir()`` walk with one extension test, the shared
     enumeration :func:`list_logical_images` and :func:`bucket_logical_identities` both build on,
-    so directory enumeration happens once per call rather than the two independent walks each
-    used to make. Keyed by :func:`stem_collision_key`; a key's list holds more than one entry
+    so directory enumeration happens once per call rather than two independent walks. Keyed
+    by :func:`stem_collision_key`; a key's list holds more than one entry
     exactly when it is ambiguous.
 
     A readable manifest is one identity under its own exact stem, paired with the parsed

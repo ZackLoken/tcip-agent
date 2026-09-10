@@ -510,8 +510,8 @@ def redraw_starved_issue(
     each active side, met first from the smallest foreground groups; a background-only group
     (zero foreground signal, e.g. a confirmed negative) is placed afterwards by tile deficit and
     can concentrate entirely onto the side that already met its minimum, leaving the other side
-    genuinely empty. Counting every distinct group regardless of foreground signal (as this
-    function once did) misses exactly that case: two groups, one of them entirely background,
+    genuinely empty. Counting every distinct group regardless of foreground signal misses
+    exactly that case: two groups, one of them entirely background,
     reads as enough groups when only one of them can ever satisfy a side's minimum. Checked
     before any run starts (:func:`~tcip_mcp.tools.training_tools.preflight_config`, and
     ``run_hyperparameter_search``'s own pre-mint check for ``split_draws``), ahead of the redraw's own refusal
@@ -1299,7 +1299,7 @@ def calibration_universe_from_manifest(
     floor below then counts only foreground groups, so a universe of background-only groups
     cannot pass it. Omitted, the floor falls back to counting every group in the universe
     (foreground or not), the weaker check every caller that has not wired foreground info still
-    gets; the doors this family ships all wire it, through
+    gets; the platform's own calibration doors all wire it, through
     :func:`resolve_manifest_calibration_universe`.
 
     ``min_foreground_groups`` is the caller's own floor, forwarded to
@@ -1483,9 +1483,9 @@ def resolve_locked_cal_holdout_split(
     lets propagate unmodified. A lock file that exists but fails to parse (corrupt, not merely
     absent) raises for the same reason when ``force_redraw=False``, "unreadable" must never
     silently become "no lock exists yet, draw a fresh one", which would violate this function's
-    own never-a-silent-re-cut guarantee. ``force_redraw=True`` (the audited admin path) is
-    itself the deliberate fix for a corrupt lock, so it proceeds past a corrupt file rather than
-    also being blocked by it, redraw history just can't be recovered from what couldn't be read.
+    own never-a-silent-re-cut guarantee. ``force_redraw=True`` (the audited admin path)
+    proceeds past a corrupt lock file rather than also being blocked by it; redraw history just
+    can't be recovered from what couldn't be read.
 
     ``scope_root`` is required and has no default: it is the root the lock is stored under, the
     dataset root of the labels or records the split was drawn over. See
@@ -1515,7 +1515,7 @@ def resolve_locked_cal_holdout_split(
             ) from exc
         logger.warning(
             "the cal/holdout lock for identity_hash=%s is corrupt (%s); force_redraw=True "
-            "proceeds to draw a fresh lock (this call is the deliberate, audited fix). Its prior "
+            "proceeds to draw a fresh lock. Its prior "
             "redraw history could not be recovered from the unreadable record.",
             identity_hash, exc,
         )

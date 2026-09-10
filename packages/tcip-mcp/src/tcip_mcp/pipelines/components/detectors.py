@@ -43,8 +43,8 @@ class BackboneNeckAdapter(nn.Module):
 def _default_anchor_sizes(num_levels: int, base: int = 32) -> tuple[tuple[int, ...], ...]:
     """One anchor size per pyramid level, doubling each level.
 
-    ``base=32, num_levels=4`` -> ``((32,),(64,),(128,),(256,))`` (the historical
-    default). Generated for ``num_levels`` so ``add_p2`` (5+ levels) doesn't crash.
+    ``base=32, num_levels=4`` -> ``((32,),(64,),(128,),(256,))``. Generated for ``num_levels``
+    so ``add_p2`` (5+ levels) doesn't crash.
     """
     return tuple((base * 2 ** i,) for i in range(num_levels))
 
@@ -117,7 +117,7 @@ def _build_faster_rcnn(
     from torchvision.ops import MultiScaleRoIAlign
 
     sizes = _default_anchor_sizes(num_levels, anchor_base_size)
-    # aspect_ratios is a builder kwarg (was hardcoded): set/derive it per trait, since an elongated
+    # aspect_ratios is a builder kwarg: set/derive it per trait, since an elongated
     # object class (~1:3-1:6) needs a tall ratio the default (0.5,1,2) can't match.
     ar = tuple(float(r) for r in aspect_ratios)
     anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=(ar,) * num_levels)
