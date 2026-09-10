@@ -52,7 +52,7 @@ const STATUS_FILTERS: { value: "all" | ImageStatus; label: string }[] = [
   { value: "negative", label: "Negative" },
 ];
 
-/** A pressed-state tool button with a status dot, matching the mockup's Editor tools. */
+/** A pressed-state tool button with a status dot. */
 function Etool({
   label,
   pressed,

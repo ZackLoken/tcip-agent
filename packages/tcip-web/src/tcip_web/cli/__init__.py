@@ -40,9 +40,10 @@ COMMANDS: dict[str, str] = {
     "shp-to-plant-csv": "tcip_mcp.cli.shp_to_plant_csv",
     "rename-subject-registry": "tcip_mcp.cli.rename_subject_registry",
 }
-"""Command name (as typed after ``tcip``) to the module exposing its ``main(argv)``, named after
-the script it replaces with underscores respelled as hyphens, never the retired conform name for
-the two renamed commands (``write-project-site``, ``repair-classified-predictions``)."""
+"""Command name (as typed after ``tcip``) to the module exposing its ``main(argv)``. A command
+name is that module's own final name with underscores respelled as hyphens, never the retired
+conform name for the two renamed commands (``write-project-site``,
+``repair-classified-predictions``)."""
 
 
 def _usage() -> str:
