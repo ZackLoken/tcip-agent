@@ -1,7 +1,7 @@
 """Shared active-learning helpers used by the AL MCP tools.
 
 ``prioritize_review_queue`` builds a method→scorer mapping and enforces a composed-detector
-precondition; factoring both here keeps a future second logit-reading entry point from drifting.
+precondition; both live here, so a second logit-reading entry point reads the same pair.
 (The sibling door ``triage_predictions`` deliberately does not use these: it partitions by
 prediction confidence via ``predict_batch``, which is kind-agnostic and reads no logits.)
 """

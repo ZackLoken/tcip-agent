@@ -23,7 +23,7 @@ sensor name:
 2. Explicit manifest, a caller-supplied ``{group_id: {band_name: filename}}`` mapping, for a
    sensor with no embedded correlation metadata at all.
 3. Refuse, don't guess: no embedded match and no explicit mapping leaves every file exactly
-   as independent as it is today. No filename-pattern fallback: a guessed grouping that happens to
+   as independent as it is. No filename-pattern fallback: a guessed grouping that happens to
    be wrong would silently corrupt every downstream annotation/measurement.
 """
 
@@ -426,7 +426,7 @@ def detect_and_write_band_groups(
     re-inferred), only files not already claimed by some manifest are offered as candidates.
     ``explicit_groups`` (strategy 2) is tried first when given; the embedded-metadata table
     (strategy 1) runs over whatever candidates it leaves unclaimed. No match under either -> those
-    files are left exactly as independent as they are today (strategy 3, refuse-don't-guess).
+    files are left exactly as independent as they are (strategy 3, refuse-don't-guess).
 
     A group whose own stem (the siblings' common prefix, not any one source file's stem) is
     reserved for a prediction bucket's provenance stamp (``tcip_annotation.json_io.
@@ -441,7 +441,7 @@ def detect_and_write_band_groups(
     an embedded-metadata group, the caller's own ``group_id`` for an explicit one) held by any
     identity other than a manifest already recorded under this group's own exact stem, or one of
     this group's own about-to-be-claimed members, puts the group under ``"refused"`` naming the
-    colliding file, and writes no manifest -- the same fold the ingest door's pre-scan refuses by,
+    colliding file, and writes no manifest, the same fold the ingest door's pre-scan refuses by,
     so this pass never mints the ambiguity the door exists to keep out. A manifest already
     recorded under the exact stem keeps the ``Version.ABSENT`` idempotence below rather than
     counting as a collision. Writing a manifest also removes its own claimed members from the

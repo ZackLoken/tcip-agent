@@ -176,8 +176,8 @@ def group_balanced_split(
     min_foreground_groups:
         Per-side minimum count of foreground groups the balancing pass guarantees before it runs
         its ordinary largest-first assignment, met first with the smallest foreground groups so
-        the dense ones remain for balancing. Omitted, every active side gets a minimum of one
-        (today's shape, so :func:`cal_holdout_split` and a stats-only draw are untouched); a side
+        the dense ones remain for balancing. Omitted, every active side gets a minimum of one,
+        the floor :func:`cal_holdout_split` and a stats-only draw resolve to; a side
         named here with no active fraction is ignored. A tree with fewer foreground groups than a
         minimum asks for simply gets fewer than that side's floor met, this function never raises
         on it (a caller wanting a hard floor calls :func:`refuse_insufficient_foreground_groups`
@@ -186,7 +186,7 @@ def group_balanced_split(
         The minimum pass's own foreground signal, independent of ``annotation_counts`` (which
         stays the balancing pass's signal, gated by whatever a caller's own stratification flag
         does before this function is ever called). Omitted, the minimum pass draws from whatever
-        ``annotation_counts`` produced (today's shape); given, a group counts toward a side's
+        ``annotation_counts`` produced; given, a group counts toward a side's
         minimum only when its ``foreground_counts`` sum is positive, even when
         ``annotation_counts`` is ``None`` and the balancing pass is running its no-foreground,
         every-group-is-foreground fallback. A manifest draw passes its subject-scoped foreground

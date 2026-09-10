@@ -8,8 +8,7 @@ reviewer has accepted it. What produced it is not this module's concern; what ma
 that a person positively stands behind it (:func:`load_canopy_segments`). The tie from a segment
 to a plant identity rests on the registry position's own accuracy: a position displaced by more
 than its disclosed clearance places the plant in a neighbour's canopy with every check here
-passing, since no breeder-confirmed tie or validated position-error bound exists yet (see the
-design's own record for that open point).
+passing, since no breeder-confirmed tie or validated position-error bound exists yet.
 
 Composes :mod:`tcip_mcp.pipelines.postprocessing.orthomosaic_mapping` (the pixel <-> real-world
 mapping and the shared in-frame partition) and

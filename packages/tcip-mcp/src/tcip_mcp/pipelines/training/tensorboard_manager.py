@@ -7,7 +7,7 @@ process's last handle to the job closes, on any parent death. On Linux and macOS
 under a guardian process (``tensorboard_guardian``) that watches this process by pid and, on this
 process's death, ends the child within the guardian's own ``_PARENT_POLL_SECONDS`` (about a
 second) to detect the death, plus ``_GUARDIAN_TERM_GRACE_SECONDS`` for a child that ignores its
-terminate signal, about three seconds together at today's values. Everywhere, and as a second
+terminate signal, about three seconds together at these values. Everywhere, and as a second
 line of defense beside the platform tie, a normal interpreter exit runs an ``atexit`` hook that
 stops every tracked child, which does not run when this process is killed rather than exiting on
 its own.
@@ -281,7 +281,7 @@ def launch_tensorboard(logdir: str, key: str | None = None) -> dict:
     ``{'error': ..., 'output': ...}`` when the process died during startup, so a caller never
     advertises a URL nothing is serving. If TensorBoard is already running for this logdir,
     returns existing info. ``lifetime_tie`` is ``"job"``, ``"guardian"``, or ``"none: <reason>"``,
-    a fact recorded for whichever caller wants it; no route reads it today. Two things can go
+    a fact recorded for whichever caller wants it; no route reads it. Two things can go
     wrong here: an exception during the launch or the tie assignment is a failed launch, the
     child killed and waited if one was started, reported back as ``error``, a kill this cannot
     confirm within ``_STOP_WAIT_SECONDS`` folded into that same message by pid rather than

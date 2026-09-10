@@ -8,7 +8,7 @@ Ties together the region-completeness gate (:mod:`region_completeness`), the hal
 :func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split` sub-banding of each reserved region,
 and per-band record building (shaped like ``pipelines.calibration.calibrate_operating_point``'s own
 per-image records) into :func:`~tcip_mcp.pipelines.operating_point.resolve_operating_point`, the
-same gate every other calibration path resolves through -- never a second, parallel validation
+same gate every other calibration path resolves through, never a second, parallel validation
 mechanism.
 """
 

@@ -121,8 +121,8 @@ def list_logical_images(images_dir: str | Path) -> dict[str, "Path | BandGroupRe
     Built from :func:`bucket_logical_identities`' own scan (:func:`_scan_identities`): a
     :class:`BandGroupRef` for a manifest identity, that file's own path for a raw one. Raises
     :class:`AmbiguousImageStem` naming every ambiguous key's own paths; folded uniqueness never
-    means case-insensitive lookup, so the returned mapping is keyed by the exact stem, exactly as
-    it was before the fold, since the refusal above makes a key's divergent identities unreachable.
+    means case-insensitive lookup, so the returned mapping is keyed by the exact stem, since the
+    refusal above makes a key's divergent identities unreachable.
 
     A manifest whose ``schema_version`` this reader does not accept propagates as
     :class:`tcip_store.SchemaVersionRefused`, uncaught, rather than as this refusal: a newer-written
@@ -247,8 +247,8 @@ def place_logical_image(
     and refuse ``BadKey`` after the bands had already landed, half-placing the group.
 
     ``copy_files=True`` routes each band and plain image through the store under
-    ``dest_key(filename)`` -- the caller's own key, since deriving one from ``dest_dir`` here
-    would nest ``images/images/`` -- and the destination manifest through its own
+    ``dest_key(filename)`` (the caller's own key, since deriving one from ``dest_dir`` here
+    would nest ``images/images/``) and the destination manifest through its own
     ``band_group_manifest_key(dest_dir, stem)``, so that store earns its row rather than
     borrowing the imagery one. A cheap ``dst.exists()`` check in front of each store write skips
     a destination already placed without reading or hashing its existing bytes; it is an
@@ -421,7 +421,7 @@ def to_pil_if_faithful(arr, *, band_interpretations: "tuple[str, ...] | None" = 
     whatever container they decoded from, while dtypes and band counts PIL has no faithful mode
     for stay ndarray. RGBA is a faithful *pixel* round-trip for any 4-channel uint8 array, but
     PIL's augmentation chain (brightness/contrast/saturation) treats an alpha channel differently
-    than a color one, silently leaving it unperturbed -- correct when the 4th channel really is
+    than a color one, silently leaving it unperturbed: correct when the 4th channel really is
     transparency, wrong when it is a genuine spectral band (RGB+NIR) that should be treated like
     any other channel. ``band_interpretations`` is the caller's own source's GDAL color
     interpretations (``getattr(src, "band_interpretations", None)``, the convention

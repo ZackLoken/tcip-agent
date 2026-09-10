@@ -55,8 +55,8 @@ def resolve_pixel_size(source: Path | BandGroupRef) -> tuple[PixelSize | None, s
        :class:`ValueError` from ``tifffile`` on a container that is not a TIFF (``.npy``/``.npz``,
        which ``capture_kind`` also calls rasters) -> "it is not a TIFF"; ``OSError`` -> "it could
        not be read".
-    3. ``pyproj.CRS.from_epsg(epsg)`` resolves (a :class:`pyproj.exceptions.CRSError` -- a
-       user-defined or unknown code -- is the reason).
+    3. ``pyproj.CRS.from_epsg(epsg)`` resolves (a :class:`pyproj.exceptions.CRSError`, raised for
+       a user-defined or unknown code, is the reason).
     4. The CRS is not compound, checked before any unit code: a compound CRS reports an empty
        ``unit_code`` on its horizontal axes too and would otherwise refuse for the wrong reason.
     5. The CRS is projected.

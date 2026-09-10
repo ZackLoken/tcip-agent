@@ -281,7 +281,8 @@ class DetectionAssignment:
     single static mosaic frame carries no capture order to anchor on. Mirrors ``Assignment``'s own
     honesty: no plant within tolerance is recorded as unmapped, never force-assigned to the
     nearest one regardless of distance, and no fabricated 0-1 confidence, only ``distance_m``
-    (see ``plant_mapping``'s module docstring for why a confidence score was removed there).
+    (``plant_mapping``'s module docstring states the rule: ``distance_m`` plus ``source``, never a
+    score read as a probability).
     """
 
     detection_index: int

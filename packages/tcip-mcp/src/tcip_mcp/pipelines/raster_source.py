@@ -293,7 +293,7 @@ class _RegionView:
     and every read is translated into the parent's coordinate space by adding the rect's own
     origin. A read past this view's declared bounds raises rather than falling through to the
     parent's own out-of-bounds check, which validates against the *whole* mosaic and would
-    otherwise happily serve real training/buffer pixels through the offset -- exactly what
+    otherwise happily serve real training/buffer pixels through the offset: exactly what
     ``predict_tiled``'s own edge clip (``min(tile_y + edge, source.height)``, checked against
     this class's own reported ``height``) relies on to keep a windowed pass over one region from
     ever silently reading pixels outside it. This must hold for every future caller of this
@@ -1037,7 +1037,7 @@ class RasterIdentity:
     ``seed``/``window_size``/``max_windows``/``pixel_fraction`` are the sampling parameters that
     produced ``pixel_checksum``, recorded by name (not just implied by the windows actually read)
     so a later comparison can recompute the other side's identity under the exact same parameters
-    rather than each side's own independent default -- otherwise a genuinely identical raster can
+    rather than each side's own independent default: otherwise a genuinely identical raster can
     checksum differently purely from parameter drift between the two calls, never from a real
     content difference.
     """

@@ -199,7 +199,7 @@ def spatial_single_source_split(
     construction, and the class/subject/id-map resolution inside it, cost nothing extra to
     share). A test region is derived and reserved alongside train/val (excluded from both, so it
     is genuinely held out) but no dataset is built for it: nothing downstream consumes a third
-    dataset from this function today, so only its geometry and kept-tile count are recorded,
+    dataset from this function, so only its geometry and kept-tile count are recorded,
     material the block-aware calibration mechanism (``pipelines.block_calibration``) consumes
     without recomputing the split.
 
@@ -207,7 +207,7 @@ def spatial_single_source_split(
     region, ``calibration``, alongside train/val/test, at that fraction of the axis: material for
     the same block-calibration mechanism's calibration-side bands. Unset, this function's
     behavior (fractions, split_names, every returned value) is byte-identical to the 3-way split
-    it has always run. When explicitly set, all three of :func:`spatial_strip_split`'s distinct
+    it runs without one. When explicitly set, all three of :func:`spatial_strip_split`'s distinct
     silent-``None``-return reasons (no extent from the label file; the strip layout itself
     infeasible; an empty train/val/test/calibration side surviving tile filtering) instead raise
     ``ValueError`` naming which one fired: an opt-in reserved region silently degrading to no

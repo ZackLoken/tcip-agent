@@ -282,7 +282,7 @@ def with_supersessions(
     ``supersessions`` maps a superseded event's id to its own stored ``delivery_supersessions``
     record (:func:`tcip_mcp.pipelines.resolution.load_delivery_supersessions`'s own shape), read
     once by the caller rather than once per event. The one join a delivery-events reader composes
-    through; the Results tab's delivery-events route is its caller today, and a second reader
+    through; the Results tab's delivery-events route is its caller, and a second reader
     joins here rather than reconstructing the pairing, so no two readers can disagree about which
     record answers for which event. ``read_audit_log`` reads the audit log itself and performs no
     such join.

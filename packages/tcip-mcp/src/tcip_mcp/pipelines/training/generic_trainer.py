@@ -4,7 +4,7 @@ This trainer works with *any* task type (detection, classification,
 ordinal, regression, segmentation) because it delegates everything
 to the model's forward() which returns a loss dict in train mode.
 
-Preserves: TensorBoard, JSONL metrics, progressive unfreezing,
+Provides: TensorBoard, JSONL metrics, progressive unfreezing,
 early stopping, mixed precision, gradient accumulation, checkpoints.
 
 The run registry (``TrainRun``, create/attach/get/list/cancel_run) lives in
@@ -474,7 +474,8 @@ def apply_stage_freeze(
     all backbone stages; ``>0`` freezes up to that stage, best-effort, a bespoke model need not
     expose ``freeze_backbone``. When ``enforce_monotonic`` and ``prev_trainable`` is given, an
     unfreeze that shrinks the trainable set raises (progressive unfreeze must only ever grow it).
-    Extracted so a hand-rolled ``train(ctx)`` gets the identical policy + guard the default trainer uses.
+    Shared so a hand-rolled ``train(ctx)`` gets the identical policy and guard the default
+    trainer uses.
     """
     if not freeze_to or not hasattr(model, "freeze_backbone"):
         for p in model.parameters():
