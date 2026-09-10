@@ -439,20 +439,22 @@ def trait_spec_unconformed(document: dict) -> str | None:
 
     A mapping with no ``schema_version`` key, or with ``1``, was never written by ``_encode_spec``'s
     unconditional stamp: either a record written before the rename (``positive_class_name`` is now
-    ``positive_value``), which no platform door conforms, or a hand-authored file with no stamp,
-    conformed by hand (``"schema_version": 2`` and ``positive_value`` in place of
-    ``positive_class_name``). Distinct from the seam's own too-new refusal
-    (``SchemaVersionRefused``, ``kind: "version_refused"``): that is a
-    document above this store's declared ceiling; this is a document at or under it whose shape the
-    ceiling alone does not describe, since a field renamed rather than the store gaining a version.
+    ``positive_value``), restated through ``author_trait_spec`` with the caller supplying every
+    field the spec carries, or a hand-authored file with no stamp, conformed by hand
+    (``"schema_version": 2`` and ``positive_value`` in place of ``positive_class_name``). Distinct
+    from the seam's own too-new refusal (``SchemaVersionRefused``, ``kind: "version_refused"``):
+    that is a document above this store's declared ceiling; this is a document at or under it whose
+    shape the ceiling alone does not describe, since a field renamed rather than the store gaining a
+    version.
     """
     version = document.get("schema_version")
     if version is None or version == 1:
         return (
             "this trait spec record predates the subject-registry rename (positive_class_name is "
-            "now positive_value) and carries no schema_version: 2 stamp; a hand-authored file is "
-            "conformed by adding \"schema_version\": 2 and renaming positive_class_name to "
-            "positive_value, and no platform door conforms a stored record; once conformed, the "
+            "now positive_value) and carries no schema_version: 2 stamp; a stored record is "
+            "restated through author_trait_spec, the caller supplying every field the spec "
+            "carries, and a hand-authored file is conformed by adding \"schema_version\": 2 and "
+            "renaming positive_class_name to positive_value; once restated or conformed, the "
             "trait's statement and operationalization read as stale until restated and "
             "re-confirmed"
         )
@@ -559,7 +561,8 @@ def revise_trait_spec_fields(
     is not a ``TraitSpec`` field, no caller sets it directly, and merging it in would let a
     config editor stamp a version the store seam never validated; the encoder stamps the current
     ceiling on every write regardless, so no caller-supplied value could ride through anyway.
-    Refuses a stored record :func:`trait_spec_unconformed` answers a reason for, before any merge.
+    Refuses a stored record :func:`trait_spec_unconformed` answers a reason for, before any merge;
+    the restatement door for such a record is :func:`author_trait_spec`, never this one.
     A ``rationale`` that is given must say something, checked before any read.
 
     The statements scope this reads and writes is :func:`trait_spec_statements_scope` (project_root)
@@ -823,6 +826,39 @@ def _statement_snapshot(spec: TraitSpec) -> dict[str, Any]:
     return {field: canonical(getattr(spec, field)) for field in _AUTHORED_SPEC_FIELDS}
 
 
+_RETIRED_SPEC_FIELD_NAMES = {"positive_value": "positive_class_name"}
+"""An authored field's name before the subject-registry rename, the one rename
+:func:`trait_spec_unconformed` exists for: a pre-rename record's ``positive_value`` reads back
+under this retired key. Consulted only by :func:`_spec_replaced_values`, when ``author_trait_spec``
+restates a record :func:`trait_spec_unconformed` answers a reason for."""
+
+
+def _spec_replaced_values(
+    old: dict[str, Any], authored: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Every authored field whose value in ``old`` (a stored record predating the
+    subject-registry rename) differs from the value ``author_trait_spec`` is about to write,
+    each as ``{"recorded": <old>, "authored": <new>}`` in canonical form.
+
+    A pre-rename field is read from its retired name (:data:`_RETIRED_SPEC_FIELD_NAMES`) when the
+    current name is absent from ``old``, so the renamed ``positive_class_name``/``positive_value``
+    pair compares the same underlying value under its two names rather than reading as an
+    always-missing field.
+    """
+    replaced: dict[str, dict[str, Any]] = {}
+    for field in _AUTHORED_SPEC_FIELDS:
+        if field in old:
+            recorded = old[field]
+        else:
+            retired_name = _RETIRED_SPEC_FIELD_NAMES.get(field)
+            recorded = old.get(retired_name) if retired_name else None
+        recorded_value = canonical(recorded)
+        authored_value = canonical(authored.get(field))
+        if recorded_value != authored_value:
+            replaced[field] = {"recorded": recorded_value, "authored": authored_value}
+    return replaced
+
+
 _CARRIED_FORWARD_SPEC_FIELDS = (
     "localization", "localization_tolerance", "localization_tolerance_frac",
     "sliver_policy", "sliver_frac",
@@ -958,6 +994,16 @@ def author_trait_spec(
     behind it (the recovery state after a second write that failed partway), this call proceeds as
     a restatement rather than refusing, since there is nothing to collide with.
 
+    A spec :func:`trait_spec_unconformed` answers a reason for (predates the subject-registry
+    rename, no ``schema_version: 2`` stamp) is also not a collision, whatever its statement: such a
+    record is not one any reader can load, so its own statement describes it no better whether the
+    statement exists or not. This call proceeds as a full restatement, the caller supplying every
+    field the spec carries exactly as on first creation; the carried-forward fields below still
+    come from the old record, since their names did not move. The returned statement then carries
+    ``replaced_values``, naming every authored field whose value this call is replacing (the
+    retired ``positive_class_name`` read as the prior value of the now-renamed ``positive_value``),
+    each as ``{"recorded": <old>, "authored": <new>}``; absent on every other call.
+
     ``localization``, ``localization_tolerance``, ``localization_tolerance_frac``,
     ``sliver_policy`` and ``sliver_frac`` are not accepted here: they carry forward unchanged from
     an existing spec on a restatement, or stay at ``TraitSpec``'s own dataclass defaults on first
@@ -987,7 +1033,14 @@ def author_trait_spec(
 
     existing_spec = ts.read_versioned(spec_key, default=None)
     existing_statement = ts.read_versioned(statement_key, default=None)
-    if existing_spec.value is not None and existing_statement.value is not None:
+    unconformed_reason = (
+        trait_spec_unconformed(existing_spec.value) if existing_spec.value is not None else None
+    )
+    if (
+        existing_spec.value is not None
+        and existing_statement.value is not None
+        and unconformed_reason is None
+    ):
         raise ValueError(_spec_collision_text(trait))
 
     authored: dict[str, Any] = {
@@ -1010,17 +1063,15 @@ def author_trait_spec(
         "holdout_match_quality_floor": holdout_match_quality_floor,
         "notes": notes,
     }
+    replaced_values: dict[str, dict[str, Any]] = {}
     if existing_spec.value is not None:
-        unconformed_reason = trait_spec_unconformed(existing_spec.value)
-        if unconformed_reason is not None:
-            raise ValueError(
-                f"author_trait_spec cannot restate trait {trait!r}: {unconformed_reason}"
-            )
         authored.update({
             field: existing_spec.value[field]
             for field in _CARRIED_FORWARD_SPEC_FIELDS
             if field in existing_spec.value
         })
+        if unconformed_reason is not None:
+            replaced_values = _spec_replaced_values(existing_spec.value, authored)
 
     spec, reason = _validate_and_write_spec(spec_key, authored, expect=existing_spec.version)
     if spec is None:
@@ -1036,6 +1087,8 @@ def author_trait_spec(
         **agent_identity.statement_fields(),
         **{field: None for field in TRAIT_SPEC_CONFIRMATION_FIELDS},
     }
+    if unconformed_reason is not None:
+        statement["replaced_values"] = replaced_values
     ts.replace(statement_key, statement, expect=existing_statement.version)
     return statement
 

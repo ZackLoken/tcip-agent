@@ -9,8 +9,10 @@ choosing not to fill a field. ``revise_trait_spec`` is the other door: it edits 
 spec already on record, never creates one, and states or restates the trait-spec authoring
 statement when its edit calls for it, the door named for a spec with a stale statement or none
 at all wherever a stated meaning needs the breeder's own confirmation. Authoring creates,
-field-editing merges, and the one documented restatement path (a spec on record whose statement
-never landed) is where the two doors overlap: both then write onto an already-registered spec.
+field-editing merges, and authoring also restates: a spec on record whose statement never landed,
+or one ``trait_spec_unconformed`` answers a reason for (whatever its own statement), are the two
+documented cases where authoring writes onto an already-registered spec rather than refusing.
+Field-editing still refuses either.
 """
 
 from __future__ import annotations
@@ -51,6 +53,12 @@ def author_trait_spec(
     real phenotype, or this refuses rather than registering a fabricated trait. Refuses when a
     spec and its authoring statement are both already on record for this trait; change an
     already-registered spec's fields with `revise_trait_spec` instead.
+
+    A spec that predates the subject-registry rename (no `schema_version: 2` stamp) is not a
+    collision, whatever its statement: state every field the spec carries here to restate it. The
+    returned statement then carries `replaced_values`, naming every authored field whose value
+    this call replaced (the retired `positive_class_name` against the new `positive_value`) as
+    `{"recorded": <old>, "authored": <new>}`; absent on every other call.
 
     Ask the breeder what the trait's measurement is, in their own terms, and record their answer
     here. Propose the semantics the breeder actually stated, never a plausible-sounding guess: a
@@ -94,7 +102,8 @@ def author_trait_spec(
             the agent. It is surfaced in a delivery refusal and never clears it.
 
     Returns the unconfirmed statement as written, plus `record_seen`, the content hash the
-    confirming surface compares against so a click cannot confirm text nobody displayed.
+    confirming surface compares against so a click cannot confirm text nobody displayed, and
+    `replaced_values` on a restatement over a pre-rename record.
     """
     try:
         statement = traits.author_trait_spec(
