@@ -14,6 +14,7 @@ rather than its exit code.
     python tools/prove_test_fails_before.py tests/test_foo.py --baseline 196eedf1~1
     python tools/prove_test_fails_before.py tests/test_foo.py --json out.json
     python tools/prove_test_fails_before.py tests/test_foo.py --test-rev 8b09bd17 --baseline ae3dbbb8
+    python tools/prove_test_fails_before.py tests/test_foo.py --per-test-timeout 30
 
 Four verdicts, four exit codes, because an exit code alone cannot carry this:
 
@@ -25,7 +26,9 @@ Four verdicts, four exit codes, because an exit code alone cannot carry this:
                        fixture-shaped failure takes; the failing assertion is printed and recorded
     VACUOUS (1)        every selected test passed at a baseline shown to precede the change
     INDETERMINATE (2)  every selected test passed, but the baseline is not shown to precede the
-                       change, so passing says nothing about the test
+                       change, so passing says nothing about the test; or, under
+                       ``--per-test-timeout``, a selected test did not finish within it, named in
+                       the verdict, so a hung baseline is told apart from a merely slow one
     REFUSED (3)        no verdict is available: nothing was selected, everything was skipped, the
                        baseline could not collect the file, the baseline's own source was not what
                        got imported, pytest never reported an outcome, or every failure is
@@ -57,6 +60,12 @@ snapshot *before* applying the fix under test, since a snapshot that already hol
 baseline the change does not precede, and a passing run against it is the same INDETERMINATE case
 as any other baseline already containing the change, never evidence the test guards anything.
 Apply the fix, then re-run normally with ``--baseline <the printed hash>``.
+
+``--per-test-timeout`` passes ``--timeout`` through to pytest-timeout (already a suite
+dependency). Where SIGALRM exists, a timeout raises inside the test with pytest-timeout's own
+message; where it does not (this project's Windows harness), the process is killed outright
+before it can report anything. Either way the tool names the timed-out test and returns
+INDETERMINATE rather than reading a hang as a real pass, fail, or refusal.
 """
 from __future__ import annotations
 
@@ -76,6 +85,7 @@ REPO = Path(__file__).resolve().parent.parent
 TEST_TREE = "tests"
 PLUGIN_MODULE = "_fail_before_outcome"
 OUTCOME_ENV = "FAIL_BEFORE_OUTCOME_JSON"
+CURRENT_TEST_ENV = "FAIL_BEFORE_CURRENT_TEST"
 
 GUARDS, VACUOUS, INDETERMINATE, REFUSED = "GUARDS", "VACUOUS", "INDETERMINATE", "REFUSED"
 EXIT = {GUARDS: 0, VACUOUS: 1, INDETERMINATE: 2, REFUSED: 3}
@@ -87,6 +97,23 @@ import os
 
 _state = {"collected": None, "collect_errors": [], "tests": [], "internal_error": None}
 _exc_types = {}  # (nodeid, when) -> the raised exception's own class name
+
+
+def pytest_runtest_logstart(nodeid, location):
+    """Name the test that is about to run, flushed to disk immediately.
+
+    A thread-method pytest-timeout kill (os._exit, no SIGALRM) never lets
+    pytest_sessionfinish write the outcome record; this file, written before the test body
+    runs and fsynced, is the only way the caller learns which test was running when the
+    process died.
+    """
+    path = os.environ.get("FAIL_BEFORE_CURRENT_TEST")
+    if not path:
+        return
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(nodeid)
+        fh.flush()
+        os.fsync(fh.fileno())
 
 
 def _headline(text):
@@ -359,7 +386,7 @@ def _overlay_test_tree(dest: Path, test_rev: str | None) -> int:
     return copied
 
 
-def child_env(tree: Path, outcome_json: Path) -> dict[str, str]:
+def child_env(tree: Path, outcome_json: Path, current_test_path: Path) -> dict[str, str]:
     srcs = [str(p) for p in sorted(tree.glob("packages/*/src"))]
     sep = ";" if sys.platform == "win32" else ":"
     env = {
@@ -367,6 +394,7 @@ def child_env(tree: Path, outcome_json: Path) -> dict[str, str]:
         "PYTHONPATH": sep.join([*srcs, str(tree)]),
         "PYTHONDONTWRITEBYTECODE": "1",
         OUTCOME_ENV: str(outcome_json),
+        CURRENT_TEST_ENV: str(current_test_path),
     }
     env.pop("TCIP_MIN_TESTS", None)
     return env
@@ -413,7 +441,7 @@ def install_outcome_plugin(tree: Path) -> None:
 
 
 def run_capturing_outcome(tree: Path, targets: list[str], expr: str, env: dict[str, str],
-                          outcome_json: Path, timeout: int):
+                          outcome_json: Path, timeout: int, per_test_timeout: float | None = None):
     """Run pytest in `tree` and return its process plus what it observed, or None if it reported none.
 
     The observed record, not the exit code, is what a caller judges on: an exit code cannot tell a
@@ -425,12 +453,24 @@ def run_capturing_outcome(tree: Path, targets: list[str], expr: str, env: dict[s
     ]
     if expr:
         cmd += ["-k", expr]
+    if per_test_timeout:
+        cmd += ["--timeout", str(per_test_timeout)]
     proc = subprocess.run(cmd, cwd=tree, env=env, capture_output=True, text=True, timeout=timeout)
     observed = None
     if outcome_json.is_file():
         observed = json.loads(outcome_json.read_text(encoding="utf-8"))
         outcome_json.unlink()
     return proc, observed
+
+
+_TIMEOUT_HEADLINE = re.compile(r"^Timeout \(>[\d.]+s\) from pytest-timeout\.$")
+
+
+def _is_timeout(headline: str) -> bool:
+    """Whether this failure is pytest-timeout's own signal-method report (its literal
+    ``PYTEST_FAILURE_MESSAGE``), never behavioral evidence and never confused with a hang the
+    thread method reports through the ``FAIL_BEFORE_CURRENT_TEST`` marker instead."""
+    return bool(_TIMEOUT_HEADLINE.match(headline.strip()))
 
 
 def _is_unreached(headline: str) -> bool:
@@ -474,10 +514,14 @@ def _is_call_signature_mismatch(headline: str) -> bool:
 
 
 def _failure_kind(entry: dict, tree: Path) -> str:
-    """One of ``unreached``, ``behavioral``, ``fixture``, for one failed or errored test.
+    """One of ``unreached``, ``timeout``, ``behavioral``, ``fixture``, for one failed or errored test.
 
     ``unreached``: the import never resolved, or a needed file was missing, the same weight as a
     collection error.
+
+    ``timeout``: pytest-timeout's own signal-method report (:func:`_is_timeout`), checked before
+    the phase split below since a timeout can fire during setup as easily as during the call, and
+    either way it is a hang to redo, never fixture-shaped evidence and never a passing assertion.
 
     A setup or teardown failure (``entry["phase"]`` is not ``"call"``) is always ``fixture``: the
     test body never ran, whatever raised it, wherever the crash frame sits. The rest applies only
@@ -498,6 +542,8 @@ def _failure_kind(entry: dict, tree: Path) -> str:
     headline = entry.get("headline", "")
     if _is_unreached(headline):
         return "unreached"
+    if _is_timeout(headline):
+        return "timeout"
     if entry.get("phase") != "call":
         return "fixture"
     if entry.get("exc_typename") in ("AssertionError", "Failed"):
@@ -531,8 +577,16 @@ def _classify(observed: dict, baseline_precedes: bool, tree: Path) -> tuple[str,
     failed = [t for t in observed["tests"] if t["outcome"] in ("failed", "error")]
     kinds = [_failure_kind(t, tree) for t in failed]
     unreached = [t for t, k in zip(failed, kinds) if k == "unreached"]
+    timed_out = [t for t, k in zip(failed, kinds) if k == "timeout"]
     fixture = [t for t, k in zip(failed, kinds) if k == "fixture"]
     behavioral = [t for t, k in zip(failed, kinds) if k == "behavioral"]
+    if timed_out:
+        names = ", ".join(t["nodeid"] for t in timed_out)
+        return INDETERMINATE, (
+            f"{len(timed_out)} of {observed['collected']} selected test(s) did not finish within "
+            f"--per-test-timeout ({names}), so passing or failing says nothing here: a hung "
+            "baseline is a different fact from a slow pass or a real failure."
+        )
     if failed and not behavioral and fixture:
         discount = (f" {len(unreached)} further failure(s) rest on a missing import or file."
                     if unreached else "")
@@ -596,6 +650,10 @@ def main() -> int:
                     help="a source file the change touches; repeatable. Overrides the computed set")
     ap.add_argument("--json", dest="json_out", default=None, help="write the full record here")
     ap.add_argument("--timeout", type=int, default=900, help="seconds to allow pytest (default 900)")
+    ap.add_argument("--per-test-timeout", type=float, default=None,
+                    help="seconds pytest-timeout allows one test (passed through as --timeout); "
+                         "a test that does not finish within it scores INDETERMINATE by name, "
+                         "told apart from a hang that says nothing and a real pass or failure")
     args = ap.parse_args()
 
     if args.baseline_from_working_tree:
@@ -654,6 +712,7 @@ def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="failbefore-"))
     tree = tmp / "tree"
     outcome_json = tmp / "outcome.json"
+    current_test_path = tmp / "current_test.txt"
     try:
         materialize(rev, tree)
         record["test_tree_overlay"] = {
@@ -663,7 +722,7 @@ def main() -> int:
         }
         install_outcome_plugin(tree)
 
-        env = child_env(tree, outcome_json)
+        env = child_env(tree, outcome_json, current_test_path)
         imports_ok, resolved = prove_tree_imports(tree, env)
         record["harness_proof"] = {"resolved": resolved, "baseline_source_imported": imports_ok}
         if not imports_ok:
@@ -675,13 +734,27 @@ def main() -> int:
 
         try:
             proc, observed = run_capturing_outcome(
-                tree, [test_file], args.expr, env, outcome_json, args.timeout)
+                tree, [test_file], args.expr, env, outcome_json, args.timeout,
+                per_test_timeout=args.per_test_timeout)
         except subprocess.TimeoutExpired:
             record.update(verdict=REFUSED, why=f"pytest did not finish within {args.timeout}s.")
             return _report(record, args.json_out)
 
         record["pytest"] = {"exit_code": proc.returncode, "tail": proc.stdout.strip().splitlines()[-15:]}
         if observed is None:
+            timed_out_nodeid = (
+                current_test_path.read_text(encoding="utf-8").strip()
+                if args.per_test_timeout and current_test_path.is_file() else ""
+            )
+            if timed_out_nodeid:
+                record.update(verdict=INDETERMINATE, why=(
+                    f"{timed_out_nodeid} did not finish within --per-test-timeout "
+                    f"({args.per_test_timeout}s) and the process was killed outright before it "
+                    "could report anything, the thread method pytest-timeout uses where SIGALRM "
+                    "is unavailable; a hung baseline is a different fact from a slow pass or a "
+                    "real failure."
+                ))
+                return _report(record, args.json_out)
             record.update(verdict=REFUSED, why=(
                 "pytest reported no outcome record, which happens on a usage error before the "
                 "session starts. Its output is recorded under pytest.tail."
