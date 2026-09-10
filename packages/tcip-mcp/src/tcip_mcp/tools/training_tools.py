@@ -808,8 +808,8 @@ def launch_training(
     No record, no run: everything through the experiment stamp below is one boundary. Before it:
     preflight, normalization, the model contract, and the dataset identity read (a
     ``SchemaVersionRefused`` reader-ceiling mismatch refuses the launch by name; an absent,
-    malformed or otherwise-unreadable identity trains untracked, as an unregistered dataset
-    always has). After it: the registry entry, the launch config, the subprocess and TensorBoard.
+    malformed or otherwise-unreadable identity trains untracked, the same as an unregistered
+    dataset). After it: the registry entry, the launch config, the subprocess and TensorBoard.
     A spawn failure after the stamp leaves a ``running`` record with no process, which reads
     ``interrupted`` once its heartbeat stales and forks on relaunch, the same as any other
     process death.

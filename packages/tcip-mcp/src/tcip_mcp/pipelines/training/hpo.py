@@ -596,7 +596,8 @@ def tune_search(
             ``BasicVariantGenerator(constant_grid_search=True, random_state=seed)`` instead of
             through ``build_search_alg``, so every sampled point is trained once per seed
             (Ray's own pairing, ``ray.tune.search.basic_variant``) whether ``search_alg`` is
-            ``random`` or ``grid``. 1 (the default) leaves search-building unchanged.
+            ``random`` or ``grid``. 1 (the default) leaves search-building to
+            :func:`build_search_alg`.
 
     Returns dict with ``best_params``, ``best_value``, ``n_trials``, ``all_trials``,
     ``search_alg``, ``scheduler``, ``study_name`` (+ ``warm_start``/``baseline_params``).

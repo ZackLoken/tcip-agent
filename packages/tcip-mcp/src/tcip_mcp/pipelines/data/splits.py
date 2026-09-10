@@ -1464,8 +1464,8 @@ def resolve_locked_cal_holdout_split(
     ``seed``/``holdout_ratio``/``split_manifest_dir``) differs from what is recorded in it, the
     divergence is logged as a warning and returned under ``"policy_divergence"``
     (``{"requested": ..., "locked": ...}``), the locked split is still returned unchanged, never
-    silently redrawn, but a caller now has a way to *see* the mismatch instead of reading server
-    logs. Stems the caller has that the lock doesn't cover are similarly surfaced under
+    silently redrawn, so a caller can see the mismatch on the result rather than in a server
+    log. Stems the caller has that the lock doesn't cover are similarly surfaced under
     ``"unlocked_stems"`` rather than silently dropped, the lock stays authoritative for what it
     already covers.
 
