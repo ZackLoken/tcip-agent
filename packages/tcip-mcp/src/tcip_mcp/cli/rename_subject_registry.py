@@ -1,6 +1,8 @@
-"""Conform a project's pre-rename state to the subject registry's current shape: rename a
-dataset root's retired ``classes.json`` to ``subjects.json``, and stamp a ``trait_specs`` record
-still carrying ``positive_class_name`` to ``positive_value`` with ``schema_version: 2``.
+"""Conform a project's pre-rename state to the subject registry's current shape.
+
+Renames a dataset root's retired ``classes.json`` to ``subjects.json``, and stamps a
+``trait_specs`` record still carrying ``positive_class_name`` to ``positive_value`` with
+``schema_version: 2``.
 
 A logged operator command: bind, walk, one outcome line per unit, a closing count per root, exit
 2 on any refusal or, under ``--plan``, on any unit that would change. Each named root is one of
@@ -58,7 +60,7 @@ Exit codes: 0 when every visited unit in every named root already carries the cu
 just conformed; 2 if any root is refused, any record will not decode or refuses to be resolved, or
 (under ``--plan``) any unit would change.
 
-The command ships with the family and is deleted once every root that needed it is conformed. An
+This command is deleted once every root that needed it is conformed. An
 archived project (``tcip archive-project`` / ``tcip import-project``) is conformed before it is
 archived, never after: the archive's own accounting recognizes a retired document at the tree
 root and refuses to omit it, so a bundle carrying one is refused on export, not silently short by
@@ -165,7 +167,7 @@ def _conform_registry(root: Path, *, plan: bool) -> tuple[str, bool, bool]:
 
 
 def _conform_trait_spec_record(
-    key: "ts.Key", document: dict, *, project_root: Path, plan: bool,
+    key: "ts.Key", document: dict, *, version: "ts.Version", project_root: Path, plan: bool,
 ) -> tuple[str, bool, bool]:
     trait = key.parts[0]
     if "positive_class_name" in document and "positive_value" in document:
@@ -183,7 +185,7 @@ def _conform_trait_spec_record(
     if needs_rename:
         new_document["positive_value"] = new_document.pop("positive_class_name")
     new_document["schema_version"] = TRAIT_SPEC_SCHEMA_VERSION
-    ts.replace(key, new_document, expect=ts.read_versioned(key).version)
+    ts.replace(key, new_document, expect=version)
     try:
         record_event_or_raise(
             TOOL_NAME,
@@ -219,7 +221,8 @@ def _conform_trait_specs(project_root: Path, *, plan: bool) -> list[tuple[str, b
             outcomes.append((f"trait spec {key.parts[0]!r} is not a mapping, left as it is", True, False))
             continue
         outcomes.append(
-            _conform_trait_spec_record(key, document, project_root=project_root, plan=plan))
+            _conform_trait_spec_record(
+                key, document, version=versioned.version, project_root=project_root, plan=plan))
     return outcomes
 
 

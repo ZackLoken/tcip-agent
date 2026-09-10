@@ -21,7 +21,7 @@ from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import traits
 from tcip_mcp.cli import rename_subject_registry as cli
 from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
-from tcip_mcp.subject_registry import Subject, SubjectRegistry, write_registry
+from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry, write_registry
 from tcip_mcp.tools.data_tools import draw_splits
 from tcip_mcp.tools.project_tools import register_dataset
 
@@ -222,6 +222,66 @@ def test_a_split_trees_own_out_dir_named_directly_is_renamed(tmp_path: Path) -> 
     assert not (split_root / "classes.json").exists()
 
 
+# ── the registry unit, named directly over a curated tree with no experiment_id ─
+
+CLASSIFIED_SUBJECT = "leaf"
+CLASSIFIED_ATTRIBUTE = "condition"
+CLASSIFIED_BUCKET = "predictions/classifier/2026-03-05"
+
+
+def _seed_classified_verdict(state_dir: Path) -> None:
+    """One accepted classified call: a classified review's own verdict shape, whose class_name
+    is the confirmed value, never the object's subject."""
+    from tcip_annotation.review_engine import ReviewEngine
+
+    state = {"verdicts": {
+        (CLASSIFIED_BUCKET, "imgA.png"): {"img_status": "completed", "detections": [
+            {"action": "accepted", "class_name": "healthy",
+             "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
+    }}
+    engine = ReviewEngine(str(state_dir))
+    engine.raw_state.update(state)
+    engine.save_review_state()
+
+
+def test_a_curated_tree_materialized_without_an_experiment_id_is_conformed_when_named_directly(
+    tmp_path: Path,
+) -> None:
+    """``materialize_review_dataset`` called with no ``experiment_id`` records no
+    ``curated_dataset`` artifact, so ``store_catalogue.project_roots`` cannot reach the tree it
+    wrote; the conform's direct-root form is the only way to it (D7)."""
+    from tcip_mcp.pipelines.resolution import write_sidecar
+    from tcip_mcp.prediction_buckets import review_state_dir_of
+    from tcip_mcp.tools.feedback_tools import materialize_review_dataset
+
+    dataset_root = tmp_path / "dataset"
+    _seed_classified_verdict(review_state_dir_of(dataset_root))
+    write_sidecar(dataset_root / CLASSIFIED_BUCKET, {
+        "id_map": {"healthy": 0, "diseased": 1},
+        "subject": CLASSIFIED_SUBJECT, "attribute": CLASSIFIED_ATTRIBUTE,
+    })
+    source_root = tmp_path / "source_dataset"
+    (source_root / "images").mkdir(parents=True)
+    Image.new("RGB", (32, 32)).save(source_root / "images" / "imgA.png")
+    write_registry(source_root / "subjects.json", SubjectRegistry(subjects=(
+        Subject(name=CLASSIFIED_SUBJECT, attributes=(
+            Attribute(name=CLASSIFIED_ATTRIBUTE, type="categorical",
+                     values=("healthy", "diseased")),)),)))
+    out = tmp_path / "out"
+
+    r = materialize_review_dataset(
+        str(dataset_root), str(source_root / "images"), str(out), bucket=CLASSIFIED_BUCKET)
+    assert "error" not in r, r
+    assert (out / "subjects.json").is_file()
+    _retire(out)
+
+    outcomes, refused = cli.process_root(out, plan=False)
+
+    assert not refused, outcomes
+    assert (out / "subjects.json").is_file()
+    assert not (out / "classes.json").exists()
+
+
 # ── the project form: walking a registered dataset root ─────────────────────────
 
 
@@ -312,6 +372,40 @@ def _seed_raw_trait_spec(project_root: Path, document: dict) -> "ts.Key":
     return key
 
 
+def test_the_trait_spec_writes_compare_and_set_against_the_version_the_scan_itself_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The write's own ``expect`` is the version the scan already read with the document, not a
+    version read fresh at write time: a concurrent write landing on the same record between the
+    scan's read and the conform's own write is caught as a version conflict, rather than silently
+    overwritten with content built from the document the scan read before the concurrent write."""
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip").mkdir(parents=True)
+    key = _seed_raw_trait_spec(project_root, {
+        "name": "leaf", "delivers": ["leaf_length"], "positive_class_name": "open",
+        "schema_version": 1,
+    })
+
+    real_read_versioned = ts.read_versioned
+    calls = {"n": 0}
+
+    def _read_then_race(k, *args, **kwargs):
+        result = real_read_versioned(k, *args, **kwargs)
+        calls["n"] += 1
+        if calls["n"] == 1 and k == key:
+            ts.replace(k, {**result.value, "notes": "moved by a concurrent writer"},
+                      expect=result.version)
+        return result
+
+    monkeypatch.setattr(cli.ts, "read_versioned", _read_then_race)
+
+    with pytest.raises(ts.VersionConflict):
+        cli.process_root(project_root, plan=False)
+
+    document = ts.read_versioned(key).value
+    assert document["notes"] == "moved by a concurrent writer"
+
+
 def test_a_version_1_trait_spec_is_rewritten_to_version_2_with_the_key_renamed(
     tmp_path: Path,
 ) -> None:
@@ -334,6 +428,29 @@ def test_a_version_1_trait_spec_is_rewritten_to_version_2_with_the_key_renamed(
     entries = list(ts.read_log(_audit_key(project_root)).records)
     assert any(e["tool"] == cli.TOOL_NAME and e.get("arguments", {}).get("trait") == "leaf"
               for e in entries)
+
+
+def test_a_stamped_2_trait_spec_still_carrying_the_old_key_is_rewritten(tmp_path: Path) -> None:
+    """A record already stamped ``schema_version: 2`` but still carrying ``positive_class_name``
+    (never written by the current encoder, but not ruled out by ``trait_spec_unconformed``, whose
+    reason is about the stamp alone) is rewritten to ``positive_value`` all the same: the key
+    check runs independently of the version reason."""
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip").mkdir(parents=True)
+    key = _seed_raw_trait_spec(project_root, {
+        "name": "leaf", "delivers": ["leaf_length"], "positive_class_name": "open",
+        "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION,
+    })
+    before_version = ts.read_versioned(key).version
+
+    outcomes, refused = cli.process_root(project_root, plan=False)
+
+    assert not refused, outcomes
+    document = ts.read_versioned(key).value
+    assert document["positive_value"] == "open"
+    assert "positive_class_name" not in document
+    assert document["schema_version"] == traits.TRAIT_SPEC_SCHEMA_VERSION
+    assert ts.read_versioned(key).version != before_version
 
 
 def test_an_unstamped_trait_spec_with_no_positive_class_name_is_still_conformed(
