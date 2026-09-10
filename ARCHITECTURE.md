@@ -790,17 +790,17 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `ingest_images` | `ingest_tools.py:220` | yes | Copy raw images into a structured project, bucketed by the capture date each file states. |
+| `ingest_images` | `ingest_tools.py:219` | yes | Copy raw images into a structured project, bucketed by the capture date each file states. |
 
 ### meta_tools.py (5 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `report_friction` | `meta_tools.py:238` | yes | Log structured friction when you get stuck, confused, or surprised. |
-| `load_project_memory` | `meta_tools.py:307` | yes | Read one project-memory corpus into context so context isn't lost between sessions. |
-| `read_audit_log` | `meta_tools.py:385` | yes | Read one audit log's own entries: which door touched a dataset or project, when, with |
-| `write_retrospective` | `meta_tools.py:568` | yes | Write an end-of-project retrospective to markdown. |
-| `record_distillation_pass` | `meta_tools.py:671` | yes | Record that you reviewed this project's friction/retrospectives (e.g. via |
+| `report_friction` | `meta_tools.py:236` | yes | Log structured friction when you get stuck, confused, or surprised. |
+| `load_project_memory` | `meta_tools.py:305` | yes | Read one project-memory corpus into context so context isn't lost between sessions. |
+| `read_audit_log` | `meta_tools.py:383` | yes | Read one audit log's own entries: which door touched a dataset or project, when, with |
+| `write_retrospective` | `meta_tools.py:566` | yes | Write an end-of-project retrospective to markdown. |
+| `record_distillation_pass` | `meta_tools.py:669` | yes | Record that you reviewed this project's friction/retrospectives (e.g. via |
 
 ### knowledge_tools.py (1 tool)
 
@@ -1023,18 +1023,18 @@ registered at HEAD.
 | POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:192` |
 | POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:323` |
 | GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:357` |
-| POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:679` |
-| POST | `/export_csv` | `export_csv` | `routes/results.py:781` |
-| POST | `/export_count_csv` | `export_count_csv` | `routes/results.py:932` |
-| GET | `/traits` | `list_traits` | `routes/results.py:1434` |
-| GET | `/operationalization` | `get_operationalization` | `routes/results.py:1103` |
-| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:1119` |
-| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:1157` |
-| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:1259` |
-| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:1275` |
-| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:1317` |
-| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1383` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:1463` |
+| POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:678` |
+| POST | `/export_csv` | `export_csv` | `routes/results.py:780` |
+| POST | `/export_count_csv` | `export_count_csv` | `routes/results.py:931` |
+| GET | `/traits` | `list_traits` | `routes/results.py:1433` |
+| GET | `/operationalization` | `get_operationalization` | `routes/results.py:1102` |
+| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:1118` |
+| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:1156` |
+| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:1258` |
+| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:1274` |
+| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:1316` |
+| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1382` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:1462` |
 
 ### routes/review.py, prefix `/api/review` (8 routes)
 
@@ -1378,7 +1378,7 @@ attributed to a split by
 `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:1087`).
 
 Readers: `tcip_mcp.pipelines.data.label_queries.confirmed_negative_names`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:579`; `_status_bucket_for`,
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:577`; `_status_bucket_for`,
 `packages/tcip-web/src/tcip_web/routes/sessions.py:239`;
 `tcip_mcp.subject_registry._sweep_schema_change`,
 `packages/tcip-mcp/src/tcip_mcp/subject_registry.py:329`, which enumerates every bucket of a
@@ -1386,7 +1386,7 @@ subject whose attribute schema is about to change so the confirmations under it 
 before the outgoing digest is gone; `routes.subjects.get_image_status`,
 `packages/tcip-web/src/tcip_web/routes/subjects.py:319`, through
 `tcip_mcp.pipelines.data.label_queries.stale_finished_names`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:548`, the public reader over a
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:546`, the public reader over a
 resolved dataset root.
 
 `IMAGE_STATUSES = ("complete", "partial", CONFIRMED_NEGATIVE, "unannotated")`,
@@ -1426,11 +1426,11 @@ vocabulary. Both writers reach the store through the one transactional writer
 the sweep from re-dating a stamp the confirmation-time writer already set.
 
 Reader: `tcip_mcp.pipelines.data.label_queries._stale_finished`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:501`, the quarantine logic
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:499`, the quarantine logic
 shared by `confirmed_negative_records` and the public `stale_finished_names`; a name whose stamp
 no longer matches the registry's current schema is dropped as `quarantined_stale_definition`
 rather than trained by its stored confirmation, complete or negative alike,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:364`
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:362`
 (`counts["quarantined_stale_definition"] += 1`).
 
 Seam S23 ("image_status_digest.json attribute-schema stamp"), verdict `both-sides-restated`,
@@ -2339,7 +2339,7 @@ Phase 3 verdict: single. The current generation also rides the GuiState broadcas
 ## S12. Friction reports and retrospectives under .tcip/
 
 Must agree: the GUI reader finds, decodes and orders what the MCP writer produced.
-Side A: `packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py:185` (`def report_documents(`, the one enumeration, decode and ordering of the friction reports, with `retrospective_documents`, `meta_tools.py:222`, doing the same for the retrospectives). Both stores are records, enumerated through the seam and ordered by the timestamp each document states (a report's own `timestamp` field, a retrospective's own `## Retrospective:` section headers), never by when the bytes landed. A report is one whole JSON document, not a line of a stream.
+Side A: `packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py:183` (`def report_documents(`, the one enumeration, decode and ordering of the friction reports, with `retrospective_documents`, `meta_tools.py:220`, doing the same for the retrospectives). Both stores are records, enumerated through the seam and ordered by the timestamp each document states (a report's own `timestamp` field, a retrospective's own `## Retrospective:` section headers), never by when the bytes landed. A report is one whole JSON document, not a line of a stream.
 Side B: `packages/tcip-web/src/tcip_web/routes/meta.py:36` (`get_reports`) and `routes/meta.py:58` (`get_retrospectives`), both routes importing those MCP-side enumerators directly and presenting the rows they return, rather than walking a directory of their own.
 Phase 3 verdict: single.
 
@@ -2453,7 +2453,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:143` (`def read_registry_index(`, the read path for everything outside the module; `_register_entry`, `model_registry.py:450`, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, `model_registry.py:128`, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1462` (`@router.get("/models/registered")`, serving `model_tools.rank_registered_models`'s listing view) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1461` (`@router.get("/models/registered")`, serving `model_tools.rank_registered_models`'s listing view) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar
@@ -2535,7 +2535,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP writer, the loader, and the GUI trait list agree on the spec fields and the reason a spec was skipped.
 Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:358` (`def trait_specs_dir(`, the one placement, with `TRAIT_SPECS_STORE`, `traits.py:399`, and `trait_spec_key`, `traits.py:419`, addressing one spec).
-Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:459` (`load_trait_specs_with_errors`, the one scan and the one skip-reason list) and `traits.py:547` (`revise_trait_spec_fields`, the one write that reads, merges and compare-and-sets against the version it read, with `write_trait_spec_fields` its wrapper). `packages/tcip-web/src/tcip_web/routes/results.py:443` and `packages/tcip-mcp/src/tcip_mcp/cli/doctor.py:588` name the project and let the placement resolve here.
+Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:459` (`load_trait_specs_with_errors`, the one scan and the one skip-reason list) and `traits.py:546` (`revise_trait_spec_fields`, the one write that reads, merges and compare-and-sets against the version it read, with `write_trait_spec_fields` its wrapper). `packages/tcip-web/src/tcip_web/routes/results.py:443` and `packages/tcip-mcp/src/tcip_mcp/cli/doctor.py:588` name the project and let the placement resolve here.
 Phase 3 verdict: single.
 
 ## S39. Phenology CSV column vocabulary
