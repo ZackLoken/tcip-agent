@@ -96,7 +96,7 @@ def _split_manifest_drawn_conflicts(data_cfg: dict, split_cfg: dict) -> list[str
     (:data:`_SPLIT_MANIFEST_CONFLICT_KEYS`). ``seed`` is admitted, not a conflict, only when
     ``data.split.redraw_within_manifest`` is true (:func:`_redraw_flag_issue` covers the flag's
     own remaining requirement, that a redraw states a seed at all): a seed left over from a
-    forked or drawn config still conflicts by name otherwise, as it always has. Shared by
+    forked or drawn config still conflicts by name otherwise. Shared by
     ``preflight_config`` and :func:`~tcip_mcp.pipelines.data.split_construction.auto_train_val`'s
     manifest branch, so the two report the identical set for one config.
     """
@@ -294,7 +294,7 @@ def manifest_compatibility(config: dict, manifest: dict, manifest_dir: str) -> l
     :func:`~tcip_mcp.pipelines.data.splits.refuse_if_images_root_moved` (which the training
     child, both inference entry points and calibration also call) and
     :func:`_split_manifest_drawn_conflicts`, plus the subject, attribute, date and empty-side
-    comparisons ``preflight_config`` inlined until this pair existed. ``preflight_config`` calls
+    comparisons. ``preflight_config`` calls
     both directly, in the same order, so a manifest read failure never suppresses the
     config-only issues; the data picker's :func:`list_split_choices` calls this one composed
     function per candidate manifest, before Start, over a manifest it also read itself. Never
@@ -557,11 +557,11 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
         issues.extend(_reserve_calibration_feasibility_issues(
             model_source, data_cfg_dict, split_cfg_dict, reserve_cal_frac, smoke=smoke))
 
-    # Trainable-sample coverage: trainable_stems' own partition was computed
-    # by DetectionDataset/InstanceSegDataset and then thrown away, a run whose label store admits
+    # Trainable-sample coverage: DetectionDataset/InstanceSegDataset compute trainable_stems'
+    # own partition and keep none of it, so a run whose label store admits
     # only a fraction of its annotated images (an unconfirmed-empty backlog, a stale-schema
-    # quarantine, incomplete attribute coverage) reported "valid, no warnings" with no visibility
-    # into what would silently train on far fewer images than the operator expects. Never gating,
+    # quarantine, incomplete attribute coverage) would otherwise read "valid, no warnings" while
+    # training on far fewer images than the operator expects. Never gating,
     # a real project legitimately has unconfirmed/unannotated images, and only fires for the known
     # loaders (a dataset_source's own admission logic is the agent's to report, not this rail's).
     task_for_coverage = (model_source.get("task") if isinstance(model_source, dict) else None) \
@@ -2288,7 +2288,7 @@ def run_hyperparameter_search(
             an explicit value always wins over the derivation.
         study_name: The sweep's id, for a caller (the Tuning route's launch) that already
             minted one and must have its own registry entry, manifest and every sweep route
-            agree on it; omitted mints one the way this always has.
+            agree on it; omitted mints one here.
         auto_tensorboard: Launch a TensorBoard over the sweep root once it finishes. The
             Tuning route's launch passes ``False``: it serves its own per-sweep TensorBoard
             view on demand, so leaving this on there would run a second, unaddressable
@@ -3535,7 +3535,7 @@ def evaluate_model(
             ``split_manifest_dir`` and the evaluated stem count, the loader's own count, refused
             by name (naming the difference and the remedy) when the loader admits fewer than the
             universe the manifest drew, since the data moved under the manifest since the split
-            was drawn; omitted, the whole directory is scored, as today.
+            was drawn; omitted, the whole directory is scored.
     """
     import torch
     from torch.utils.data import DataLoader

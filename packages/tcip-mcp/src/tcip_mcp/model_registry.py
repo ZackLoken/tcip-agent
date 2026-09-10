@@ -195,7 +195,7 @@ def _resolve_producer(entries: tuple[dict, ...], *, checkpoint_path: Path, diges
     The producer is the entry's own ``experiment_id`` field, written only by a run's own
     completion through the experiment-mode binding (:func:`_register_entry`) and ``None`` for an
     explicit-mode entry: a verified fact, not a caller assertion (``tags`` carries no producer
-    claim any more). Every matched entry must carry the key at all, or the load refuses by name,
+    claim). Every matched entry must carry the key at all, or the load refuses by name,
     as ``best_model`` refuses a pre-``metrics_source`` entry: no operator door adds the missing
     key to an existing entry. An entry naming ``None`` is ignored (not a vote for ``None``);
     every entry that does name a producer must name the same one, or the load refuses rather
@@ -555,10 +555,10 @@ def _document_entries_for_conform(raw: object) -> tuple[list[dict], bool, bool]:
     """(entries, was_already_wrapped, had_stray_schema_version_two) for this conform's own
     read.
 
-    Unlike :func:`_read_registry_document`, two dev-era shapes are accepted here rather than
+    Unlike :func:`_read_registry_document`, two further shapes are accepted here rather than
     refused, since wrapping and respelling one of them is exactly this conform's own purpose: a
     bare top-level array, and a
-    mapping still carrying a stray ``schema_version: 2`` from before this store's version-1 reset
+    mapping carrying a stray ``schema_version: 2``, a value above this store's own ceiling
     (:func:`conform_registry_paths_on_disk` reads such a document directly, bypassing the seam's
     own ceiling refusal, precisely to reach this function; the seam's own read otherwise refuses a
     stray 2 outright, so this function is never reached carrying one except through that bypass).
@@ -745,8 +745,8 @@ def conform_registry_paths_on_disk(root: str | Path) -> list[str]:
     internal-but-absent) rather than ever writing a path under the conform root.
 
     Reading the raw bytes directly, bypassing the seam's own schema_version ceiling check, is
-    what lets this route accept a document still carrying a stray ``schema_version: 2`` from
-    before this store's version-1 reset (the seam's own entry point refuses that value outright,
+    what lets this route accept a document still carrying a stray ``schema_version: 2``
+    (the seam's own entry point refuses that value outright,
     on read as on write): this is the one conform that accepts it, since ``import_project`` is
     the only door this function serves.
 

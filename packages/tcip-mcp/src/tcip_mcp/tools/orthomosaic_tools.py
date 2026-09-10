@@ -58,7 +58,7 @@ def orthomosaic_plant_counts(
     since-withdrawn ``per_plant_count_aggregate`` meaning (carrying the check, no counts);
     ``pipelines.resolution.DeliveryRefused`` for the writer's own gate refusal (carrying the gate,
     with this call's own counts-bearing facts attached); ``pipelines.resolution.
-    CountDeliveryRefused`` for everything else this door refuses on today (a missing bucket or
+    CountDeliveryRefused`` for every other refusal this door raises (a missing bucket or
     raster, a conflicting regime, an unregistered or rewritten plant registry, an empty bucket, a
     raster identity mismatch, a canopy-segment refusal), each carrying the same facts the tool's
     own ``{"error": ...}`` response carries.

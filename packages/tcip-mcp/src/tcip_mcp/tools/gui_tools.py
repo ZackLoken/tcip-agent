@@ -61,7 +61,7 @@ def _logical_image_names(images_dir) -> list[str]:
     or (for a ``.bandgroup``-grouped capture) its manifest's filename, the file every other
     by-name reader (``image_name_map``, the dataset gallery route) treats as that capture's name.
     Folding sibling band files into one name here is what lets this tool's frame index agree with
-    the frontend's own image_list, which now enumerates the same way.
+    the frontend's own image_list, which enumerates the same way.
     """
     from tcip_mcp.pipelines.image_utils import list_logical_images, logical_image_name
 

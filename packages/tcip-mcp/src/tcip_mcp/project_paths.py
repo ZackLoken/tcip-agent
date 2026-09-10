@@ -5,8 +5,8 @@ registry, anchors here so a whole project is self-contained under one ``<root>/.
 
 Resolution order (``platform_state_root`` / ``resolve_state``, evaluated at use time):
   1. ``$TCIP_STATE_ROOT`` if set.
-  2. otherwise the current working directory, the fallback when nothing else pins a root, so
-     nothing changes for tests or an un-pinned run.
+  2. otherwise the current working directory, the fallback when nothing else pins a root: a
+     relative path then resolves against the process cwd.
 
 A long-lived process binds the variable once at startup, through :func:`pin_platform_root`.
 A process that opts in (``from_marker=True``: the web backend always, the MCP server inside
@@ -102,7 +102,7 @@ def resolve_state(path: Path) -> Path:
     - A relative ``path`` is prefixed with ``$TCIP_STATE_ROOT`` when pinned, so a process
       launched from a subdir still writes to the one platform ``.tcip/``.
     - When unpinned, a relative ``path`` is returned as-is → resolved against the current
-      directory at use, preserving the same fallback (and per-test cwd isolation).
+      directory at use, so each caller's own cwd decides where it lands.
     """
     if path.is_absolute():
         return path

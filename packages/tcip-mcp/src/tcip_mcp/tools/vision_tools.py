@@ -155,7 +155,7 @@ def _display_for_path(image_path: str, *, max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
 def _subject_indexer() -> tuple[dict[str, int], Callable[[str], int]]:
     """A stable subject-name → color-index map for the (int-keyed) renderers, plus its indexer.
 
-    Labels are name-based now; the viz layer colors by an integer and labels from a ``{index: name}``
+    Labels are name-based; the viz layer colors by an integer and labels from a ``{index: name}``
     map, so each distinct subject in one render gets a stable index and its own name in the legend.
     """
     idx: dict[str, int] = {}
@@ -192,7 +192,7 @@ def _point_note(n: int) -> str:
 
 def _legend_name(a: Annotation, *, scope) -> str:
     """The name a render's legend shows for ``a``: the classified value under a classified scope
-    (the object class alone would be one name for every prediction), else ``a.subject`` as today.
+    (the object class alone would be one name for every prediction), else ``a.subject``.
     """
     if scope is not None and scope.classified:
         from tcip_annotation.json_io import classified_value_of
@@ -237,8 +237,7 @@ def visualize(
     Not an MCP tool: run through ``tcip visualize``, per the admission standard
     (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
 
-    One entry point for the common renders (replaces the former visualize_annotations /
-    visualize_predictions / visualize_comparison / visualize_dataset_sample). Saves to
+    One entry point for the common renders. Saves to
     .tcip/artifacts/viz/ and returns ``image_path`` for the agent's own image-capable read tool.
 
     Rendering conventions, shared across every source: boxes/masks color by class through the
@@ -414,7 +413,7 @@ def _viz_comparison(
     from ``compute_matches`` over the two documents as written: on a conformed classified bucket
     (predictions carrying the object class in ``subject``, the same shape ground truth carries)
     they match by object class, while the legend still keys the prediction side by its decoded
-    value (:func:`_legend_name`), so a correctly localized, wrongly classified pair now shows as
+    value (:func:`_legend_name`), so a correctly localized, wrongly classified pair shows as
     a real match with two different legend colors rather than as an unrelated FP/FN.
     """
     from tcip_annotation.format_io import detect_format

@@ -224,7 +224,7 @@ def propose_annotations(
     so a bespoke engine gets region support with no code of its own. The one real caveat: an engine
     that keys behavior off the image path itself (a cache, a sidecar lookup keyed by the original
     file) receives the temp crop's path, which it cannot resolve back to the source image. Omitting
-    ``grid_cells`` runs the whole frame, unchanged.
+    ``grid_cells`` runs the whole frame.
 
     Args:
         image_path: Absolute path to the image file.
@@ -252,7 +252,7 @@ def propose_annotations(
         return {"error": str(e)}
 
     # A region is cropped and offset entirely here, before the engine ever sees an image path.
-    # grid_cells=None skips this branch, taking the exact whole-frame path below, unchanged.
+    # grid_cells=None skips this branch, taking the whole-frame path below.
     propose_path = image_path
     crop_tmp: Path | None = None
     origin = (0.0, 0.0)

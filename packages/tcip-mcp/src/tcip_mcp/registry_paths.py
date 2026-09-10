@@ -45,7 +45,7 @@ def nearest_containing_ancestor(start: Path, root: Path, *, tolerant: bool) -> P
     """The nearest of ``start`` and its parents that is the same file as ``root``, or ``None``
     when none is.
 
-    ``tolerant=True`` (the dataset speller's own, unchanged behavior) treats an ancestor
+    ``tolerant=True`` (the dataset speller's own mode) treats an ancestor
     ``os.path.samefile`` cannot compare (an inaccessible share) as simply not a match and tries
     the next one. ``tolerant=False`` (the checkpoint speller) re-raises instead: that speller's
     stricter root gate must never fall through to an external spelling from a comparison it
