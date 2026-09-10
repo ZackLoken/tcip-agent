@@ -1251,8 +1251,8 @@ def _sidecar_reference(
     Never upgrades a missing/unrecognized/wrong-kind value to a shippable reference, a param whose
     own recorded reference is absent, or belongs to a different validation kind than this one, floors
     to ``false`` rather than being read as validated. (Upgrading on a bare top-level ``validated``
-    bool was a real laundering path: a physical-measurement reference could read back as an
-    annotation-based one purely because the sidecar's overall flag was true.) ``param_key`` lets a
+    bool is a laundering path: a physical-measurement reference could read back as an
+    annotation-based one purely because the sidecar's overall flag is true.) ``param_key`` lets a
     differently-shaped sidecar (e.g. a classifier stamp's ``classifier`` param) reuse this same read.
     """
     if not sidecar or not sidecar.get("validated"):

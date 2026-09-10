@@ -39,7 +39,7 @@ under the workspace.
 - `phenotype`: what is being measured (see
   `packages/tcip-mcp/src/tcip_mcp/knowledge/crop-science.md`), never a `crops.yml` trait name.
 
-The site (field/orchard) is no longer part of the name: it is a required argument of
+The site (field/orchard) is not part of the name: it is a required argument of
 `initialize_project` and `ingest_images`, recorded once on the project's own record
 (`tcip_mcp.project_record`) and shown in the picker. Ask the human for it rather than
 guessing it from a path or filename; a project that already records a different site
