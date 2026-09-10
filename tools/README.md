@@ -43,6 +43,11 @@ breeder or an operator runs against a project are documented in `README.md` and
   worktree needs its own `PYTHONPATH`) and refused before any gate runs if `tcip_mcp` resolves
   outside it; each requested gate runs in the foreground, stopping at the first failure with its
   exit code.
+- `list_store_consumers.py` - for every store the registry declares: its classification (kind,
+  frozen) and version ceiling, the module that declares its descriptor, and every other module
+  referencing that descriptor's own `<NAME>_STORE` symbol, split into writers, readers, and
+  references (present but neither recognizably), from a module inventory's import graph plus a
+  textual symbol scan. `--json` for machine output.
 - `generate_frontend_routes.py` - generates the browser's route-path module and the dev
   server's proxy config from the backend's registered FastAPI routes, so the frontend
   references a path by name instead of restating the string a second time.
