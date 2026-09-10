@@ -31,13 +31,13 @@ snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the 
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 83d560b9 has 436 modules across the six scanned roots (145631 total lines):
+HEAD 83d560b9 has 436 modules across the six scanned roots (145620 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 138 | 64646 |
+| tcip-mcp | 138 | 64644 |
 | tcip-annotation | 12 | 4347 |
-| tcip-web | 40 | 14098 |
+| tcip-web | 40 | 14089 |
 | tcip-store | 13 | 5282 |
 | tcip-web-frontend | 216 | 52304 |
 | tools | 17 | 4954 |
@@ -956,17 +956,6 @@ registered at HEAD.
 |---|---|---|---|
 | POST | `/state` | `push_canvas_state` | `routes/canvas.py:89` |
 
-### routes/subjects.py, prefix `/api/subjects` (6 routes)
-
-| method | path | handler | line |
-|---|---|---|---|
-| GET | `/load` | `load_subjects` | `routes/subjects.py:101` |
-| POST | `/save` | `save_subjects` | `routes/subjects.py:165` |
-| GET | `/image_status` | `get_image_status` | `routes/subjects.py:319` |
-| POST | `/image_status` | `set_image_status` | `routes/subjects.py:334` |
-| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/subjects.py:375` |
-| POST | `/image_status/derive` | `derive_image_status` | `routes/subjects.py:415` |
-
 ### routes/coverage.py, prefix `/api/coverage` (6 routes)
 
 | method | path | handler | line |
@@ -1034,18 +1023,18 @@ registered at HEAD.
 | POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:192` |
 | POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:323` |
 | GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:357` |
-| POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:683` |
-| POST | `/export_csv` | `export_csv` | `routes/results.py:789` |
-| POST | `/export_count_csv` | `export_count_csv` | `routes/results.py:940` |
-| GET | `/traits` | `list_traits` | `routes/results.py:1442` |
-| GET | `/operationalization` | `get_operationalization` | `routes/results.py:1111` |
-| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:1127` |
-| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:1165` |
-| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:1267` |
-| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:1283` |
-| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:1325` |
-| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1391` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:1471` |
+| POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:679` |
+| POST | `/export_csv` | `export_csv` | `routes/results.py:781` |
+| POST | `/export_count_csv` | `export_count_csv` | `routes/results.py:932` |
+| GET | `/traits` | `list_traits` | `routes/results.py:1434` |
+| GET | `/operationalization` | `get_operationalization` | `routes/results.py:1103` |
+| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:1119` |
+| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:1157` |
+| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:1259` |
+| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:1275` |
+| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:1317` |
+| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1383` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:1463` |
 
 ### routes/review.py, prefix `/api/review` (8 routes)
 
@@ -1068,6 +1057,17 @@ registered at HEAD.
 | POST | `/start` | `start_session` | `routes/sessions.py:161` |
 | POST | `/end` | `end_session` | `routes/sessions.py:182` |
 | GET | `/load` | `load_sessions` | `routes/sessions.py:198` |
+
+### routes/subjects.py, prefix `/api/subjects` (6 routes)
+
+| method | path | handler | line |
+|---|---|---|---|
+| GET | `/load` | `load_subjects` | `routes/subjects.py:101` |
+| POST | `/save` | `save_subjects` | `routes/subjects.py:165` |
+| GET | `/image_status` | `get_image_status` | `routes/subjects.py:319` |
+| POST | `/image_status` | `set_image_status` | `routes/subjects.py:334` |
+| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/subjects.py:375` |
+| POST | `/image_status/derive` | `derive_image_status` | `routes/subjects.py:415` |
 
 ### routes/terminal.py, prefix `/api/terminal` (3 HTTP + 1 WS)
 
@@ -1889,12 +1889,12 @@ every declared document (`test_declared_stamp_filenames_cover_every_declared_doc
 Path: `<project_root>/.tcip/state/gui.json`, addressed by `gui_snapshot_key`,
 `packages/tcip-web/src/tcip_web/state.py:18`.
 
-Writer: `StateStore._flush_sync`, `tcip_web/state.py:282`, debounced 0.5s after `mutate`/`replace`, which
+Writer: `StateStore._flush_sync`, `tcip_web/state.py:281`, debounced 0.5s after `mutate`/`replace`, which
 resolves the destination at flush time so a project switch during the debounce window cannot write
 one project's snapshot into another's. The store is declared `durable=False`: the snapshot is
 rewritten every debounce cycle and losing the last one costs a re-selection, not history.
 
-Reader: `StateStore.load_from_disk`, `tcip_web/state.py:295`.
+Reader: `StateStore.load_from_disk`, `tcip_web/state.py:294`.
 
 `StateStore.mutate`, `tcip_web/state.py:27`, validates the merged mutation through `GuiState`
 before holding it, raising `GuiMutationInvalid` (`tcip_web/state.py:26`) on a field that does not
@@ -2334,7 +2334,7 @@ Phase 3 verdict: single.
 Must agree: which root the GUI currently has open, so the push route writes canvas_live.json/canvas_shapes.json under it and capture_live_canvas reads them from that same root rather than trusting its own pinned one to still be live. The filename half is closed (both sides address through one locator pair); the root half used to be open (the writer took the browser payload's own project_root as authority, Part 20's own rejected shape), and is now resolved through the canvas_open_binding record P5-274 added (docs/audit/remediation/batch8/p5-274-canvas-binding-design.md): a pinned-root refusal landed for the old shape and was reverted after a three-family review refuted its anchor (docs/audit/remediation/batch8/xf-canvas-root/), and this binding is the settled replacement.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:182` (`def canvas_open_binding_key(`, the one workspace-scoped record `{generation, root, project_name, issued_at, released}`, declared alongside `canvas_meta_key` (`web_client.py:146`)/`canvas_geometry_key` (`web_client.py:157`) addressing the two per-project documents the binding's root names) and `packages/tcip-web/src/tcip_web/routes/dataset.py:205` (`def _write_canvas_binding(`, called from `select_dataset` before the selection is adopted; `generation` bumps when `root` actually changes or the current record was released) and `packages/tcip-mcp/src/tcip_mcp/project_removal.py:770` (`def release_project_binding(`, the record's second writer, marking it released and bumping `generation` without deleting it, for a project the marker or the binding names).
 Side B: `packages/tcip-web/src/tcip_web/routes/canvas.py:89` (`def push_canvas_state(`, reads the binding, verifies the payload's `binding_generation` against it, and writes both documents under the binding's own `root`, never a client-supplied one) and the binding's three MCP-side readers, each comparing a root it names against the record through the one predicate `packages/tcip-mcp/src/tcip_mcp/web_client.py:353` (`def gui_binding_matches(`): `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:731` (`def capture_live_canvas(`, beside its own pinned root, with a generation fence re-reading the binding after the documents through the same store-error contract so a switch mid-call cannot render a false live result) and `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:73` (`push_panel_event`) and `tools/gui_tools.py:137` (`focus_human_attention`), each against a caller-stated `project_root` rather than a process's own pin). A mismatch or absence on any of the three is named through the shared helper `packages/tcip-mcp/src/tcip_mcp/web_client.py:385` (`def binding_divergence(`).
-Phase 3 verdict: single. The current generation also rides the GuiState broadcast envelope (`packages/tcip-web/src/tcip_web/app.py:185` `SERVER_EPOCH`, read off `StateStore.binding_generation`, `packages/tcip-web/src/tcip_web/state.py:150`) and is adopted with the dataset in one client-side store update (`packages/tcip-web/frontend/src/store/slices/gui.ts:138` `applyRestoredDataset`, and `mergeSnapshot`), so the push's `binding_generation` and the reader's own comparison never straddle a stale identity.
+Phase 3 verdict: single. The current generation also rides the GuiState broadcast envelope (`packages/tcip-web/src/tcip_web/app.py:185` `SERVER_EPOCH`, read off `StateStore.binding_generation`, `packages/tcip-web/src/tcip_web/state.py:149`) and is adopted with the dataset in one client-side store update (`packages/tcip-web/frontend/src/store/slices/gui.ts:138` `applyRestoredDataset`, and `mergeSnapshot`), so the push's `binding_generation` and the reader's own comparison never straddle a stale identity.
 
 ## S12. Friction reports and retrospectives under .tcip/
 
@@ -2453,7 +2453,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:145` (`def read_registry_index(`, the read path for everything outside the module; `_register_entry`, `model_registry.py:453`, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, `model_registry.py:130`, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1470` (`@router.get("/models/registered")`, serving `model_tools.rank_registered_models`'s listing view) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1462` (`@router.get("/models/registered")`, serving `model_tools.rank_registered_models`'s listing view) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar
@@ -2598,7 +2598,7 @@ Phase 3 verdict: single. The api/ helpers keep their hand-written signatures and
 ## S47. GuiState shape between state.py and store/types.ts  <!-- queued: P5-287 unify -->
 
 Must agree: the snapshot the backend serializes deserializes into the store's typed shape.
-Side A: `packages/tcip-web/src/tcip_web/state.py:97` (`class GuiState(BaseModel):`).
+Side A: `packages/tcip-web/src/tcip_web/state.py:96` (`class GuiState(BaseModel):`).
 Side B: `packages/tcip-web/frontend/src/store/types.ts:49` (`export interface GuiState {`).
 Phase 3 verdict: duplicated.
 

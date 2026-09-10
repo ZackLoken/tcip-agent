@@ -62,9 +62,8 @@ class DatasetSelection(BaseModel):
 
 class PredictionReference(BaseModel):
     """Shape of the ``pred_reference`` field below: part of ``gui_snapshot``'s frozen version 1
-    schema, held to it for every already-persisted ``gui.json``. It has no producer since the
-    Review-to-Annotate hand-off route was removed; the working shape for a reviewer's edit is
-    the in-place Edit flow inside Review itself."""
+    schema, held to it for every already-persisted ``gui.json``. It has no producer today; the
+    working shape for a reviewer's edit is the in-place Edit flow inside Review itself."""
 
     model_config = ConfigDict(extra="forbid")
 
