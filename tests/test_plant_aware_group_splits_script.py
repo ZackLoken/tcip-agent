@@ -306,8 +306,8 @@ def test_main_cli_states_all_three_ratios_and_writes_a_three_sided_manifest(
 
 def test_main_cli_missing_a_required_ratio_flag_refuses(tmp_path: Path, four_plant_csv: Path) -> None:
     """--train-ratio, --val-ratio and --calibration-ratio all have no default and are required:
-    omitting --train-ratio (which used to default to 0.8) refuses via argparse before anything
-    is written, rather than silently falling back to a stale default."""
+    omitting --train-ratio refuses via argparse before anything is written, rather than silently
+    falling back to a default."""
     dataset_root = _four_plant_dataset(tmp_path)
     out_dir = tmp_path / "cli_defaults_out"
 

@@ -108,10 +108,10 @@ def test_a_caller_chosen_conf_never_reaches_a_written_count_csv(tmp_path, monkey
     assert not out_csv.exists()
 
 
-def test_acknowledge_unvalidated_keyword_is_no_longer_accepted(tmp_path, monkeypatch):
-    """The old escape hatch is retired outright, not just narrowed: this door takes no
-    acknowledgement for its own CSV, so the retired keyword is a caller error rather than a
-    route to a flagged write. The plain refusal it used to escape is already covered above."""
+def test_deliver_per_image_counts_takes_no_acknowledge_unvalidated_keyword(tmp_path, monkeypatch):
+    """This door takes no acknowledgement for its own CSV, so ``acknowledge_unvalidated`` is a
+    caller error rather than a route to a flagged write. The refusal this door makes on an
+    uncalibrated conf is covered above."""
     import tcip_mcp.tools.inference_tools as itools
 
     ckpt, images_dir = _prepare(tmp_path, monkeypatch)

@@ -808,8 +808,8 @@ def test_materialized_fence_is_written_to_a_private_directory_not_a_fixed_shared
 
 
 def test_guards_resolve_variable_indirection_into_in_place_writers():
-    # A destination named through a variable is resolved and classified, so the refactor keeps the
-    # coverage the old protected-anywhere check gave cp/Set-Content indirection.
+    # A destination named through a variable is resolved and classified, so cp and Set-Content
+    # indirection into a protected path is refused.
     assert _run_guard("DEST=packages/tcip-mcp/x.py; cp evil.py $DEST").returncode == 2
     assert _run_ps_guard("$t='packages\\tcip-mcp\\x.py'; Set-Content $t 'hacked'").returncode == 2
 

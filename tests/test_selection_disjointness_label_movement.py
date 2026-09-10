@@ -512,9 +512,9 @@ def test_an_unbound_run_calibrated_under_a_caller_named_manifest_seals_null_keys
 def test_read_split_manifest_dir_refuses_a_members_block_without_label_digests(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A manifest ``draw_splits`` itself wrote, stripped of one date's ``label_digests`` the way
-    an old, pre-family manifest would carry it: every other required key present, so the refusal
-    is provably about this key, not a stand-in shaped so loosely it would refuse for any reason."""
+    """A manifest ``draw_splits`` itself wrote, with one date's members block stripped of its
+    ``label_digests`` key: every other required key present, so the refusal is provably about
+    this key, not a stand-in shaped so loosely it would refuse for any reason."""
     import tcip_store as ts
 
     from tcip_mcp.tools.data_tools import read_split_manifest_dir, split_manifest_key

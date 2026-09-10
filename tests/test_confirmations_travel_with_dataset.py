@@ -1,11 +1,10 @@
 """Confirmations travel with the dataset, quarantined on subject-definition mismatch.
 
-Confirmed negatives now live dataset-native (``<dataset_root>/.tcip/state/image_status.json``, a
-sibling of ``subjects.json``) rather than in whichever project's private ``.tcip/`` happened to be an
-ancestor of the labels dir. ``dataset_fingerprint`` folds this store in as a 4th term (it previously
-could not detect confirming/un-confirming a negative at all). A confirmation is quarantined only when
-a stamped attribute-schema digest positively disagrees with the subject's current schema: an
-unstamped confirmation is admitted, never punished for predating the mechanism.
+Confirmed negatives live dataset-native (``<dataset_root>/.tcip/state/image_status.json``, a
+sibling of ``subjects.json``), never in a project's private ``.tcip/``. ``dataset_fingerprint``
+folds this store in as a 4th term, so confirming or un-confirming a negative moves the
+fingerprint. A confirmation is quarantined only when a stamped attribute-schema digest
+positively disagrees with the subject's current schema; an unstamped confirmation is admitted.
 """
 
 from __future__ import annotations
@@ -157,10 +156,9 @@ def test_quarantine_does_not_fire_when_schema_is_unchanged(tmp_path):
 
 # (d) a rail must admit valid work: absence of a stamp is not evidence of staleness.
 def test_unstamped_confirmation_is_admitted_not_quarantined(tmp_path):
-    """Every image_status.json predating the digest-stamp mechanism (real projects, every existing
-    test fixture) has no digest sidecar at all. Punishing that by quarantine-by-default would
-    silently empty every one of them, exactly the 'strengthened rail rejects legitimate work'
-    failure to avoid."""
+    """An image_status.json carrying no digest sidecar at all is an ordinary shape, so
+    quarantining by default would silently empty every one of them: the confirmation is
+    admitted."""
     from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     root = _dataset(tmp_path, negative=False)

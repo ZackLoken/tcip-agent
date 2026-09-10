@@ -1,8 +1,8 @@
-"""GUARDS proofs, kept in their own file with the narrowest possible import set: neither test
-imports ``register_plant_registry`` itself, only the two doors whose signature changed, so
-``prove_test_fails_before.py`` can revert just ``phenology_tools.py``/``orthomosaic_tools.py``
-to the pre-registry baseline without the module failing to collect on an import the baseline
-predates entirely.
+"""The two delivery doors that take a named plant registry, held to their signatures.
+
+Nothing here imports ``register_plant_registry``: the module reaches only
+``phenology_tools.py`` and ``orthomosaic_tools.py``, so it collects against any tree that
+carries those two.
 """
 
 from __future__ import annotations

@@ -40,13 +40,9 @@ def _write_binding_raw(workspace: Path, *, generation: int, root: Path,
                        project_name: str | None = None) -> None:
     """Write a canvas_open_binding record as a plain file, bypassing the store seam entirely.
 
-    Used only by guard proofs run against a baseline that predates this store's registration: a
-    seam call (even a lazy import inside a helper) would raise ``ImportError`` there, which
-    ``prove_test_fails_before.py`` treats as unreached rather than as evidence. The path is still
-    computed through the generic ``RootedFileLocator`` primitive (the same one the registered
-    store's own locator wraps), not hand-spelled, so the layout is stated once even though this
-    fixture cannot go through the registration itself; that primitive predates this store by a
-    wide margin, so it carries none of the baseline dependency the registration would.
+    For a test that must not import the store's registration at all. The path is computed
+    through the generic ``RootedFileLocator`` primitive, the same one the registered store's own
+    locator wraps, never hand-spelled, so the layout is stated once.
     """
     import json
 
@@ -518,9 +514,8 @@ def _write_state(tmp_path: Path, img: str, shapes=SHAPES, *, shapes_image: str |
 
 def test_capture_live_canvas_no_binding_names_the_consulted_workspace_root(tmp_path, monkeypatch):
     """No binding record exists: the message names the workspace root it consulted and that
-    opening a project in the GUI creates one. Nothing else is written (no canvas state either),
-    so this also covers the plain absence case the old 'no live canvas state' message used to
-    answer for a different reason."""
+    opening a project in the GUI creates one. Nothing else is written, so this also covers the
+    case where neither a binding nor any canvas state is present."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.tools.vision_tools import capture_live_canvas
     from tcip_mcp.workspace import workspace_root
@@ -646,12 +641,10 @@ def test_capture_live_canvas_identity_stale_shapes_do_not_render(tmp_path, monke
 
 def test_capture_live_canvas_hit_case_divergence_is_not_silently_rendered(tmp_path, monkeypatch):
     """The reader pinned to A must not render A's own stale documents as live once the binding
-    names B: GUARDS at the parent, where no binding concept existed and A's stale documents
-    rendered unconditionally.
+    names B.
 
-    The binding is written as a plain file at the exact path its store's locator places it at
-    (bypassing the store seam), so this stays constructible against a baseline that predates the
-    canvas_open_binding registration entirely: no symbol this proof needs is new at the parent.
+    The binding is written as a plain file at the exact path its store's locator places it at,
+    bypassing the store seam, so this test imports no part of the store's registration.
     """
     from tcip_store.file_backend import FileBackend
 
@@ -768,9 +761,8 @@ def test_capture_live_canvas_generation_fence_retries_once_then_answers_divergen
     not produce a false live result: it retries once, and if the mismatch persists, answers with
     the divergence rather than the render it just produced.
 
-    Minted through the seam (``_mint_binding``), not a raw file: unlike the hit-case divergence
-    guard above, this test has no baseline-constructibility need to bypass the store, so it runs
-    on whichever backend the leg actually bound rather than being pinned to the file backend.
+    Minted through the seam (``_mint_binding``), not a raw file, so it runs on whichever
+    backend the leg bound rather than being pinned to the file backend.
     """
     import tcip_store as ts
 

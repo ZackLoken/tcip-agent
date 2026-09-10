@@ -121,8 +121,8 @@ def test_review_door_refuses_a_class_compensating_reference_the_pooled_bias_call
     conf = b.params["conf"]
     sweep = conf.gate_evidence
     hb = sweep["holdout_bias"]
-    # The pooled term the gate used to judge on reads perfectly unbiased, on a reference where every
-    # swapped object is counted under the wrong class.
+    # The pooled term reads perfectly unbiased on a reference where every swapped object is
+    # counted under the wrong class.
     assert hb["count_bias_mean"] == pytest.approx(0.0)
     assert hb["fp"] == 0 and hb["fn"] == 0
     # Per class it is anything but: class 1 under-counted, class 2 over-counted, by N_SWAPPED each.
@@ -354,8 +354,8 @@ def test_pick_serves_the_worst_class_not_the_pooled_total():
     bias of 1.0 clearing a tolerance of 1.0 via ``<=``); see
     ``test_pick_serves_the_worst_class_not_the_pooled_total_admits_it_when_dense_enough`` below for
     the same picker mechanism validating end-to-end once every class is dense enough that its own
-    identical permanent miscount is a small relative fraction, the "rail admits valid work, not
-    only reject invalid work" case CLAUDE.md requires for a strengthened gate.
+    identical permanent miscount is a small relative fraction, the legitimate call this gate must
+    still admit.
     """
     def build(prefix, offset):
         recs = []
@@ -414,10 +414,10 @@ def test_pick_serves_the_worst_class_not_the_pooled_total_admits_it_when_dense_e
     miscount (class 3's single missed object, and classes 1/2's own permanent +1 spurious detection,
     present in the test above too, masked there by that test's boundary-exact absolute
     tolerance of 1.0, which a bias of exactly 1.0 cleared via ``<=``) is a small relative fraction
-    of it, comfortably inside the default 1% relative tolerance. This is the "a rail must admit
-    valid work, not only reject invalid work" case CLAUDE.md requires alongside the refusal test
-    above: the relative gate is not merely stricter everywhere, it correctly admits a reference
-    whose real misses are genuinely small relative to how much of each class there is.
+    of it, comfortably inside the default 1% relative tolerance. This is the legitimate call the
+    gate must still admit, beside the refusal above: the relative gate is not merely stricter
+    everywhere, it correctly admits a reference whose real misses are genuinely small relative to
+    how much of each class there is.
     """
     def build(prefix, offset):
         recs = []
@@ -494,7 +494,7 @@ def test_effective_count_bias_tolerance_floor_shrinks_as_evidence_grows():
     assert tol_n50 < tol_n5  # more evidence behind the mean -> a tighter floor, never looser
 
 
-def test_effective_count_bias_tolerance_floor_never_loosens_past_d12_default_at_n_ge_2():
+def test_effective_count_bias_tolerance_floor_never_loosens_past_the_1_0_default_at_n_ge_2():
     from tcip_mcp.pipelines.operating_point import _effective_count_bias_tolerance
 
     # The absolute default is 1.0: at every n the reference-sufficiency gates actually let

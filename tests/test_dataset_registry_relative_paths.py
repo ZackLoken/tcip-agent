@@ -1,10 +1,9 @@
 """The dataset registry's ``path``: relative to the project root when the dataset is the
 project's own tree, absolute for a genuinely external dataset, resolved on read through one
-accessor (``dataset_entry_path``). Every consumer that used to read a registry entry's ``path``
-directly now resolves it through that accessor instead; this file exercises the accessor itself
-and the consumers that are not already covered by their own test files
-(``tcip_web.paths.allowed_roots`` has its own test in test_web_path_guard_permanent_on.py, and
-the door's own round trip lands with the import door's commits).
+accessor (``dataset_entry_path``). Every consumer of a registry entry's ``path`` resolves it
+through that accessor; this file exercises the accessor itself and the consumers that have no
+test file of their own (``tcip_web.paths.allowed_roots`` is covered by
+test_web_path_guard_permanent_on.py).
 """
 
 from __future__ import annotations
@@ -48,8 +47,8 @@ def _run_check(*args: str) -> subprocess.CompletedProcess:
 
 
 def test_register_dataset_stores_a_relative_path_for_the_projects_own_tree(tmp_path: Path):
-    """At the pre-row baseline every dataset's registered path is absolute, the project's own
-    tree included; this is the behavior the row changes."""
+    """A dataset that is the project's own tree registers as ``"."``, never as an absolute
+    path."""
     src = tmp_path / "proj"
     _make_dataset(src)
 

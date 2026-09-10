@@ -1,9 +1,7 @@
-"""Characterization goldens for the eval-on-disk merge (Merge A).
+"""Characterization goldens for the on-disk evaluators.
 
-Freezes the exact return dicts of the on-disk evaluators against current code, so the
-``evaluate_detections`` + ``evaluate_dataset`` → ``score_predictions`` consolidation is
-provably behavior-preserving. Before the merge these assert the two original tools; after it
-they assert ``score_predictions`` reproduces the same dicts keyed on file-vs-dir input.
+Freezes the exact return dicts ``score_predictions`` produces on a single image and on a
+directory, so a change to either shape fails here instead of reaching a delivered metric.
 """
 
 from __future__ import annotations

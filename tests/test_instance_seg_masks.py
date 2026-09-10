@@ -9,9 +9,9 @@ windowed-reader coverage), and ``write_predictions_json`` converts a mask (eithe
 to a real (possibly multi-ring) ``Polygon`` via ``resolve_binarize_threshold``, never a second
 hardcoded threshold.
 
-``require_masks=False`` remains a deliberate boxes-only opt-out for a caller that never reads
-masks (a mask patch per detection is real extra memory/compute across a dense tile grid): a rail
-must admit valid work, so that opt-out is tested here alongside the default mask-carrying path.
+``require_masks=False`` is a boxes-only opt-out for a caller that never reads masks (a mask
+patch per detection is real extra memory and compute across a dense tile grid), tested here
+alongside the default mask-carrying path.
 """
 
 from __future__ import annotations

@@ -1,9 +1,8 @@
 """The provenance identity spine.
 
-Locks the additive provenance stamping across the spine: checkpoint experiment_id + a
+Locks the additive provenance stamping across the spine: checkpoint experiment_id plus a
 computed-once sha256, the terminal-state lock (additive-only), the enriched capture_env,
-the split manifest, and the producing-model stamps on the delivery CSV/manifest surfaces.
-These are provenance additions, no measurement changes.
+the split manifest, and the producing-model stamps on the delivery CSV and manifest surfaces.
 """
 
 from __future__ import annotations

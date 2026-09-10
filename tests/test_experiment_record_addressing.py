@@ -43,8 +43,8 @@ def test_an_experiment_payload_that_json_cannot_hold_is_refused_at_the_entry_poi
     """Config, metrics and lineage arrive as the caller's own dicts, so the field that will
     not encode is named here rather than surfacing as a codec failure naming only the file.
 
-    A refusal matters most for a measurement: an unserializable value used to become its
-    repr, which reads as a real recorded number forever after.
+    A refusal matters most for a measurement: an unserializable value stored as its repr reads
+    as a real recorded number forever after.
     """
     experiment_id = "exp-020-json-boundary"
     experiments.create_experiment(experiment_id, {"model_source": {"builder": "m:f"}})
@@ -147,8 +147,7 @@ def test_one_epoch_logs_one_row_when_the_run_writes_where_its_record_lives(tmp_p
     experiments.create_experiment(experiment_id, config)
     experiments.update_status(experiment_id, "running")
 
-    # The default output dir is the experiment's own directory, which is where the two writers
-    # used to meet.
+    # The default output dir is the experiment's own directory, where the two writers meet.
     record_dir = experiments.experiments_dir() / experiment_id
     run = create_run(config, str(record_dir), id="auto-run-30")
     dataset = ConstantImageDataset([0.2, 0.8], [1.0, 4.0])

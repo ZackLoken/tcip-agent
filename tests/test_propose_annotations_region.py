@@ -1,6 +1,6 @@
 """Region-scoped `propose_annotations`: crop-and-offset, entirely on the tcip-mcp side.
 
-`propose_annotations` gained an optional `grid_cells`/`tile_size`/`overlap` region: when given, the
+`propose_annotations` takes an optional `grid_cells`/`tile_size`/`overlap` region: when given, the
 tool crops the source image to the named cells' bounding rect, hands the engine only that crop, and
 offsets the returned candidates back to the source image's full-frame coordinates. `auto_mask`
 itself (`tcip_annotation.sam_wrapper`) is untouched; every hop here is on the tcip-mcp side of the

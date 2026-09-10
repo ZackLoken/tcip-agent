@@ -8,15 +8,15 @@ here, so a codec swapped for a re-spelled serializer, a dropped trailing newline
 differently a season later.
 
 Two cases drive the owning module's own writer end to end: ``write_registry`` and
-``write_band_group_manifest``. A third, ``write_trait_spec_fields``, no longer needs one: a trait
-spec now writes through the same ``RECORD_JSON`` codec every other record store uses, so its byte
-spelling is already the one ``test_the_canonical_record_codec_writes_the_bytes_this_test_spells_out``
-pins centrally in ``test_store_contract.py``, and its own placement and codec application are
-already covered there by the ``trait_specs`` case of
-``test_a_registered_store_lands_where_its_locator_says_with_the_bytes_its_codec_produces``. Pinning
-a second literal byte sequence here would only restate that pin under a weaker, hand-picked field
-set; ``test_trait_authoring.py`` is where ``write_trait_spec_fields``'s own field-level content is
-asserted. The other four (dataset identity, friction report, retrospective, snapshot manifest) pin
+``write_band_group_manifest``. ``write_trait_spec_fields`` has no case here: a trait spec writes
+through the same ``RECORD_JSON`` codec every other record store uses, so its byte spelling is the
+one ``test_the_canonical_record_codec_writes_the_bytes_this_test_spells_out`` pins centrally in
+``test_store_contract.py``, its placement and codec application are covered there by the
+``trait_specs`` case of
+``test_a_registered_store_lands_where_its_locator_says_with_the_bytes_its_codec_produces``,
+and ``test_trait_authoring.py`` asserts its own field-level content.
+
+The other four (dataset identity, friction report, retrospective, snapshot manifest) pin
 the codec and the path only, through the seam expression their writer makes, because those writers
 mint an id, stamp a timestamp, draw a random suffix or capture a live environment, none of which a
 fixed byte comparison can hold still. That those writers reach the store through this very

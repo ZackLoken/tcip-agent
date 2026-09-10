@@ -1,4 +1,4 @@
-﻿"""Tests for the vision rendering engine and MCP tools."""
+"""Tests for the vision rendering engine and MCP tools."""
 
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ def _damage_sidecar(pred_dir: Path) -> None:
         conn.close()
 
 
-# â”€â”€ Rendering engine tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Rendering engine tests ──────────────────────────────────────────────────
 
 
 def test_default_output_resolves_under_the_platform_state_root(tmp_path, monkeypatch):
@@ -173,8 +173,8 @@ class TestRenderDetections:
             render_detections(np.zeros((8, 8, 5), dtype=np.uint16), [], native_size=(8, 8))
 
     def test_a_native_coordinate_lands_at_its_scaled_position(self, tmp_path: Path):
-        """Annotations are authored in the raster's own frame, so a renderer handed reduced pixels
-        places them by ``native_size``: the scaling the internal decode used to do."""
+        """Annotations are authored in the raster's own frame, so a renderer handed reduced
+        pixels scales each coordinate by the served size over ``native_size``."""
         from tcip_annotation.viz import render_detections
 
         native = (400, 200)
@@ -286,7 +286,7 @@ class TestRenderGrid:
         assert Path(result).is_file()
 
 
-# â”€â”€ Vision MCP tool tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Vision MCP tool tests ──────────────────────────────────────────────────
 
 
 class TestVisualizeAnnotations:
@@ -1008,9 +1008,9 @@ class TestAcceptProposalsTool:
         assert all(isinstance(o["score"], float) for o in objs)
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════
 # Layer 3: SAM integration tests (skipped when SAM is not installed)
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def _sam_available() -> bool:
@@ -1112,7 +1112,7 @@ class TestSamPredictFromGrid:
         img = Image.new("RGB", (640, 480), color=(200, 200, 200))
         from PIL import ImageDraw
         draw = ImageDraw.Draw(img)
-        # Object at roughly B2 area (col=1, row=1 â†’ center ~120,120)
+        # Object at roughly B2 area (col=1, row=1 → center ~120,120)
         draw.rectangle([80, 80, 160, 160], fill=(255, 0, 0))
         img.save(images_dir / "grid_test.jpg")
         return tmp_path
@@ -1134,7 +1134,7 @@ class TestSamPredictFromGrid:
 
 @requires_sam
 class TestFullSamPipeline:
-    """End-to-end: auto_mask â†’ accept â†’ verify, with real SAM."""
+    """End-to-end: auto_mask → accept → verify, with real SAM."""
 
     @pytest.fixture
     def sam_dataset(self, tmp_path: Path) -> Path:
@@ -1180,9 +1180,9 @@ class TestFullSamPipeline:
         assert Path(accept_result["image_path"]).is_file()
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Layer 2: Integration tests â€” full pipeline with mocked SAM candidates
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════
+# Layer 2: Integration tests over the full pipeline with mocked SAM candidates
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 MOCK_CANDIDATES: list[dict[str, Any]] = [
@@ -1223,7 +1223,7 @@ MOCK_CANDIDATES: list[dict[str, Any]] = [
 
 
 class TestCandidateCacheRoundTrip:
-    """Verify candidates survive JSON serialize â†’ deserialize."""
+    """Verify candidates survive JSON serialize → deserialize."""
 
     def test_polygon_geometry_preserved(self, tmp_path: Path):
         state_file = tmp_path / "candidates_test.json"
@@ -1255,7 +1255,7 @@ class TestCandidateCacheRoundTrip:
 
 
 class TestFullPipelineIntegration:
-    """End-to-end flow: mock candidates â†’ accept â†’ verify output files."""
+    """End-to-end flow: mock candidates → accept → verify output files."""
 
     @pytest.fixture
     def pipeline_dataset(self, tmp_path: Path) -> Path:
@@ -1411,7 +1411,7 @@ class TestFullPipelineIntegration:
     def test_render_then_accept_pipeline(
         self, pipeline_dataset: Path, monkeypatch: pytest.MonkeyPatch,
     ):
-        """Full render â†’ accept â†’ verify pipeline (sans SAM)."""
+        """Full render → accept → verify pipeline (sans SAM)."""
         from tcip_annotation.viz import render_candidates, render_grid_overlay
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
@@ -1469,7 +1469,7 @@ class TestGridCellToSamPrompt:
                 tile_size=80,
             )
 
-        # Should have called predict_from_points (2 points â†’ multi-point)
+        # Should have called predict_from_points (2 points → multi-point)
         assert mock_predict.called
         call_args = mock_predict.call_args
         pts = call_args[0][1]  # second positional arg: points

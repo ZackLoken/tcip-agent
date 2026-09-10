@@ -279,7 +279,7 @@ def test_a_windowed_alpha_tagged_source_is_resized_and_undone_the_same_way(caplo
     recorded resize applied and undone exactly like the 3-band case: the alpha-vs-spectral
     ambiguity to_pil_if_faithful exists for must not silently disable this tier for a genuinely
     alpha-bearing 4-band source. The fake detector is scale-invariant (always the middle 50% of
-    whatever tensor it is handed), so box equality alone can't tell "resized" from "skipped" --
+    whatever tensor it is handed), so box equality alone cannot tell "resized" from "skipped":
     the absence of the skip warning is the signal that actually distinguishes them, the same
     signal test_a_windowed_undeclared_fourth_band_source_keeps_its_own_pixels checks for its
     presence."""
@@ -549,9 +549,8 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
 
 
 def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict_tiled(tmp_path):
-    """The evaluation door never forwarded a resize into ``predict_tiled`` before this change; a
-    native-frame checkpoint whose recorded chain pins one must reach ``predict_tiled`` with it, not
-    silently run each tile at its own native size."""
+    """A native-frame checkpoint whose recorded chain pins a resize reaches ``predict_tiled``
+    with it, so the evaluation door never silently runs each tile at its own native size."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
     from tests._verified_checkpoint_fixtures import stub_verified_checkpoint

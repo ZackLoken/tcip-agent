@@ -1,12 +1,10 @@
 """The registry's producer binding: a run's own completion records the digest it produced, and
 nothing else can name a producer for weights the run did not record.
 
-Rails from docs/audit/remediation/milestone-s/registry-producer-binding-design.md, numbered as
-that note's section 4 numbers them. Rail 8's full shape lives in tests/test_training_envelope.py
-(the round trip needs the audited envelope); rail 13's admits live in
-tests/test_provenance_spine.py and tests/test_registry_entry_shape_agreement.py; rail 4 of the
-checkpoint-digest family's own rails (a different, same-numbered rail set) is rewritten in
-tests/test_checkpoint_digest_rails.py.
+The rails are numbered in the section comments below. Rail 8's full shape lives in
+tests/test_training_envelope.py (the round trip needs the audited envelope), and rail 13's
+admits live in tests/test_provenance_spine.py and tests/test_registry_entry_shape_agreement.py.
+tests/test_checkpoint_digest_rails.py numbers its own, separate rail set.
 """
 
 from __future__ import annotations
@@ -291,9 +289,8 @@ def test_register_model_from_experiment_admits_a_differently_spelled_own_root(tm
 
 def test_explicit_mode_refuses_to_replace_a_run_bound_entry(tmp_path, monkeypatch):
     """An explicit-mode registration under the name of an entry a run bound raises rather than
-    evicting it (a plain ``ValueError`` at the baseline this guards against; the specific class
-    is checked separately, once the fail-before proof no longer needs to import a symbol the
-    baseline predates)."""
+    evicting it. The class raised is ``EntryOwnedByRun``, a ``ValueError`` subclass, checked
+    below by its type name rather than imported."""
     from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment, update_status
     from tcip_mcp.model_registry import ModelRegistry
 

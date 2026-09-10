@@ -1,9 +1,8 @@
-"""Characterization goldens for the splits merge.
+"""Characterization goldens for ``draw_splits``.
 
-Freezes ``draw_splits`` stats and ``split_dataset`` on-disk tree/return against current code, so
-folding materialization into ``draw_splits(materialize=...)`` is provably behavior-preserving:
-``draw_splits(materialize=False)`` reproduces the stats and ``draw_splits(materialize=True)``
-reproduces the tree plus ``output_dir``/``structure``.
+Freezes the stats ``draw_splits(materialize=False)`` returns and the on-disk tree plus
+``output_dir`` and ``structure`` that ``draw_splits(materialize=True)`` produces, so a change to
+either shape fails here.
 """
 
 from __future__ import annotations

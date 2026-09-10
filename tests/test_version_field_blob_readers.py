@@ -91,10 +91,8 @@ def test_a_version_one_registry_reads_back_through_the_platforms_own_writer(tmp_
 
 def test_a_registry_above_the_ceiling_refuses_as_a_schema_version_refusal(tmp_path):
     """Every other top-level key is a well-formed subject, so ``registry_from_dict`` would parse
-    it fine on its own: the refusal below must come from the version check, not from
-    ``schema_version: 2`` incidentally failing to parse as a subject body (the wrong reason this
-    test used to pass for, when ``2`` is not a dict and trips the shape parser before the version
-    check ever runs)."""
+    it fine on its own: the refusal below must come from the version check, never from
+    ``schema_version: 2`` failing the shape parser as a subject body."""
     key = subject_registry_key(tmp_path)
     document = {"bur": {"description": "", "defined_by": "", "defined_at": ""},
                 "leaf": {"description": "", "defined_by": "", "defined_at": ""},

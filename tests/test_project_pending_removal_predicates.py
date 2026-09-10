@@ -1,9 +1,9 @@
 """Tests for the pending-removal predicate split in ``tcip_mcp.workspace``.
 
 A pending-removal marker is written directly through the store here, standing in for the
-removal door landed in a later family member: these tests are about what the marker means to
-every reader that already exists (``adoptable_project_root``, ``active_project_if_present``,
-``marker_problem``, ``ingest_images``, ``workspace_project_name``), not about the door itself.
+removal door itself: these tests are about what the marker means to every reader that already
+exists (``adoptable_project_root``, ``active_project_if_present``, ``marker_problem``,
+``ingest_images``, ``workspace_project_name``), not about the door itself.
 """
 
 from __future__ import annotations

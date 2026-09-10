@@ -1,6 +1,6 @@
 """Coverage: CONTRIBUTING.md claims its Commands block is CLAUDE.md's Commands block, verbatim.
-Nothing enforced that claim before this test; it extracts the first fenced ```bash block from
-each file and asserts the two are identical, so the two documents cannot drift apart silently.
+This extracts the first fenced ```bash block from each file and asserts the two are identical,
+so the two documents cannot drift apart silently.
 """
 
 from __future__ import annotations

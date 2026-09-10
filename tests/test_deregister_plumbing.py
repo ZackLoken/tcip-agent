@@ -2,8 +2,8 @@
 
 De-registering the ``log_metrics`` / ``record_artifact`` MCP wrappers must not touch the internal
 ``tcip_mcp.experiments`` functions the trainer and feedback tools call directly. These freeze that
-internal contract against current code. The registry-absence standing checks (that the three
-de-registered names no longer register) are added after the de-regs land; see the bottom of file.
+internal contract against current code. The checks that the three de-registered names are absent
+from the registry are at the bottom of this file.
 """
 
 from __future__ import annotations

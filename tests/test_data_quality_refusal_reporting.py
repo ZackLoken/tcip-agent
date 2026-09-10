@@ -1,9 +1,8 @@
 """tcip doctor's check_data_quality: what it reports, and what it must never quietly claim.
 
-Folded in from the retired per-file quality tool. Two standing facts the caller relies on.
-First, a label store whose format the detector refused is a distinct finding from a dataset that
-simply has no labels of that shape. Second, the finding's own vocabulary is load bearing: a
-warning and an error are not interchangeable.
+Two standing facts the caller relies on. First, a label store whose format the detector refused
+is a distinct finding from a dataset that simply has no labels of that shape. Second, the
+finding's own vocabulary is load bearing: a warning and an error are not interchangeable.
 """
 
 from __future__ import annotations

@@ -69,11 +69,11 @@ def _sweep_records(idp="c", *, shift: float = 0.0):
     Image B: 2 GT; correct det @0.9 + a hesitant-but-correct det @0.3.
 
     ``shift`` offsets every GT box's center by that many px (well inside the ~10px center-match
-    tolerance derived from these boxes), leaving the detections in place. Used to give the holdout
-    fixture genuinely different GT content from calibration's: a holdout differing from
-    calibration only by ``image_id`` is byte-identical content and the content-overlap gate now
-    (correctly) refuses it; see ``test_golden_duplicate_content_holdout_is_false`` below, which
-    pins exactly that refusal on the shift=0 fixture pair.
+    tolerance derived from these boxes), leaving the detections in place, so the holdout fixture
+    carries genuinely different GT content from calibration's. A holdout differing from
+    calibration only by ``image_id`` is byte-identical content, which the content-overlap gate
+    refuses; ``test_golden_duplicate_content_holdout_is_false`` below pins that refusal on the
+    shift=0 fixture pair.
     """
     a = {"width": 400, "height": 400, "image_id": f"{idp}_a",
          "gt": [_ann(100 + shift, 100)],
@@ -130,11 +130,10 @@ def test_golden_pick_count_unbiased_and_f1_max():
 
 
 def test_golden_resolve_operating_point_validated_conf():
-    # resolve_operating_point fails closed without an asserted staged_conf_floor,
-    # and requires a dense, realistic reference to exercise the holdout gate: a
-    # 2-image sparse fixture no longer suffices (its per-image variance trips the
-    # equivalence criterion; see test_golden_duplicate_content_holdout_is_false below for what a
-    # sparse fixture still correctly refuses).
+    # resolve_operating_point fails closed without an asserted staged_conf_floor, and needs a
+    # dense, realistic reference to exercise the holdout gate: a sparse 2-image fixture's
+    # per-image variance trips the equivalence criterion, which
+    # test_golden_duplicate_content_holdout_is_false below pins as a correct refusal.
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     cal, hold = good_cal_holdout()
@@ -366,8 +365,8 @@ def test_golden_consolidated_operating_point_defaults():
     assert not hasattr(R, "DEFAULT_TILE_SIZE")
     assert not hasattr(R, "DEFAULT_TILED")
 
-    # operating_point.py: the private _DEFAULT_* copies are gone; the module now imports the
-    # shared constants (same objects), proving one source of truth.
+    # operating_point.py holds no private _DEFAULT_* copies: it imports the shared constants
+    # themselves, so there is one source of truth.
     assert not hasattr(OP, "_DEFAULT_CROSS_TILE_NMS")
     assert not hasattr(OP, "_DEFAULT_MAX_DETS")
     assert not hasattr(OP, "_DEFAULT_CONF_PLACEHOLDER")
@@ -615,8 +614,8 @@ def _write_op_sidecar(d: Path, *, dataset_root: Path, validated: bool, conf: flo
                       experiment_id: str | None = "exp-golden") -> None:
     """The operating_point.json stamp run_inference writes beside a bucket's labels: the
     on-disk validity deliver_phenology_milestones reconciles against, including id_map and
-    producer identity (the real writer always stamps checkpoint_sha256/experiment_id
-    at the top level; a fixture that omitted them blessed a shape the platform never produces).
+    producer identity (the real writer always stamps checkpoint_sha256 and experiment_id at the
+    top level, so a fixture must carry them too).
 
     A validated bucket also gets the producing run its stamp names filed, since a delivery repeats a
     producer identity only where an experiment outside the bucket corroborates the stamp's claim."""

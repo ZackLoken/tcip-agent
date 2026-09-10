@@ -1,11 +1,11 @@
 """One contour extractor: a SAM-assisted proposal keeps every region of a split mask.
 
 ``state.Polygon`` is multi-ring because an occlusion-split object (a bud behind a branch) is
-genuinely more than one region. The prediction-export path honored that; the human-in-the-loop
-bootstrapping path (SAM proposal -> ``stage_proposals``) had its own contour extractor that kept only
-the largest contour, so the same object was whole as a prediction and truncated as SAM-assisted GT,
-and that GT is what a dataset rasterizes and a model learns from. Both paths now call
-``tcip_annotation.mask_contours.mask_to_polygon_rings``.
+genuinely more than one region. The prediction-export path and the human-in-the-loop
+bootstrapping path (SAM proposal -> ``stage_proposals``) both extract contours through
+``tcip_annotation.mask_contours.mask_to_polygon_rings``, so one object cannot be whole as a
+prediction and truncated as SAM-assisted GT, which is the GT a dataset rasterizes and a model
+learns from.
 
 The round-trip tests drive the real ``auto_mask`` / ``predict_from_point`` code with a fake SAM2 (the
 pattern ``tests/test_vision.py::TestSamPredictorCache`` uses), so every hop this touches
@@ -190,9 +190,8 @@ def test_neutral_candidate_keeps_every_ring(sam_project: Path) -> None:
 def test_split_sam_proposal_is_accepted_as_a_multi_ring_annotation(sam_project: Path) -> None:
     """The whole point: a two-lobe SAM proposal reaches disk as one annotation with both lobes.
 
-    The SAM path used to drop every region but the largest while extracting the contour, before
-    ``stage_proposals`` ever saw the candidate, so the staged shape was silently a fragment of the
-    object a breeder then confirmed.
+    The SAM path keeps every region of a mask while extracting its contour, so the shape
+    ``stage_proposals`` sees is the whole object and never its largest fragment alone.
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import Polygon, bbox_of

@@ -1,9 +1,9 @@
 """A crash in the training worker's own pre-envelope setup (config read, dataset build, split
-manifest write) used to leave the experiment record ``running`` forever and its subprocess exit
-with no ``training_run`` audit event at all, since ``run_training_envelope`` (the one place that
-opens that event) is never reached. The worker now reconciles the record to ``failed`` and opens
-the same event before letting the crash propagate and end the subprocess, except when the crash
-is an already-audited terminal-lock refusal, which the reconciler leaves untouched.
+manifest write) never leaves the experiment record ``running`` and never ends the subprocess
+without a ``training_run`` audit event. ``run_training_envelope``, the one place that opens that
+event, is not reached from there, so the worker itself reconciles the record to ``failed`` and
+opens the event before letting the crash propagate, except when the crash is an already-audited
+terminal-lock refusal, which the reconciler leaves untouched.
 """
 
 from __future__ import annotations

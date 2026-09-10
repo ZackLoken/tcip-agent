@@ -1,13 +1,13 @@
 """The generic delivery doors are gated by one shared refuse-or-stamp check.
 
-Covers the single ``check_delivery_gate`` helper and its retrofit onto the previously-ungated
-writers/tools: ``export_detection_csv`` / ``export_aggregated_csv`` (writer-level, no MCP wrapper)
-and ``deliver_per_image_counts`` (reads the run's resolved validity, not a caller string). The phenology
-doors' gate behavior is pinned in the Phase-0 measurement goldens; here we pin the doors newly
-gated. Neither writer's MCP-tool caller builds an acknowledgement (no MCP door ever does), so an
-unvalidated dimension always refuses through the tools; a writer called directly with a real one
-(the web results route's count export) ships instead. The gate's own acknowledgement escape is
-pinned directly against ``check_delivery_gate``.
+Covers the single ``check_delivery_gate`` helper and the writers and tools it gates:
+``export_detection_csv`` / ``export_aggregated_csv`` (writer-level, no MCP wrapper) and
+``deliver_per_image_counts`` (reads the run's resolved validity, not a caller string). The
+phenology doors' gate behavior is pinned in the measurement goldens, not here. Neither writer's
+MCP-tool caller builds an acknowledgement (no MCP door ever does), so an unvalidated dimension
+always refuses through the tools; a writer called directly with a real one (the web results
+route's count export) ships instead. The gate's own acknowledgement escape is pinned directly
+against ``check_delivery_gate``.
 """
 
 from __future__ import annotations
@@ -195,8 +195,8 @@ def test_acknowledgement_refuses_a_blank_acknowledged_by(acknowledged_by):
 
 
 def test_measurement_dimension_key_is_retired():
-    """The dimension key measurement is retired in favor of operating_point: a caller still
-    composing flags under the old key hits the same unknown-dimension refusal any other dead
+    """The dimension key measurement is retired in favor of operating_point: a caller composing
+    flags under the ``measurement`` key hits the same unknown-dimension refusal any other dead
     vocabulary would, never a silently accepted alias."""
     with pytest.raises(ValueError, match="measurement"):
         check_delivery_gate({"measurement": VALIDATED_HELD_OUT})
@@ -723,7 +723,7 @@ def test_export_aggregated_csv_regression_trait_floors_on_a_failed_sidecar(tmp_p
 
 def test_export_aggregated_csv_rejects_an_unrecognized_measurement_document(tmp_path):
     # A typo'd measurement_document must raise rather than reconciling against the wrong
-    # dimension: the statement rail replacing the old task-typo guard.
+    # dimension: the statement rail refuses it.
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     bucket = _scalar_bucket(tmp_path, "preds", "ordinal", validated=True)
@@ -1049,9 +1049,9 @@ def test_run_inference_staging_escape_writes_and_floors_the_sidecar_stamp(tmp_pa
 
 
 def test_run_inference_images_dir_gates_before_the_pass_not_after(tmp_path, monkeypatch):
-    """DECIDED #1: the images_dir regime's gate runs before the (expensive) pass, the same
-    ordering the raster_path regime already had, not only after the verified pass already ran it.
-    A real checkpoint with no tile geometry at all (no persisted tile size, no untiled training
+    """The images_dir regime's gate runs before the expensive pass, the same ordering the
+    raster_path regime uses, never only after the verified pass has run. A real checkpoint with
+    no tile geometry at all (no persisted tile size, no untiled training
     frame to derive a native-ratio edge from, no explicit override) must refuse without ever
     reaching the model's own forward pass; GenericPredictor's predict_batch is monkeypatched to
     raise if called at all, so this proves the skip, not just that no bucket got written."""
@@ -1445,10 +1445,10 @@ def test_export_aggregated_csv_ships_dimensional_value_with_a_validated_scale(tm
 def test_export_aggregated_csv_records_every_reconciliation_the_gate_ran(tmp_path):
     """A delivery whose gate reconciled the count operating point, claim scope, tile geometry and
     physical scale together stores every one of them: the recorded delivery event's
-    document_reconciliations carries the operating_point entry the gate ran (GUARDS the new key),
+    document_reconciliations carries the operating_point entry the gate ran,
     dimension_reconciliations carries claim_scope, tile_size and scale, each validated equal to
     what the gate's own flags held, documents equal to the operating_point entry's own bindings,
-    and the audit line's verified_buckets unchanged from today."""
+    and the audit line names the same verified buckets."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_PERSISTED_GEOMETRY,
@@ -1581,7 +1581,7 @@ def test_export_aggregated_csv_unvalidated_scale_refuses_despite_valid_conf(tmp_
 
 def test_export_aggregated_csv_refuses_a_stated_scale_with_no_physical_unit(tmp_path):
     """A stated scale_document with a value_key implying no physical unit is refused: a physical
-    scale cannot answer for a non-dimensional value (count-delivery-door design section 2, rule 4)."""
+    scale cannot answer for a non-dimensional value."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
@@ -1596,8 +1596,8 @@ def test_export_aggregated_csv_refuses_a_dimensional_operating_point_delivery_wi
     tmp_path,
 ):
     """A value_key implying a physical unit under operating_point with no stated scale_document
-    refuses outright: a dimensional number from a detection/segmentation bucket has nothing
-    answering for its unit without one (rule 4), distinct from the gate floor above, which is for a
+    refuses outright: a dimensional number from a detection or segmentation bucket has nothing
+    answering for its unit without one, distinct from the gate floor above, which is for a
     delivery that at least states the scale it rests on."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 

@@ -1,7 +1,7 @@
-"""Backend coverage for side-by-side run comparison: compare_experiments' new columns
-(task/subject/status_error/split/registry), a no-longer-fabricated model builder, an honest
-same_dataset_fingerprint over an error column, the experiment_ids filter on best-model ranking,
-and the /api/training/compare/best route.
+"""Backend coverage for side-by-side run comparison: compare_experiments' task, subject,
+status_error, split and registry columns, a model builder reported only where the record names
+one, an honest same_dataset_fingerprint over an error column, the experiment_ids filter on
+best-model ranking, and the /api/training/compare/best route.
 """
 
 from __future__ import annotations

@@ -1,11 +1,11 @@
-"""Structural (AST-only, no import of the modules under test): one-home guarantees for every
-module reshape a move commit claims, across the training layer, the label-store/data-library
-query functions, the proposal-engine tools, and the GUI-driving tools. Each assertion is
-three-sided: the old module no longer defines the name, the new module defines it exactly once,
-and no other module under any of the platform's source trees defines it either. Nested
-definitions count (a def tucked inside another function, a class body, or a conditional block is
-not invisible), and the old/new paths themselves are asserted to exist before anything is
-scanned, so a typo'd or renamed path reads as a failure rather than a vacuous pass.
+"""Structural (AST-only, no import of the modules under test): one name, one home, across the
+training layer, the label-store and data-library query functions, the proposal-engine tools,
+and the GUI-driving tools. Each assertion is three-sided: the module a name moved out of does
+not define it, the module it lives in defines it exactly once, and no other module under any of
+the platform's source trees defines it either. Nested definitions count (a def tucked inside
+another function, a class body, or a conditional block is not invisible), and both module paths
+are asserted to exist before anything is scanned, so a typo'd or renamed path reads as a failure
+rather than a vacuous pass.
 """
 
 import ast

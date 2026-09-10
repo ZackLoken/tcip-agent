@@ -1,8 +1,9 @@
 """The data picker: choosing a recorded partition (or "As recorded") for a relaunch.
 
-Covers the pieces the design record's second family adds: the shared
-``manifest_compatibility`` check, the extracted ``narrow_manifest_to_date``, the checked manifest
-reader, ``list_split_choices`` and its route, and the launch route's ``split_manifest_dir`` field.
+Covers the shared ``manifest_compatibility`` check, ``narrow_manifest_to_date``, the checked
+manifest reader, ``list_split_choices`` and its route, and the launch route's
+``split_manifest_dir`` field.
+
 The manifest-binding mechanics themselves (``bind_manifest_stems``, ``auto_train_val``'s manifest
 branch, ``read_split_manifest_dir``) are ``test_split_manifest_binding.py``'s; this file reuses
 its dataset fixture rather than restating it.

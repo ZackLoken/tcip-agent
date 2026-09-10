@@ -1,6 +1,7 @@
 """``read_audit_log``: the one tool reading a scope's own audit log back, on the record itself.
 
-Coverage, not GUARDS: the tool is wholly new, so there is no prior behavior to prove absent.
+Coverage, not a guard: this tool has no prior behavior to prove absent.
+
 Every entry read here comes from a real ``@audited`` call, never a hand-built dict, except the
 corrupt-page, version-refused-page and torn-tail cases, each of which appends malformed bytes by
 hand directly to the log file at the seam's own path (bypassing the store's append entirely,

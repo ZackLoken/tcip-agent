@@ -1,7 +1,5 @@
 """The checkpoint digest rail: every delivery door recomputes the sha256 of the checkpoint bytes
 it loaded and refuses one no registry entry names, before anything in it is unpickled.
-
-See docs/audit/remediation/milestone-s/checkpoint-digest-design.md, sections 3-5.
 """
 
 from __future__ import annotations
@@ -183,9 +181,8 @@ def test_triage_predictions_admits_a_checkpoint_registered_under_the_stated_proj
 
 
 def test_calibrate_operating_point_script_refuses_an_unregistered_checkpoint(tmp_path):
-    """Coverage, not a guard: --project-root and this refusal landed in the same change, so no
-    baseline exists that parses the flag but lacks the check; prove_test_fails_before against
-    f4413a14 reports SystemExit(2) from argparse, never this test's own assertion."""
+    """Coverage, not a guard: no baseline separates ``--project-root`` from the refusal it
+    carries, so nothing can be observed failing without the check."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
@@ -401,7 +398,7 @@ def _touch_marker(marker_path: str) -> "_SideEffectOnUnpickle":
 
 
 class _SideEffectOnUnpickle:
-    """Its unpickling writes a marker file; the design read's own probe shape."""
+    """Its unpickling writes a marker file, so a load that unpickles is visible on disk."""
 
     def __init__(self, marker_path: str) -> None:
         self._marker_path = marker_path
@@ -686,10 +683,8 @@ def _stand_in_calibration(monkeypatch, calibration_pipeline, labels_dir):
 
 
 def test_run_inference_refuses_a_sweep_record_edited_after_the_run(tmp_path, monkeypatch):
-    """Coverage, not a fail-before guard: the spy stubs _run_inference_verified, a symbol the
-    family's baseline (f4413a14) does not carry, so a run against that baseline dies in setup
-    rather than on the assertion this test names. See the driven-through-real-doors version
-    below for the guard."""
+    """Coverage: the spy stubs ``_run_inference_verified``, so this exercises the refusal
+    without a real model pass. The version below drives the same refusal through real doors."""
     import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
 
@@ -736,14 +731,12 @@ def test_run_inference_refuses_a_sweep_record_edited_after_the_run(tmp_path, mon
 def test_run_inference_refuses_a_sweep_record_edited_after_the_run_through_real_doors(
     tmp_path, monkeypatch,
 ):
-    """The fail-before guard for rail 3, driven through real doors with no stub of
-    _run_inference_verified (a symbol the family's baseline, f4413a14, does not carry): the
-    calibration itself is the same deterministic stand-in the coverage test above uses (a real
-    model pass is not reproducible byte for byte across two separate calls, see
-    _stand_in_calibration), so two real run_inference calls over it agree
-    on one identity. store.replace (a baseline-old primitive) is patched to skip only the
-    confidence-sweep write on the second call, so the first call's tampered record is the one
-    run_inference reads back and refuses on."""
+    """Rail 3 driven through real doors, with no stub of ``_run_inference_verified``. The
+    calibration is the same deterministic stand-in the coverage test above uses, since a real
+    model pass is not reproducible byte for byte across two separate calls (see
+    ``_stand_in_calibration``), so two real run_inference calls over it agree on one identity.
+    ``store.replace`` is patched to skip only the confidence-sweep write on the second call, so
+    the first call's tampered record is the one run_inference reads back and refuses on."""
     import tcip_store.store as store_mod
 
     import tcip_mcp.pipelines.calibration as calibration_pipeline

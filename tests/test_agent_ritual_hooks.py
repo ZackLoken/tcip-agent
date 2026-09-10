@@ -1,9 +1,8 @@
 """SessionStart ritual hook: fast directive injection through the platform's own storage seam.
 
-Locks the compliant design (Anthropic guidance: SessionStart must be quick, context-loading only):
-it injects an ``additionalContext`` directive naming the active project, and it spawns no
-subprocess and never imports the MCP server's tool registration (the standing check that guards
-against the reverted 30s regression).
+The hook stays quick and context-loading only: it injects an ``additionalContext`` directive
+naming the active project, and it spawns no subprocess and never imports the MCP server's tool
+registration, which would cost tens of seconds at every session start.
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
 """Per-plant attribution by canopy segment: loading a canopy boundary document, tying its
 segments to registry plants, and assigning detections to a tie's own segments.
 
-Coverage tests for a new module: each function's own admitting and refusing shapes, on
-synthetic segments over a real registered-dataset raster (:mod:`tests._geotiff_fixtures`).
+Coverage: each function's own admitting and refusing shapes, on synthetic segments over a real
+registered-dataset raster (:mod:`tests._geotiff_fixtures`).
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """The import door's own rails: staging, the shared accounting's refusals, the backend-
-conditional adoption, and the move. Each refusal here is paired with what still admits, per
-CLAUDE.md's rail rule.
+conditional adoption, and the move. Each refusal here is paired with the legitimate call the
+same rail must still admit.
 """
 
 from __future__ import annotations

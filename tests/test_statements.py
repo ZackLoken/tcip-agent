@@ -1,12 +1,10 @@
-"""``statements.py``'s shared primitives, proven identical to what they replaced.
+"""``statements.py``'s shared primitives.
 
-``canonical`` and the content-hash-over-declared-fields pattern used to live inside
-``operationalization.py``, hand-written for its own eight statement fields. They now live in
-``tcip_mcp.statements`` as generic functions any statement kind can call, and
-``operationalization.record_seen_hash`` becomes a one-line wrapper over them. This module checks
-that the move changed nothing observable: the wrapper's hash still equals a direct call through the
-real store's own round-tripped record, and ``canonical`` still normalizes the same way a JSON
-round trip does.
+``canonical`` and the content-hash-over-declared-fields pattern live in ``tcip_mcp.statements``
+as generic functions any statement kind can call, and ``operationalization.record_seen_hash`` is
+a one-line wrapper over them. This module checks that the wrapper's hash equals a direct call
+through the real store's own round-tripped record, and that ``canonical`` normalizes the same way
+a JSON round trip does.
 """
 
 from __future__ import annotations
@@ -44,7 +42,7 @@ def test_content_hash_does_not_vary_with_sequence_type(project: Path) -> None:
 
 
 def test_content_hash_takes_the_field_tuple_as_a_parameter_rather_than_a_fixed_set() -> None:
-    """The generalization S1 asked for: a caller names its own statement kind's field set."""
+    """A caller names its own statement kind's field set rather than a fixed one."""
     narrow = content_hash({"a": 1, "b": 2}, ("a",))
     wide = content_hash({"a": 1, "b": 2}, ("a", "b"))
 

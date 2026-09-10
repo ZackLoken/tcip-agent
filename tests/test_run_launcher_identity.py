@@ -104,8 +104,8 @@ def test_a_record_with_no_stamp_reconstructs_with_launched_by_none(tmp_path, mon
 
 
 def test_is_launched_true_for_a_record_stamped_with_output_dir_alone(tmp_path, monkeypatch):
-    """A record from before the stamp moved to one transaction: output_dir landed but the
-    separate state write that used to follow it never reached "running". Still launched."""
+    """A status record whose ``output_dir`` is stamped while its state is still "created" reads
+    as launched."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import create_experiment, is_launched, status_key
     from tcip_store import store
@@ -123,8 +123,8 @@ def test_is_launched_true_for_a_record_stamped_with_output_dir_alone(tmp_path, m
 
 
 def test_is_launched_true_for_an_old_record_carrying_both_output_dir_and_run_id(tmp_path, monkeypatch):
-    """A record from before this change: the old stamp wrote run_id alongside output_dir. Still
-    reads as launched, through output_dir alone; the stale run_id is never consulted."""
+    """A status record carrying both ``run_id`` and ``output_dir`` reads as launched through
+    ``output_dir`` alone; the ``run_id`` is never consulted."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import create_experiment, is_launched, status_key
     from tcip_store import store
@@ -381,16 +381,15 @@ def test_stamp_run_identity_with_config_refuses_once_metrics_are_logged(tmp_path
 def test_two_launches_racing_a_pristine_record_never_split_the_winners_config_from_its_stamp(
     tmp_path, monkeypatch,
 ):
-    """The pristine-reuse branch used to be two store transactions
-    (overwrite_config_if_pristine, then stamp_run_identity): two launches that both passed the
-    pristine check could interleave A-overwrite, B-overwrite, A-stamp, B-stamp, leaving the
-    record running under A's stamp with B's config snapshot. Forces that exact interleaving
-    with timed wrapper waits around both functions; the overwrite wrapper is never reached on
-    the fixed tree (the stamp itself carries the config), so its own wait times out rather than
-    deadlocking the other thread. Both launches must still return without error, one id is the
-    pre-created record's own and the other a fresh fork naming it as parent, and for each
-    returned id the config snapshot and the launch config the run actually trains from carry
-    the identical seed."""
+    """The pristine-reuse branch stamps a run's config and its identity in one store
+    transaction, so two launches that both pass the pristine check can never leave the record
+    running under one launch's stamp with the other's config snapshot. Timed wrapper waits
+    around ``overwrite_config_if_pristine`` and ``stamp_run_identity`` force the interleaving
+    that would split them; the overwrite wrapper is never reached, since the stamp itself
+    carries the config, so its own wait times out rather than deadlocking the other thread.
+    Both launches must return without error, one id is the pre-created record's own and the
+    other a fresh fork naming it as parent, and for each returned id the config snapshot and the
+    launch config the run actually trains from carry the identical seed."""
     monkeypatch.chdir(tmp_path)
     import threading
 

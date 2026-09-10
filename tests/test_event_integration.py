@@ -1,8 +1,7 @@
 """Integration tests for the push_panel_event HTTP bridge and tool output schemas.
 
-The legacy ``.tcip/events/`` file bridge has been retired. ``push_panel_event``
-now POSTs to the tcip-web FastAPI backend; the backend broadcasts to any
-subscribed WebSocket clients.
+``push_panel_event`` POSTs to the tcip-web FastAPI backend, which broadcasts to any
+subscribed WebSocket clients. No file bridge under ``.tcip/events/`` is involved.
 """
 
 from __future__ import annotations

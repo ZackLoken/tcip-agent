@@ -1,11 +1,10 @@
 """The name-based annotation schema: subjects, never integer class ids, on disk or in memory.
 
-Fail-before tests that pin the measurement-critical invariants of the flip to name-based labels: the
-registry decodes its own labels, a geometry-less annotation round-trips without collapsing to a
-negative, every id consumer rests on one ``assign_class_ids`` map, negatives key through a threaded
-subject, the loader filters by subject + geometry, decode inverts the recorded map, and authoring
-refuses a subjectless label. Each builds its own dataset (no shared fixture) so the pre-change
-baseline harness runs clean.
+The measurement-critical invariants of name-based labels: the registry decodes its own labels, a
+geometry-less annotation round-trips without collapsing to a negative, every id consumer rests
+on one ``assign_class_ids`` map, negatives key through a threaded subject, the loader filters by
+subject and geometry, decode inverts the recorded map, and authoring refuses a subjectless
+label. Each test builds its own dataset, sharing no fixture with another.
 """
 
 from __future__ import annotations
@@ -358,8 +357,8 @@ def test_records_from_annotation_honors_a_global_name_id():
 
 # (j) the COCO-assembled loader must match images by their real on-disk name, not a case-normalized
 # one: real drone frames use an uppercase .JPG, and matching against a fabricated ".jpg" silently
-# yields zero boxes (an all-empty training set). (Fails pre-fix only on a case-insensitive FS, where
-# the miscased probe "succeeds"; the real-name match is correct on every platform.)
+# yields zero boxes (an all-empty training set). A miscased probe opens the file anyway on a
+# case-insensitive filesystem, so the match is made on the real on-disk name.
 def test_uppercase_extension_image_still_yields_boxes(tmp_path):
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
