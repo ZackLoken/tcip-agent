@@ -761,11 +761,11 @@ def main() -> int:
             )
             if timed_out_nodeid:
                 record.update(verdict=INDETERMINATE, why=(
-                    f"{timed_out_nodeid} did not finish within --per-test-timeout "
-                    f"({args.per_test_timeout}s) and the process was killed outright before it "
-                    "could report anything, the thread method pytest-timeout uses where SIGALRM "
-                    "is unavailable; a hung baseline is a different fact from a slow pass or a "
-                    "real failure."
+                    f"{timed_out_nodeid} was running when the process ended without reporting an "
+                    f"outcome, under --per-test-timeout ({args.per_test_timeout}s). The marker "
+                    "names which test did not finish, not why: a hang killed outright (the thread "
+                    "method pytest-timeout uses where SIGALRM is unavailable) and a crash read the "
+                    "same here, and either is a different fact from a slow pass or a real failure."
                 ))
                 return _report(record, args.json_out)
             record.update(verdict=REFUSED, why=(
