@@ -623,6 +623,27 @@ def _record_verdict(root: Path, model: str, date: str, img_name: str) -> None:
         bucket_key_of(prediction_dir(root, model, date)), det, ctx, action="accepted")
 
 
+def _bulk_accept(root: Path, model: str, date: str, img_name: str) -> None:
+    """Mark ``img_name`` reviewed under ``model``'s bucket with zero detection entries (a bulk
+    accept / confirmed negative), the state ``POST /api/review/mark_complete`` writes."""
+    from tcip_annotation.review_engine import ReviewEngine
+
+    from tcip_mcp.prediction_buckets import bucket_key_of
+
+    engine = ReviewEngine(root / ".tcip" / "state")
+    engine.mark_image_reviewed(bucket_key_of(prediction_dir(root, model, date)), img_name)
+
+
+def _unmark_reviewed(root: Path, model: str, date: str, img_name: str) -> None:
+    """Reverse a bulk accept back to a not_started shard, the state an unreviewed image carries."""
+    from tcip_annotation.review_engine import ReviewEngine
+
+    from tcip_mcp.prediction_buckets import bucket_key_of
+
+    engine = ReviewEngine(root / ".tcip" / "state")
+    engine.unmark_image_reviewed(bucket_key_of(prediction_dir(root, model, date)), img_name)
+
+
 _BOX = [{"subject": "bud", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
 
 
@@ -666,15 +687,114 @@ def test_stage_proposals_overwrite_refused_when_bucket_has_verdicts(tmp_path: Pa
     assert res["suggested_bucket"] == "claude@r2"
 
 
-def test_stage_proposals_overwrite_in_place_when_no_verdicts(tmp_path: Path) -> None:
+def test_stage_proposals_redirects_when_bucket_has_a_bulk_accept(tmp_path: Path) -> None:
+    """The staging door's guard reads review state, not detection verdicts alone: a bucket a
+    reviewer bulk-accepted with no detection entry at all is exactly as immutable to it as one
+    carrying a verdict. GUARDS against aa8acc21: today the second call writes into ``claude`` in
+    place (the resolver's own reading there counts a detection verdict alone), so
+    ``second["bucket"] == "claude@r2"`` fails at the baseline on the assertion this test names."""
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0001", size=(640, 480))
+
+    image_path = _img_path(root, date, "IMG_0001")
+    first = stage_proposals(image_path, model_name="claude", boxes=_BOX)
+    assert first["bucket"] == "claude" and first["bucket_redirected"] is False
+
+    _bulk_accept(root, "claude", date, "IMG_0001.jpg")  # a human completes the image, no verdict
+
+    second = stage_proposals(image_path, model_name="claude", boxes=_BOX)
+    assert second["bucket"] == "claude@r2"
+    assert second["bucket_redirected"] is True
+    # The original bucket's file is untouched.
+    assert (Path(prediction_dir(root, "claude", date)) / "IMG_0001.json").is_file()
+
+
+def test_stage_proposals_overwrite_refused_when_bucket_has_a_bulk_accept(tmp_path: Path) -> None:
+    """GUARDS against aa8acc21: today ``overwrite=True`` writes ``claude`` in place over a
+    bulk-accepted bucket (no verdict recorded, so the baseline's guard reads it as free), so
+    ``"error" in res`` fails at the baseline on the assertion this test names."""
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0001", size=(640, 480))
+    image_path = _img_path(root, date, "IMG_0001")
+    stage_proposals(image_path, model_name="claude", boxes=_BOX)
+    _bulk_accept(root, "claude", date, "IMG_0001.jpg")
+
+    res = stage_proposals(image_path, model_name="claude", boxes=_BOX, overwrite=True)
+    assert "error" in res
+    assert res["verdict_count"] == 1
+    assert res["suggested_bucket"] == "claude@r2"
+    assert "reviewed image(s)" in res["error"]
+
+
+def test_stage_proposals_overwrite_in_place_when_no_review_state(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001", size=(640, 480))
     image_path = _img_path(root, date, "IMG_0001")
     stage_proposals(image_path, model_name="claude", boxes=_BOX)
 
-    # No verdicts recorded -> overwrite writes in place, no redirect.
+    # No review state recorded (no verdict, no bulk accept) -> overwrite writes in place, no redirect.
     res = stage_proposals(image_path, model_name="claude", boxes=_BOX, overwrite=True)
+    assert "error" not in res
+    assert res["bucket"] == "claude" and res["bucket_redirected"] is False
+
+
+def test_stage_proposals_admits_two_unreviewed_stems_staged_in_turn(tmp_path: Path) -> None:
+    """A rail must admit valid work: two stems staged in turn into the same bucket, neither
+    reviewed, both land in place, since staging accumulates one stem per call by contract.
+    Admits-valid-work, through the tool."""
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0001", size=(640, 480))
+    _image(root, date, "IMG_0002", size=(640, 480))
+
+    first = stage_proposals(_img_path(root, date, "IMG_0001"), model_name="claude", boxes=_BOX)
+    second = stage_proposals(_img_path(root, date, "IMG_0002"), model_name="claude", boxes=_BOX)
+
+    assert first["bucket"] == "claude" and first["bucket_redirected"] is False
+    assert second["bucket"] == "claude" and second["bucket_redirected"] is False
+    assert (Path(prediction_dir(root, "claude", date)) / "IMG_0001.json").is_file()
+    assert (Path(prediction_dir(root, "claude", date)) / "IMG_0002.json").is_file()
+
+
+def test_stage_proposals_interleaved_with_completing_images_fragments_across_variants(
+    tmp_path: Path,
+) -> None:
+    """Coverage pinning the consequence decision 4 states: a session that interleaves staging
+    with completing images on the Review canvas spreads one engine's proposals over several
+    bucket variants, each frozen by the review state it acquires before the next stage."""
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    for stem in ("IMG_0001", "IMG_0002", "IMG_0003"):
+        _image(root, date, stem, size=(640, 480))
+
+    first = stage_proposals(_img_path(root, date, "IMG_0001"), model_name="claude", boxes=_BOX)
+    assert first["bucket"] == "claude" and first["bucket_redirected"] is False
+    _bulk_accept(root, "claude", date, "IMG_0001.jpg")
+
+    second = stage_proposals(_img_path(root, date, "IMG_0002"), model_name="claude", boxes=_BOX)
+    assert second["bucket"] == "claude@r2" and second["bucket_redirected"] is True
+    _bulk_accept(root, "claude@r2", date, "IMG_0002.jpg")
+
+    third = stage_proposals(_img_path(root, date, "IMG_0003"), model_name="claude", boxes=_BOX)
+    assert third["bucket"] == "claude@r3" and third["bucket_redirected"] is True
+
+
+def test_stage_proposals_reland_after_unmark_is_admitted_in_place(tmp_path: Path) -> None:
+    """A bucket a bulk accept froze, once unmarked back to a not_started shard (no review
+    decision recorded), is free again: a rail must admit valid work. Admits-valid-work."""
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0001", size=(640, 480))
+    image_path = _img_path(root, date, "IMG_0001")
+
+    stage_proposals(image_path, model_name="claude", boxes=_BOX)
+    _bulk_accept(root, "claude", date, "IMG_0001.jpg")
+    _unmark_reviewed(root, "claude", date, "IMG_0001.jpg")
+
+    res = stage_proposals(image_path, model_name="claude", boxes=_BOX)
     assert "error" not in res
     assert res["bucket"] == "claude" and res["bucket_redirected"] is False
 

@@ -4,8 +4,9 @@ canvas review.
 propose_annotations and segment_prompt each ask an engine (the built-in SAM reference, or a
 bespoke 'module:factory' the agent brings) to look at pixels and offer candidates or a prompted
 mask. stage_proposals lands either an engine's reviewed candidates or explicit boxes/polygons in
-the predictions tree through one verdict-guarded staging door, for a human to accept, reject or
-edit on the Review canvas. It never writes ground truth.
+the predictions tree through one staging door guarded on review state (a detection verdict or a
+bulk accept alike), for a human to accept, reject or edit on the Review canvas. It never writes
+ground truth.
 """
 
 from __future__ import annotations
@@ -454,8 +455,8 @@ def _stage_assignments_regime(image_path: str, img: Path, address: StagingAddres
                 score=score, created_by=engine, created_at=staged_at))
             n_poly += 1
 
-    # Stage into the predictions tree through the shared verdict-guarded helper: model output for a
-    # human to accept on the Review canvas, never written straight to ground truth.
+    # Stage into the predictions tree through the shared review-state-guarded helper: model output
+    # for a human to accept on the Review canvas, never written straight to ground truth.
     from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes
 
     try:
@@ -480,8 +481,9 @@ def _stage_assignments_regime(image_path: str, img: Path, address: StagingAddres
     note = (f"Staged {n_poly} proposal(s) from {len(assignments)} {engine!r} candidates as "
             f"predictions (created_by={engine!r}) for review, not ground truth.")
     if staged["redirected"]:
-        note = (f"bucket {engine!r} has {staged['verdict_count']} review verdict(s), staged to a fresh "
-                f"bucket {bucket!r} instead so the reviewed predictions stay intact. " + note)
+        note = (f"bucket {engine!r} has {staged['verdict_count']} reviewed image(s) (a review "
+                f"verdict or a bulk accept), staged to a fresh bucket {bucket!r} instead so the "
+                "reviewed predictions stay intact. " + note)
 
     return {
         "image_path": out,
@@ -734,8 +736,9 @@ def _stage_explicit_regime(image_path: str, img: Path, address: StagingAddress,
             "send them). It is reviewed through the accept path and is never promoted to a "
             "validation reference.")
     if staged["redirected"]:
-        note = (f"bucket {model_name!r} has {staged['verdict_count']} review verdict(s), staged to a "
-                f"fresh bucket {bucket!r} instead so the reviewed predictions stay intact; " + note)
+        note = (f"bucket {model_name!r} has {staged['verdict_count']} reviewed image(s) (a review "
+                f"verdict or a bulk accept), staged to a fresh bucket {bucket!r} instead so the "
+                "reviewed predictions stay intact; " + note)
 
     return {
         "staged": len(box_proposals) + len(resolved_polys),
@@ -779,15 +782,21 @@ def stage_proposals(
       [0, 1]; or ``rings``, a list of rings in pixel coordinates, each vertex an ``[x, y]`` pair
       or an ``{"x":, "y":}`` mapping, the frame ``segment_prompt`` returns. Both build the same
       ``Polygon`` through the ground-truth door's own vertex parser. ``overwrite=True`` writes in
-      place even into an existing bucket, refused if the bucket has verdicts; the default
-      redirects to a fresh run-scoped bucket (``<model_name>@r2``, next free) instead, returned as
-      ``bucket``.
+      place even into an existing bucket, refused if the bucket has review state (a verdict or a
+      bulk accept); the default redirects to a fresh run-scoped bucket (``<model_name>@r2``, next
+      free) instead, returned as ``bucket`` alongside ``bucket_redirected``. The count behind that
+      redirect (``verdict_count`` in the error dict, held under its name) counts reviewed images,
+      a detection verdict or a bulk accept alike, not detection entries, so a session that stages
+      one image and completes it on the Review canvas before staging the next spreads one run's
+      proposals over ``@r2``, ``@r3`` and onward, one variant per image already finished; stage
+      every image of a run before reviewing any to avoid it.
 
     Either regime resolves the dataset root, capture date and stem from ``image_path`` itself
     (the same resolver ``propose_annotations`` uses), so the explicit regime takes no
     path fragments a caller must keep consistent with the image. Both write through the one
-    verdict-guarded staging door (``prediction_buckets.stage_prediction_shapes``), so a re-run
-    never overwrites reviewed predictions or orphans their verdicts. Pair with
+    staging door guarded on review state (a verdict or a bulk accept,
+    ``prediction_buckets.stage_prediction_shapes``), so a re-run never overwrites reviewed
+    predictions or orphans their verdicts. Pair with
     ``focus_human_attention(tab='review')`` to send the human straight to the result.
 
     A staged record's ``subject`` is whatever ``assignments``/``boxes``/``polygons`` named; the
@@ -805,7 +814,7 @@ def stage_proposals(
         model_name: Predictions bucket to stage the explicit regime under. Required with
             boxes/polygons, refused with assignments.
         overwrite: Explicit regime only: write in place even into an existing bucket. Refused if
-            the bucket has verdicts.
+            the bucket has review state (a detection verdict or a bulk accept).
     """
     if assignments is not None and (boxes or polygons):
         return {"error": "assignments cannot be combined with boxes/polygons: pick one input "
