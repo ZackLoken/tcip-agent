@@ -593,8 +593,8 @@ def main() -> int:
         inventory = json.loads(Path(args.inventory_json).read_text(encoding="utf-8"))
         head = args.head or _default_head(repo_root)
         stamp_findings, stamp_skips = _check_head_is_real(head, repo_root, line_no=0)
-        for note in stamp_skips:
-            print(note)
+        if stamp_skips:
+            print(f"--head {head} is stamped unchecked: {repo_root} is not a git checkout")
         if stamp_findings:
             kind = stamp_findings[0]["kind"]
             reason = ("names no commit on this checkout"

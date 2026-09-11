@@ -767,10 +767,13 @@ def check_stray_state_files(root: Path, findings: list) -> None:
     except (AnchorMisplaced, StoreError) as exc:
         findings.append(("warn", f"the state root's accounting refused: {exc}"))
         return
+    state_root = Path(root).resolve() / ".tcip" / "state"
     for path in strays:
-        findings.append(("info", f"{path.relative_to(root)}: a stray file under .tcip/state that "
-                         "no store claims; delete it with delete_stray_state_file if it is not "
-                         "needed"))
+        findings.append((
+            "info",
+            f".tcip/state/{path.relative_to(state_root).as_posix()}: a stray file under "
+            ".tcip/state that no store claims; delete it with delete_stray_state_file if it is "
+            "not needed"))
 
 
 def gated_stores(root: Path) -> dict[str, tuple[tuple[Path, str], ...]]:

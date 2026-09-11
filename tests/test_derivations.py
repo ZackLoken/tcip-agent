@@ -357,9 +357,9 @@ def test_derive_block_scale_px_truncated_raster_refuses_named(tmp_path):
 
 
 def test_derive_block_scale_px_npy_raster_refuses_named_for_no_georeference(tmp_path):
-    """An .npy array container is a raster by suffix but carries no georeferencing tags at all;
-    it is refused by name, distinct from the truncated-file words above, rather than tried
-    through read_geotransform (coverage: the npy/npz discriminator added ahead of the open)."""
+    """guard. An .npy array container is a raster by suffix but carries no georeferencing tags at
+    all; it is refused by name, distinct from the truncated-file words above, rather than tried
+    through read_geotransform."""
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
 
     plants = [
