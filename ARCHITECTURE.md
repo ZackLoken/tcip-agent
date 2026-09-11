@@ -1555,7 +1555,7 @@ root but outside any dataset tree), `resolution.py`'s `record_delivery_binding_e
 delivery's buckets share one dataset root, platform-scoped otherwise), and
 `calibration_tools.py`'s redraw event (`redraw_calibration_holdout_result`, `tools/calibration_tools.py:216`).
 Project-scoped: `routes/results.py`'s `_audit` (`routes/results.py:164`, its delivery and confirmation routes) and
-`pipelines/postprocessing/plant_mapping.py`'s `persist_mapping` (`pipelines/postprocessing/plant_mapping.py:1370`), whose two callers file
+`pipelines/postprocessing/plant_mapping.py`'s `persist_mapping` (`pipelines/postprocessing/plant_mapping.py:1406`), whose two callers file
 its receipt under two different categories: the MCP tool `build_plant_mapping` passes the
 process's own pinned platform root (so the receipt lands in the platform log's own file, a
 project's once that root is an adopted project), while the web build route passes its own guarded
@@ -1587,8 +1587,8 @@ unknown `schema_version`. `experiments._index_refused_mutations`,
 compares in one call; `page.corrupt`/`page.version_refused` both fail the whole call (`None`, not
 a partial index), so a caller who cannot see behind an unreadable entry never reports "no
 refusals" in its place. `plant_mapping._scan_receipts`
-(`pipelines/postprocessing/plant_mapping.py:1561`) and `_require_receipt`
-(`pipelines/postprocessing/plant_mapping.py:1588`), the hard receipt gate `load_mapping` runs
+(`pipelines/postprocessing/plant_mapping.py:1597`) and `_require_receipt`
+(`pipelines/postprocessing/plant_mapping.py:1624`), the hard receipt gate `load_mapping` runs
 before trusting a persisted mapping record:
 every `plant_mapping_built` entry in the record's own project log is scanned for a receipt naming
 the record's digest, and a page reporting `page.corrupt` or `page.version_refused` raises rather
@@ -2327,11 +2327,11 @@ platform log instead); `routes/subjects.py:79` (`record_committed(`) likewise, t
 `routes/inference.py:397` (`from tcip_web.routes.subjects import _audit_dataset_write`) imports
 and calls rather than defining its own; `routes/results.py:176`
 (`record_committed(`) does the same for a project root instead. Reader:
-`pipelines/postprocessing/plant_mapping.py:1588` (`_require_receipt`)
+`pipelines/postprocessing/plant_mapping.py:1624` (`_require_receipt`)
 trusts only a `plant_mapping_built` entry it finds in the log under the root its caller holds
 (the MCP tool's pinned platform root, the platform log's own file until adoption makes it a
 project's; the web route's guarded project root), scanned by `_scan_receipts`
-(`pipelines/postprocessing/plant_mapping.py:1561`), which refuses (never scans past) a page
+(`pipelines/postprocessing/plant_mapping.py:1597`), which refuses (never scans past) a page
 reporting corruption or an unknown `schema_version`.
 Phase 3 verdict: single. Each writer is exercised through a real append and checked for its own
 tool name landing in the log its own scope names: `tests/test_tcip_web_routes.py:766,1193,1229`
@@ -2595,7 +2595,7 @@ Phase 3 verdict: single.
 ## S40. Per-band normalization stats for a non-3-channel detector
 
 Must agree: the values passed as image_mean/image_std are per-band stats of the same length as in_chans.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/derivations.py:484` (`def band_normalization_stats(`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/derivations.py:485` (`def band_normalization_stats(`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/components/detectors.py:68` (`def _normalization(adapter: Any, in_chans: int | None, image_mean, image_std,`).
 Phase 3 verdict: single.
 
