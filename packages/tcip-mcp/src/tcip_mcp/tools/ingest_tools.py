@@ -304,11 +304,15 @@ def ingest_images(
     except ValueError as exc:
         return {"error": str(exc)}
 
-    pending = workspace.pending_removal_or_none(dest_root)
+    pending = workspace.pending_marker_or_none(dest_root)
     if pending is not None:
-        return {"error": f"{dest_root} is pending removal (requested "
-                          f"{pending['requested_at']}); no image lands in a tree the archive "
-                          "has already left"}
+        if pending.kind == "removal":
+            return {"error": f"{dest_root} is pending removal (requested "
+                              f"{pending.record['requested_at']}); no image lands in a tree the "
+                              "archive has already left"}
+        return {"error": f"{dest_root} is pending rename to {pending.record['new_name']!r} "
+                          f"(requested {pending.record['requested_at']}); no image lands in a "
+                          "tree about to move"}
 
     sources = list(_iter_source_images(source, recursive))
     if not sources:

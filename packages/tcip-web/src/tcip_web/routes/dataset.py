@@ -240,11 +240,21 @@ def _write_canvas_binding(root: Path) -> int:
     return generation
 
 
-def _pending_removal_message(project_root: str, pending: dict) -> str:
+def _pending_marker_message(project_root: str, marker: "workspace.PendingMarker") -> str:
+    """One sentence naming ``project_root`` (the client's own string, kept as
+    ``_pending_removal_message`` already did) and, from ``marker``, which kind is pending and
+    what completes at the next backend start."""
+    record = marker.record
+    if marker.kind == "removal":
+        return (
+            f"{project_root!r} is pending removal (requested {record['requested_at']}); it "
+            "moves to the workspace's holding directory at the next backend start, or through "
+            "tcip complete-removals"
+        )
     return (
-        f"{project_root!r} is pending removal (requested {pending['requested_at']}); it moves "
-        "to the workspace's holding directory at the next backend start, or through "
-        "tcip complete-removals"
+        f"{project_root!r} is pending rename to {record['new_name']!r} (requested "
+        f"{record['requested_at']}); it renames at the next backend start, or through "
+        "tcip complete-renames"
     )
 
 
@@ -252,29 +262,29 @@ def _pending_removal_message(project_root: str, pending: dict) -> str:
 async def select_dataset(req: SelectionRequest) -> dict:
     """Set the active dataset for the GUI; broadcasts a state delta.
 
-    A ``project_root`` pending removal is refused before the binding write, checked on the path
-    the guard resolves rather than the client's raw string. The guard's own excluded-roots check
-    (``assert_path_allowed``) already refuses a path under a pending project by identity, ahead
-    of everything else, with a 403; this route re-reads the marker to answer that same 403 with
-    the pending door's own message rather than the guard's generic one. The route's own marker
-    read that runs when the guard admits the root instead can only fire for a marker written in
-    the narrow window between the guard's own read and this one, since the guard would otherwise
-    already have refused; that race still answers 409 the same way, so a refused select changes
-    no binding and bumps no generation either way.
+    A ``project_root`` pending removal or pending rename is refused before the binding write,
+    checked on the path the guard resolves rather than the client's raw string. The guard's own
+    excluded-roots check (``assert_path_allowed``) already refuses a path under a pending
+    project by identity, ahead of everything else, with a 403; this route re-reads the marker to
+    answer that same 403 with the pending door's own message rather than the guard's generic
+    one. The route's own marker read that runs when the guard admits the root instead can only
+    fire for a marker written in the narrow window between the guard's own read and this one,
+    since the guard would otherwise already have refused; that race still answers 409 the same
+    way, so a refused select changes no binding and bumps no generation either way.
     """
     try:
         project_root = _guarded(req.project_root)
     except HTTPException as exc:
         if exc.status_code == 403:
-            pending = workspace.pending_removal_or_none(
+            pending = workspace.pending_marker_or_none(
                 Path(req.project_root).expanduser().resolve()
             )
             if pending is not None:
-                raise HTTPException(403, _pending_removal_message(req.project_root, pending)) from exc
+                raise HTTPException(403, _pending_marker_message(req.project_root, pending)) from exc
         raise
-    pending = workspace.pending_removal_or_none(project_root)
+    pending = workspace.pending_marker_or_none(project_root)
     if pending is not None:
-        raise HTTPException(409, _pending_removal_message(req.project_root, pending))
+        raise HTTPException(409, _pending_marker_message(req.project_root, pending))
     root = _guarded(req.dataset_root)
     if not root.is_dir():
         raise HTTPException(404, f"dataset_root not found: {req.dataset_root}")

@@ -21,6 +21,13 @@ holding directory: a project carrying one is not adoptable
 (:func:`adoptable_project_root`), still names itself (:func:`workspace_project_root`,
 :func:`workspace_project_name`), and moves at the next backend start or through
 ``tcip complete-removals`` (:mod:`tcip_mcp.project_removal`).
+
+A third, sibling marker (``<project>/.tcip/pending_rename.json``) records that a project's
+directory is waiting to be renamed onto a new name within the same workspace: a project
+carrying one is not adoptable either, still names itself the same way, and renames at the
+next backend start or through ``tcip complete-renames`` (:mod:`tcip_mcp.project_rename`).
+:func:`pending_marker_or_none` is the one predicate that reads both markers for a caller that
+only needs to know a project is not open-able, naming which kind it found.
 """
 
 from __future__ import annotations
@@ -28,7 +35,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from tcip_store import (
     RECORD_JSON,
@@ -227,7 +234,8 @@ register_store(
 
 
 def pending_removal_key(project_root: str | Path) -> Key:
-    """The workspace project's own pending-removal marker, one document per project.
+    """The workspace project's own pending-removal marker, one document per project, the
+    sibling :func:`pending_rename_key` shares the same per-project, ``.tcip``-rooted shape with.
 
     ``cas``: written once by ``tcip_mcp.project_removal.request_project_removal`` with
     ``expect=Version.ABSENT`` (a second request over an existing marker is a conflict, not an
@@ -243,17 +251,18 @@ def pending_removal_record(project_root: str | Path) -> Optional[dict]:
     Reads through the seam and lets the store's own refusals (``StoreError``, ``DecodeError``,
     ``SchemaVersionRefused``) propagate rather than folding them to ``None``: a caller that
     must treat an unreadable marker the same as no marker (:func:`adoptable_project_root`)
-    catches those itself, and a caller that must report the refusal as its own (the removal
-    door's own read of the marker it is about to write) lets it surface.
+    catches those itself, and a caller that must report the refusal as its own (either door's
+    own read of the marker it is about to write) lets it surface. :func:`pending_rename_record`
+    is the sibling reader for the other marker.
     """
     return read(pending_removal_key(project_root), default=None)
 
 
 def pending_removal_or_none(project_root: str | Path) -> Optional[dict]:
     """:func:`pending_removal_record`, with a marker the store refuses to read folded to
-    ``None``: shared by :func:`adoptable_project_root` and ``ingest_images``, the one other
-    writer by project name, so the two agree on what "no marker" means rather than each
-    catching the same three exceptions on its own.
+    ``None``. The one caller is :func:`pending_marker_or_none`; every reader that used to call
+    this directly reads through that predicate instead, so the two doors' markers are never
+    told apart by two different readers agreeing on what "no marker" means.
     """
     try:
         return pending_removal_record(project_root)
@@ -271,15 +280,103 @@ class ProjectPendingRemoval(ValueError):
     catches it ahead of the plain ``ValueError`` it still keeps for every other case."""
 
 
+# ── the pending-rename marker store ──────────────────────────────────────────
+
+_PENDING_RENAME_DOC = RootedFileLocator(prefix=(".tcip",), suffix=".json")
+"""A project's own top-level ``.tcip`` document, the shape :data:`_PENDING_REMOVAL_DOC` uses."""
+
+PENDING_RENAME_STORE = "pending_rename"
+_PENDING_RENAME_PARTS = ("pending_rename",)
+register_store(
+    StoreDescriptor(
+        name=PENDING_RENAME_STORE,
+        kind="record",
+        key_fields=("document",),
+        frozen=True,
+        codec=RECORD_JSON,
+        concurrency="cas",
+        locator=_PENDING_RENAME_DOC,
+    )
+)
+
+
+def pending_rename_key(project_root: str | Path) -> Key:
+    """The workspace project's own pending-rename marker, one document per project.
+
+    ``cas``: written once by ``tcip_mcp.project_rename.request_project_rename`` with
+    ``expect=Version.ABSENT`` (a second request over an existing marker is a conflict, not an
+    overwrite) and deleted, at the version the completing walk read it at, by
+    ``complete_pending_renames`` or by ``withdraw_project_rename``.
+    """
+    return Key(PENDING_RENAME_STORE, str(Path(project_root).absolute()), _PENDING_RENAME_PARTS)
+
+
+def pending_rename_record(project_root: str | Path) -> Optional[dict]:
+    """The project's pending-rename marker, or ``None`` when it carries none.
+
+    Reads through the seam and lets the store's own refusals (``StoreError``, ``DecodeError``,
+    ``SchemaVersionRefused``) propagate, the same split :func:`pending_removal_record` keeps:
+    a caller that must treat an unreadable marker the same as no marker catches those itself
+    (:func:`pending_rename_or_none`), and a caller that must report the refusal as its own (the
+    rename door's own read of the marker it is about to write) lets it surface.
+    """
+    return read(pending_rename_key(project_root), default=None)
+
+
+def pending_rename_or_none(project_root: str | Path) -> Optional[dict]:
+    """:func:`pending_rename_record`, with a marker the store refuses to read folded to
+    ``None``. The one caller is :func:`pending_marker_or_none`, the sibling of
+    :func:`pending_removal_or_none`'s own one caller.
+    """
+    try:
+        return pending_rename_record(project_root)
+    except (StoreError, DecodeError, SchemaVersionRefused):
+        return None
+
+
+class ProjectPendingRename(ValueError):
+    """A workspace project's own ``pending_rename`` marker names it, naming the new name and
+    that the rename completes at the next backend start, or through ``tcip complete-renames``.
+    A ``ValueError`` subclass for the same reason :class:`ProjectPendingRemoval` is: every
+    caller that already catches that folds this refusal the same way, with no separate catch to
+    add; a caller that must answer this refusal on its own (the ``/api/projects/active`` route)
+    catches it ahead of the plain ``ValueError`` it still keeps for every other case."""
+
+
+class PendingMarker(NamedTuple):
+    """Which of the two per-project markers a project carries, and its record."""
+    kind: str
+    """``"removal"`` or ``"rename"``."""
+    record: dict
+
+
+def pending_marker_or_none(project_root: str | Path) -> Optional[PendingMarker]:
+    """Whichever of the two per-project markers ``project_root`` carries, or ``None`` when it
+    carries neither: the removal marker is read first, then the rename marker, through
+    :func:`pending_removal_or_none` and :func:`pending_rename_or_none`, so a marker either store
+    refuses to read folds to "no marker" exactly as each already does on its own. The one
+    predicate every reader that only needs to know a project is not open-able calls, in place of
+    reading either marker directly, so the two doors' markers are never told apart twice.
+    """
+    removal = pending_removal_or_none(project_root)
+    if removal is not None:
+        return PendingMarker("removal", removal)
+    rename = pending_rename_or_none(project_root)
+    if rename is not None:
+        return PendingMarker("rename", rename)
+    return None
+
+
 def workspace_project_root(name: str) -> Path:
     """The path a workspace project's name resolves to, when its ``.tcip`` exists on disk.
 
     Raises ``ValueError``, naming which check failed: an unsafe name (path separators, ``..``,
     empty) or a safely-named path whose ``.tcip`` is not a directory (nothing there to open).
-    Says nothing about whether the project is pending removal: :func:`adoptable_project_root`
-    is the predicate that also asks that, and this one alone is what :func:`workspace_project_name`
+    Says nothing about whether the project is pending removal or pending rename:
+    :func:`adoptable_project_root` is the predicate that also asks that (through
+    :func:`pending_marker_or_none`), and this one alone is what :func:`workspace_project_name`
     calls, since naming a directory opens no store and a pending project's directory still
-    names it.
+    names it either way.
     """
     if not is_valid_name(name):
         raise ValueError(f"invalid project name: {name!r}")
@@ -293,25 +390,32 @@ def adoptable_project_root(name: str) -> Path:
     """The path a workspace project's name resolves to, when it is safe to open.
 
     Raises ``ValueError``, naming which check failed: everything :func:`workspace_project_root`
-    already checks, plus a pending project (:class:`ProjectPendingRemoval`, naming when it was
-    requested and that it completes at the next backend start). A marker the store refuses to
-    read (``StoreError``, ``DecodeError``, ``SchemaVersionRefused``) is not treated as one: the
-    project stays adoptable exactly as it would with no marker at all, and the removal door's
-    own read of the same marker is where such a refusal is answered as its own 409. The one
-    predicate every reader that must tell "no marker" apart from "the marker names a project
-    that is not adoptable, pending removal included" calls: :func:`activate_project`, :func:`
-    active_project_if_present` (folding the raise to ``None``), and
-    ``tcip_mcp.project_paths.pin_platform_root`` when binding from the marker.
+    already checks, plus a pending project (:class:`ProjectPendingRemoval` or
+    :class:`ProjectPendingRename`, naming when the request was made and what completes at the
+    next backend start). A marker either store refuses to read (``StoreError``, ``DecodeError``,
+    ``SchemaVersionRefused``) is not treated as one: the project stays adoptable exactly as it
+    would with no marker at all, and the owning door's own read of the same marker is where such
+    a refusal is answered as its own 409. The one predicate every reader that must tell "no
+    marker" apart from "the marker names a project that is not adoptable, pending removal or
+    rename included" calls: :func:`activate_project`, :func:`active_project_if_present` (folding
+    the raise to ``None``), and ``tcip_mcp.project_paths.pin_platform_root`` when binding from
+    the marker.
     """
     root = workspace_project_root(name)
-    pending = pending_removal_or_none(root)
-    if pending is not None:
+    pending = pending_marker_or_none(root)
+    if pending is None:
+        return root
+    if pending.kind == "removal":
         raise ProjectPendingRemoval(
-            f"{name!r} is pending removal (requested {pending['requested_at']}); it moves to "
-            "the workspace's holding directory at the next backend start, or through "
+            f"{name!r} is pending removal (requested {pending.record['requested_at']}); it "
+            "moves to the workspace's holding directory at the next backend start, or through "
             "tcip complete-removals"
         )
-    return root
+    raise ProjectPendingRename(
+        f"{name!r} is pending rename to {pending.record['new_name']!r} (requested "
+        f"{pending.record['requested_at']}); it renames at the next backend start, or through "
+        "tcip complete-renames"
+    )
 
 
 def active_project_if_present(*, create: bool = True) -> Optional[tuple[str, Path]]:
@@ -365,9 +469,10 @@ def marker_problem(*, create: bool = False) -> Optional[str]:
 def resolve_project_path(given: str) -> str:
     """A given path wins; empty falls back to the active project's root (the live GUI session).
 
-    Reads the marker's name raw, with no pending-removal check of its own: safe because the
-    marker's own project can never be pending, since the removal door refuses a request that
-    names the currently active marker's project before it writes anything.
+    Reads the marker's name raw, with no pending-marker check of its own: safe because the
+    marker's own project can never be pending removal or pending rename, since both doors
+    refuse a request that names the currently active marker's project before either writes
+    anything.
     """
     if given:
         return given
@@ -384,10 +489,12 @@ def workspace_project_name(root: Path) -> Optional[str]:
     root nested inside a project, the workspace root itself, or a directory that is not one the
     workspace holds (:func:`workspace_project_root`) names no project. Answers through that
     predicate rather than :func:`adoptable_project_root`, since naming a directory opens no
-    store: a pending project still names itself here, so the canvas binding's own
-    ``project_name``, ``binding_divergence``'s advice, and whether the removal door's own line
-    lands under this root (:func:`tcip_mcp.project_removal.request_project_removal`) all stay
-    accurate whether or not a marker or a store refusal is in play. The one predicate
+    store: a project pending removal or pending rename still names itself here, so the canvas
+    binding's own ``project_name``, ``binding_divergence``'s advice, and whether the removal or
+    rename door's own line lands under this root
+    (:func:`tcip_mcp.project_removal.request_project_removal`,
+    :func:`tcip_mcp.project_rename.request_project_rename`) all stay accurate whether or not a
+    marker of either kind or a store refusal is in play. The one predicate
     :mod:`tcip_web.routes.dataset` calls to name the ``canvas_open_binding`` record's
     ``project_name``, and :mod:`tcip_mcp.tools.vision_tools` calls the same way to name a
     divergent binding's project.

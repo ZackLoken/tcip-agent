@@ -2281,6 +2281,10 @@ REGISTERED = {
          "holding_dir": "C:/orchards/.removed/bud_orchard_valley-20260304T120000Z",
          "external_roots": [], "dependent_projects": []},
         workspace.pending_removal_key, ".tcip/pending_removal.json"),
+    "pending_rename": Registered(
+        {"requested_at": "20260304T120000Z", "requested_by": "user:ü",
+         "old_name": "bud_orchard_valley", "new_name": "bud_orchard_ridge"},
+        workspace.pending_rename_key, ".tcip/pending_rename.json"),
     "split_manifest": Registered(
         _real_split_manifest(),
         lambda root: data_tools.split_manifest_key(_split_dir(root)),
