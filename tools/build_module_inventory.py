@@ -27,9 +27,10 @@ package specifiers (react, zustand, ...) are external and dropped.
 
 Tracked at tools/build_module_inventory.py so `check_architecture_doc.py` can run it
 fresh and compare its counts against ARCHITECTURE.md's tables. Run from anywhere; the
-repo root is found by walking up from this file to the first ancestor containing a
-.git directory. Writes JSON to --out when given (with a markdown twin beside it), or
-prints the JSON to stdout when --out is omitted.
+repo root is found by walking up from this file to the first ancestor holding both a
+packages/ directory and a tools/ directory, a marker true of a checkout and of a
+git-archive sandbox alike, unlike a .git directory. Writes JSON to --out when given
+(with a markdown twin beside it), or prints the JSON to stdout when --out is omitted.
 """
 
 from __future__ import annotations
@@ -47,10 +48,12 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 def find_repo_root(start: Path) -> Path:
     cur = start
     while cur != cur.parent:
-        if (cur / ".git").exists():
+        if (cur / "packages").is_dir() and (cur / "tools").is_dir():
             return cur
         cur = cur.parent
-    raise SystemExit("could not locate repo root (no .git ancestor found)")
+    raise SystemExit(
+        "could not locate repo root (no ancestor holding both packages/ and tools/ found)"
+    )
 
 
 REPO_ROOT = find_repo_root(SCRIPT_DIR)
