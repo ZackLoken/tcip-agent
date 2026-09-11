@@ -156,6 +156,7 @@ export interface DependencyWarning {
   archive_path?: string | null;
   holding_dir?: string | null;
   pending_kind?: string | null;
+  new_name?: string | null;
 }
 
 export interface DependentProject {

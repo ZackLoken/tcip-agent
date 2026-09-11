@@ -23,7 +23,10 @@ the breeder can request another name.
 The rename door's whole scope is a project before it trains, maps or delivers:
 :func:`project_records_present` refuses a project that holds any experiment, plant mapping,
 plant registry, delivery event, persisted job or HPO sweep, since those stores can carry the
-project's own path absolutely and no door here re-points a record's own path. A dependent
+project's own path absolutely and no door here re-points a record's own path. (A re-pointer does
+exist elsewhere, ``model_registry._conform_entries``, but it is anchored on a checkpoint's own
+sha256 rather than on string surgery; these six records carry no identity to verify a re-point
+against, which is why they refuse rather than move.) A dependent
 project's own dataset-registry entry is never refused on and never re-pointed: it is warned,
 before the request through the preview and after it through
 :func:`~tcip_mcp.project_removal.dependency_warnings`'s ``pending_kind``, the same ruling Q26
@@ -37,6 +40,17 @@ written marker and refuses. The shared refusal chain (name shape, existence, a l
 markers, the open-project identity checks, a live run, a non-terminal job) is read from
 :func:`tcip_mcp.project_removal._ordered_refusal`, called here with ``door="rename"``, so the two
 doors cannot silently drift on a refusal they both must answer alike (CLAUDE.md).
+
+That lock holds within one process. Two backends on one workspace can write both markers on one
+project; startup answers that by running this walk before ``complete_pending_removals``
+(``tcip_web.app.bind_startup_root``), so the tree renames and then archives under its new name.
+The two console commands carry no such order: ``tcip complete-removals`` run first moves the tree
+into the workspace's holding directory, where this walk never looks (it iterates workspace
+children carrying a ``.tcip``), leaving the rename marker inert inside an archived tree. Nothing
+is lost, and the marker would only fire again if that tree were moved back under the workspace by
+hand. A second process bound to the pre-rename root (an MCP server, which never runs
+``bind_startup_root``) keeps writing at the old path, the residual
+``project_removal``'s own module docstring states for its door and which holds here too.
 
 Importing this module pulls in nothing that imports ``tcip_mcp.server`` at module level:
 ``workspace``, ``audit``, ``tcip_store`` and ``tcip_mcp.project_removal`` are safe there (none of
@@ -124,25 +138,44 @@ def project_records_present(project: Path) -> list[str]:
                 )
             except (tcip_store.StoreError, tcip_store.DecodeError,
                     tcip_store.SchemaVersionRefused):
-                continue
+                present.append("hpo_sweep_manifest")
+                break
             if manifest is not None:
                 present.append("hpo_sweep_manifest")
                 break
     return present
 
 
+_RECORD_IN_PLAIN_WORDS = {
+    "experiments": "a training run",
+    "plant_mapping": "a plant mapping",
+    "plant_registries": "a plant location list",
+    "delivery_events": "a delivered result",
+    "job_registry": "a saved job",
+    "hpo_sweep_manifest": "a tuning sweep",
+}
+"""What each bound store means to the breeder reading the refusal, since the dialog renders that
+sentence verbatim and a store's own name says nothing to the person holding the mouse."""
+
+
 def _records_refusal(project: Path) -> Optional[str]:
     """:func:`project_records_present`'s answer rendered as the door's own refusal text, or
-    ``None`` when the project holds no such record."""
+    ``None`` when the project holds no such record.
+
+    The breeder's sentence comes first and the platform's reason second: the dialog shows this
+    string as it stands, so a reader who stops after one sentence has still been told what is
+    wrong and what it means for them.
+    """
     records = project_records_present(project)
     if not records:
         return None
+    held = ", ".join(_RECORD_IN_PLAIN_WORDS.get(r, r) for r in records)
     return (
-        f"{project.name!r} holds records in {', '.join(records)}; a project keeps its name "
-        "once it holds any experiment, mapping, plant registry, delivery event, persisted job "
-        "or sweep, since those stores can carry the project's own path absolutely and no door "
-        "re-points a record's own path; rename is only for a project before it trains, maps or "
-        "delivers"
+        f"{project.name} has already been worked on, so its name is fixed: it holds {held}. "
+        "Those saved records name this project by its current folder, and nothing re-points "
+        "them, so renaming would leave them pointing at a folder that no longer exists. "
+        "Renaming is for a project that has not yet been trained, mapped or delivered from. "
+        f"The records found were in {', '.join(records)}."
     )
 
 
@@ -376,6 +409,18 @@ def withdraw_project_rename(name: str, *, requested_by: str) -> dict:
         record = versioned.value
         new_name = record["new_name"]
 
+        if name == new_name:
+            return {"error": f"{name!r} is already at its new name: the move landed and only the "
+                             "completion line and the marker are outstanding, so withdrawing "
+                             "would record a withdrawal of a rename that happened. It finishes "
+                             "at the next backend start, or through tcip complete-renames.",
+                    "status": 409}
+
+        try:
+            tcip_store.delete(workspace.pending_rename_key(project), expect=versioned.version)
+        except tcip_store.StoreError as exc:
+            return {"error": f"the marker changed while withdrawing: {exc}", "status": 409}
+
         try:
             audit.record_event_or_raise(
                 "project_rename_withdrawn",
@@ -383,13 +428,10 @@ def withdraw_project_rename(name: str, *, requested_by: str) -> dict:
                 scope=project,
             )
         except audit.AuditEntryNotWritten as exc:
-            return {"error": f"the withdraw's own line was not written: {exc}; the marker "
-                              "still stands.", "status": 409}
-
-        try:
-            tcip_store.delete(workspace.pending_rename_key(project), expect=versioned.version)
-        except tcip_store.StoreError as exc:
-            return {"error": f"the marker changed while withdrawing: {exc}", "status": 409}
+            return {"error": f"{name!r} is withdrawn and its marker is gone, but the withdraw's "
+                             f"own line was not written: {exc}. The project opens again; the log "
+                             "does not say why it stopped being pending.",
+                    "status": 409}
 
         return {"withdrawn": True, "name": name, "new_name": new_name}
 
@@ -446,12 +488,15 @@ def complete_pending_renames(workspace_root: Path) -> list[dict]:
                     {"name": old_name, "new_name": new_name, "old_root": str(ws / old_name)},
                     scope=child,
                 )
+                line_written = True
             except audit.AuditEntryNotWritten as exc:
-                notes.append(str(exc))
-            try:
-                tcip_store.delete(workspace.pending_rename_key(child), expect=version)
-            except tcip_store.StoreError as exc:
-                notes.append(str(exc))
+                line_written = False
+                notes.append(f"{exc}; the marker stands so the next start writes it")
+            if line_written:
+                try:
+                    tcip_store.delete(workspace.pending_rename_key(child), expect=version)
+                except tcip_store.StoreError as exc:
+                    notes.append(str(exc))
             outcome = {"name": old_name, "new_name": new_name, "already_renamed": True}
             if notes:
                 outcome["note"] = "; ".join(notes)
@@ -485,12 +530,15 @@ def complete_pending_renames(workspace_root: Path) -> list[dict]:
                 {"name": name, "new_name": new_name, "old_root": str(child)},
                 scope=destination,
             )
+            line_written = True
         except audit.AuditEntryNotWritten as exc:
-            notes.append(str(exc))
-        try:
-            tcip_store.delete(workspace.pending_rename_key(destination), expect=version)
-        except tcip_store.StoreError as exc:
-            notes.append(str(exc))
+            line_written = False
+            notes.append(f"{exc}; the marker stands so the next start writes it")
+        if line_written:
+            try:
+                tcip_store.delete(workspace.pending_rename_key(destination), expect=version)
+            except tcip_store.StoreError as exc:
+                notes.append(str(exc))
         tcip_store.close_connections()
 
         outcome = {"name": name, "new_name": new_name}

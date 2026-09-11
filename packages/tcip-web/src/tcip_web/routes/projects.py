@@ -71,6 +71,9 @@ class DependencyWarning(BaseModel):
     # "removal" or "rename" while present is true; absent when the target is gone rather than
     # pending. Read by the Remove... and Rename... cards' own warning line.
     pending_kind: str | None = None
+    # The name the target takes, from its own pending-rename marker; null for a removal or once
+    # present is false. The card names it, so the dependent's owner knows what to re-register at.
+    new_name: str | None = None
 
 
 class ProjectSummary(BaseModel):
@@ -98,8 +101,8 @@ class ProjectSummary(BaseModel):
     removal_refusal: str | None
     # Whether the control stays enabled beside removal_refusal: a release would clear it.
     removal_releasable: bool
-    # Every dataset this project registered under another workspace project now pending
-    # removal or gone.
+    # Every dataset this project registered under another workspace project now pending removal,
+    # pending rename or gone; each entry's pending_kind says which.
     dependency_warnings: list[DependencyWarning]
     # A complete sentence, or null: a registry that will not decode leaves dependency_warnings
     # empty beside it; an entry with a path and no id leaves the other entries' warnings beside it.

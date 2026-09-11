@@ -1779,7 +1779,7 @@ describe("ProjectPicker rename", () => {
     await screen.findByText(PROJECTS[0].name);
   });
 
-  it("renders a blocked rename's own sentence and filters it from the plain pending line", async () => {
+  it("keeps a blocked rename's pending row and its Withdraw control, beside the blocked sentence", async () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
@@ -1800,7 +1800,115 @@ describe("ProjectPicker rename", () => {
     expect(
       screen.getByText(/held_target.*another process still holds its files/),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/^Pending rename: held_target/)).not.toBeInTheDocument();
+    // The blocked row keeps its Withdraw control: the destination-taken block is the one state
+    // withdraw exists for, so hiding the row hid the only way to reach it.
+    expect(
+      screen.getByText(/^Pending rename: held_target.*did not land at this start/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Withdraw" })).toBeInTheDocument();
+  });
+
+  it("offers Release inside the Rename dialog for a refusal a release would clear", async () => {
+    // The card keeps Rename... enabled for a releasable refusal, so the dialog carries the control
+    // that clears it rather than sending the breeder to the Remove... dialog to release.
+    const releasable: ProjectSummary = {
+      ...PROJECTS[0],
+      removal_refusal: "it opens by default; choose a different default first, or release it",
+      removal_releasable: true,
+    };
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: [releasable, PROJECTS[1]],
+      pending_removal: [],
+      removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.renamePreview)
+      .mockResolvedValueOnce({
+        refusal: "it opens by default; choose a different default first, or release it",
+        releasable: true,
+        dependent_projects: [],
+        records_present: [],
+      })
+      .mockResolvedValueOnce({
+        refusal: null,
+        releasable: false,
+        dependent_projects: [],
+        records_present: [],
+      });
+    vi.mocked(api.projects.releaseBinding).mockResolvedValue({
+      name: releasable.name,
+      refusal: null,
+      releasable: false,
+      marker_cleared: true,
+      canvas_binding_released: false,
+    });
+
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Rename\u2026" }));
+    const dialog = await screen.findByRole("dialog");
+
+    const release = await within(dialog).findByRole("button", {
+      name: `Release ${releasable.name}`,
+    });
+    fireEvent.click(release);
+
+    await waitFor(() =>
+      expect(api.projects.releaseBinding).toHaveBeenCalledWith(releasable.name, expect.any(String)),
+    );
+    await waitFor(() =>
+      expect(within(dialog).queryByText(/opens by default/)).not.toBeInTheDocument(),
+    );
+  });
+
+  it("clears a submit refusal when either name field is edited", async () => {
+    // The refusal gates the Rename button, so a sticky one left a breeder who mistyped a new name
+    // unable to correct it without closing and reopening the dialog.
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.renamePreview).mockResolvedValue({
+      refusal: null,
+      releasable: false,
+      dependent_projects: [],
+      records_present: [],
+    });
+    vi.mocked(api.projects.rename).mockRejectedValue(
+      new Error("'oneword' does not fit crop_subject_phenotype"),
+    );
+
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Rename\u2026" }));
+    const dialog = await screen.findByRole("dialog");
+    const nameField = await within(dialog).findByLabelText(/type the project name to confirm/i);
+    const newNameField = within(dialog).getByLabelText(/new name/i);
+    fireEvent.change(nameField, { target: { value: PROJECTS[0].name } });
+    fireEvent.change(newNameField, { target: { value: "oneword" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Rename$/ }));
+
+    await within(dialog).findByText(/does not fit crop_subject_phenotype/);
+    expect(within(dialog).getByRole("button", { name: /^Rename$/ })).toBeDisabled();
+
+    fireEvent.change(newNameField, { target: { value: "crop_a_subject_a_new-site" } });
+
+    await waitFor(() =>
+      expect(
+        within(dialog).queryByText(/does not fit crop_subject_phenotype/),
+      ).not.toBeInTheDocument(),
+    );
+    expect(within(dialog).getByRole("button", { name: /^Rename$/ })).not.toBeDisabled();
   });
 
   it("renders the rename sentence, not the removal one, for a dependent whose target is pending rename", async () => {
@@ -1814,6 +1922,7 @@ describe("ProjectPicker rename", () => {
             target: "sample_plot_renaming",
             present: true,
             pending_kind: "rename",
+            new_name: "sample_plot_renamed",
           },
         ],
       },
@@ -1831,8 +1940,10 @@ describe("ProjectPicker rename", () => {
     });
     render(<ProjectPicker />);
 
+    // The card names the new folder, since that is what the dependent's own owner has to
+    // register at, and names the agent, since no GUI route registers a dataset.
     await screen.findByText(
-      /Depends on sample_plot_renaming, which is being renamed; its images stay where they are\. Register the dataset again at the new path once the move lands to clear this\./,
+      /Depends on sample_plot_renaming, which is being renamed to sample_plot_renamed; the same images, under a new folder name\. Ask the agent to register the dataset again under sample_plot_renamed once the move lands to clear this\./,
     );
     expect(screen.queryByText(/pending removal/)).not.toBeInTheDocument();
   });
