@@ -63,6 +63,41 @@ def test_a_comma_ended_line_anchors_a_citation_indented_on_the_next_line(tmp_pat
     assert findings[0]["key"] == "create_something"
 
 
+def test_a_definition_fragment_cited_at_a_docstring_mention_is_re_anchored_to_the_definition(
+    tmp_path,
+):
+    """def helper( appears twice: as the real definition on line 1, and inside a docstring
+    mentioning it on line 6. Cited at line 6, this must be re-anchorable, never verified: a
+    definition-shaped fragment anchors only at the line that begins with it, never a mention."""
+    _write_source(tmp_path, "scripts/example.py", [
+        "def helper():",
+        "    return 1",
+        "",
+        "",
+        "def caller():",
+        '    """Calls def helper( to do the work."""',
+        "    return helper()",
+    ])
+    doc = tmp_path / "ARCHITECTURE.md"
+    doc.write_text("- `def helper(` (`scripts/example.py:6`)\n", encoding="utf-8")
+
+    checker = _load()
+    findings, unanchored = checker.check(doc, tmp_path)
+
+    assert unanchored == 0
+    assert len(findings) == 1
+    assert findings[0]["status"] == "re-anchorable"
+    assert findings[0]["path"] == "scripts/example.py"
+    assert findings[0]["line"] == 1
+
+    fixed = checker.apply_fix(doc, findings)
+
+    assert fixed == 1
+    fixed_text = doc.read_text(encoding="utf-8")
+    assert "scripts/example.py:1" in fixed_text
+    assert "scripts/example.py:6" not in fixed_text
+
+
 def test_a_wide_gap_with_real_prose_between_stays_unanchored(tmp_path):
     """The widened gap admits whitespace and connector punctuation only, so a fragment and a
     citation separated by an unrelated sentence still count as unanchored."""
