@@ -1,14 +1,16 @@
 """planned_trial_count answers the trial count run_hyperparameter_search's own budget door checks
 against: Ray's BasicVariantGenerator variant count over the identical space _search_space_and_points
-builds for tune_search, so the two can never diverge. Every row here is measured directly against
-Ray's own generator (no fake, no Ray session), the nearest sibling to test_hpo_durable.py's own
-real-search-space proofs."""
+builds for tune_search, so the two can never diverge. Every count here comes from Ray's own
+generator rather than a fake, and no Ray session is started. The last section walks a separately
+built generator to exhaustion and checks that the total_samples tally planned_trial_count reads
+back is the number of trials Ray would really yield, the property the door's bound rests on."""
 
 from __future__ import annotations
 
 import pytest
 
 from tcip_mcp.pipelines.training.hpo import (
+    _search_space_and_points,
     get_default_space,
     planned_trial_count,
     split_draw_search_space,
@@ -195,3 +197,68 @@ def test_planned_trial_count_leaves_nothing_under_home_or_the_project_root(tmp_p
     assert count == 5
     assert list(home.iterdir()) == []
     assert list(project_root.iterdir()) == []
+
+
+# -- the tally against the trials Ray really yields -----------------------------------
+
+
+def _trials_ray_yields(
+    param_space: dict, num_samples: int, search_alg: str | None, draws: int,
+    warm_start: bool, baseline_params: dict | None, storage_path,
+) -> tuple[int, int]:
+    """Build the generator planned_trial_count builds and drain it, returning the number of
+    trials next_trial() actually yielded and the total_samples tally read back afterwards."""
+    from ray.tune.experiment import Experiment
+    from ray.tune.search.basic_variant import BasicVariantGenerator
+
+    space, points, _alg = _search_space_and_points(
+        param_space, search_alg, draws, warm_start, baseline_params)
+    generator = BasicVariantGenerator(
+        constant_grid_search=(draws > 1), points_to_evaluate=points)
+    generator.add_configurations(Experiment(
+        name="drained_count", run=lambda config: None, config=space,
+        num_samples=num_samples, storage_path=str(storage_path),
+    ))
+    yielded = 0
+    while generator.next_trial() is not None:
+        yielded += 1
+        if yielded > 1000:
+            raise AssertionError("the generator did not exhaust within 1000 trials")
+    return yielded, generator.total_samples
+
+
+@pytest.mark.parametrize("search_alg, draws, warm_start", [
+    ("random", 1, False),
+    ("random", 3, False),
+    ("grid", 1, False),
+    ("grid", 2, False),
+    ("grid", 3, True),
+    ("random", 2, True),
+])
+def test_planned_trial_count_equals_the_trials_the_generator_yields(
+        search_alg, draws, warm_start, tmp_path):
+    """Coverage that the tally the door reads is the launched count, not merely a number the same
+    function computes twice: a separately built generator is drained to exhaustion, and the trials
+    it yielded, its own total_samples, and planned_trial_count's answer are all one number."""
+    param_space = get_default_space() if draws == 1 else _paired_space(draws)
+    baseline_params = {"lr": 0.001} if warm_start else None
+
+    yielded, tally = _trials_ray_yields(
+        param_space, 5, search_alg, draws, warm_start, baseline_params, tmp_path)
+
+    assert yielded == tally
+    assert planned_trial_count(
+        param_space, 5, search_alg, draws, warm_start, baseline_params) == yielded
+
+
+@pytest.mark.parametrize("draws", [2, 3, 4])
+def test_the_counted_total_divides_evenly_into_the_per_draw_count(draws):
+    """Coverage of the invariant the budget refusal's per-draw arithmetic rests on: the seed axis
+    is a grid factor of every sample, so the counted total is an exact multiple of split_draws and
+    the count // split_draws the refusal reports is at least one, never a floor to zero."""
+    space = _paired_space(draws)
+
+    for search_alg in ("random", "grid"):
+        count = planned_trial_count(space, 5, search_alg, draws, False, None)
+        assert count % draws == 0
+        assert count // draws >= 1

@@ -166,8 +166,9 @@ run_hyperparameter_search(base_config=config, n_trials=20, search_alg="optuna", 
   launched over HTTP but not yet manifested reads as not found).
 - Above one draw (`split_draws`), on a launch that is not a relaunch, `trial_budget` states the
   most trials the sweep may launch, checked at the door against Ray's own variant count over the
-  built search space; a stated `trial_budget` is checked at one draw too, and a relaunch replays
-  the record's own `trial_budget` or none, admitted either way.
+  built search space; a stated `trial_budget` is checked wherever it is stated, at one draw and on
+  a relaunch alike, and the Tuning relaunch route passes the record's own `trial_budget` through,
+  so a relaunch whose recount no longer fits the recorded budget is refused rather than replayed.
 
 ## Dataset Splits
 

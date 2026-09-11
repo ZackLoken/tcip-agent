@@ -2307,9 +2307,11 @@ def run_hyperparameter_search(
         relaunched_from: The sweep this one replays, for a caller (the Tuning route's relaunch)
             that started it from another sweep's own recorded manifest; recorded on this
             sweep's manifest so a listing can show the fork, ``None`` when this sweep was not
-            a relaunch. Refused when it names no sweep manifest under this resolved root. A
-            relaunch replays the source manifest's own ``trial_budget`` (or none, admitted with
-            no bound to check), never a value this call states.
+            a relaunch. Refused when it names no sweep manifest under this resolved root. It
+            exempts nothing from the budget leg: the Tuning relaunch route passes the source
+            manifest's own ``trial_budget`` through (or none, which reads no bound), and a
+            ``trial_budget`` this call states is counted and checked on a relaunch exactly as on
+            a launch.
         trial_budget: The most trials this sweep may launch, counted the way Ray will launch
             them (see :func:`~tcip_mcp.pipelines.training.hpo.planned_trial_count`). Required by
             name above one draw on a launch that is not a relaunch, since the paired grid
@@ -2384,13 +2386,13 @@ def run_hyperparameter_search(
                 return {"error": f"relaunched_from names no sweep manifest under this root: "
                                   f"{relaunched_from!r}", "issues": []}
 
-        # Computed once so the argument and budget legs below can never disagree on whether a
-        # bound is read (a stated trial_budget, or a launch, never a relaunch, above one draw).
-        reads_bound = trial_budget is not None or (split_draws > 1 and relaunched_from is None)
-
         argument_refusal = _split_draws_argument_refusal(split_draws)
         if argument_refusal is not None:
             return {"error": argument_refusal, "issues": []}
+
+        # Below the leg that makes split_draws an integer, so this comparison never meets another
+        # type, and computed once so every leg that reads it agrees on whether a bound is read.
+        reads_bound = trial_budget is not None or (split_draws > 1 and relaunched_from is None)
 
         # A bound base_config admitted to split_draws redraws inside its manifest from here on.
         base_config = _base_config_for_split_draws(base_config, split_draws)
@@ -2924,7 +2926,10 @@ def _trial_budget_refusal(
         count = planned_trial_count(
             search_param_space, n_trials, search_alg, split_draws, warm_start, baseline_params)
     except (ValueError, KeyError, TypeError, IndexError, OverflowError) as exc:
-        return f"the sweep's param_space cannot be counted as a search space: {exc!r}"
+        return (f"the sweep's param_space cannot be counted as a search space: {exc!r}; correct "
+                "the axis that exception names, since tune_search builds the same space and "
+                "would meet it too, or run at split_draws=1 stating no trial_budget, where no "
+                "count is taken.")
 
     per_draw = count // split_draws
     warm_state = "on" if warm_start else "off"
@@ -3156,10 +3161,10 @@ _SEED_AXIS_REMEDY = (
     "is one the native generator builds (random, grid, variant_generator, or unset); scheduler "
     "prunes nothing (none, fifo, or unset); split_draw_seeds is one per draw and distinct; no "
     "baseline_params names the seed under a warm start; no other data.* axis is in param_space; "
-    "and, for a built-in detection config with tiling on, more than one trainable source is "
-    "admitted under data.labels_dir (a single admitted source's own single-source spatial-strip "
-    "path pairs no distinct partition with any draw); a trial_budget is stated on a launch that "
-    "is not a relaunch, and Ray's variant count over the sweep fits under it. A single fixed "
+    "a trial_budget is stated on a launch that is not a relaunch, and Ray's variant count over "
+    "the sweep fits under it; and, for a built-in detection config with tiling on, more than one "
+    "trainable source is admitted under data.labels_dir (a single admitted source's own "
+    "single-source spatial-strip path pairs no distinct partition with any draw). A single fixed "
     "seed belongs in "
     "base_config's own data.split.seed: the drawn path's partition depends on it, and the "
     "single-source spatial path's, a config with "
