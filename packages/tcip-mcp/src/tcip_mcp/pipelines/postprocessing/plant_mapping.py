@@ -798,13 +798,19 @@ def parse_plant_registry_csvs(csv_paths: list[Path]) -> tuple[list[dict], str, i
     exactly what a real registration would write without writing it.
 
     Raises :class:`NoGeoreferencedPlantsRefusal`, naming every file that parsed no georeferenced,
-    named plant, the same check :func:`register_plant_registry_record` runs before it writes.
+    named plant or is not UTF-8 text (a binary file, a shapefile's own ``.shp``/``.shx``/``.dbf``
+    included, would otherwise raise an unguarded ``UnicodeDecodeError`` out of this function), the
+    same check :func:`register_plant_registry_record` runs before it writes.
     """
     failed: list[str] = []
     csvs_meta: list[dict] = []
     all_plants: list[PlantRecord] = []
     for p in csv_paths:
-        records = read_plant_csvs([p])
+        try:
+            records = read_plant_csvs([p])
+        except UnicodeDecodeError:
+            failed.append(str(p))
+            continue
         if not records:
             failed.append(str(p))
             continue
@@ -816,9 +822,9 @@ def parse_plant_registry_csvs(csv_paths: list[Path]) -> tuple[list[dict], str, i
         })
     if failed:
         raise NoGeoreferencedPlantsRefusal(
-            f"{failed} parsed no georeferenced, named plant (need columns plot_name, "
-            "WGS84_centroid_x, WGS84_centroid_y with usable values); register only files that "
-            "carry at least one",
+            f"{failed} parsed no georeferenced, named plant, or is not UTF-8 text (need columns "
+            "plot_name, WGS84_centroid_x, WGS84_centroid_y with usable values); register only "
+            "files that carry at least one",
             paths=failed,
         )
     return csvs_meta, registry_content_digest(all_plants), len(all_plants)
