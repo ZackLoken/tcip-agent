@@ -70,7 +70,8 @@ _HALVING_SCHEDULERS = {"async_hyperband", "hyperband"}
 SPLIT_DRAW_SEED_KEY = "data.split.seed"
 """The dotted param-space key ``run_hyperparameter_search``'s ``split_draws`` axis sweeps and ``tune_search``
 pairs with every sampled point via ``grid_keys``; the one definition every site that names the
-axis (``run_hyperparameter_search``, ``_split_draws_refusal``, ``group_split_draws``, ``tune_search`` itself)
+axis (``run_hyperparameter_search``, ``_split_draws_refusal``, ``group_split_draws``, ``tune_search`` itself,
+``split_draw_search_space``, ``_search_space_and_points`` and ``planned_trial_count``)
 reads, rather than a literal repeated at each site."""
 
 
@@ -542,6 +543,121 @@ def _build_sweep_stopper(stop_all_when: Callable[[], bool], sweep_root: Path) ->
     return _SweepStopper(), live_trials
 
 
+def split_draw_search_space(
+    param_space: dict, base_config: dict, split_draws: int, split_draw_seeds: list[int] | None,
+) -> tuple[dict, list[int] | None]:
+    """The search space ``run_hyperparameter_search`` hands ``tune_search`` (and this module's own
+    :func:`planned_trial_count`): ``param_space`` itself, unaugmented, at ``split_draws`` of one
+    or below; above one, a copy carrying :data:`SPLIT_DRAW_SEED_KEY` as a categorical grid axis
+    over the resolved draw seeds (``split_draw_seeds`` when given, else ``base_config``'s own
+    ``data.split.seed``, or 42, plus the draw index). ``run_hyperparameter_search`` calls this in
+    place of composing the axis itself, so the space its own door counts and the space it hands
+    the search are the identical object, never two derivations that could disagree.
+
+    Returns ``(search_param_space, resolved_draw_seeds)``: the second element is ``None`` at one
+    draw (nothing was resolved) and the list of seeds actually paired above it, the same list the
+    sweep manifest and :func:`~tcip_mcp.tools.training_tools.group_split_draws` read.
+    """
+    if split_draws <= 1:
+        return param_space, None
+    base_seed = int(((base_config.get("data") or {}).get("split") or {}).get("seed", 42))
+    resolved_draw_seeds = (
+        list(split_draw_seeds) if split_draw_seeds is not None
+        else [base_seed + i for i in range(split_draws)]
+    )
+    search_param_space = {
+        **param_space,
+        SPLIT_DRAW_SEED_KEY: {"type": "categorical", "choices": resolved_draw_seeds},
+    }
+    return search_param_space, resolved_draw_seeds
+
+
+def _search_space_and_points(
+    param_space: dict | None, search_alg: str | None, split_draws: int, warm_start: bool,
+    baseline_params: dict | None,
+) -> tuple[dict, list[dict] | None, str]:
+    """The Ray Tune space, warm-start preset points, and the normalized search-algorithm name
+    ``tune_search`` builds its own search from, and the identical derivation
+    :func:`planned_trial_count` counts over, so neither can diverge from the other. The
+    platform's own ``param_space`` (or ``get_default_space()`` for an empty or ``None`` one,
+    ``_to_tune_space``'s own substitution, carried verbatim) turned into Ray's own space, gridded
+    over every discrete axis under ``grid`` and over :data:`SPLIT_DRAW_SEED_KEY` regardless above
+    one draw, plus the warm-start baseline filtered to the space's own keys.
+    """
+    normalized_search_alg = (search_alg or "").lower()
+    grid_keys = frozenset({SPLIT_DRAW_SEED_KEY}) if split_draws > 1 else frozenset()
+    space = _to_tune_space(param_space or get_default_space(),
+                           grid=(normalized_search_alg == "grid"), grid_keys=grid_keys)
+    points = None
+    if warm_start:
+        baseline = baseline_params or get_default_baseline_params()
+        filtered = {k: v for k, v in baseline.items() if k in space}
+        points = [filtered] if filtered else None
+    return space, points, normalized_search_alg
+
+
+_PLANNED_TRIAL_COUNT_EXPERIMENT_NAME = "tcip_planned_trial_count"
+
+
+def _planned_trial_count_trainable(config: dict) -> None:
+    """The no-op ``run`` :func:`planned_trial_count` gives its throwaway ``Experiment``: never
+    invoked, since counting stops at ``add_configurations``'s own ``total_samples`` and no Ray
+    session ever starts for this call."""
+    return None
+
+
+def planned_trial_count(
+    param_space: dict, num_samples: int, search_alg: str | None, split_draws: int,
+    warm_start: bool, baseline_params: dict | None,
+) -> int:
+    """How many trials ``tune_search`` would actually launch for this sweep: Ray's own
+    ``BasicVariantGenerator``'s variant count over the identical space
+    :func:`_search_space_and_points` builds, the same ``num_samples`` value
+    ``ray.tune.TuneConfig`` carries for every searcher alike (a backend searcher's own
+    installation is refused inside ``tune_search``'s own ``build_search_alg``, never by this
+    function). ``constant_grid_search=True`` above one draw matches ``tune_search``'s own
+    construction and does not move the count.
+
+    Counted by adding one throwaway ``ray.tune.experiment.Experiment`` to a
+    ``BasicVariantGenerator`` under a temporary ``storage_path`` (``Experiment`` creates
+    ``<storage_path>/<name>/`` and a validation marker there) and reading ``total_samples`` back;
+    no Ray session is started. ``add_configurations`` itself only tallies each grid axis's own
+    length (``ray.tune.search.variant_generator._count_spec_samples``) and never resolves a
+    domain var, so an empty grid axis or a malformed numeric range counts silently (0, or a
+    number that ignores the malformed axis entirely) with no exception at that point alone,
+    measured at Ray 2.56.1: the actual variant-resolution failure (``IndexError`` under a grid
+    axis Ray cannot pop from, ``ValueError`` evaluating a malformed random axis) only surfaces
+    once a trial is actually drawn. One draw, via the generator's own ``next_trial()``, is taken
+    here for exactly that reason, immediately discarded (the drawn ``Trial`` is never queued, no
+    training result is read back), so a space that cannot really be generated raises here rather
+    than counting a number nobody could launch. The temporary directory is discarded with the
+    context manager, so nothing lands under the project or the home directory Ray's own
+    ``storage_path`` default otherwise would.
+
+    Propagates whatever ``_to_tune_space``, ``add_configurations`` or the one drawn trial raise
+    on a space that cannot be built or generated (``ValueError``, ``KeyError``, ``TypeError``,
+    ``IndexError``, ``OverflowError``); an enormous but finite axis span can also raise
+    ``MemoryError`` while ``_to_tune_space`` materializes its ``range(...)``, left to propagate
+    uncaught here, as it does inside ``tune_search`` today.
+    """
+    import tempfile
+
+    from ray.tune.experiment import Experiment
+    from ray.tune.search.basic_variant import BasicVariantGenerator
+
+    space, points, _normalized_search_alg = _search_space_and_points(
+        param_space, search_alg, split_draws, warm_start, baseline_params)
+    generator = BasicVariantGenerator(
+        constant_grid_search=(split_draws > 1), points_to_evaluate=points)
+    with tempfile.TemporaryDirectory() as storage_path:
+        generator.add_configurations(Experiment(
+            name=_PLANNED_TRIAL_COUNT_EXPERIMENT_NAME, run=_planned_trial_count_trainable,
+            config=space, num_samples=num_samples, storage_path=storage_path,
+        ))
+        generator.next_trial()
+        return generator.total_samples
+
+
 def tune_search(
     objective_fn: Callable[[dict, Callable[[float], None]], Any],
     param_space: dict | None = None,
@@ -571,7 +687,9 @@ def tune_search(
             (report at least once; the last value is the trial's result under ``mode``).
         param_space: platform param-space dict (see ``get_default_space``); ``None`` uses it.
         metric / mode: the reported metric name and whether to ``min`` or ``max`` it.
-        num_samples: number of trials (with a grid space, samples over the grid).
+        num_samples: number of trials (with a grid space, samples over the grid); the count
+            actually launched is Ray's own variant count over the built space, see
+            :func:`planned_trial_count`.
         search_alg / scheduler: agent-selected names (see module docstring). ``None`` schedules
             nothing; native ``random``/``grid`` need no searcher backend.
         max_concurrent: trials to run at once (default 1, safe for single-GPU training).
@@ -591,8 +709,9 @@ def tune_search(
             still looks unfinished, or (the bounded fallback, for a trial that never polls) once
             a configured staleness window has passed. See :func:`_build_sweep_stopper`.
         split_draws: Above 1, ``param_space`` must already carry a ``SPLIT_DRAW_SEED_KEY`` grid
-            axis (``run_hyperparameter_search``'s own addition; raises ``ValueError`` naming the axis when it is
-            missing, rather than pairing nothing silently) and the search is built as
+            axis (``run_hyperparameter_search``'s own addition, via :func:`split_draw_search_space`;
+            raises ``ValueError`` naming the axis when it is missing, rather than pairing nothing
+            silently) and the search is built as
             ``BasicVariantGenerator(constant_grid_search=True, random_state=seed)`` instead of
             through ``build_search_alg``, so every sampled point is trained once per seed
             (Ray's own pairing, ``ray.tune.search.basic_variant``) whether ``search_alg`` is
@@ -621,9 +740,6 @@ def tune_search(
             "search names its own directory."
         )
 
-    # One normalized local, read at every branch point below; result["search_alg"] stays the caller's own string.
-    normalized_search_alg = (search_alg or "").lower()
-
     if split_draws > 1 and SPLIT_DRAW_SEED_KEY not in (param_space or {}):
         raise ValueError(
             f"tune_search: split_draws={split_draws} pairs {SPLIT_DRAW_SEED_KEY!r} as a grid "
@@ -634,16 +750,11 @@ def tune_search(
     import ray
     from ray import tune
 
-    grid_keys = frozenset({SPLIT_DRAW_SEED_KEY}) if split_draws > 1 else frozenset()
-    space = _to_tune_space(param_space or get_default_space(),
-                           grid=(normalized_search_alg == "grid"), grid_keys=grid_keys)
+    # The normalized name is the helper's third return, read at every branch point below;
+    # result["search_alg"] stays the caller's own string.
+    space, points, normalized_search_alg = _search_space_and_points(
+        param_space, search_alg, split_draws, warm_start, baseline_params)
     resources = resources_per_trial or _default_trial_resources(max_concurrent)
-
-    points = None
-    if warm_start:
-        baseline = baseline_params or get_default_baseline_params()
-        filtered = {k: v for k, v in baseline.items() if k in space}
-        points = [filtered] if filtered else None
 
     if split_draws > 1:
         from ray.tune.search.basic_variant import BasicVariantGenerator
