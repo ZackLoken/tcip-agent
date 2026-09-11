@@ -55,10 +55,15 @@ def author_trait_spec(
     already-registered spec's fields with `revise_trait_spec` instead.
 
     A spec that predates the subject-registry rename (no `schema_version: 2` stamp) is not a
-    collision, whatever its statement: state every field the spec carries here to restate it. The
-    returned statement then carries `replaced_values`, naming every authored field whose value
-    this call replaced (the retired `positive_class_name` against the new `positive_value`) as
-    `{"recorded": <old>, "authored": <new>}`; absent on every other call.
+    collision, whatever its statement: state every field the spec carries here to restate it, since
+    a field left unstated is written at its default and nothing here can tell the two apart. The
+    response, and only the response, then carries `replaced_values`, naming every authored field
+    whose value this call replaced (the retired `positive_class_name` against the new
+    `positive_value`) as `{"recorded": <old>, "authored": <new>}`, and `prior_confirmation`, the
+    `confirmed_by` and `confirmed_at` of the statement this call replaced when the breeder had
+    confirmed it, else null, since the fresh statement is unconfirmed and that confirmation no
+    longer stands; both absent on every other call, and neither is written into the statement
+    record.
 
     Ask the breeder what the trait's measurement is, in their own terms, and record their answer
     here. Propose the semantics the breeder actually stated, never a plausible-sounding guess: a
@@ -103,7 +108,7 @@ def author_trait_spec(
 
     Returns the unconfirmed statement as written, plus `record_seen`, the content hash the
     confirming surface compares against so a click cannot confirm text nobody displayed, and
-    `replaced_values` on a restatement over a pre-rename record.
+    `replaced_values` and `prior_confirmation` on a restatement over a pre-rename record.
     """
     try:
         statement = traits.author_trait_spec(
