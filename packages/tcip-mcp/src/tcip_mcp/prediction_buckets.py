@@ -36,11 +36,13 @@ attribute)`` scope: each record's ``subject`` is whatever the caller named
 and every reader below reads a staged bucket's records under the caller's own statement rather
 than a stamp's.
 
-Exhaustion is refused for every caller regardless of that keyword: when every ``<name>@r<n>``
-variant up to the search's ceiling already carries a verdict, the resolver raises
+Exhaustion is refused for every caller: when every ``<name>@r<n>`` variant up to the search's
+ceiling is already taken under the reading that caller asked for (a detection verdict for the
+three publishers, any finished image for the staging door), the resolver raises
 :class:`BucketHasVerdicts` naming no suggestion rather than falling back to an unchecked,
 never-searched ``<name>@r100``. ``stage_prediction_shapes``, the one caller that never opts into
-the document guard, meets this same refusal on exhaustion.
+the document guard, meets this same refusal on exhaustion, and reaches it sooner than a publisher
+would, since its own reading takes a variant on a bulk accept alone.
 
 A bucket's documents leave it through exactly one audited door,
 :func:`~tcip_mcp.tools.inference_tools.clear_prediction_bucket`, which moves a terminal
@@ -276,7 +278,7 @@ class BucketHasVerdicts(Exception):
             message = (
                 f"prediction bucket {name!r} has {count} {unit} recorded against it; "
                 f"refusing to overwrite in place. Write to a new bucket (e.g. {suggested!r}) or "
-                f"reconcile the verdicts first."
+                f"reconcile what is recorded against it first."
             )
         super().__init__(message)
 
@@ -381,7 +383,8 @@ def resolve_writable_bucket(
     count_review_state: bool = False,
     max_variants: int = 99,
 ) -> BucketResolution:
-    """Resolve which bucket to write to, honoring review-verdict immutability and, for the
+    """Resolve which bucket to write to, honoring the review immutability the caller asked for
+    (detection verdicts alone, or every finished image under ``count_review_state``) and, for the
     callers that opt in, prediction-document immutability.
 
     ``dirs_for(name)`` returns the task dir(s) of the bucket variant ``name`` (one for a
