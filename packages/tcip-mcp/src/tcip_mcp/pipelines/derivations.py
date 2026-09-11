@@ -435,6 +435,11 @@ def derive_block_scale_px(
                     "derive_block_scale_px: raster_path is not a raster file this derivation can "
                     f"read a pixel size from ({raster}); pass the training raster, or "
                     "raster_path=None to use the GT-object-spacing-derived block scale")
+            if raster.suffix.casefold() in {".npy", ".npz"}:
+                raise ValueError(
+                    f"derive_block_scale_px: raster_path ({raster}) is an array container, which "
+                    "carries no georeferencing tags, so there is no pixel size to read; pass "
+                    "raster_path=None to use the GT-object-spacing-derived block scale instead")
             try:
                 read_geotransform(raster)
             except (GeoreferencingError, RotatedRasterError):

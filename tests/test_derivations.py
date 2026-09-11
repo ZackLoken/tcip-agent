@@ -356,6 +356,25 @@ def test_derive_block_scale_px_truncated_raster_refuses_named(tmp_path):
             raster_path=str(raster_path))
 
 
+def test_derive_block_scale_px_npy_raster_refuses_named_for_no_georeference(tmp_path):
+    """An .npy array container is a raster by suffix but carries no georeferencing tags at all;
+    it is refused by name, distinct from the truncated-file words above, rather than tried
+    through read_geotransform (coverage: the npy/npz discriminator added ahead of the open)."""
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
+
+    plants = [
+        PlantRecord("p0", "a0", 0, 0, 0, 45.0, -93.0),
+        PlantRecord("p1", "a1", 0, 0, 0, 45.000898, -93.0),
+    ]
+    raster_path = tmp_path / "mosaic.npy"
+    np.save(str(raster_path), np.zeros((20, 20, 3), dtype=np.uint8))
+    boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
+    with pytest.raises(ValueError, match="carries no georeferencing tags"):
+        derive_block_scale_px(
+            tile_size=50, gt_boxes_per_image=[boxes], plants=plants,
+            raster_path=str(raster_path))
+
+
 def test_write_subject_registry(tmp_path):
     import json
 

@@ -117,9 +117,9 @@ def raster_pixel_size(source: Path | BandGroupRef) -> PixelSize | None:
     """``source``'s own real-world pixel size, from its georeferencing tags alone, or ``None``
     when ``source`` is not a raster this module can resolve one for (see
     :func:`resolve_pixel_size` for the checks, in order); call
-    :func:`raster_pixel_size_reason` for why. Calls
-    :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.read_geotransform` directly,
-    never :func:`~tcip_mcp.pipelines.raster_source.is_georeferenced`, which swallows the reason.
+    :func:`raster_pixel_size_reason` for why. This resolver reads the tags itself through
+    :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.read_geotransform` and reports
+    the reason it failed, rather than delegating to a boolean check that would swallow it.
 
     A photographic capture is never opened, and a ``band_group`` manifest is excluded: neither
     is a single raster this module reads georeferencing tags off of.
