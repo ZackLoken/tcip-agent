@@ -1,8 +1,8 @@
 """Data-state doctor: scan a live project for state inconsistencies code audits can't see.
 
 Checks status-store vs disk disagreements on negatives, registry entries pointing at
-missing/test-fixture checkpoints, provenance smells, and orphaned labels. Read-only. Run at
-session start:
+missing/test-fixture checkpoints, provenance smells, orphaned labels, and a stray file under
+``.tcip/state`` no store claims. Read-only. Run at session start:
 
     tcip doctor <project_root>
 
@@ -737,6 +737,42 @@ def check_project_record(root: Path, findings: list) -> None:
         findings.append(("error", str(exc)))
 
 
+def check_stray_state_files(root: Path, findings: list) -> None:
+    """A file under ``.tcip/state`` no store claims (``tcip_mcp.stray_state.stray_state_files``,
+    the same predicate ``delete_stray_state_file`` refuses or admits a single path through) is an
+    info finding naming that tool as the remedy, never a warn or error: a stray costs nothing to
+    leave in place, and deleting one is a person's call, not this check's.
+
+    Deliberately absent from :func:`gated_stores`, though this reads files off disk: the
+    predicate walks the tree and matches path templates (``layout_claims.claimed_files``,
+    ``adoption.plan_root``) and never consults a database, so export lag cannot move a file
+    between the claimed and unaccounted classes. An un-exported record leaves no file on disk to
+    miscall a stray (the record isn't there to misclassify), and a stale exported file still
+    matches its store's own template and reads as claimed regardless of how current its content
+    is. This check can only under-report on a behind-database root (a store's file whose record
+    was since deleted in the database still reads as claimed, since the file itself still matches
+    the template) and never over-report, and under-reporting a deletion candidate is the safe
+    direction, unlike every check ``gated_stores`` does cover. Gating it would also fold in the
+    live-state stores that share the ``.tcip/state`` prefix (``gui_snapshot``, ``canvas_meta``,
+    ``canvas_geometry``, ``project_status``), which are not doctor inputs at all and which a
+    running GUI leaves behind its database constantly, so nearly every database-held root would
+    report this check invalid rather than run it.
+    """
+    from tcip_mcp.stray_state import stray_state_files
+    from tcip_mcp.tools.bundle import AnchorMisplaced
+    from tcip_store.errors import StoreError
+
+    try:
+        strays = stray_state_files(root)
+    except (AnchorMisplaced, StoreError) as exc:
+        findings.append(("warn", f"the state root's accounting refused: {exc}"))
+        return
+    for path in strays:
+        findings.append(("info", f"{path.relative_to(root)}: a stray file under .tcip/state that "
+                         "no store claims; delete it with delete_stray_state_file if it is not "
+                         "needed"))
+
+
 def gated_stores(root: Path) -> dict[str, tuple[tuple[Path, str], ...]]:
     """Which database-held store each file-reading check depends on, and under which root.
 
@@ -815,7 +851,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     for check in (check_negatives, check_data_quality, check_status_tokens, check_reserved_names,
                  check_registry, check_provenance, check_state, check_region_completeness,
                  check_retired_subject_registry, check_trait_specs, check_trait_spec_statements,
-                 check_project_record):
+                 check_project_record, check_stray_state_files):
         reason = invalid.get(check.__name__)
         if reason:
             findings.append(("error", f"{check.__name__} reads state as files and those files "

@@ -2,8 +2,10 @@
 
 ``archive_project`` composes its bundle from this accounting's record/log and blob classes;
 ``import_project`` classifies every extracted member by it and refuses on anything bookkeeping,
-cross-root-collided or unaccounted. One implementation, so the two doors cannot silently drift
-onto two different notions of "what a bundle holds".
+cross-root-collided or unaccounted; ``tcip_mcp.stray_state`` reads the same accounting's
+``unaccounted`` class, narrowed to the state root, to name a stray file under ``.tcip/state``.
+One implementation, so the three readers cannot silently drift onto different notions of
+"what a bundle holds".
 
 Roots are derived from the tree's own structure plus the anchored documents the platform's own
 writers place (``split_manifest.json``, ``curated_manifest.json``); an anchor found somewhere
@@ -420,6 +422,10 @@ def _walk_files(tree: Path) -> tuple[Path, ...]:
 
 def account_for(tree: str | Path) -> BundleAccounting:
     """Classify every file under ``tree`` into the four membership classes.
+
+    ``tcip_mcp.stray_state`` is this function's third reader, beside ``archive_project`` and
+    ``import_project``: it reads ``unaccounted`` alone, narrowed to files under the tree's own
+    ``.tcip/state``, to name a stray no store claims.
 
     Passive: this raises only on :class:`AnchorMisplaced` (a structural fact about the tree
     itself, true for either door); bookkeeping members and cross-root collisions are reported
