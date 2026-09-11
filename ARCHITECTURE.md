@@ -939,13 +939,13 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/api/state` | `get_state` | `app.py:344` |
-| POST | `/api/state/tab` | `set_active_tab` | `app.py:353` |
-| WS | `/ws/state` | `state_ws` | `app.py:361` |
-| GET | `/health` | `health` | `app.py:456` |
-| GET | `/` | `index` | `app.py:464` |
-| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:528` |
-| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:579` |
+| GET | `/api/state` | `get_state` | `app.py:355` |
+| POST | `/api/state/tab` | `set_active_tab` | `app.py:364` |
+| WS | `/ws/state` | `state_ws` | `app.py:372` |
+| GET | `/health` | `health` | `app.py:467` |
+| GET | `/` | `index` | `app.py:475` |
+| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:539` |
+| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:590` |
 
 ### routes/annotate.py, prefix `/api/annotate` (2 routes)
 
@@ -976,8 +976,8 @@ registered at HEAD.
 | method | path | handler | line |
 |---|---|---|---|
 | GET | `/tree` | `get_dataset_tree` | `routes/dataset.py:152` |  <!-- queued: P5-83 unify -->
-| POST | `/select` | `select_dataset` | `routes/dataset.py:252` |
-| POST | `/nav` | `set_current_image` | `routes/dataset.py:394` |
+| POST | `/select` | `select_dataset` | `routes/dataset.py:262` |
+| POST | `/nav` | `set_current_image` | `routes/dataset.py:404` |
 
 ### routes/fs.py, prefix `/api/fs` (1 route)
 
@@ -1014,11 +1014,11 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `` (root) | `list_projects` | `routes/projects.py:151` |
-| POST | `/active` | `activate_project` | `routes/projects.py:221` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
-| GET | `/{name}/removal-preview` | `removal_preview_route` | `routes/projects.py:354` |
-| POST | `/remove` | `remove_project` | `routes/projects.py:363` |
-| POST | `/{name}/release-binding` | `release_binding_route` | `routes/projects.py:377` |
+| GET | `` (root) | `list_projects` | `routes/projects.py:163` |
+| POST | `/active` | `activate_project` | `routes/projects.py:246` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
+| GET | `/{name}/removal-preview` | `removal_preview_route` | `routes/projects.py:410` |
+| POST | `/remove` | `remove_project` | `routes/projects.py:419` |
+| POST | `/{name}/release-binding` | `release_binding_route` | `routes/projects.py:433` |
 
 ### routes/results.py, prefix `/api/results` (15 routes)
 
@@ -1911,7 +1911,7 @@ Reader: `StateStore.load_from_disk`, `tcip_web/state.py:294`.
 `StateStore.mutate`, `tcip_web/state.py:27`, validates the merged mutation through `GuiState`
 before holding it, raising `GuiMutationInvalid` (`tcip_web/state.py:26`) on a field that does not
 validate or a key `GuiState` does not declare; `app.py`'s `_gui_mutation_invalid_handler`,
-`packages/tcip-web/src/tcip_web/app.py:301`, answers a route that raises it with 400 and the
+`packages/tcip-web/src/tcip_web/app.py:312`, answers a route that raises it with 400 and the
 validation message rather than the 500 an unhandled `ValueError` would produce.
 
 Seam S10 ("Live GUI state .tcip/state/gui.json"), verdict `both-sides-restated`,
@@ -1992,9 +1992,9 @@ No seam id in `seam-coverage.json`'s 67-entry inventory names `.tcip/datasets.js
 
 Path: `<workspace_root>/.active`, a workspace-root sibling, not inside `.tcip/`.
 
-Writer: `activate_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:414`.
+Writer: `activate_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:521`.
 
-Readers: `read_active_project`, `workspace.py:194`; `resolve_project_path`, `workspace.py:365`.
+Readers: `read_active_project`, `workspace.py:201`; `resolve_project_path`, `workspace.py:469`.
 
 Seam S02 ("Workspace root and the .active project marker"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_tcip_web_projects_routes.py:160`,
@@ -2182,18 +2182,18 @@ No seam id in `seam-coverage.json`'s inventory names this record.
 ## 29. `pending_removal.json`, per-project removal marker
 
 Path: `<project_path>/.tcip/pending_removal.json`, addressed by `pending_removal_key`
-(`packages/tcip-mcp/src/tcip_mcp/workspace.py:229`), on the store `PENDING_REMOVAL_STORE`
-(`workspace.py:214`), `frozen: true`, locator `RootedFileLocator(prefix=(".tcip",),
+(`packages/tcip-mcp/src/tcip_mcp/workspace.py:236`), on the store `PENDING_REMOVAL_STORE`
+(`workspace.py:221`), `frozen: true`, locator `RootedFileLocator(prefix=(".tcip",),
 suffix=".json")`, the same shape `dataset_registry` and `.tcip/project.json` (format 25) use.
 
 Shape: `{requested_at, requested_by, archive_path, holding_dir, external_roots,
 dependent_projects}`, one document per project. Written once, `concurrency="cas"` with
 `expect=Version.ABSENT`, by `request_project_removal`
-(`packages/tcip-mcp/src/tcip_mcp/project_removal.py:607`); deleted, at the version the
-completing walk read it at, by `complete_pending_removals` (`project_removal.py:907`).
+(`packages/tcip-mcp/src/tcip_mcp/project_removal.py:689`); deleted, at the version the
+completing walk read it at, by `complete_pending_removals` (`project_removal.py:989`).
 
-Readers: `pending_removal_record` (`workspace.py:240`) and `pending_removal_or_none`
-(`workspace.py:252`), the
+Readers: `pending_removal_record` (`workspace.py:248`) and `pending_removal_or_none`
+(`workspace.py:261`), the
 predicate `adoptable_project_root`, `ingest_images` and `tcip_web.paths.allowed_roots`'s
 excluded roots all consult, so an opener or a guarded route refuses a marked project from the
 moment this document lands.
@@ -2245,7 +2245,7 @@ Phase 3 verdict: single.
 ## S02. Workspace root and the .active project marker
 
 Must agree: every process names the same workspace directory and the same active project.
-Side A: `packages/tcip-mcp/src/tcip_mcp/workspace.py:51` (`ACTIVE_MARKER = ".active"`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/workspace.py:58` (`ACTIVE_MARKER = ".active"`).
 Side B: `packages/tcip-web/src/tcip_web/agent_session_start.py:72` (`workspace.active_project_if_present(create=False)`, reading the marker through `workspace.py` rather than a loose file the SessionStart hook resolved itself).
 Phase 3 verdict: single.
 
@@ -2267,7 +2267,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
 Side A: `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:302` (`result = post_panel_event("app", "annotate_focus", payload)`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:551` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:562` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
 Phase 3 verdict: single. The posted payload carries `subject` beside `active_subject` (`packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:300`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus_human_attention tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. `audit_log`, one append-only store under three kinds of root
@@ -2345,7 +2345,7 @@ Phase 3 verdict: single.
 ## S11. Live canvas state files canvas_live.json / canvas_shapes.json, bound to one root by canvas_open_binding
 
 Must agree: which root the GUI currently has open, so the push route writes canvas_live.json/canvas_shapes.json under it and capture_live_canvas reads them from that same root rather than trusting its own pinned one to still be live. The filename half is closed (both sides address through one locator pair); the root half used to be open (the writer took the browser payload's own project_root as authority, Part 20's own rejected shape), and is now resolved through the canvas_open_binding record P5-274 added (docs/audit/remediation/batch8/p5-274-canvas-binding-design.md): a pinned-root refusal landed for the old shape and was reverted after a three-family review refuted its anchor (docs/audit/remediation/batch8/xf-canvas-root/), and this binding is the settled replacement.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:182` (`def canvas_open_binding_key(`, the one workspace-scoped record `{generation, root, project_name, issued_at, released}`, declared alongside `canvas_meta_key` (`web_client.py:146`)/`canvas_geometry_key` (`web_client.py:157`) addressing the two per-project documents the binding's root names) and `packages/tcip-web/src/tcip_web/routes/dataset.py:205` (`def _write_canvas_binding(`, called from `select_dataset` before the selection is adopted; `generation` bumps when `root` actually changes or the current record was released) and `packages/tcip-mcp/src/tcip_mcp/project_removal.py:770` (`def release_project_binding(`, the record's second writer, marking it released and bumping `generation` without deleting it, for a project the marker or the binding names).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:182` (`def canvas_open_binding_key(`, the one workspace-scoped record `{generation, root, project_name, issued_at, released}`, declared alongside `canvas_meta_key` (`web_client.py:146`)/`canvas_geometry_key` (`web_client.py:157`) addressing the two per-project documents the binding's root names) and `packages/tcip-web/src/tcip_web/routes/dataset.py:205` (`def _write_canvas_binding(`, called from `select_dataset` before the selection is adopted; `generation` bumps when `root` actually changes or the current record was released) and `packages/tcip-mcp/src/tcip_mcp/project_removal.py:852` (`def release_project_binding(`, the record's second writer, marking it released and bumping `generation` without deleting it, for a project the marker or the binding names).
 Side B: `packages/tcip-web/src/tcip_web/routes/canvas.py:89` (`def push_canvas_state(`, reads the binding, verifies the payload's `binding_generation` against it, and writes both documents under the binding's own `root`, never a client-supplied one) and the binding's three MCP-side readers, each comparing a root it names against the record through the one predicate `packages/tcip-mcp/src/tcip_mcp/web_client.py:353` (`def gui_binding_matches(`): `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:730` (`def capture_live_canvas(`, beside its own pinned root, with a generation fence re-reading the binding after the documents through the same store-error contract so a switch mid-call cannot render a false live result) and `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:73` (`push_panel_event`) and `tools/gui_tools.py:137` (`focus_human_attention`), each against a caller-stated `project_root` rather than a process's own pin). A mismatch or absence on any of the three is named through the shared helper `packages/tcip-mcp/src/tcip_mcp/web_client.py:385` (`def binding_divergence(`).
 Phase 3 verdict: single. The current generation also rides the GuiState broadcast envelope (`packages/tcip-web/src/tcip_web/app.py:185` `SERVER_EPOCH`, read off `StateStore.binding_generation`, `packages/tcip-web/src/tcip_web/state.py:149`) and is adopted with the dataset in one client-side store update (`packages/tcip-web/frontend/src/store/slices/gui.ts:138` `applyRestoredDataset`, and `mergeSnapshot`), so the push's `binding_generation` and the reader's own comparison never straddle a stale identity.
 
@@ -2619,7 +2619,7 @@ Phase 3 verdict: duplicated.
 ## S48. State WebSocket snapshot protocol  <!-- queued: P5-288 unify -->
 
 Must agree: the browser knows which slices of a broadcast snapshot are backend-authoritative and orders them by version.
-Side A: `packages/tcip-web/src/tcip_web/app.py:360` (`@app.websocket("/ws/state")`).
+Side A: `packages/tcip-web/src/tcip_web/app.py:371` (`@app.websocket("/ws/state")`).
 Side B: `packages/tcip-web/src/tcip_web/state.py:210` (`def version(self) -> int:`, "Monotonic version, bumped on every state change.").
 Phase 3 verdict: duplicated.
 
@@ -2662,14 +2662,14 @@ Phase 3 verdict: single.
 
 Must agree: the directory Vite writes is one of the directories the backend looks in.
 Side A: `packages/tcip-web/frontend/vite.config.ts:26` (`outDir: "../static",`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:420` (`def _find_static_dir() -> Path:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:431` (`def _find_static_dir() -> Path:`).
 Phase 3 verdict: duplicated.
 
 ## S55. Vite dev-server proxy prefixes  <!-- queued: P5-306 unify -->
 
 Must agree: every backend path the browser calls in dev falls under a proxied prefix.
 Side A: `packages/tcip-web/frontend/vite.config.ts:20` (`proxy: {`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:360` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
+Side B: `packages/tcip-web/src/tcip_web/app.py:371` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
 Phase 3 verdict: duplicated. The prefix literals still stand on their own, but `tests/test_frontend_route_paths.py` now fails when a path the frontend references falls outside them, sockets under the API prefix included.
 
 ## S56. Tab-name vocabulary  <!-- queued: P5-290 unify -->
@@ -2696,7 +2696,7 @@ Phase 3 verdict: single.
 ## S59. Path confinement (the derived allow-set)
 
 Must agree: every route that accepts a client-supplied path confines it to the same allowed roots.
-Side A: `packages/tcip-web/src/tcip_web/paths.py:55`
+Side A: `packages/tcip-web/src/tcip_web/paths.py:56`
 (`def allowed_roots() -> tuple[list[Path], list[Path]]:`).
 Side B: `packages/tcip-web/src/tcip_web/routes/annotate.py:80` (`p = assert_path_allowed(path)`).
 Phase 3 verdict: single.
