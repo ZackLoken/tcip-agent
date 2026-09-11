@@ -111,7 +111,7 @@ def test_a_verified_claim_writes_the_marker_beside_the_person(
     raw = json.loads(gt_path.read_text(encoding="utf-8"))
     record = raw["annotations"][0]
     expected_identity = f"{validated_by['experiment_id']}:{validated_by['record_digest']}"
-    assert record.get("accepted_by_rule") == expected_identity  # a guard: now carries the identity
+    assert record.get("accepted_by_rule") == expected_identity  # a guard: the identity, not a bare flag
     assert record.get("accepted_by", "").startswith("user:")
     assert "score" not in record
 

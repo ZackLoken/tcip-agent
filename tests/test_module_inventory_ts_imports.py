@@ -11,8 +11,8 @@ SCRIPT = REPO_ROOT / "tools" / "build_module_inventory.py"
 
 
 def _load():
-    """Load the script fresh, tolerating a tree with no ``.git`` (which ``git archive`` never
-    carries into a checkout): the module's own repo-root walk needs a marker to find, not a real
+    """Load the script fresh, tolerating a tree with no ``.git`` directory (a ``git archive``
+    export has none): the module's own repo-root walk needs a marker to find, not a real
     checkout."""
     git_marker = SCRIPT.parent.parent / ".git"
     if not git_marker.exists():

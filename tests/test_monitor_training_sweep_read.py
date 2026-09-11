@@ -41,8 +41,8 @@ def test_monitor_training_refuses_both_experiment_id_and_sweep_id() -> None:
 
 
 def test_monitor_training_refuses_neither_experiment_id_nor_sweep_id() -> None:
-    """Coverage: monitor_training refuses when neither experiment_id nor sweep_id is given, on the
-    same basis as the both-given case above."""
+    """Coverage: monitor_training refuses when neither experiment_id nor sweep_id is given, naming
+    the two arguments one of which it needs."""
     from tcip_mcp.tools.training_tools import monitor_training
 
     res = monitor_training()

@@ -78,9 +78,8 @@ def test_generation_conf_answers_a_null_admission_rule_with_a_naming_reason(
     """admission_rule is null with a reason naming why, for every stamp shape that answers no
     rule, each read as what it is (an absent stamp, a stamp claiming nothing, and a validated
     stamp whose row is gone read as three distinct sentences, never one collapsed into another).
-    A guard: the key's own presence (against a sentinel default) is asserted separately from its
-    value for all three cases, since the route may omit the admission_rule/admission_reason key
-    entirely rather than merely setting it to null.
+    A guard: for all three cases the key's presence is asserted against a sentinel default, so a
+    response that dropped the admission_rule key would fail here rather than read as null.
     The non-numeric-conf case (a successfully bound claim whose stamp still carries an unreadable
     value) is exercised as a unit test of admission_rule_of itself
     (test_admission_rule_of.py), since reaching it through a real bound claim needs a
@@ -107,7 +106,7 @@ def test_generation_conf_answers_a_null_admission_rule_with_a_naming_reason(
         resp = client.get("/api/review/generation_conf", params={"pred_dir": str(bucket)})
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body.get("admission_rule", _SENTINEL) is None  # a guard: key absent, not merely null
+        assert body.get("admission_rule", _SENTINEL) is None  # the key is present and null
         assert body["admission_rule"] is None
         assert reason_fragment in body["admission_reason"]
     assert "does not claim validated" not in (

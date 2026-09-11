@@ -1018,8 +1018,8 @@ def test_a_canvas_binding_with_no_project_name_is_read_as_no_binding(client, tmp
 def test_release_clears_the_marker_and_the_canvas_binding_both_naming_the_project(
     client, tmp_path,
 ):
-    """coverage: release clears both the marker and the canvas binding, naming the project in
-    the route's own response, and bumps the canvas binding's generation."""
+    """coverage: release clears both the marker and the canvas binding, reports both in the
+    route's own response, bumps the canvas binding's generation and records its audit line."""
     from tcip_mcp.web_client import read_canvas_binding
 
     ws = tmp_path.parent

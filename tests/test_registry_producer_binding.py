@@ -347,7 +347,8 @@ def test_a_second_run_s_binding_under_a_bound_name_refuses_naming_the_run(tmp_pa
 # Rail 7: a registry entry with no experiment_id key refuses the load by name.
 
 def test_missing_experiment_id_key_refuses_the_load(tmp_path, monkeypatch):
-    """A guard: the payload is a real, torch-loadable checkpoint."""
+    """A guard: a registry entry with no experiment_id key refuses the load naming the missing
+    key, even though the payload itself is a real, torch-loadable checkpoint."""
     torch = pytest.importorskip("torch")
     from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint, registry_index_key
     import tcip_store as ts
