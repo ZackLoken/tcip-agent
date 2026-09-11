@@ -1185,3 +1185,50 @@ def _external_dataset_paths(project_root: Path) -> list[str]:
     """
     entries = read_datasets_raw(project_root)
     return sorted(str(e["path"]) for e in entries if entry_is_external(e))
+
+
+@mcp.tool()
+@audited(scope_arg="project_root")
+def delete_stray_state_file(project_root: str, relative_path: str, reason: str) -> dict:
+    """Delete one stray file under a project's ``.tcip/state`` root: a file
+    ``stray_state.stray_state_files`` lists, and the doctor's own finding names, that no store
+    claims, no blob home claims, and that is not the storage backend's own bookkeeping.
+
+    ``reason`` is required and non-empty: the confirmation with the person this destructive act
+    requires, recorded on this door's own audit line, in ``clear_prediction_bucket``'s own words.
+
+    Refuses, before any write, naming why: an empty ``reason``; a ``project_root`` whose ``.tcip``
+    is not a directory; ``relative_path`` empty, absolute, carrying a ``..`` segment, or resolving
+    outside the state root; a path under the state root's own database home; a path that does not
+    exist; a directory; a link or junction; a path the accounting classifies as the storage
+    backend's own bookkeeping, as a claimed store's own file (naming the store), or as a
+    recognized blob; and a state root whose own accounting refuses (a misplaced split or curated
+    manifest anchor, or two stores claiming one file equally).
+
+    Only the named file is removed (``os.remove``); an emptied parent directory is left exactly as
+    it stands, since a directory is not a store's own entry and clearing one is a second, separate
+    call.
+    """
+    if not (reason or "").strip():
+        return {"error": "delete_stray_state_file needs a non-empty reason: the confirmation "
+                         "with the person this destructive act requires."}
+
+    root = Path(project_root)
+    if not (root / ".tcip").is_dir():
+        return {"error": f"{project_root} has no .tcip directory; not a project root"}
+
+    from tcip_mcp.stray_state import stray_state_file_refusal
+
+    target, refusal = stray_state_file_refusal(project_root, relative_path)
+    if refusal is not None:
+        return {"error": refusal}
+
+    size_bytes = target.stat().st_size
+    os.remove(target)
+
+    return {
+        "deleted": str(target),
+        "relative_path": relative_path,
+        "size_bytes": size_bytes,
+        "reason": reason,
+    }

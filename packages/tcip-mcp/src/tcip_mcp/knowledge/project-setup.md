@@ -19,7 +19,9 @@ follow this arc. Each step links out to the domain skill that owns its detail.
 
 Start the session with `load_project_memory` (kind='reports' and kind='retrospectives'), then `inspect_project`
 on any project you're handed. Surface friction with `report_friction` the moment you hit
-it (ambiguous goal, unconfirmed format).
+it (ambiguous goal, unconfirmed format). `tcip doctor <project_root>` names a stray file
+under `.tcip/state` no store claims; delete one through `delete_stray_state_file` with the
+person's confirmation as `reason`.
 
 ## 1. Name the project: `crop_subject_phenotype`
 
