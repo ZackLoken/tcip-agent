@@ -2604,7 +2604,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the browser knows which slices of a broadcast snapshot are backend-authoritative and orders them by version.
 Side A: `packages/tcip-web/src/tcip_web/app.py:360` (`@app.websocket("/ws/state")`).
-Side B: `packages/tcip-web/src/tcip_web/state.py:211` (`def version(self) -> int:`, "Monotonic version, bumped on every state change.").
+Side B: `packages/tcip-web/src/tcip_web/state.py:210` (`def version(self) -> int:`, "Monotonic version, bumped on every state change.").
 Phase 3 verdict: duplicated.
 
 ## S49. Terminal PTY WebSocket protocol  <!-- queued: P5-289 unify -->
