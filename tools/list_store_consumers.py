@@ -8,17 +8,24 @@ symbol, split into writers, readers, and references.
 
 Heuristic, stated once: a store's declaring module names its identity in a module-level constant
 following this repository's own convention, ``<NAME>_STORE = "<store_name>"`` (a plain string,
-found by a regex over the declaring module's source, never guessed). A module counts as
-referencing that symbol when the import graph ``tools/build_module_inventory.py`` builds says it
-imports the declaring module, *and* the symbol's own name appears in that module's source text.
-Among referencing modules: a **writer** calls one of the writing seam operations (``replace``,
-``append``, ``delete``, ``clear_log``) anywhere in its own source; a **reader** calls one of the
-read-shaped seam operations (``read``, ``read_versioned``, ``exists``, ``keys``, ``read_log``,
-``read_blob_versioned``, ``open_blob``, ``blob_path``) and no writing operation; a module that
-references the symbol but calls neither recognizably is printed under **references** rather than
-folded into readers. This is textual over the whole module, not tied to the call site that
-actually uses this key, so a module calling e.g. ``replace`` for an unrelated reason would
-misclassify; it is a starting point for a human sweep, not a proof.
+found by a regex over the declaring module's source, never guessed). A real consumer rarely
+names that constant directly; it calls a key builder or scope resolver the declaring module
+defines, one that closes over the constant internally. So the identifying set is the symbol
+itself plus the name of every top-level function in the declaring module whose own body mentions
+the symbol. A module counts as referencing the store when the import graph
+``tools/build_module_inventory.py`` builds says it imports the declaring module, *and* its own
+source text mentions any name in that set. Among referencing modules: a **writer** calls one of
+the writing seam operations (``replace``, ``append``, ``delete``, ``clear_log``) either on a
+store-seam receiver (a name bound to a store handle by this repository's own convention, ``ts``,
+``tcip_store``, ``store``, ``txn``, dotted onto the operation) or as the bare name the module
+itself imports from ``tcip_store`` (``from tcip_store import replace``); a **reader** does the
+same for the read-shaped seam operations (``read``, ``read_versioned``, ``exists``, ``keys``,
+``read_log``, ``read_blob_versioned``, ``open_blob``, ``blob_path``) and calls no writing
+operation this way; a module that references the store but calls neither recognizably is printed
+under **references** rather than folded into readers. This is textual over the whole module, not
+tied to the call site that actually uses this key, so a module calling a store-seam operation for
+an unrelated reason (through the same receiver name, or importing an unrelated symbol of the same
+bare name) would misclassify; it is a starting point for a human sweep, not a proof.
 
 Takes a module-inventory JSON (the shape ``tools/build_module_inventory.py --out`` writes) rather
 than building one itself, the same convention ``check_architecture_doc.py`` uses.
@@ -31,6 +38,7 @@ than building one itself, the same convention ``check_architecture_doc.py`` uses
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -43,6 +51,7 @@ READ_OPS = (
     "read", "read_versioned", "exists", "keys", "read_log", "read_blob_versioned",
     "open_blob", "blob_path",
 )
+STORE_SEAM_RECEIVERS = ("ts", "tcip_store", "store", "txn")
 
 
 def find_symbol(source_text: str, store_name: str) -> str | None:
@@ -58,12 +67,58 @@ def find_symbol(source_text: str, store_name: str) -> str | None:
     return m.group(1) if m else None
 
 
+def key_builders(source_text: str, symbol: str) -> list[str]:
+    """Every top-level function in the declaring module whose own body mentions ``symbol``: a
+    key builder or scope resolver a real consumer calls instead of naming the constant itself."""
+    tree = ast.parse(source_text)
+    names = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            segment = ast.get_source_segment(source_text, node) or ""
+            if symbol in segment:
+                names.append(node.name)
+    return names
+
+
+def _qualified_op_called(source_text: str, ops: tuple[str, ...]) -> bool:
+    """Whether any of ``ops`` is called on a store-seam receiver (``ts.``, ``tcip_store.``,
+    ``store.``, ``txn.``), never a same-named method on an unrelated object."""
+    receivers = "|".join(STORE_SEAM_RECEIVERS)
+    pattern = re.compile(rf"\b(?:{receivers})\.(?:{'|'.join(ops)})\s*\(")
+    return bool(pattern.search(source_text))
+
+
+def _bare_names_imported_from_tcip_store(source_text: str, ops: tuple[str, ...]) -> set[str]:
+    """Which of ``ops`` this module's own source imports bare from ``tcip_store``
+    (``from tcip_store import replace``), so a later unqualified call to that name is the seam
+    operation itself rather than an unrelated same-named method."""
+    imported: set[str] = set()
+    for m in re.finditer(r"^from\s+tcip_store\s+import\s+(.+)$", source_text, re.M):
+        for part in m.group(1).split(","):
+            name = part.strip().split(" as ")[0].strip()
+            if name in ops:
+                imported.add(name)
+    return imported
+
+
+def _bare_op_called(source_text: str, names: set[str]) -> bool:
+    """Whether one of ``names`` is called unqualified (never as ``x.name(``, an unrelated
+    object's own method of the same name)."""
+    return any(re.search(rf"(?<![.\w]){re.escape(n)}\s*\(", source_text) for n in names)
+
+
+def _calls_any(source_text: str, ops: tuple[str, ...]) -> bool:
+    if _qualified_op_called(source_text, ops):
+        return True
+    return _bare_op_called(source_text, _bare_names_imported_from_tcip_store(source_text, ops))
+
+
 def classify_module(source_text: str) -> str:
     """``writer``, ``reader``, or ``references`` for one module already confirmed to reference
-    the symbol: see the module docstring for the exact heuristic and its stated limits."""
-    if any(re.search(rf"\b{op}\s*\(", source_text) for op in WRITE_OPS):
+    the store: see the module docstring for the exact heuristic and its stated limits."""
+    if _calls_any(source_text, WRITE_OPS):
         return "writer"
-    if any(re.search(rf"\b{op}\s*\(", source_text) for op in READ_OPS):
+    if _calls_any(source_text, READ_OPS):
         return "reader"
     return "references"
 
@@ -87,6 +142,7 @@ def store_consumers(inventory: dict, repo_root: Path, store_name: str, declared_
     symbol = find_symbol(declaring_text, store_name)
     if symbol is None:
         return empty
+    identifiers = [symbol, *key_builders(declaring_text, symbol)]
 
     writers: list[str] = []
     readers: list[str] = []
@@ -96,7 +152,7 @@ def store_consumers(inventory: dict, repo_root: Path, store_name: str, declared_
         if candidate is None:
             continue
         text = (repo_root / rel_path).read_text(encoding="utf-8")
-        if symbol not in text:
+        if not any(re.search(rf"\b{re.escape(name)}\b", text) for name in identifiers):
             continue
         target = candidate.get("dotted_name") or rel_path
         kind = classify_module(text)
