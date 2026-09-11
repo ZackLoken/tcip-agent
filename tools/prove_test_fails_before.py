@@ -619,7 +619,7 @@ def _classify(observed: dict, baseline_precedes: bool, tree: Path) -> tuple[str,
     if behavioral:
         discount_parts = []
         if unreached:
-            discount_parts.append(f"{len(unreached)} further failure(s) rest on a missing import")
+            discount_parts.append(f"{len(unreached)} further failure(s) rest on a missing import or file")
         if fixture:
             discount_parts.append(f"{len(fixture)} further failure(s) are fixture-shaped")
         discount = f" {' and '.join(discount_parts)}, not evidence either way." if discount_parts else ""
