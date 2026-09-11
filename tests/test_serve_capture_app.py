@@ -4,6 +4,7 @@ roots it refuses before setting anything. No server is started here."""
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
@@ -37,6 +38,20 @@ def test_the_two_variables_point_under_the_given_root(tool, tmp_path, monkeypatc
     assert env["TCIP_STATE_ROOT"] == str(root / "workspace" / "my_project")
     assert env["TCIP_WEB_PORT"] == "8799"
     assert env["PYTHONUNBUFFERED"] == "1"
+
+
+def test_pythonpath_carries_the_repository_root(tool, tmp_path, monkeypatch):
+    """A seeded run's subprocess imports a fixture module (a tiny trainer, say) by dotted name
+    against the repository, the same way the day-3 harness's own environment did."""
+    monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "existing"))
+    root = tmp_path / "harness"
+
+    env = tool.build_environ(root, "my_project", 8799)
+
+    parts = env["PYTHONPATH"].split(os.pathsep)
+    assert str(tool.REPO_ROOT) == parts[0]
+    assert str(tmp_path / "existing") in parts
 
 
 def test_a_root_under_the_repository_is_refused(tool):

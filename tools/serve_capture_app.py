@@ -73,8 +73,11 @@ def _refuse_unsafe_root(root: Path) -> None:
 
 def build_environ(root: Path, state_project: str, port: int) -> dict[str, str]:
     """The environment ``start`` launches ``python -m tcip_web`` under: a scratch workspace and
-    state root beneath ``root``, the port to bind, unbuffered output. Refuses an unsafe root
-    before building anything.
+    state root beneath ``root``, the port to bind, unbuffered output, and the repository root
+    prefixed onto ``PYTHONPATH`` (as the day-3 harness did) so a seeded run's subprocess can
+    import a fixture module (a tiny trainer, say) by dotted name against the repository, the
+    same way the capture script's own seeding step does. Refuses an unsafe root before building
+    anything.
     """
     _refuse_unsafe_root(root)
     workspace = root / "workspace"
@@ -83,6 +86,8 @@ def build_environ(root: Path, state_project: str, port: int) -> dict[str, str]:
     env["TCIP_STATE_ROOT"] = str(workspace / state_project)
     env["TCIP_WEB_PORT"] = str(port)
     env["PYTHONUNBUFFERED"] = "1"
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(REPO_ROOT) + (os.pathsep + existing if existing else "")
     return env
 
 
