@@ -733,7 +733,11 @@ def main() -> int:
     # touch: merge onto whatever summary.json already holds, keyed by family.
     previous_rows: dict[str, dict] = {}
     if summary.is_file():
-        for row in json.loads(summary.read_text(encoding="utf-8")):
+        try:
+            previous = json.loads(summary.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            previous = []
+        for row in previous:
             previous_rows[row["family"]] = row
     for row in results:
         previous_rows[row["family"]] = row

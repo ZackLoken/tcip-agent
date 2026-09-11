@@ -671,6 +671,32 @@ def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_in
     assert families_in_summary == {"codex", "antigravity"}
 
 
+def test_a_malformed_prior_summary_loses_only_itself_not_the_current_run(runner, tmp_path, monkeypatch):
+    """A summary.json a prior run left mid-write, or otherwise not valid JSON, must not crash the
+    merge: the current run's own rows still land, starting from an empty prior set rather than
+    raising out of the merge step."""
+    monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
+    monkeypatch.setattr(runner, "harness_version", lambda *a, **k: "stub-version")
+    monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: "/stub/harness")
+    monkeypatch.setitem(runner.BUILDERS, "codex", lambda *a, **k: (["stub", "argv"], None))
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+    summary_path = tmp_path / "out" / "qid" / "as-shipped" / "summary.json"
+    summary_path.parent.mkdir(parents=True)
+    summary_path.write_text("{not valid json", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", [
+        "cross_family_ask.py", "--question-id", "qid",
+        "--prompt-file", str(tmp_path / "q.txt"), "--families", "codex",
+        "--model", "stub-model",
+        "--cwd", str(tmp_path), "--out", str(tmp_path / "out"), "--timeout", "5",
+    ])
+
+    assert runner.main() == 0
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert {row["family"] for row in summary} == {"codex"}
+
+
 def test_a_missing_image_is_refused_before_any_family_launches(runner, tmp_path, monkeypatch):
     """A family told to review an image that is not there would answer about nothing; the
     runner refuses by name instead of launching."""
