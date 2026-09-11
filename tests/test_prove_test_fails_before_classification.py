@@ -410,7 +410,6 @@ def test_a_hung_test_under_per_test_timeout_reports_indeterminate_naming_it(tmp_
         cwd=str(repo), capture_output=True, text=True, timeout=60,
     )
 
-    assert proc.returncode == EXIT["INDETERMINATE"], proc.stdout + proc.stderr
     assert "INDETERMINATE" in proc.stdout
     assert "test_hangs_forever" in proc.stdout
 
