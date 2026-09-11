@@ -52,10 +52,8 @@ def test_binds_under_the_given_workspace_not_the_machines_live_marker(tmp_path, 
 
 
 def test_the_websocket_url_is_absolute_and_carries_the_served_host_and_port(tmp_path, monkeypatch):
-    """The trust boundary refuses a relative connect path (it joins onto ws://testserver, a Host
-    the boundary's arrival check does not recognize); the smoke must instead build an absolute
-    URL naming the same host and port the client's own base_url does. Never runs the live smoke:
-    this only asserts on the URL terminal_ws_url builds for a TestClient, no real claude process."""
+    """Coverage: asserts the URL terminal_ws_url builds for a TestClient is absolute and carries
+    the same host and port the client's own base_url does. Never runs the live smoke."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("TCIP_WORKSPACE", str(workspace))
