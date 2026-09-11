@@ -105,6 +105,23 @@ def test_main_refuses_before_running_any_gate_when_resolution_is_outside(tool, t
     assert len(calls) == 1, "no gate (ruff/mypy/pytest) may run once the proof has refused"
 
 
+def test_run_mypy_removes_its_cache_directory_afterward(tool, monkeypatch):
+    created: list[str] = []
+
+    def _fake_run(cmd, **kwargs):
+        cache_dir = cmd[cmd.index("--cache-dir") + 1]
+        assert Path(cache_dir).is_dir()
+        created.append(cache_dir)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(tool.subprocess, "run", _fake_run)
+
+    code = tool.run_mypy(Path("."), {})
+
+    assert code == 0
+    assert created and not Path(created[0]).exists()
+
+
 def test_a_worktree_that_is_not_a_directory_is_refused_before_any_proof_or_gate(tool, tmp_path, monkeypatch):
     calls: list[object] = []
 
