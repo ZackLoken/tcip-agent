@@ -2196,10 +2196,12 @@ dependent_projects}`, one document per project. Written once, `concurrency="cas"
 completing walk read it at, by `complete_pending_removals` (`project_removal.py:989`).
 
 Readers: `pending_removal_record` (`workspace.py:248`) and `pending_removal_or_none`
-(`workspace.py:261`). Neither is consulted directly by a door any more: every caller that asks
-whether a project is spoken for now calls `pending_marker_or_none` (`workspace.py:353`), the one
-predicate that reads this marker and the rename marker in section 29a and answers a
-`PendingMarker` naming which kind it found. `adoptable_project_root`, `ingest_images`,
+(`workspace.py:261`). Every caller that asks whether a project is spoken for goes through
+`pending_marker_or_none` (`workspace.py:353`), the one predicate that reads this marker and the
+rename marker in section 29a and answers a `PendingMarker` naming which kind it found. The one
+direct reader left is `_ordered_refusal` (`project_removal.py:476`), which reads each marker by
+name because it must report which kind refused and must let the store's own refusal surface as
+its own 409 rather than fold to no marker. `adoptable_project_root`, `ingest_images`,
 `tcip_web.paths.allowed_roots`'s excluded roots, `routes/dataset.py`, `routes/projects.py`'s
 listing and `cli/distill_learnings.py` all go through it, so an opener or a guarded route refuses
 a marked project, of either kind, from the moment its document lands.

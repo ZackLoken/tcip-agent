@@ -372,10 +372,11 @@ def dependency_warnings(project_root: Path) -> tuple[list[dict], Optional[str]]:
         if pending is not None:
             archive_path = pending.record.get("archive_path") if pending.kind == "removal" else None
             holding_dir = pending.record.get("holding_dir") if pending.kind == "removal" else None
+            new_name = pending.record.get("new_name") if pending.kind == "rename" else None
             warnings.append({"dataset_id": dataset_id, "dataset_path": str(entry_path),
                               "target": child.name, "present": True,
                               "archive_path": archive_path, "holding_dir": holding_dir,
-                              "pending_kind": pending.kind})
+                              "pending_kind": pending.kind, "new_name": new_name})
     return warnings, problem
 
 

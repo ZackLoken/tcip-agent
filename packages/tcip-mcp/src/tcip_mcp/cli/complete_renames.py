@@ -44,6 +44,9 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     for outcome in outcomes:
         name = outcome["name"]
         if "skipped" in outcome:
+            # A marker this walk could not read is outstanding work, not a clean pass: an
+            # operator scripting this command must see a non-zero status for it.
+            blocked += 1
             print(f"{name}: skipped ({outcome['skipped']})")
             continue
         new_name = outcome.get("new_name")

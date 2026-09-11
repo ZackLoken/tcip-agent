@@ -277,7 +277,9 @@ class ProjectPendingRemoval(ValueError):
     caller that already catches that (:func:`active_project_if_present`, :func:`marker_problem`)
     folds this refusal exactly as it folds any other unadoptable name, with no separate catch to
     add; a caller that must answer this refusal on its own (the ``/api/projects/active`` route)
-    catches it ahead of the plain ``ValueError`` it still keeps for every other case."""
+    catches it ahead of the plain ``ValueError`` it still keeps for every other case, and now
+    beside :class:`ProjectPendingRename`, its sibling over the other marker: a route that names
+    only this one answers a renaming project with the wrong sentence."""
 
 
 # ── the pending-rename marker store ──────────────────────────────────────────

@@ -7,7 +7,7 @@
  * data paths rather than hand-structuring a folder here.
  */
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import {
   api,
@@ -292,6 +292,17 @@ function RenameDialog({
   const [confirmText, setConfirmText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [releasing, setReleasing] = useState(false);
+  const [releaseError, setReleaseError] = useState<string | null>(null);
+
+  const loadPreview = useCallback(async () => {
+    try {
+      setPreview(await api.projects.renamePreview(name));
+      setPreviewError(null);
+    } catch (e) {
+      setPreviewError(e instanceof Error ? e.message : String(e));
+    }
+  }, [name]);
 
   useEffect(() => {
     let cancelled = false;
@@ -337,8 +348,9 @@ function RenameDialog({
       useStore
         .getState()
         .pushToast(
-          `Rename requested: ${name} moves to ${res.new_name} at the next backend start. It is ` +
-            `hidden from the picker until then.${dependentsSuffix}`,
+          `Rename requested: ${name} moves to ${res.new_name} at the next backend start. Until ` +
+            `then it sits in the pending list at the foot of this page, where Withdraw cancels ` +
+            `it.${dependentsSuffix}`,
           "success",
         );
       onRenamed();
@@ -360,6 +372,30 @@ function RenameDialog({
     );
   }
 
+  async function releaseBinding() {
+    setReleasing(true);
+    setReleaseError(null);
+    try {
+      const res = await api.projects.releaseBinding(name, user);
+      if (res.marker_cleared || res.canvas_binding_released) {
+        useStore.getState().pushToast(`Released ${name}. It can be renamed now.`, "success");
+      } else {
+        useStore
+          .getState()
+          .pushToast(
+            `Nothing was released: as far as this backend could read, ${name} is neither the default nor the project the GUI has open.`,
+            "info",
+          );
+      }
+      await loadPreview();
+      onRefetchListing();
+    } catch (e) {
+      setReleaseError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReleasing(false);
+    }
+  }
+
   return (
     <ConfirmDialog heading={`Rename ${name}`} onClose={onClose} busy={checking}>
       <div className="flex flex-col gap-3 text-[12px]">
@@ -374,6 +410,27 @@ function RenameDialog({
             </p>
           )}
           {refusal && <p className="text-tcip-fp">{refusal}</p>}
+          {preview?.releasable && (
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                className="tcip-btn self-start"
+                disabled={releasing}
+                onClick={releaseBinding}
+              >
+                {releasing ? "Releasing…" : `Release ${name}`}
+              </button>
+              <p className="text-tcip-muted">
+                Stops it opening by default, and forgets it as the GUI&apos;s open project if the
+                canvas has it open, so the rename above can go ahead. Nothing on disk changes.
+              </p>
+              {releaseError && (
+                <p className="text-tcip-warn">
+                  {name} could not be released: {releaseError}.
+                </p>
+              )}
+            </div>
+          )}
           {preview && preview.dependent_projects.length > 0 && (
             <div className="text-tcip-fp">
               <p className="font-medium">Other projects depend on this one:</p>
@@ -386,8 +443,9 @@ function RenameDialog({
           )}
         </div>
         <p className="text-tcip-muted">
-          {name} renames at the next backend start; it is hidden from the picker until then, or
-          withdrawn from the pending list below before that.
+          {name} renames at the next backend start. Until then it cannot be opened, and it moves off
+          the cards above into the pending list at the foot of this page, where Withdraw cancels it
+          and gives the project back under its own name.
         </p>
         <label className="flex flex-col gap-1" htmlFor={newNameFieldId}>
           <span className="tcip-label">New name</span>
@@ -395,7 +453,10 @@ function RenameDialog({
             id={newNameFieldId}
             className="tcip-input"
             value={newName}
-            onChange={(e) => setNewName(e.target.value)}
+            onChange={(e) => {
+              setNewName(e.target.value);
+              setSubmitError(null);
+            }}
             autoComplete="off"
             spellCheck={false}
           />
@@ -406,7 +467,10 @@ function RenameDialog({
             id={nameFieldId}
             className="tcip-input"
             value={confirmText}
-            onChange={(e) => setConfirmText(e.target.value)}
+            onChange={(e) => {
+              setConfirmText(e.target.value);
+              setSubmitError(null);
+            }}
             autoComplete="off"
             spellCheck={false}
           />
@@ -458,6 +522,7 @@ interface DependencyWarningGroup {
   target: string;
   present: boolean;
   pendingKind: string | null;
+  newName: string | null;
   count: number;
 }
 
@@ -474,6 +539,7 @@ function groupDependencyWarnings(warnings: DependencyWarning[]): DependencyWarni
         target: w.target,
         present: w.present,
         pendingKind: w.pending_kind ?? null,
+        newName: w.new_name ?? null,
         count: 1,
       });
     }
@@ -485,9 +551,12 @@ function dependencyWarningLine(g: DependencyWarningGroup): string {
   const countSuffix = g.count > 1 ? ` (${g.count} datasets)` : "";
   const remedy = g.count > 1 ? "the datasets" : "the dataset";
   if (g.present && g.pendingKind === "rename") {
+    const destination = g.newName ? ` to ${g.newName}` : "";
+    const newPath = g.newName ? `under ${g.newName}` : "at the new name";
     return (
-      `Depends on ${g.target}${countSuffix}, which is being renamed; its images stay where ` +
-      `they are. Register ${remedy} again at the new path once the move lands to clear this.`
+      `Depends on ${g.target}${countSuffix}, which is being renamed${destination}; the same ` +
+      `images, under a new folder name. Ask the agent to register ${remedy} again ${newPath} ` +
+      "once the move lands to clear this."
     );
   }
   if (g.present) {
@@ -523,6 +592,19 @@ function removalOutcomeLine(o: RemovalOutcome): string {
     return `${o.name}: blocked (${o.blocked_by})`;
   }
   return `${o.name}: skipped (${o.skipped})`;
+}
+
+// A blocked rename keeps its pending row, and so its Withdraw control: the destination-taken
+// block is the one state withdraw exists for, and hiding the row hid the only way to reach it.
+export function pendingRenameLine(p: PendingRenameEntry, blockedThisStart: boolean): string {
+  const head = `Pending rename: ${p.name} to ${p.new_name}, requested ${localTime(p.requested_at)}`;
+  if (blockedThisStart) {
+    return (
+      `${head}; the move did not land at this start, for the reason below. It is tried again at ` +
+      "the next start, or Withdraw clears it and the project opens under its own name now."
+    );
+  }
+  return `${head}; moves at the next backend start.`;
 }
 
 function renameOutcomeLine(o: RenameOutcome): string {
@@ -954,26 +1036,21 @@ export function ProjectPicker() {
           </div>
         )}
 
-        {pendingRename.filter((p) => !blockedRenameThisStart.has(p.name)).length > 0 && (
+        {pendingRename.length > 0 && (
           <div className="text-[11px] text-tcip-muted flex flex-col gap-1">
-            {pendingRename
-              .filter((p) => !blockedRenameThisStart.has(p.name))
-              .map((p) => (
-                <div key={p.name} className="flex items-center gap-2">
-                  <span>
-                    Pending rename: {p.name} to {p.new_name}, requested {localTime(p.requested_at)};
-                    moves at the next backend start.
-                  </span>
-                  <button
-                    type="button"
-                    className="tcip-btn"
-                    disabled={withdrawingRename === p.name}
-                    onClick={() => void withdrawRename(p.name)}
-                  >
-                    {withdrawingRename === p.name ? "Withdrawing…" : "Withdraw"}
-                  </button>
-                </div>
-              ))}
+            {pendingRename.map((p) => (
+              <div key={p.name} className="flex items-center gap-2">
+                <span>{pendingRenameLine(p, blockedRenameThisStart.has(p.name))}</span>
+                <button
+                  type="button"
+                  className="tcip-btn"
+                  disabled={withdrawingRename === p.name}
+                  onClick={() => void withdrawRename(p.name)}
+                >
+                  {withdrawingRename === p.name ? "Withdrawing…" : "Withdraw"}
+                </button>
+              </div>
+            ))}
           </div>
         )}
 

@@ -753,3 +753,218 @@ def test_the_six_marker_patterns_call_sites_are_the_complete_named_set():
 
     for name in wanted:
         assert found[name] == _ALLOWED_CALL_SITES[name], (name, found[name])
+
+
+# ── the re-pointed readers' own rename branches ──────────────────────────────
+
+
+def test_ingest_images_refuses_a_project_pending_rename_by_name(client, tmp_path):
+    """coverage. ingest_images reads the shared marker predicate, so a project pending rename
+    refuses by name rather than taking images into a tree about to move. The branch landed with
+    the door; nothing held it before this."""
+    from tcip_mcp.tools.ingest_tools import ingest_images
+
+    ws = tmp_path.parent
+    _open_project, target = _seed(ws)
+    raw = ws / "raw"
+    raw.mkdir(exist_ok=True)
+    Image.new("RGB", (8, 8), (1, 2, 3)).save(raw / "new.jpg")
+
+    ok = client.post("/api/projects/rename", json={
+        "name": target.name, "new_name": "sample_plot_renamed", "confirm_name": target.name})
+    assert ok.status_code == 200, ok.text
+
+    result = ingest_images(source=str(raw / "*.jpg"), name=target.name, site="a site")
+
+    assert "error" in result
+    assert "pending rename" in result["error"]
+    assert "sample_plot_renamed" in result["error"]
+
+
+def test_allowed_roots_refuses_a_project_pending_rename_by_identity(client, tmp_path):
+    """coverage. allowed_roots names a project pending rename in its refused-by-identity list,
+    the same place a project pending removal lands, so no route opens a tree about to move. It
+    stays in the roots list, which is what keeps the filesystem listing showing its directory.
+    The branch landed with the door; nothing held it before this."""
+    from tcip_web import paths
+
+    ws = tmp_path.parent
+    _open_project, target = _seed(ws)
+
+    _roots_before, excluded_before = paths.allowed_roots()
+    assert not any(str(r) == str(target.resolve()) for r in excluded_before)
+
+    ok = client.post("/api/projects/rename", json={
+        "name": target.name, "new_name": "sample_plot_renamed", "confirm_name": target.name})
+    assert ok.status_code == 200, ok.text
+
+    roots_after, excluded_after = paths.allowed_roots()
+    assert any(str(r) == str(target.resolve()) for r in excluded_after)
+    assert any(str(r) == str(target.resolve()) for r in roots_after)
+
+
+def test_select_dataset_refuses_a_project_pending_rename_naming_the_new_name(client, tmp_path):
+    """coverage. The dataset route's own marker message branches on the kind, so a project
+    pending rename is refused with the rename sentence and the name it takes, never a removal
+    sentence about a holding directory. The branch landed with the door; nothing held it
+    before this."""
+    ws = tmp_path.parent
+    _open_project, target = _seed(ws)
+
+    ok = client.post("/api/projects/rename", json={
+        "name": target.name, "new_name": "sample_plot_renamed", "confirm_name": target.name})
+    assert ok.status_code == 200, ok.text
+
+    response = client.post("/api/dataset/select", json={
+        "project_root": str(target), "dataset_root": str(target)})
+
+    assert response.status_code in (403, 409), response.text
+    body = response.json()["detail"]
+    assert "pending rename" in body and "sample_plot_renamed" in body
+    assert "holding directory" not in body
+
+
+# ── the fix-up's own corrections ─────────────────────────────────────────────
+
+
+def test_withdraw_deletes_the_marker_before_it_writes_its_own_line(client, tmp_path, monkeypatch):
+    """guard. The withdraw door deletes the marker first and logs second, so a log that cannot be
+    written never leaves a line saying a rename was withdrawn while the marker still stands and
+    the project still renames at the next start."""
+    from tcip_mcp import audit
+
+    ws = tmp_path.parent
+    _open_project, target = _seed(ws)
+    ok = client.post("/api/projects/rename", json={
+        "name": target.name, "new_name": "sample_plot_renamed", "confirm_name": target.name})
+    assert ok.status_code == 200, ok.text
+
+    def _refuse(*args, **kwargs):
+        raise audit.AuditEntryNotWritten("project_rename_withdrawn", RuntimeError("no log"))
+
+    monkeypatch.setattr(project_rename.audit, "record_event_or_raise", _refuse)
+    result = project_rename.withdraw_project_rename(target.name, requested_by="user:test")
+
+    assert result["status"] == 409
+    assert "marker is gone" in result["error"]
+    assert workspace.pending_rename_record(target) is None
+
+
+def test_withdraw_refuses_a_tree_already_at_its_new_name(client, tmp_path):
+    """guard. A marker whose project already sits at its new name is in the crash window phase
+    two's resume branch finishes; withdrawing there would record a withdrawal of a rename that
+    landed, so the door refuses and names the resume instead."""
+    ws = tmp_path.parent
+    _open_project, target = _seed(ws)
+    ok = client.post("/api/projects/rename", json={
+        "name": target.name, "new_name": "sample_plot_renamed", "confirm_name": target.name})
+    assert ok.status_code == 200, ok.text
+
+    ts.close_connections()
+    os.rename(str(target), str(ws / "sample_plot_renamed"))
+
+    result = project_rename.withdraw_project_rename("sample_plot_renamed",
+                                                    requested_by="user:test")
+
+    assert result["status"] == 409
+    assert "already at its new name" in result["error"]
+    assert workspace.pending_rename_record(ws / "sample_plot_renamed") is not None
+
+
+def test_phase_two_keeps_the_marker_when_its_completion_line_does_not_write(
+        client, tmp_path, monkeypatch):
+    """guard. Phase two deletes the marker only once the completion line has landed, so a log the
+    walk could not append to leaves the rename outstanding for the next start rather than
+    finishing it with no record that it happened."""
+    from tcip_mcp import audit
+
+    ws = tmp_path.parent
+    _open_project, target = _seed(ws)
+    ok = client.post("/api/projects/rename", json={
+        "name": target.name, "new_name": "sample_plot_renamed", "confirm_name": target.name})
+    assert ok.status_code == 200, ok.text
+
+    def _refuse(*args, **kwargs):
+        raise audit.AuditEntryNotWritten("project_rename_completed", RuntimeError("no log"))
+
+    monkeypatch.setattr(project_rename.audit, "record_event_or_raise", _refuse)
+    outcomes = project_rename.complete_pending_renames(ws)
+
+    assert len(outcomes) == 1
+    assert outcomes[0]["new_name"] == "sample_plot_renamed"
+    assert "marker stands" in outcomes[0]["note"]
+    assert (ws / "sample_plot_renamed").is_dir()
+    assert workspace.pending_rename_record(ws / "sample_plot_renamed") is not None
+
+
+def test_a_sweep_manifest_that_cannot_be_read_refuses_the_rename(client, tmp_path, monkeypatch):
+    """guard. The records bound fails closed on a sweep manifest the store refuses to read: a
+    manifest that cannot be read is not proof that no sweep names this project's path."""
+    ws = tmp_path.parent
+    _open_project, target = _seed(ws)
+
+    from tcip_mcp.tools import training_tools
+
+    sweep_dir = training_tools.hpo_root(root=target) / "hpo_probe"
+    sweep_dir.mkdir(parents=True, exist_ok=True)
+
+    real_read = ts.read
+
+    def _refuse_manifest(key, default=None):
+        if key.store == "hpo_sweep_manifest":
+            raise ts.DecodeError("the manifest is not readable")
+        return real_read(key, default=default)
+
+    monkeypatch.setattr(project_rename.tcip_store, "read", _refuse_manifest)
+    present = project_rename.project_records_present(target)
+
+    assert "hpo_sweep_manifest" in present
+
+
+def test_the_records_refusal_leads_with_the_breeders_own_sentence(client, tmp_path):
+    """coverage. The dialog renders the records refusal verbatim, so its first sentence says what
+    is wrong in words a breeder follows and names the record in plain terms; the store names
+    follow for the agent."""
+    ws = tmp_path.parent
+    _open_project, target = _seed(ws)
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
+
+    csv_path = ws / "plants.csv"
+    csv_path.write_text(
+        "plot_name,accession_name,plot_number,row_number,col_number,"
+        "WGS84_centroid_x,WGS84_centroid_y\nP1,acc-A,1,1,1,-90.058,43.197\n",
+        encoding="utf-8",
+    )
+    plant_mapping.register_plant_registry_record(
+        target, "reg", [csv_path], crop="black locust", site="a site",
+        registered_by="user:test",
+    )
+
+    refusal = project_rename._records_refusal(target)
+
+    assert refusal is not None
+    assert refusal.startswith(f"{target.name} has already been worked on")
+    assert "a plant location list" in refusal
+    assert "plant_registries" in refusal
+
+
+def test_a_rename_warning_carries_the_name_the_target_takes(client, tmp_path):
+    """guard. A dependent's own warning carries the new name, so the card can name the folder its
+    owner has to re-register at rather than saying only that the target is being renamed."""
+    ws = tmp_path.parent
+    _open_project, target = _seed(ws)
+    dependent = _init(ws, "sample_plot_dependent")
+    registered = register_dataset(dataset_root=str(target), crop="black locust",
+                                  project_root=str(dependent))
+    assert "error" not in registered, registered
+
+    ok = client.post("/api/projects/rename", json={
+        "name": target.name, "new_name": "sample_plot_renamed", "confirm_name": target.name})
+    assert ok.status_code == 200, ok.text
+
+    warnings, problem = project_removal.dependency_warnings(dependent)
+
+    assert problem is None
+    assert len(warnings) == 1
+    assert warnings[0]["pending_kind"] == "rename"
+    assert warnings[0]["new_name"] == "sample_plot_renamed"
