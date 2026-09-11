@@ -507,6 +507,49 @@ def test_fix_requires_inventory_json():
     assert "--inventory-json" in result.stderr
 
 
+def test_fix_refuses_a_head_that_names_no_commit_and_writes_nothing(tmp_path):
+    """guard. A --head the checkout cannot resolve is refused before the document is touched:
+    the stamp the checker later verifies would otherwise carry a hash no reader can look up, and
+    the rewrite would be reported as done."""
+    doc_path = tmp_path / "ARCHITECTURE.md"
+    doc_path.write_text(_fix_fixture_doc(), encoding="utf-8")
+    inventory_path = tmp_path / "inventory.json"
+    inventory_path.write_text(json.dumps(_FIX_INVENTORY), encoding="utf-8")
+    before = doc_path.read_text(encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(doc_path), str(REPO_ROOT),
+         "--inventory-json", str(inventory_path), "--fix", "--head", "2d33eee1"],
+        cwd=str(REPO_ROOT), capture_output=True, text=True,
+    )
+
+    assert result.returncode == 1
+    assert "REFUSED" in result.stdout and "2d33eee1" in result.stdout
+    assert doc_path.read_text(encoding="utf-8") == before
+
+
+def test_fix_stamps_a_head_the_checkout_does_resolve(tmp_path):
+    """coverage that the refusal above admits real work: the same call with this checkout's own
+    HEAD rewrites the document and stamps that hash into both sentences."""
+    doc_path = tmp_path / "ARCHITECTURE.md"
+    doc_path.write_text(_fix_fixture_doc(), encoding="utf-8")
+    inventory_path = tmp_path / "inventory.json"
+    inventory_path.write_text(json.dumps(_FIX_INVENTORY), encoding="utf-8")
+    head = subprocess.run(
+        ["git", "rev-parse", "--short=8", "HEAD"], cwd=str(REPO_ROOT),
+        capture_output=True, text=True,
+    ).stdout.strip()
+
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(doc_path), str(REPO_ROOT),
+         "--inventory-json", str(inventory_path), "--fix", "--head", head],
+        cwd=str(REPO_ROOT), capture_output=True, text=True,
+    )
+
+    assert result.returncode == 0
+    assert head in doc_path.read_text(encoding="utf-8")
+
+
 def test_without_fix_the_checker_reports_only_and_does_not_write(tmp_path):
     """A legitimate call with drift and no --fix still exits, reporting rather than rewriting."""
     doc_path = tmp_path / "ARCHITECTURE.md"
