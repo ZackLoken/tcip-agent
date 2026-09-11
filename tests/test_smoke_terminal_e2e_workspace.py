@@ -51,9 +51,9 @@ def test_binds_under_the_given_workspace_not_the_machines_live_marker(tmp_path, 
     assert audit.platform_audit_scope().resolve() != live_proj.resolve()
 
 
-def test_the_websocket_url_is_absolute_and_carries_the_served_host_and_port(tmp_path, monkeypatch):
-    """Coverage: asserts the URL terminal_ws_url builds for a TestClient is absolute and carries
-    the same host and port the client's own base_url does. Never runs the live smoke."""
+def test_the_websocket_url_is_absolute_and_carries_the_served_host(tmp_path, monkeypatch):
+    """Coverage: asserts the URL terminal_ws_url builds for a TestClient is absolute and names
+    the same host the client's own base_url does. Never runs the live smoke."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("TCIP_WORKSPACE", str(workspace))

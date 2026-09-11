@@ -35,8 +35,8 @@ def terminal_ws_url(client: Any, session_id: str) -> str:
 
     A relative path handed to ``client.websocket_connect`` joins onto ``ws://testserver``
     (``TestClient``'s own default), a Host the boundary's arrival check refuses; this instead
-    carries the same host and port ``client.base_url`` does, which the boundary reads as a
-    loopback arrival.
+    carries the same host ``client.base_url`` does, which the boundary reads as a loopback
+    arrival.
     """
     parts = urlsplit(str(client.base_url))
     scheme = "wss" if parts.scheme == "https" else "ws"
