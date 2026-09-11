@@ -22,10 +22,10 @@ ARCHITECTURE.md and the repo root relative to this script, so CI invokes it as
 `python tools/check_architecture_doc.py`.
 
 `--fix` (requires `--inventory-json`) rewrites the document in place instead of only reporting
-drift: every module row's description and counts refreshed from the inventory, a row added after
-its root's last row for an inventory module the document never named, a row dropped whose path
-the inventory no longer carries, the zero-importer table and its header count regenerated, the
-per-root Modules/Lines summary table and its introductory sentence regenerated, and both HEAD
+drift: every module row's description and counts refreshed from the inventory, a row added in its
+root's own sorted position for an inventory module the document never named, a row dropped whose
+path the inventory no longer carries, the zero-importer table and its header count regenerated,
+the per-root Modules/Lines summary table and its introductory sentence regenerated, and both HEAD
 sentences moved to `--head` (default: `git rev-parse --short=8 HEAD`). Without `--fix` nothing
 here changes; the checker only reports.
 """
