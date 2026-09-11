@@ -27,13 +27,17 @@ def _write(path: Path, text: str) -> None:
 
 
 def _fixture_tree(tmp_path: Path) -> dict:
-    """One store declared in pkg/widget_store.py, a writer, a reader, and a bystander that
-    references the symbol but calls no recognized seam operation."""
+    """One store declared in pkg/widget_store.py, a writer, a reader, a bystander that
+    references the symbol but calls no recognized seam operation, a reader that reaches the
+    store only through the declaring module's own key builder (never naming the bare symbol),
+    and a module that references the symbol but only calls list.append, never a store write."""
     _write(tmp_path / "pkg" / "widget_store.py",
            "from tcip_store import register_store, StoreDescriptor\n\n"
            "WIDGET_STORE = \"widgets\"\n"
            "register_store(StoreDescriptor(name=WIDGET_STORE, kind=\"record\", "
-           "key_fields=(\"id\",), concurrency=\"cas\"))\n")
+           "key_fields=(\"id\",), concurrency=\"cas\"))\n\n\n"
+           "def widget_key(id):\n"
+           "    return (WIDGET_STORE, id)\n")
     _write(tmp_path / "pkg" / "writer_module.py",
            "from tcip_store import replace\n"
            "from pkg.widget_store import WIDGET_STORE\n\n"
@@ -47,6 +51,15 @@ def _fixture_tree(tmp_path: Path) -> dict:
     _write(tmp_path / "pkg" / "bystander_module.py",
            "from pkg.widget_store import WIDGET_STORE\n\n"
            "NAME = WIDGET_STORE\n")
+    _write(tmp_path / "pkg" / "key_builder_reader.py",
+           "from tcip_store import read\n"
+           "from pkg.widget_store import widget_key\n\n"
+           "def load(id):\n"
+           "    return read(widget_key(id))\n")
+    _write(tmp_path / "pkg" / "list_append_module.py",
+           "from pkg.widget_store import WIDGET_STORE\n\n"
+           "findings = []\n"
+           "findings.append(WIDGET_STORE)\n")
     _write(tmp_path / "pkg" / "unrelated_module.py",
            "def do_nothing():\n    return None\n")
 
@@ -54,10 +67,15 @@ def _fixture_tree(tmp_path: Path) -> dict:
         "python_modules": [
             {"path": "pkg/widget_store.py", "dotted_name": "pkg.widget_store",
              "imported_by": ["pkg/writer_module.py", "pkg/reader_module.py",
-                              "pkg/bystander_module.py"]},
+                              "pkg/bystander_module.py", "pkg/key_builder_reader.py",
+                              "pkg/list_append_module.py"]},
             {"path": "pkg/writer_module.py", "dotted_name": "pkg.writer_module", "imported_by": []},
             {"path": "pkg/reader_module.py", "dotted_name": "pkg.reader_module", "imported_by": []},
             {"path": "pkg/bystander_module.py", "dotted_name": "pkg.bystander_module", "imported_by": []},
+            {"path": "pkg/key_builder_reader.py", "dotted_name": "pkg.key_builder_reader",
+             "imported_by": []},
+            {"path": "pkg/list_append_module.py", "dotted_name": "pkg.list_append_module",
+             "imported_by": []},
             {"path": "pkg/unrelated_module.py", "dotted_name": "pkg.unrelated_module", "imported_by": []},
         ],
     }
@@ -71,8 +89,8 @@ def test_store_consumers_splits_writer_reader_and_references(tmp_path):
 
     assert result["symbol"] == "WIDGET_STORE"
     assert result["writers"] == ["pkg.writer_module"]
-    assert result["readers"] == ["pkg.reader_module"]
-    assert result["references"] == ["pkg.bystander_module"]
+    assert result["readers"] == ["pkg.key_builder_reader", "pkg.reader_module"]
+    assert result["references"] == ["pkg.bystander_module", "pkg.list_append_module"]
 
 
 def test_find_symbol_reads_the_name_store_convention():
@@ -85,10 +103,40 @@ def test_find_symbol_reads_the_name_store_convention():
 
 def test_classify_module_prefers_writer_over_reader():
     tool = _load()
-    assert tool.classify_module("replace(key, value)\n") == "writer"
-    assert tool.classify_module("read(key)\n") == "reader"
+    assert tool.classify_module(
+        "from tcip_store import replace\nreplace(key, value)\n") == "writer"
+    assert tool.classify_module("from tcip_store import read\nread(key)\n") == "reader"
     assert tool.classify_module("NAME = WIDGET_STORE\n") == "references"
-    assert tool.classify_module("read(key)\nreplace(key, value)\n") == "writer"
+    assert tool.classify_module(
+        "from tcip_store import read, replace\nread(key)\nreplace(key, value)\n") == "writer"
+
+
+def test_classify_module_recognizes_a_qualified_store_seam_call_with_no_import(tmp_path):
+    """A store-seam receiver dotted onto the operation is recognized on its own, since the
+    module need not import the bare name to hold a store handle under one of these names."""
+    tool = _load()
+    assert tool.classify_module("store.replace(key, value)\n") == "writer"
+    assert tool.classify_module("txn.read(key)\n") == "reader"
+
+
+def test_classify_module_does_not_mistake_an_unrelated_bare_call_for_a_store_write():
+    """A module that never imports replace/append/etc. from tcip_store, and calls a same-named
+    method on an unrelated receiver (list.append), references the store without writing to it."""
+    tool = _load()
+    assert tool.classify_module("findings = []\nfindings.append(x)\n") == "references"
+
+
+def test_key_builders_collects_only_top_level_functions_mentioning_the_symbol():
+    tool = _load()
+    source = (
+        "WIDGET_STORE = \"widgets\"\n\n"
+        "def widget_key(id):\n"
+        "    return (WIDGET_STORE, id)\n\n"
+        "def unrelated():\n"
+        "    return 1\n"
+    )
+
+    assert tool.key_builders(source, "WIDGET_STORE") == ["widget_key"]
 
 
 def test_store_consumers_answers_empty_when_the_declaring_module_is_not_in_the_inventory(tmp_path):
@@ -120,8 +168,9 @@ def test_build_listing_composes_one_row_per_registered_store(tmp_path, monkeypat
     assert rows == [{
         "store": "widgets", "kind": "record", "frozen": True, "schema_version": 2,
         "declared_in": "pkg.widget_store", "symbol": "WIDGET_STORE",
-        "writers": ["pkg.writer_module"], "readers": ["pkg.reader_module"],
-        "references": ["pkg.bystander_module"],
+        "writers": ["pkg.writer_module"],
+        "readers": ["pkg.key_builder_reader", "pkg.reader_module"],
+        "references": ["pkg.bystander_module", "pkg.list_append_module"],
     }]
 
 
