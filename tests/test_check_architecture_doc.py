@@ -424,6 +424,50 @@ def test_fix_adds_a_row_for_a_module_the_document_never_named():
     assert "A module the document never named." in fixed
 
 
+def test_fix_inserts_a_new_row_in_the_roots_own_sorted_position():
+    """A new module whose path sorts before the retained row must land before it, never merely
+    appended after the last retained row (the fixture's own new_module.py happens to sort after
+    kept.py, so this needs its own path that sorts first to actually exercise the ordering)."""
+    checker = _load()
+    inventory = {
+        "python_modules": [
+            {
+                "path": "packages/tcip-mcp/src/tcip_mcp/aaa_new.py", "root": "tcip-mcp",
+                "lines": 4, "owns": "Sorts before kept.py.",
+                "imports": [], "imported_by_count": 0,
+            },
+            {
+                "path": "packages/tcip-mcp/src/tcip_mcp/kept.py", "root": "tcip-mcp", "lines": 10,
+                "owns": "Kept module, refreshed rather than dropped.",
+                "imports": ["a", "b"], "imported_by_count": 1,
+            },
+        ],
+        "typescript_modules": [],
+        "counts": {
+            "python_by_root": {
+                "tcip-mcp": 2, "tcip-annotation": 0, "tcip-web": 0, "tcip-store": 0, "tools": 0,
+            },
+            "typescript_total": 0,
+        },
+    }
+    doc = (
+        "## tcip-mcp\n\n"
+        "| Module path | Ownership (one line) | In-repo imports | Imported by |\n"
+        "|---|---|---|---|\n"
+        "| packages/tcip-mcp/src/tcip_mcp/kept.py | (none found) | 99 | 99 |\n"
+        "\n"
+        "## Modules with zero importers (0)\n\n"
+        "| Root | Module path |\n"
+        "|---|---|\n"
+    )
+
+    fixed = checker.fix_architecture_doc(doc, inventory, head="deadbeef")
+
+    new_index = fixed.index("aaa_new.py")
+    kept_index = fixed.index("kept.py")
+    assert new_index < kept_index
+
+
 def test_fix_regenerates_the_zero_importer_header_count():
     checker = _load()
     fixed = checker.fix_architecture_doc(_fix_fixture_doc(), _FIX_INVENTORY, head="deadbeef")
