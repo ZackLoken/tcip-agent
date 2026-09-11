@@ -15,9 +15,10 @@ neither needs its own root: ``.imports`` (the import door's private staging tree
 ``.removed`` (the workspace's holding directory a removed project moves into). Both share the
 same over-breadth the ``.imports`` rule always carried: a registered dataset or a
 ``TCIP_IMAGE_ROOTS`` entry that happens to sit under a directory of either name is refused too.
-A workspace project pending removal is excluded by identity instead, since its own directory
-name carries no marker: :func:`allowed_roots` reports it back to :func:`assert_path_allowed`
-as an excluded root, still admitted by :mod:`tcip_web.routes.fs`'s listing.
+A workspace project pending removal or pending rename is excluded by identity instead, since its
+own directory name carries no marker: :func:`allowed_roots` reports it back to
+:func:`assert_path_allowed` as an excluded root, still admitted by :mod:`tcip_web.routes.fs`'s
+listing.
 """
 
 from __future__ import annotations
@@ -63,7 +64,8 @@ def allowed_roots() -> tuple[list[Path], list[Path]]:
     routes that write under it derive it server-side rather than taking it from a client.
 
     The excluded roots: the resolved root of every workspace project carrying a pending-removal
-    marker (``tcip_mcp.workspace.pending_removal_or_none``). The workspace root itself admits
+    or pending-rename marker (``tcip_mcp.workspace.pending_marker_or_none``, presence alone;
+    which kind is irrelevant here). The workspace root itself admits
     every child by containment, so excluding a pending project by name would exclude nothing
     its own directory does not already carry; :func:`assert_path_allowed` refuses it by
     identity instead, which also catches a dependent's dataset nested under its tree. A pending
@@ -87,7 +89,7 @@ def allowed_roots() -> tuple[list[Path], list[Path]]:
         # admitted as itself, not only through the workspace it is listed from.
         resolved_project = project.resolve()
         roots.append(resolved_project)
-        if _workspace.pending_removal_or_none(resolved_project) is not None:
+        if _workspace.pending_marker_or_none(resolved_project) is not None:
             excluded.append(resolved_project)
         try:
             entries = read_datasets(project)
@@ -171,11 +173,11 @@ def assert_path_allowed(path: str | Path) -> Path:
     does not exist yet (a file about to be written) is judged by its nearest existing ancestor.
     An ``.imports`` or ``.removed`` staging tree is never admitted, by name, however it compares
     to the roots below (:func:`_excluded_by_name`); a path under a workspace project pending
-    removal is refused by identity instead (:func:`allowed_roots`' excluded roots), ahead of the
-    ordinary containment check, so a project the archive has already left is unreachable through
-    every guarded route from the moment its marker lands. Raises :class:`ValueError` naming the
-    roots checked on refusal, and on any resolution or comparison error, which is a refusal
-    rather than a guess.
+    removal or pending rename is refused by identity instead (:func:`allowed_roots`' excluded
+    roots), ahead of the ordinary containment check, so a project the archive has already left,
+    or one about to move onto a new name, is unreachable through every guarded route from the
+    moment its marker lands. Raises :class:`ValueError` naming the roots checked on refusal, and
+    on any resolution or comparison error, which is a refusal rather than a guess.
     """
     try:
         resolved = Path(path).resolve()
@@ -188,7 +190,8 @@ def assert_path_allowed(path: str | Path) -> Path:
             try:
                 if root.exists() and _contained(anchor, root):
                     raise ValueError(
-                        f"path {resolved} is under {root}, a workspace project pending removal"
+                        f"path {resolved} is under {root}, a workspace project pending "
+                        "removal or rename"
                     )
             except OSError as exc:
                 raise ValueError(

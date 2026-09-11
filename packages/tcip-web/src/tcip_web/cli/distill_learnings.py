@@ -104,11 +104,11 @@ def build_workspace_worksheet(workspace_root: Path) -> str:
     """
     lines: list[str] = [f"# Cross-project learning-review worksheet: {workspace_root}", ""]
 
-    from tcip_mcp.workspace import pending_removal_or_none
+    from tcip_mcp.workspace import pending_marker_or_none
 
     projects = sorted(
         p for p in workspace_root.iterdir()
-        if p.is_dir() and (p / ".tcip").is_dir() and pending_removal_or_none(p) is None
+        if p.is_dir() and (p / ".tcip").is_dir() and pending_marker_or_none(p) is None
     )
     if not projects:
         lines.append("\nNo projects with a `.tcip/` directory found under this workspace.")
