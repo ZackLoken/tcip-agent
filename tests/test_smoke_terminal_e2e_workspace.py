@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "tools" / "smoke_terminal_e2e.py"
@@ -48,3 +49,28 @@ def test_binds_under_the_given_workspace_not_the_machines_live_marker(tmp_path, 
     assert binding.source != "marker"
     assert binding.root.resolve() != live_proj.resolve()
     assert audit.platform_audit_scope().resolve() != live_proj.resolve()
+
+
+def test_the_websocket_url_is_absolute_and_carries_the_served_host_and_port(tmp_path, monkeypatch):
+    """The trust boundary refuses a relative connect path (it joins onto ws://testserver, a Host
+    the boundary's arrival check does not recognize); the smoke must instead build an absolute
+    URL naming the same host and port the client's own base_url does. Never runs the live smoke:
+    this only asserts on the URL terminal_ws_url builds for a TestClient, no real claude process."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("TCIP_WORKSPACE", str(workspace))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(workspace / "scratch_project"))
+
+    from fastapi.testclient import TestClient
+
+    from tcip_web.app import app
+
+    mod = _load()
+    client = TestClient(app, base_url="http://127.0.0.1")
+
+    url = mod.terminal_ws_url(client, "abc123")
+
+    parsed = urlsplit(url)
+    assert parsed.scheme == "ws"
+    assert parsed.netloc == "127.0.0.1"
+    assert parsed.path == "/api/terminal/ws/abc123"
