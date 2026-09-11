@@ -70,8 +70,7 @@ def test_verdict_redirect_skips_a_variant_that_already_holds_a_document(tmp_path
     """A caller that opts into refuse_documents redirects around a verdicted bucket the same way
     it always has, but the variant search now also skips a candidate that holds a document with
     no verdict of its own: a redirect must never land on a bucket a prior, unreviewed publish
-    already filled. Coverage, not a guard: omitting refuse_documents raises TypeError rather
-    than reaching this assertion."""
+    already filled. Coverage, not a guard."""
     dataset_root = tmp_path / "data"
     review_state_dir = tmp_path / "state"
     _write_bucket(dataset_root, "baseline", "img")
@@ -89,8 +88,7 @@ def test_verdict_redirect_skips_a_variant_that_already_holds_a_document(tmp_path
 def test_document_holding_bucket_with_no_verdicts_refuses_naming_a_free_suggestion(tmp_path):
     """A rail must admit valid work: the suggested bucket a document refusal names is itself
     free of both a verdict and a document, and writing into it (the platform's own producer)
-    succeeds. Coverage, not a guard: omitting refuse_documents raises TypeError rather than
-    reaching this assertion."""
+    succeeds. Coverage, not a guard."""
     dataset_root = tmp_path / "data"
     review_state_dir = tmp_path / "state"
     _write_bucket(dataset_root, "baseline", "img")
@@ -118,8 +116,7 @@ def test_document_holding_bucket_with_no_verdicts_refuses_naming_a_free_suggesti
 def test_document_refusal_exhaustion_names_no_suggestion(tmp_path):
     """Coverage of the exhausted variant search: when the requested bucket and every
     <name>@r<n> variant up to the ceiling already hold a document, the resolver refuses by name
-    with no suggestion, rather than handing back an unchecked, never-searched directory.
-    Omitting refuse_documents raises TypeError rather than reaching this assertion."""
+    with no suggestion, rather than handing back an unchecked, never-searched directory."""
     from tcip_mcp.prediction_buckets import resolve_writable_bucket
 
     dataset_root = tmp_path / "data"

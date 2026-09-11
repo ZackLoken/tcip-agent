@@ -146,8 +146,8 @@ def test_ws_inference_stream_rejects_cross_site_origin(client: TestClient) -> No
 
 
 def test_ws_training_stream_rejects_cross_site_origin(client: TestClient, tmp_path) -> None:
-    """project_root is confined so the origin, not the path guard, refuses this connect:
-    preservation coverage for the move into the middleware, not a guard for this change."""
+    """Coverage: project_root is confined so the origin, not the path guard, is what refuses this
+    connect."""
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect(
             f"ws://127.0.0.1/api/training/runs/does-not-exist/stream?project_root={tmp_path}",

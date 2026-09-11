@@ -173,8 +173,8 @@ def test_a_reverse_proxy_forwarding_its_own_name_is_admitted_once_advertised(
 
 def test_the_local_method_set_matches_the_canonical_one() -> None:
     """Coverage: the literal above exists so this module still collects without
-    trust_boundary.STATE_CHANGING_METHODS; this pins it to that constant, imported here rather
-    than at module scope so only this test's collection depends on the constant existing."""
+    trust_boundary.STATE_CHANGING_METHODS; this pins it to that constant, imported inside the
+    test so only this test, and not the module's collection, depends on the constant existing."""
     from tcip_web.trust_boundary import STATE_CHANGING_METHODS
 
     assert _STATE_CHANGING_METHODS == STATE_CHANGING_METHODS
