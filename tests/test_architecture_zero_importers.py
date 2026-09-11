@@ -106,9 +106,6 @@ def test_the_real_architecture_md_zero_importer_list_matches_a_fresh_inventory()
     """The gate's own self-check, over the real tree rather than a synthetic one."""
     checker = _load()
     inventory_script = REPO_ROOT / "tools" / "build_module_inventory.py"
-    git_marker = inventory_script.parent.parent / ".git"
-    if not git_marker.exists():
-        git_marker.touch()
     spec = importlib.util.spec_from_file_location("build_module_inventory", inventory_script)
     builder = importlib.util.module_from_spec(spec)
     sys.modules["build_module_inventory"] = builder
