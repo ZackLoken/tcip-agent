@@ -198,14 +198,20 @@ def bind_startup_root() -> None:
     scope-carried signals of that rail live in :class:`_BindStartupRootMiddleware`, which alone
     sees the request scope.
 
-    After the early return's check, and before the marker pin: ``tcip_mcp.project_removal.
-    complete_pending_removals`` walks the workspace and moves every project carrying a
-    pending-removal marker, once per process, on the first bind. Both callers of this function
-    reach it through :func:`_bind_startup_root_serialized` under the module lock, off the event
-    loop, so the walk (which opens each project's own database on this thread to read its
-    marker, and may wait the rename budget) never runs on a request-serving thread and no
-    request is served before it completes; a non-request thread touching the seam during a
-    test's first bind is the one residual. A failure inside the walk other than its own
+    After the early return's check, and before the marker pin: ``tcip_mcp.project_rename.
+    complete_pending_renames`` walks the workspace and renames every project carrying a
+    pending-rename marker, then ``tcip_mcp.project_removal.complete_pending_removals`` walks it
+    and moves every project carrying a pending-removal marker, each once per process, on the
+    first bind. Renames run first so a rename marker is never walked past inside a tree the
+    removal walk has already moved into the holding directory: the two doors' own
+    ``_request_lock`` keeps one process from writing both markers on one project, but two
+    backends bound to the same workspace can still each write one, and this ordering is what
+    keeps that residual case from stranding a rename marker under a moved tree. Both callers of
+    this function reach it through :func:`_bind_startup_root_serialized` under the module lock,
+    off the event loop, so the walks (which open each project's own database on this thread to
+    read its marker, and may wait the rename budget) never run on a request-serving thread and no
+    request is served before they complete; a non-request thread touching the seam during a
+    test's first bind is the one residual. A failure inside either walk other than its own
     per-project folds (a workspace that cannot even be listed) is logged and swallowed, since
     the process must start regardless, the same rule the marker read below already holds. The
     MCP server never calls this: it is not the breeder's surface, and it may itself be the
@@ -218,8 +224,13 @@ def bind_startup_root() -> None:
     if root_binding() is not None:
         return
 
-    from tcip_mcp import project_removal
+    from tcip_mcp import project_removal, project_rename
     from tcip_mcp.workspace import workspace_root
+
+    try:
+        project_rename.complete_pending_renames(workspace_root(create=False))
+    except Exception:
+        logger.exception("complete_pending_renames failed at startup")
 
     try:
         project_removal.complete_pending_removals(workspace_root(create=False))

@@ -23,6 +23,7 @@ COMMANDS: dict[str, str] = {
     "archive-project": "tcip_mcp.cli.archive_project",
     "import-project": "tcip_mcp.cli.import_project",
     "complete-removals": "tcip_mcp.cli.complete_removals",
+    "complete-renames": "tcip_mcp.cli.complete_renames",
     "calibrate-operating-point": "tcip_mcp.cli.calibrate_operating_point",
     "check-dataset-identity": "tcip_mcp.cli.check_dataset_identity",
     "write-project-site": "tcip_mcp.cli.write_project_site",

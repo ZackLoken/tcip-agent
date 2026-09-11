@@ -139,11 +139,12 @@ def capabilities() -> Capabilities:
 def close_connections() -> None:
     """Close every connection the bound backend holds, on every thread.
 
-    A process-lifecycle operation, not a per-key one: the two callers are an entry point
+    A process-lifecycle operation, not a per-key one: the callers are an entry point
     closing the instance its own startup opened before another instance takes over
-    (``tcip_web/__main__.py``), and a console command that walks a workspace and renames
+    (``tcip_web/__main__.py``), and two console commands that walk a workspace and rename
     project directories out from under a backend that must hold no open handle while a
-    rename is in flight (``tcip_mcp.project_removal.complete_pending_removals``). Refuses
+    rename is in flight (``tcip_mcp.project_removal.complete_pending_removals``,
+    ``tcip_mcp.project_rename.complete_pending_renames``). Refuses
     with ``TransactionMisuse`` inside an open transaction, the same rule ``replace`` and
     ``delete`` hold, since a transaction's own connection cannot be closed out from under it.
 
