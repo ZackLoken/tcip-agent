@@ -311,24 +311,26 @@ def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(tmp_pa
 
 
 def test_a_bare_file_not_found_error_outside_the_assertion_is_refused_not_guards(tmp_path):
-    """A test that reads a data file the baseline commit does not carry (outside tests/, so the
-    tests/ overlay cannot supply it) raises FileNotFoundError outside its own assertion: the code
-    under test was never reached, so this scores REFUSED, never GUARDS."""
+    """A helper module outside tests/ opens a data file the baseline commit does not carry (the
+    tests/ overlay cannot supply it, living as it does outside tests/); the crash frame sits in
+    that helper, outside tests/, so the code under test was never reached and this scores
+    REFUSED, never GUARDS."""
     repo = _scratch_repo(tmp_path)
     _write(repo / "widgets.py", "def double(x):\n    return x\n")
+    _write(repo / "loader.py",
+           "def load_expected():\n"
+           "    with open('data/expected.txt') as f:\n"
+           "        return int(f.read())\n")
     baseline = _commit_all(repo, "double is a no-op, no recorded value yet")
 
     (repo / "data").mkdir()
     _write(repo / "data" / "expected.txt", "6\n")
     _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
     _write(repo / "tests" / "test_widgets.py",
-           "from pathlib import Path\n"
-           "\n"
-           "\n"
            "def test_double_matches_the_recorded_value():\n"
            "    from widgets import double\n"
-           "    root = Path(__file__).resolve().parents[1]\n"
-           "    expected = int((root / 'data' / 'expected.txt').read_text())\n"
+           "    from loader import load_expected\n"
+           "    expected = load_expected()\n"
            "    assert double(3) == expected\n")
     _commit_all(repo, "double actually doubles, checked against a recorded value")
 
@@ -337,6 +339,35 @@ def test_a_bare_file_not_found_error_outside_the_assertion_is_refused_not_guards
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     assert "REFUSED" in result.stdout
     assert "[unreached]" in result.stdout
+
+
+def test_a_file_not_found_error_at_the_tests_own_assertion_line_guards(tmp_path):
+    """The fix under test writes a file; the guard test's own assertion reads it back directly
+    (never through a helper outside tests/), so at the baseline, before the fix, that read raises
+    FileNotFoundError with its crash frame inside the test's own body. That is behavioral
+    evidence, not a fixture-shaped discount: the code under test was reached (it ran and simply
+    did not write the file), and the test's own line is what noticed."""
+    repo = _scratch_repo(tmp_path)
+    _write(repo / "widgets.py", "def write_summary(path):\n    pass\n")
+    baseline = _commit_all(repo, "write_summary is a no-op")
+
+    _write(repo / "widgets.py",
+           "def write_summary(path):\n"
+           "    with open(path, 'w') as f:\n"
+           "        f.write('6')\n")
+    _write(repo / "tests" / "test_widgets.py",
+           "def test_write_summary_writes_the_expected_content(tmp_path):\n"
+           "    from widgets import write_summary\n"
+           "    out = tmp_path / 'summary.txt'\n"
+           "    write_summary(out)\n"
+           "    with open(out) as f:\n"
+           "        assert f.read() == '6'\n")
+    _commit_all(repo, "write_summary actually writes, checked by reading it back")
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    assert "GUARDS" in result.stdout
 
 
 # ── --per-test-timeout ───────────────────────────────────────────────────────
