@@ -28,9 +28,13 @@ from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 
 logger = logging.getLogger(__name__)
 
+# The array containers that carry no georeferencing tags at all, whatever is inside them: a door
+# that needs metres refuses these by name rather than opening one and reporting a read failure.
+UNGEOREFERENCED_ARRAY_EXTS = (".npy", ".npz")
+
 # The containers band data is read out of as an array. Any other extension is a photographic frame
 # decoded through PIL, at the channel counts PIL's own modes cover.
-ARRAY_CONTAINER_EXTS = (".npy", ".npz", ".tif", ".tiff")
+ARRAY_CONTAINER_EXTS = UNGEOREFERENCED_ARRAY_EXTS + (".tif", ".tiff")
 
 _PIL_MODES = {1: "L", 3: "RGB", 4: "RGBA"}
 

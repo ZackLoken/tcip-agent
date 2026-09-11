@@ -428,6 +428,7 @@ def derive_block_scale_px(
                 RotatedRasterError,
                 read_geotransform,
             )
+            from tcip_mcp.pipelines.raster_source import UNGEOREFERENCED_ARRAY_EXTS
 
             raster = Path(raster_path)
             if not raster.is_file() or capture_kind(raster) != "raster":
@@ -435,7 +436,7 @@ def derive_block_scale_px(
                     "derive_block_scale_px: raster_path is not a raster file this derivation can "
                     f"read a pixel size from ({raster}); pass the training raster, or "
                     "raster_path=None to use the GT-object-spacing-derived block scale")
-            if raster.suffix.casefold() in {".npy", ".npz"}:
+            if raster.suffix.casefold() in UNGEOREFERENCED_ARRAY_EXTS:
                 raise ValueError(
                     f"derive_block_scale_px: raster_path ({raster}) is an array container, which "
                     "carries no georeferencing tags, so there is no pixel size to read; pass "

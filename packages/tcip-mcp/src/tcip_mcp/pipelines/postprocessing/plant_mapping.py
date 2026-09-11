@@ -449,13 +449,27 @@ def capture_digests(stamps: list[ImageStamp]) -> dict[str, str]:
 # ── Plant CSV parsing ───────────────────────────────────────────────────
 
 
-PLANT_CSV_COLUMNS = [
-    "plot_name", "accession_name", "plot_number", "row_number", "col_number",
-    "WGS84_centroid_x", "WGS84_centroid_y",
-]
-"""The seven column names :func:`read_plant_csv_bytes` reads, and the header
-``tcip_mcp.cli.shp_to_plant_csv.convert_shp_to_plant_csv`` writes over :func:`read_plant_shapefile`'s
-own rows, so a shapefile's CSV output cannot drift from what this module parses."""
+PLANT_CSV_COLUMN_FOR_FIELD = {
+    "plot_name": "plot_name",
+    "accession_name": "accession_name",
+    "plot_number": "plot_number",
+    "row_number": "row_number",
+    "col_number": "col_number",
+    "lon": "WGS84_centroid_x",
+    "lat": "WGS84_centroid_y",
+}
+"""Which CSV column carries each :class:`PlantRecord` field, in the order the header writes them.
+
+The one place a plant CSV's column names are spelled. :func:`read_plant_csv_bytes` indexes its
+rows through this mapping, :func:`read_plant_shapefile` builds its rows through it, and
+:data:`PLANT_CSV_COLUMNS` is derived from it, so the reader, the shapefile route and the header
+cannot drift: a renamed column moves all three at once or none.
+"""
+
+PLANT_CSV_COLUMNS = list(PLANT_CSV_COLUMN_FOR_FIELD.values())
+"""The seven column names in header order, derived from :data:`PLANT_CSV_COLUMN_FOR_FIELD`, and
+the header ``tcip_mcp.cli.shp_to_plant_csv.convert_shp_to_plant_csv`` writes over
+:func:`read_plant_shapefile`'s own rows."""
 
 
 def read_plant_csv_bytes(data: bytes) -> list[PlantRecord]:
@@ -471,19 +485,20 @@ def read_plant_csv_bytes(data: bytes) -> list[PlantRecord]:
     records: list[PlantRecord] = []
     text = data.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text, newline=""))
+    column = PLANT_CSV_COLUMN_FOR_FIELD
     for row in reader:
         try:
-            lat = float(row["WGS84_centroid_y"])
-            lon = float(row["WGS84_centroid_x"])
+            lat = float(row[column["lat"]])
+            lon = float(row[column["lon"]])
         except Exception:
             continue
         records.append(
             PlantRecord(
-                plot_name=row.get("plot_name", ""),
-                accession_name=row.get("accession_name", ""),
-                plot_number=_maybe_float(row.get("plot_number")),
-                row_number=_maybe_float(row.get("row_number")),
-                col_number=_maybe_float(row.get("col_number")),
+                plot_name=row.get(column["plot_name"], ""),
+                accession_name=row.get(column["accession_name"], ""),
+                plot_number=_maybe_float(row.get(column["plot_number"])),
+                row_number=_maybe_float(row.get(column["row_number"])),
+                col_number=_maybe_float(row.get(column["col_number"])),
                 lat=lat,
                 lon=lon,
             )
@@ -553,7 +568,10 @@ def read_plant_shapefile(
     geometry type refuses by name (naming the feature index and ``geom_type``), rather than
     centroiding it silently as a plain nearest-point conversion would. A feature with null
     geometry is skipped and counted in the return's ``skipped_null_geometry``, not raised on.
-    Raises :class:`ShapefileCrsUnknown` when the layer's CRS cannot be resolved.
+    Raises :class:`ShapefileCrsUnknown` when the layer's CRS cannot be resolved, and
+    :class:`ShapefileUnreadable` when fiona cannot open the shapefile at all, so a caller meets
+    one of this module's own two refusals rather than any of the three unrelated exception types
+    fiona's own hierarchy would otherwise hand it.
 
     Yields rows, never :class:`PlantRecord`: that dataclass narrows ``plot_number``,
     ``row_number`` and ``col_number`` to ``Optional[float]`` (:func:`_maybe_float`), which would
@@ -576,7 +594,15 @@ def read_plant_shapefile(
     geom_kinds: set[str] = set()
     rows: list[dict[str, object]] = []
     skipped_null_geometry = 0
-    with fiona.open(str(shp_path)) as layer:
+    try:
+        opened = fiona.open(str(shp_path))
+    except Exception as exc:
+        raise ShapefileUnreadable(
+            f"{shp_path}: fiona could not open this shapefile ({type(exc).__name__}: {exc}); "
+            "check that the .shp, .shx and .dbf parts are all present and readable beside each "
+            "other, then run tcip shp-to-plant-csv again"
+        ) from exc
+    with opened as layer:
         # fiona reports a missing or unparseable .prj as an empty CRS (probed directly, neither
         # raises), so one falsy check catches both without a second except clause.
         if not layer.crs:
@@ -621,16 +647,15 @@ def read_plant_shapefile(
                 )
             lon, lat = transform.transform(x, y)
             properties = dict(feature.properties)
-            rows.append({
-                "plot_name": _shapefile_field_value(properties, resolved_fields["plot_name"]),
-                "accession_name": _shapefile_field_value(
-                    properties, resolved_fields["accession_name"]),
-                "plot_number": _shapefile_field_value(properties, resolved_fields["plot_number"]),
-                "row_number": _shapefile_field_value(properties, resolved_fields["row_number"]),
-                "col_number": _shapefile_field_value(properties, resolved_fields["col_number"]),
-                "WGS84_centroid_x": lon,
-                "WGS84_centroid_y": lat,
-            })
+            column = PLANT_CSV_COLUMN_FOR_FIELD
+            row: dict[str, object] = {
+                column[field]: _shapefile_field_value(properties, resolved_fields[field])
+                for field in ("plot_name", "accession_name", "plot_number", "row_number",
+                              "col_number")
+            }
+            row[column["lon"]] = lon
+            row[column["lat"]] = lat
+            rows.append(row)
 
     return ShapefileRows(
         rows=rows, missing_fields=missing_fields, geometry_kinds=sorted(geom_kinds),
@@ -665,6 +690,17 @@ class ShapefileCrsUnknown(ValueError):
     ``.prj`` as an empty ``layer.crs``, and (probed directly, since fiona raises nothing at open
     or at read for this case) a ``.prj`` whose WKT does not parse answers the same falsy
     ``layer.crs`` rather than an exception, so one check catches both. No CRS is ever guessed."""
+
+
+class ShapefileUnreadable(ValueError):
+    """fiona could not open a shapefile at all: a missing or unreadable ``.shx``/``.dbf`` part, a
+    file that is not a shapefile, a driver or IO failure. Raised in place of whatever fiona threw,
+    since its own exception hierarchy is not one this package's callers can be expected to know:
+    ``CRSError`` and ``DriverError`` subclass ``ValueError``, while ``DriverIOError`` is an
+    ``OSError`` and the base ``FionaError`` is neither, so an unwrapped open reached a direct
+    caller of :func:`read_plant_shapefile` as one of three unrelated exception types. A
+    ``ValueError`` subclass so the command's own ``except ValueError`` keeps refusing by message
+    rather than by traceback."""
 
 
 class NoGeoreferencedPlantsRefusal(Exception):
