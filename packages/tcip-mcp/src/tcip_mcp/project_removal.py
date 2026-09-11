@@ -72,8 +72,16 @@ Importing this module pulls in nothing that imports ``tcip_mcp.server``: ``archi
 tool registration reaches a web backend process on the first preview or removal request, never
 at startup. This module also imports nothing from ``tcip_web``: the resolved ``requested_by``
 identity and the ``job_conflict`` callable that walks the three job registries are the caller's
-own to supply (:mod:`tcip_web.routes.projects`, the only caller), rather than edges this module
-holds into a package one layer above it.
+own to supply (:mod:`tcip_web.routes.projects`, the route module's own caller for both this
+door and ``tcip_mcp.project_rename``'s), rather than edges this module holds into a package one
+layer above it.
+
+A fourth door lives in a sibling module, ``tcip_mcp.project_rename``: the project-rename door,
+which shares :data:`_request_lock`, calls :func:`_ordered_refusal` (naming itself with
+``door="rename"``) so the two doors' shared refusals are read from one implementation, and calls
+:func:`dependent_projects_of`, :func:`read_open_project_state`, :func:`identity_conflict` and
+:func:`binding_release_available` rather than re-deriving any of them. This module never imports
+that one back: the dependency runs one way.
 """
 
 from __future__ import annotations
@@ -111,8 +119,15 @@ indexer) denies. A held database is not transient, so this bounds the delay a bl
 adds to every start rather than waiting on a holder that will not release."""
 
 _request_lock = threading.Lock()
-"""Serializes :func:`request_project_removal` within one process: the second of two concurrent
-requests meets the first one's freshly written marker rather than racing its own archive."""
+"""Serializes both :func:`request_project_removal` and
+``tcip_mcp.project_rename.request_project_rename`` within one process: whichever of a removal or
+a rename request enters second meets the first one's freshly written marker rather than racing
+its own archive or its own write. A ``threading.Lock``, so it holds only within this process: two
+backends bound to the same workspace can still each pass this lock in their own process and each
+write their own marker (a removal marker and a rename marker on the same project, from two
+processes); nothing in this platform prevents two backends from sharing one workspace, and that
+residual is carried rather than hidden. Within one process it is exact: a crash inside either
+door's own chain writes at most one marker, since each write is the chain's last step."""
 
 _startup_outcomes: list[dict] = []
 _startup_outcomes_lock = threading.Lock()
@@ -124,11 +139,13 @@ class _Refusal:
     message: str
 
 
-def _is_link_or_junction(path: Path) -> bool:
+def is_link_or_junction(path: Path) -> bool:
     """A symbolic link (POSIX) or a Windows junction/reparse point.
 
     Either would let the archive follow the link's target while a rename moves the link entry
-    alone, leaving the two out of step, so the door refuses rather than acting on it.
+    alone, leaving the two out of step, so the door refuses rather than acting on it. Public
+    because both the removal and the rename door's shared refusal chain (:func:`_ordered_refusal`)
+    call it.
     """
     try:
         st = os.lstat(path)
@@ -277,8 +294,12 @@ def _workspace_child_of(path: Path, workspace_root: Path) -> Optional[Path]:
 
 def dependency_warnings(project_root: Path) -> tuple[list[dict], Optional[str]]:
     """Every warning ``project_root``'s own registry earns from a dataset it registered under
-    another workspace project that is now pending removal or gone, plus the registry's own
-    problem when it will not read at all or carries an entry with a path and no id.
+    another workspace project that is now pending removal, pending rename, or gone, plus the
+    registry's own problem when it will not read at all or carries an entry with a path and no
+    id. ``pending_kind`` (``"removal"`` or ``"rename"``, absent when the target is gone rather
+    than pending) is set from :func:`~tcip_mcp.workspace.pending_marker_or_none` so a dependent's
+    card can render the sentence for whichever kind is under way, never the removal sentence for
+    a target that is only being renamed.
 
     Reads through :func:`~tcip_mcp.tools.project_tools.read_datasets_raw`; a registry that will
     not read (``StoreError``, ``DecodeError``, ``SchemaVersionRefused``, or a fingerprint
@@ -294,14 +315,16 @@ def dependency_warnings(project_root: Path) -> tuple[list[dict], Optional[str]]:
     than a warning with a null id; the first such entry names the problem, and every other
     entry is still considered.
     The condition is the entry itself, never the holding directory an eventual move leaves
-    behind: a child directory that no longer exists on disk is a warning with ``present`` false
-    and ``archive_path``/``holding_dir`` both null, whatever ``.removed/`` holds, since the
-    holding directory is not state this platform owns and a project gone by any means leaves the
-    entry dangling the same way; a child directory that still exists, still carries ``.tcip``,
-    and carries a pending-removal marker (:func:`~tcip_mcp.workspace.pending_removal_or_none`) is
-    a warning with ``present`` true and ``archive_path``/``holding_dir`` from that same marker
-    record, so an agent reading the warning can answer "from where" without the dependent's own
-    log; every other entry earns none. The warning's own lifetime is bounded by what the
+    behind: a child directory that no longer exists on disk is a warning with ``present`` false,
+    ``pending_kind`` absent, and ``archive_path``/``holding_dir`` both null, whatever
+    ``.removed/`` holds, since the holding directory is not state this platform owns and a
+    project gone by any means leaves the entry dangling the same way; a child directory that
+    still exists, still carries ``.tcip``, and carries either marker
+    (:func:`~tcip_mcp.workspace.pending_marker_or_none`) is a warning with ``present`` true,
+    ``pending_kind`` naming which marker, and ``archive_path``/``holding_dir`` from the marker
+    record when it is a removal (both null for a rename, which archives nothing), so an agent
+    reading the warning can answer "from where" without the dependent's own log; every other
+    entry earns none. The warning's own lifetime is bounded by what the
     registry can express: no door removes an entry, and ``register_dataset`` refreshes an
     entry's own path by id, so a
     warning stands while the entry's path resolves under a pending or absent workspace child and
@@ -310,7 +333,7 @@ def dependency_warnings(project_root: Path) -> tuple[list[dict], Optional[str]]:
     unrelated tree and clears the warning too, which the dataset-identity rail (the fingerprint
     the entry carries against the data actually there) catches at training time and this function
     does not. Each warning is ``{dataset_id, dataset_path, target, present, archive_path,
-    holding_dir}``, ``target`` the dependency's own workspace-child name.
+    holding_dir, pending_kind}``, ``target`` the dependency's own workspace-child name.
     """
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets_raw
 
@@ -345,12 +368,14 @@ def dependency_warnings(project_root: Path) -> tuple[list[dict], Optional[str]]:
             continue
         if not (child / ".tcip").is_dir():
             continue
-        pending = workspace.pending_removal_or_none(child)
+        pending = workspace.pending_marker_or_none(child)
         if pending is not None:
+            archive_path = pending.record.get("archive_path") if pending.kind == "removal" else None
+            holding_dir = pending.record.get("holding_dir") if pending.kind == "removal" else None
             warnings.append({"dataset_id": dataset_id, "dataset_path": str(entry_path),
                               "target": child.name, "present": True,
-                              "archive_path": pending.get("archive_path"),
-                              "holding_dir": pending.get("holding_dir")})
+                              "archive_path": archive_path, "holding_dir": holding_dir,
+                              "pending_kind": pending.kind})
     return warnings, problem
 
 
@@ -413,16 +438,26 @@ def _name_shape_refusal(name: str) -> Optional[_Refusal]:
 
 
 def _ordered_refusal(
-    name: str, job_conflict: JobConflict, state: OpenProjectState,
+    name: str, job_conflict: JobConflict, state: OpenProjectState, *, door: str = "removal",
 ) -> Optional[_Refusal]:
-    """Decision order: name shape (:func:`_name_shape_refusal`), existence, a link, the marker,
-    the two cheap identity checks (:func:`identity_conflict`), a live run, a non-terminal job.
-    The first refusal wins; ``None`` means the removal may proceed. This chain runs once per
-    request either way (:func:`_preview`), never once for the preview and again for the door.
+    """Decision order: name shape (:func:`_name_shape_refusal`), existence, a link, both pending
+    markers, the two cheap identity checks (:func:`identity_conflict`), a live run, a
+    non-terminal job. The first refusal wins; ``None`` means the request may proceed. This chain
+    runs once per request either way (:func:`_preview`, ``tcip_mcp.project_rename.rename_preview``),
+    never once for a preview and again for the door it backs.
+
+    ``door`` (``"removal"`` or ``"rename"``) names which door is asking, read only by the two
+    pending-marker checks: a project already carrying a marker of the asking door's own kind
+    answers with that door's own "already pending" wording, while a project carrying the other
+    door's marker answers with a refusal naming what that marker completes into and, for a
+    removal asking about a project pending rename, that the renamed project can be removed once
+    the rename lands. Sharing this one chain is why the two doors' refusals cannot silently
+    drift apart (CLAUDE.md: when two code paths must agree, call one from the other).
+
     ``job_conflict`` is the caller's own function of the target root answering the refusal text
     or ``None``, the one edge into tcip-web's job registries this module holds no import of.
-    ``state`` is :func:`_preview`'s own single :func:`read_open_project_state` call, passed
-    through to :func:`identity_conflict` rather than read again here."""
+    ``state`` is the caller's own single :func:`read_open_project_state` call, passed through to
+    :func:`identity_conflict` rather than read again here."""
     shape_refusal = _name_shape_refusal(name)
     if shape_refusal is not None:
         return shape_refusal
@@ -432,21 +467,47 @@ def _ordered_refusal(
     except ValueError as exc:
         return _Refusal(404, str(exc))
 
-    if _is_link_or_junction(project):
+    if is_link_or_junction(project):
         return _Refusal(409, f"{name!r} is a symbolic link or a junction; the archive would "
                               "follow it while a rename would move the link alone, so remove it "
                               "by hand instead")
 
     try:
-        pending = workspace.pending_removal_record(project)
+        removal_pending = workspace.pending_removal_record(project)
     except (tcip_store.StoreError, tcip_store.DecodeError, tcip_store.SchemaVersionRefused) as exc:
         return _Refusal(409, f"{name}'s pending-removal marker could not be read: {exc}")
-    if pending is not None:
+    if removal_pending is not None:
+        if door == "removal":
+            return _Refusal(
+                409,
+                f"{name!r} already has a pending-removal marker (requested "
+                f"{removal_pending['requested_at']}); it moves to the workspace's holding "
+                "directory at the next backend start, or through tcip complete-removals",
+            )
         return _Refusal(
             409,
-            f"{name!r} already has a pending-removal marker (requested "
-            f"{pending['requested_at']}); it moves to the workspace's holding directory at the "
-            "next backend start, or through tcip complete-removals",
+            f"{name!r} is pending removal (requested {removal_pending['requested_at']}); it "
+            "moves to the workspace's holding directory at the next backend start, or through "
+            "tcip complete-removals",
+        )
+
+    try:
+        rename_pending = workspace.pending_rename_record(project)
+    except (tcip_store.StoreError, tcip_store.DecodeError, tcip_store.SchemaVersionRefused) as exc:
+        return _Refusal(409, f"{name}'s pending-rename marker could not be read: {exc}")
+    if rename_pending is not None:
+        if door == "rename":
+            return _Refusal(
+                409,
+                f"{name!r} already has a pending-rename marker (requested "
+                f"{rename_pending['requested_at']}); it renames at the next backend start, or "
+                "through tcip complete-renames",
+            )
+        return _Refusal(
+            409,
+            f"{name!r} is pending rename to {rename_pending['new_name']!r} (requested "
+            f"{rename_pending['requested_at']}); it renames at the next backend start, or "
+            "through tcip complete-renames, and the renamed project can be removed then",
         )
 
     conflict = identity_conflict(project, state)
@@ -462,6 +523,62 @@ def _ordered_refusal(
         return _Refusal(409, job_result)
 
     return None
+
+
+def dependent_projects_of(project: Path, ws: Path) -> list[dict]:
+    """Every other workspace project whose dataset registry names an entry resolving under
+    ``project``'s own tree, pending ones included and marked ``pending``.
+
+    Extracted from :func:`_preview`'s own dependent scan so the removal door's preview and
+    ``tcip_mcp.project_rename``'s own door (its preview and its request) list dependents through
+    one implementation rather than two that could silently drift (CLAUDE.md). A dependent project
+    whose own registry will not read is listed as ``{project, unreadable}``, the same treatment a
+    matching entry that carries a path but no id gets, naming the path rather than a null id.
+    Containment is decided through :func:`_workspace_child_of`, the same helper
+    :func:`dependency_warnings` calls, so the scan that lists a dependent here and the card that
+    warns about it afterward agree on one rule. ``pending`` is true for a dependent carrying
+    either marker (:func:`~tcip_mcp.workspace.pending_marker_or_none`), removal or rename alike:
+    this scan is read-only and names no consequence of which kind it is, unlike
+    :func:`dependency_warnings`'own ``pending_kind``.
+    """
+    from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets_raw
+
+    dependent_projects: list[dict] = []
+    for child in sorted(p for p in ws.iterdir() if p.is_dir()):
+        if _same_path(child, project) or not (child / ".tcip").is_dir():
+            continue
+        pending = workspace.pending_marker_or_none(child)
+        try:
+            entries = read_datasets_raw(child)
+        except Exception as exc:  # noqa: BLE001 - reported per project, never aborts the scan
+            dependent_projects.append({
+                "project": child.name,
+                "unreadable": f"its dataset registry could not be read: {exc}",
+            })
+            continue
+        for entry in entries:
+            if not entry.get("path"):
+                continue
+            try:
+                entry_path = dataset_entry_path(child, entry)
+            except ValueError:
+                continue
+            entry_child = _workspace_child_of(entry_path, ws)
+            if entry_child is None or not _same_path(entry_child, project):
+                continue
+            dataset_id = entry.get("id")
+            if not dataset_id:
+                dependent_projects.append({
+                    "project": child.name,
+                    "unreadable": f"its dataset registry has an entry with a path and no id: "
+                                   f"{entry_path}",
+                })
+                continue
+            dependent_projects.append({
+                "project": child.name, "dataset_id": dataset_id,
+                "dataset_path": str(entry_path), "pending": pending is not None,
+            })
+    return dependent_projects
 
 
 def _preview(
@@ -498,7 +615,6 @@ def _preview(
     """
     from tcip_mcp.registry_paths import nearest_containing_ancestor
     from tcip_mcp.store_catalogue import project_roots
-    from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets_raw
 
     try:
         candidate: Optional[Path] = workspace.project_path(name, create=False)
@@ -534,42 +650,8 @@ def _preview(
         for path, layouts in sorted(roots_by_path.items())
     ]
 
-    dependent_projects: list[dict] = []
     ws = workspace.workspace_root(create=False)
-    for child in sorted(p for p in ws.iterdir() if p.is_dir()):
-        if _same_path(child, project) or not (child / ".tcip").is_dir():
-            continue
-        pending = workspace.pending_removal_or_none(child)
-        try:
-            entries = read_datasets_raw(child)
-        except Exception as exc:  # noqa: BLE001 - reported per project, never aborts the scan
-            dependent_projects.append({
-                "project": child.name,
-                "unreadable": f"its dataset registry could not be read: {exc}",
-            })
-            continue
-        for entry in entries:
-            if not entry.get("path"):
-                continue
-            try:
-                entry_path = dataset_entry_path(child, entry)
-            except ValueError:
-                continue
-            entry_child = _workspace_child_of(entry_path, ws)
-            if entry_child is None or not _same_path(entry_child, project):
-                continue
-            dataset_id = entry.get("id")
-            if not dataset_id:
-                dependent_projects.append({
-                    "project": child.name,
-                    "unreadable": f"its dataset registry has an entry with a path and no id: "
-                                   f"{entry_path}",
-                })
-                continue
-            dependent_projects.append({
-                "project": child.name, "dataset_id": dataset_id,
-                "dataset_path": str(entry_path), "pending": pending is not None,
-            })
+    dependent_projects = dependent_projects_of(project, ws)
 
     result: dict = {
         "external_roots": external_roots,
