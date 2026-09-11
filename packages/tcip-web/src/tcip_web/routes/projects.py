@@ -11,7 +11,7 @@ Trust boundary: same as every other REST route (``tcip_web.trust_boundary``). Li
 inherently confined to the workspace directory, and the active-project name is validated
 as a single path segment, so neither can be coaxed into reaching outside the workspace.
 
-Four doors write here. ``POST /active`` writes the active-project marker only, its own
+Seven doors write here. ``POST /active`` writes the active-project marker only, its own
 line staying wherever the MCP tool's own caller emits one (this route emits none itself).
 ``GET /{name}/removal-preview`` writes nothing (:func:`tcip_mcp.project_removal.
 removal_preview`). ``POST /remove`` (:func:`tcip_mcp.project_removal.request_project_removal`)
@@ -26,10 +26,19 @@ project, marks the canvas-open binding released when it does (never deleting eit
 record or repinning this process), and, when either changed, records one line under the
 project's own root.
 
-``tcip_mcp.project_removal`` imports nothing from ``tcip_web``: this module resolves the
-requesting identity through :mod:`tcip_web.identity` and supplies :func:`_job_conflict`, the
-walk over the three job registries the door's own refusal chain calls through, as that door's
-required keyword arguments.
+``GET /{name}/rename-preview`` writes nothing (:func:`tcip_mcp.project_rename.rename_preview`).
+``POST /rename`` (:func:`tcip_mcp.project_rename.request_project_rename`) is GUI-only, marks the
+project pending rename with no archive taken, leaves the target's own last line naming the
+marker in its own log, one ``dependency_pending_rename`` line per dependent in that dependent's
+own log, and the route's own line in the bound project's own log or the target's own otherwise.
+``POST /rename/withdraw`` (:func:`tcip_mcp.project_rename.withdraw_project_rename`) clears a
+pending-rename marker with no rename of its own, for a request whose destination name was taken
+before phase two ran.
+
+``tcip_mcp.project_removal`` and ``tcip_mcp.project_rename`` import nothing from ``tcip_web``:
+this module resolves the requesting identity through :mod:`tcip_web.identity` and supplies
+:func:`_job_conflict`, the walk over the three job registries both doors' own refusal chains
+call through, as their required keyword arguments.
 """
 
 from __future__ import annotations
@@ -55,10 +64,13 @@ class DependencyWarning(BaseModel):
     target: str
     # False once the dependency's own directory no longer exists at the location named.
     present: bool
-    # From the target's own pending-removal marker while present is true; null once it is false,
-    # since the target's own marker is gone by then.
+    # From the target's own pending-removal marker while present is true; null for a pending
+    # rename (which archives nothing) or once present is false.
     archive_path: str | None = None
     holding_dir: str | None = None
+    # "removal" or "rename" while present is true; absent when the target is gone rather than
+    # pending. Read by the Remove... and Rename... cards' own warning line.
+    pending_kind: str | None = None
 
 
 class ProjectSummary(BaseModel):
@@ -151,23 +163,26 @@ def _summarize(
 def list_projects() -> dict:
     """List workspace projects (directories containing ``.tcip/``), newest first.
 
-    A project carrying a pending-removal marker is never one of ``projects``: it is read
-    before ``_summarize`` and carried instead under ``pending_removal``
-    (``[{name, requested_at, archive_path, holding_dir}]``), the way every other workspace
-    walker skips it from the moment its marker lands.
+    A project carrying either marker is never one of ``projects``: it is read before
+    ``_summarize`` and carried instead under ``pending_removal``
+    (``[{name, requested_at, archive_path, holding_dir}]``) or ``pending_rename``
+    (``[{name, new_name, requested_at}]``), the way every other workspace walker skips it from
+    the moment its marker lands.
 
     Carries ``platform_root``/``platform_root_source`` when this backend has bound one
     (:func:`tcip_mcp.project_paths.root_binding`, populated once the app has served its first
     request or repinned via ``activate_project``, never merely imported): the backend's own
     platform-state root, so the GUI can show it disagreeing with ``active``/``active_path`` in
-    the window before a repin lands. ``removal_startup_outcomes`` carries the last
-    ``complete_pending_removals`` run's own outcomes
-    (:func:`tcip_mcp.project_removal.startup_outcomes`).
+    the window before a repin lands. ``removal_startup_outcomes`` and ``rename_startup_outcomes``
+    carry the last ``complete_pending_removals``/``complete_pending_renames`` run's own outcomes
+    (:func:`tcip_mcp.project_removal.startup_outcomes`,
+    :func:`tcip_mcp.project_rename.rename_startup_outcomes`).
 
     ``job_registry_startup_refusals`` names every job-registry rehydrate this process has
     refused (an unconformed document, :func:`tcip_web.jobstore.startup_refusals`), each error
     text already naming the conform script; empty when nothing was refused.
     """
+    from tcip_mcp import project_rename
     from tcip_mcp.project_paths import root_binding
 
     from tcip_web import jobstore
@@ -179,17 +194,25 @@ def list_projects() -> dict:
     open_state = project_removal.read_open_project_state()
     projects: list[ProjectSummary] = []
     pending_removal: list[dict] = []
+    pending_rename: list[dict] = []
     for child in root.iterdir():
         if not (child.is_dir() and (child / ".tcip").is_dir()):
             continue
-        pending = workspace.pending_removal_or_none(child)
+        pending = workspace.pending_marker_or_none(child)
         if pending is not None:
-            pending_removal.append({
-                "name": child.name,
-                "requested_at": pending["requested_at"],
-                "archive_path": pending["archive_path"],
-                "holding_dir": pending["holding_dir"],
-            })
+            if pending.kind == "removal":
+                pending_removal.append({
+                    "name": child.name,
+                    "requested_at": pending.record["requested_at"],
+                    "archive_path": pending.record["archive_path"],
+                    "holding_dir": pending.record["holding_dir"],
+                })
+            else:
+                pending_rename.append({
+                    "name": child.name,
+                    "new_name": pending.record["new_name"],
+                    "requested_at": pending.record["requested_at"],
+                })
             continue
         try:
             projects.append(_summarize(child, active, open_state))
@@ -204,7 +227,9 @@ def list_projects() -> dict:
         "projects": [p.model_dump() for p in projects],
         "job_registry_startup_refusals": jobstore.startup_refusals(),
         "pending_removal": pending_removal,
+        "pending_rename": pending_rename,
         "removal_startup_outcomes": project_removal.startup_outcomes(),
+        "rename_startup_outcomes": project_rename.rename_startup_outcomes(),
     }
     binding = root_binding()
     if binding is not None:
@@ -221,14 +246,15 @@ class SetActiveRequest(BaseModel):
 def activate_project(req: SetActiveRequest) -> ActiveProject:
     """Set the active project (the marker the GUI auto-opens). Name must be a workspace
     project; traversal/separators are rejected, its ``.tcip`` must already exist, and it must
-    not be pending removal (409, naming when the request was made)."""
+    not be pending removal or pending rename (409, naming when the request was made and, for a
+    rename, the new name)."""
     try:
         path = workspace.project_path(req.name)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     try:
         workspace.activate_project(req.name)
-    except workspace.ProjectPendingRemoval as exc:
+    except (workspace.ProjectPendingRemoval, workspace.ProjectPendingRename) as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
@@ -298,6 +324,36 @@ class ReleaseResponse(BaseModel):
     # that does not itself re-fetch the preview (the agent); the dialog re-fetches instead.
     refusal: str | None
     releasable: bool
+
+
+class RenamePreview(BaseModel):
+    # The shared refusal chain plus the records refusal, or null; the new-name-specific checks
+    # are excluded since none is typed yet.
+    refusal: str | None = None
+    releasable: bool
+    dependent_projects: list[DependentProject]
+    # The project's own stores holding a record (project_rename.project_records_present);
+    # empty for a project the rename door would admit.
+    records_present: list[str]
+
+
+class RenameRequest(BaseModel):
+    name: str
+    new_name: str
+    confirm_name: str
+    user: str = ""
+
+
+class RenameResponse(BaseModel):
+    name: str
+    new_name: str
+    completes: str
+    dependent_projects: list[DependentProject]
+    audit_scope: str
+    # True when the route's own line landed in a bound project's log; false when, with none
+    # bound, it landed in the target's own log instead.
+    recorded_in_open_project: bool
+    audit_note: str
 
 
 def _job_conflict(target: Path) -> str | None:
@@ -384,3 +440,50 @@ def release_binding_route(name: str, req: ReleaseBindingRequest) -> ReleaseRespo
     if "error" in result:
         raise HTTPException(result.get("status", 400), result["error"])
     return ReleaseResponse(**result)
+
+
+@router.get("/{name}/rename-preview")
+def rename_preview_route(name: str) -> RenamePreview:
+    """A snapshot of what renaming ``name`` would answer: the shared refusal chain plus the
+    records refusal (or ``None``), every other project's dataset registered under it, and which
+    of its own stores hold a record. The dialog fetches this on open, before a new name is
+    typed; the request itself answers fresh if anything changed meanwhile."""
+    from tcip_mcp import project_rename
+
+    return RenamePreview(**project_rename.rename_preview(name, job_conflict=_job_conflict))
+
+
+@router.post("/rename")
+def rename_project(req: RenameRequest) -> RenameResponse:
+    """Mark ``name`` pending rename to ``new_name`` (:func:`tcip_mcp.project_rename.
+    request_project_rename`); the only caller of that door. Refuses with the status the door
+    itself names (400 malformed request, 404 no such project, 409 every other refusal)."""
+    from tcip_mcp import project_rename
+
+    requested_by = identity.user_id(identity.resolve_user(req.user))
+    result = project_rename.request_project_rename(
+        req.name, req.new_name, req.confirm_name, requested_by=requested_by,
+        job_conflict=_job_conflict,
+    )
+    if "error" in result:
+        raise HTTPException(result.get("status", 400), result["error"])
+    return RenameResponse(**result)
+
+
+class WithdrawRenameRequest(BaseModel):
+    name: str
+    user: str = ""
+
+
+@router.post("/rename/withdraw")
+def withdraw_rename_route(req: WithdrawRenameRequest) -> dict:
+    """Clear ``req.name``'s pending-rename marker with no rename of its own
+    (:func:`tcip_mcp.project_rename.withdraw_project_rename`); the only caller of that door.
+    Not destructive, so it takes no typed confirm name."""
+    from tcip_mcp import project_rename
+
+    requested_by = identity.user_id(identity.resolve_user(req.user))
+    result = project_rename.withdraw_project_rename(req.name, requested_by=requested_by)
+    if "error" in result:
+        raise HTTPException(result.get("status", 400), result["error"])
+    return result

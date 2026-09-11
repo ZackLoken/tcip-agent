@@ -23,6 +23,8 @@ export const ROUTES = {
   getProjects: "/api/projects",
   getProjectsByNameRemovalPreview: (name: string) =>
     `/api/projects/${encodeURIComponent(name)}/removal-preview`,
+  getProjectsByNameRenamePreview: (name: string) =>
+    `/api/projects/${encodeURIComponent(name)}/rename-preview`,
   getResultsDeliveryEvents: "/api/results/delivery-events",
   getResultsModelsRegistered: "/api/results/models/registered",
   getResultsOperationalization: "/api/results/operationalization",
@@ -71,6 +73,8 @@ export const ROUTES = {
   postProjectsByNameReleaseBinding: (name: string) =>
     `/api/projects/${encodeURIComponent(name)}/release-binding`,
   postProjectsRemove: "/api/projects/remove",
+  postProjectsRename: "/api/projects/rename",
+  postProjectsRenameWithdraw: "/api/projects/rename/withdraw",
   postResultsExportCountCsv: "/api/results/export_count_csv",
   postResultsExportCsv: "/api/results/export_csv",
   postResultsOperationalizationConfirm: "/api/results/operationalization/confirm",
