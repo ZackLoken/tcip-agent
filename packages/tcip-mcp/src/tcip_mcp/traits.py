@@ -452,11 +452,12 @@ def trait_spec_unconformed(document: dict) -> str | None:
         return (
             "this trait spec record predates the subject-registry rename (positive_class_name is "
             "now positive_value) and carries no schema_version: 2 stamp; a stored record is "
-            "restated through author_trait_spec, the caller supplying every field the spec "
-            "carries, and a hand-authored file is conformed by adding \"schema_version\": 2 and "
-            "renaming positive_class_name to positive_value; once restated or conformed, the "
-            "trait's statement and operationalization read as stale until restated and "
-            "re-confirmed"
+            "restated by the agent through its author_trait_spec tool, supplying every field the "
+            "spec carries, which leaves a fresh unconfirmed statement for the breeder to confirm "
+            "in the Results tab; a hand-authored file is conformed by adding "
+            "\"schema_version\": 2 and renaming positive_class_name to positive_value, after "
+            "which the trait's statement reads as stale until restated and re-confirmed; either "
+            "way a confirmed operationalization reads as stale until re-confirmed"
         )
     return None
 
@@ -843,7 +844,9 @@ def _spec_replaced_values(
     A pre-rename field is read from its retired name (:data:`_RETIRED_SPEC_FIELD_NAMES`) when the
     current name is absent from ``old``, so the renamed ``positive_class_name``/``positive_value``
     pair compares the same underlying value under its two names rather than reading as an
-    always-missing field.
+    always-missing field. A field ``old`` never carried under either name reads as
+    ``recorded: None``, the same as one it stored as null. ``authored`` is the statement snapshot
+    of the parsed spec, so the ``authored`` side agrees with ``statement_fields`` byte for byte.
     """
     replaced: dict[str, dict[str, Any]] = {}
     for field in _AUTHORED_SPEC_FIELDS:
@@ -999,10 +1002,18 @@ def author_trait_spec(
     record is not one any reader can load, so its own statement describes it no better whether the
     statement exists or not. This call proceeds as a full restatement, the caller supplying every
     field the spec carries exactly as on first creation; the carried-forward fields below still
-    come from the old record, since their names did not move. The returned statement then carries
-    ``replaced_values``, naming every authored field whose value this call is replacing (the
-    retired ``positive_class_name`` read as the prior value of the now-renamed ``positive_value``),
-    each as ``{"recorded": <old>, "authored": <new>}``; absent on every other call.
+    come from the old record, since their names did not move. The response, and only the
+    response (the persisted statement carries exactly ``TRAIT_SPEC_STATEMENT_FIELDS`` and the
+    confirmation fields), then carries two more keys: ``replaced_values``, naming every authored
+    field whose value this call replaced (the retired ``positive_class_name`` read as the prior
+    value of the now-renamed ``positive_value``; a field the old record never carried reads as
+    ``recorded: null``), each as ``{"recorded": <old>, "authored": <new>}`` in the statement
+    snapshot's own canonical form; and ``prior_confirmation``, the ``confirmed_by`` and
+    ``confirmed_at`` of the statement this call replaced when the breeder had confirmed it, else
+    ``None``, since the fresh statement is unconfirmed and that confirmation no longer stands.
+    Every field the tool does not receive is written at its default, so the caller reads
+    ``replaced_values`` back and the breeder reads the new values in the Results tab before
+    confirming; nothing here can tell an omitted field from one stated at its default.
 
     ``localization``, ``localization_tolerance``, ``localization_tolerance_frac``,
     ``sliver_policy`` and ``sliver_frac`` are not accepted here: they carry forward unchanged from
@@ -1033,6 +1044,11 @@ def author_trait_spec(
 
     existing_spec = ts.read_versioned(spec_key, default=None)
     existing_statement = ts.read_versioned(statement_key, default=None)
+    if existing_spec.value is not None and not isinstance(existing_spec.value, dict):
+        raise ValueError(
+            f"author_trait_spec cannot restate trait {trait!r}: the stored trait spec record is "
+            "not a mapping; delete or repair the record before authoring the trait again"
+        )
     unconformed_reason = (
         trait_spec_unconformed(existing_spec.value) if existing_spec.value is not None else None
     )
@@ -1063,23 +1079,21 @@ def author_trait_spec(
         "holdout_match_quality_floor": holdout_match_quality_floor,
         "notes": notes,
     }
-    replaced_values: dict[str, dict[str, Any]] = {}
     if existing_spec.value is not None:
         authored.update({
             field: existing_spec.value[field]
             for field in _CARRIED_FORWARD_SPEC_FIELDS
             if field in existing_spec.value
         })
-        if unconformed_reason is not None:
-            replaced_values = _spec_replaced_values(existing_spec.value, authored)
 
     spec, reason = _validate_and_write_spec(spec_key, authored, expect=existing_spec.version)
     if spec is None:
         raise ValueError(f"author_trait_spec cannot register trait {trait!r}: {reason}")
 
+    snapshot = _statement_snapshot(spec)
     statement = {
         "trait": trait,
-        "statement_fields": _statement_snapshot(spec),
+        "statement_fields": snapshot,
         "rationale": _require_text(rationale, "rationale"),
         "stated_by": TRAIT_SPEC_STATEMENT_SURFACE,
         "stated_at": now_iso(),
@@ -1087,10 +1101,23 @@ def author_trait_spec(
         **agent_identity.statement_fields(),
         **{field: None for field in TRAIT_SPEC_CONFIRMATION_FIELDS},
     }
-    if unconformed_reason is not None:
-        statement["replaced_values"] = replaced_values
     ts.replace(statement_key, statement, expect=existing_statement.version)
-    return statement
+    if unconformed_reason is None:
+        return statement
+    # The two restatement keys are the response's alone: the persisted statement carries exactly
+    # TRAIT_SPEC_STATEMENT_FIELDS and the confirmation fields, the shape the seen hash covers.
+    prior = existing_statement.value if isinstance(existing_statement.value, dict) else {}
+    prior_confirmation = (
+        {"confirmed_by": prior.get("confirmed_by"), "confirmed_at": prior.get("confirmed_at")}
+        if prior.get("confirmed_by") is not None
+        else None
+    )
+    old_record: dict[str, Any] = existing_spec.value if isinstance(existing_spec.value, dict) else {}
+    return {
+        **statement,
+        "replaced_values": _spec_replaced_values(old_record, snapshot),
+        "prior_confirmation": prior_confirmation,
+    }
 
 
 class TraitSpecStatementNotFound(ValueError):

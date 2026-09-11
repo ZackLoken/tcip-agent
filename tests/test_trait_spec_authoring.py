@@ -315,6 +315,80 @@ def test_restating_an_unconformed_spec_with_a_statement_on_record_is_not_a_colli
     assert traits.get_trait_for("leaf", str(tmp_path)).positive_value == "open"
 
 
+def test_restating_over_a_confirmed_statement_reports_the_withdrawn_confirmation(
+    tmp_path: Path,
+) -> None:
+    """A guard: when the statement behind an unconformed record was breeder-confirmed, the
+    restatement's response names that confirmation under ``prior_confirmation`` (who and when),
+    and the fresh statement on record is unconfirmed, so the agent learns here that the breeder's
+    earlier confirmation no longer stands."""
+    _seed_unconformed_leaf(tmp_path)
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    statement_key = traits.trait_spec_statement_key(scope, "leaf")
+    stated = ts.read_versioned(statement_key).value
+    traits.confirm_trait_spec(
+        str(tmp_path), "leaf", user="user:breeder",
+        record_seen=traits.trait_spec_statement_seen_hash(stated), identity_from_request=True,
+    )
+    assert ts.read_versioned(statement_key).value["confirmed_by"] == "user:breeder"
+
+    response = traits.author_trait_spec(
+        str(tmp_path), "leaf", **_FULL_LEAF_RESTATEMENT,
+        rationale="restating after the subject-registry rename, every field supplied",
+    )
+
+    assert response["prior_confirmation"]["confirmed_by"] == "user:breeder"
+    assert response["prior_confirmation"]["confirmed_at"] is not None
+    stored = ts.read_versioned(statement_key).value
+    assert stored["confirmed_by"] is None
+
+
+def test_restatement_keys_are_the_responses_alone_never_the_stored_statements(
+    tmp_path: Path,
+) -> None:
+    """A guard: ``replaced_values`` and ``prior_confirmation`` are keys of the restatement's
+    response and never of the ``trait_spec_statements`` record, whose key set stays exactly
+    ``TRAIT_SPEC_STATEMENT_FIELDS`` plus the confirmation fields and ``trait``, the shape the
+    breeder's seen hash and the Results panel both project onto."""
+    _seed_unconformed_leaf(tmp_path)
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    statement_key = traits.trait_spec_statement_key(scope, "leaf")
+
+    response = traits.author_trait_spec(
+        str(tmp_path), "leaf", **_FULL_LEAF_RESTATEMENT,
+        rationale="restating after the subject-registry rename, every field supplied",
+    )
+
+    assert "replaced_values" in response and "prior_confirmation" in response
+    assert response["prior_confirmation"] is None
+    stored = ts.read_versioned(statement_key).value
+    assert set(stored) == {
+        "trait", *traits.TRAIT_SPEC_STATEMENT_FIELDS, *traits.TRAIT_SPEC_CONFIRMATION_FIELDS,
+    }
+    fresh = traits.author_trait_spec(
+        str(tmp_path), "stem", delivers=("leaf_length",), rationale="a first creation",
+    )
+    assert "replaced_values" not in fresh and "prior_confirmation" not in fresh
+
+
+def test_a_stored_record_that_is_not_a_mapping_refuses_the_restatement_by_name(
+    tmp_path: Path,
+) -> None:
+    """Coverage: a ``trait_specs`` record that decodes as something other than a mapping refuses
+    ``author_trait_spec`` naming the shape, before the unconformed reading or the collision
+    rule is consulted, rather than raising from inside the reading."""
+    _author(tmp_path, trait="leaf", delivers=("leaf_length",))
+    directory = traits.trait_specs_dir(str(tmp_path))
+    key = traits.trait_spec_key(directory, "leaf")
+    stored = ts.read_versioned(key)
+    ts.replace(key, ["not", "a", "mapping"], expect=stored.version)
+
+    with pytest.raises(ValueError, match="not a mapping"):
+        traits.author_trait_spec(
+            str(tmp_path), "leaf", delivers=("leaf_length",), rationale="a restatement",
+        )
+
+
 def test_a_stamped_2_trait_specs_schema_version_survives_a_field_edit(tmp_path: Path) -> None:
     """A record already carrying the current ``schema_version`` stamp keeps it through an ordinary
     field-edit rewrite: ``_encode_spec`` has no such dataclass field, and every write stamps the
