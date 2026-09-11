@@ -478,11 +478,17 @@ def _is_timeout(headline: str) -> bool:
     return bool(_TIMEOUT_HEADLINE.match(headline.strip()))
 
 
-def _is_unreached(headline: str) -> bool:
+def _is_unreached(headline: str, crash_path: str | None, tree: Path) -> bool:
     """A failure that never reached the code under test carries the same weight as a collection
-    error: a missing module, or a missing file the overlaid test needs that only the newer tree
-    carries (a fixture path outside ``tests/``, which the test-tree overlay cannot supply)."""
-    return headline.startswith(("ModuleNotFoundError", "ImportError", "FileNotFoundError"))
+    error: a missing module or import always counts. A missing file counts only when its crash
+    frame sits outside ``tests/`` (:func:`_crash_outside_test_tree`); a test's own assertion
+    reading back a file the fixed code under test was supposed to write raises ``FileNotFoundError``
+    at the test's own line, and that is behavioral evidence, never a fixture-shaped discount."""
+    if headline.startswith(("ModuleNotFoundError", "ImportError")):
+        return True
+    if headline.startswith("FileNotFoundError"):
+        return _crash_outside_test_tree(crash_path, tree)
+    return False
 
 
 def _crash_outside_test_tree(crash_path: str | None, tree: Path) -> bool:
@@ -521,8 +527,10 @@ def _is_call_signature_mismatch(headline: str) -> bool:
 def _failure_kind(entry: dict, tree: Path) -> str:
     """One of ``unreached``, ``timeout``, ``behavioral``, ``fixture``, for one failed or errored test.
 
-    ``unreached``: the import never resolved, or a needed file was missing, the same weight as a
-    collection error.
+    ``unreached``: the import never resolved, always; or a needed file was missing and the crash
+    frame sits outside ``tests/`` (:func:`_is_unreached`). A missing file whose crash frame sits
+    inside the test's own body is left to the rest of this function instead, since that shape is
+    the test's own assertion reading back something the code under test was supposed to produce.
 
     ``timeout``: pytest-timeout's own signal-method report (:func:`_is_timeout`), checked before
     the phase split below since a timeout can fire during setup as easily as during the call, and
@@ -545,7 +553,7 @@ def _failure_kind(entry: dict, tree: Path) -> str:
     whatever went wrong from there.
     """
     headline = entry.get("headline", "")
-    if _is_unreached(headline):
+    if _is_unreached(headline, entry.get("crash_path"), tree):
         return "unreached"
     if _is_timeout(headline):
         return "timeout"
