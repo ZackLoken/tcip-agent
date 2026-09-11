@@ -112,6 +112,11 @@ def test_resolve_writable_bucket_for_pins_both_canonical_shapes_suggestion_strin
     assert undated_refusal["suggested_bucket"] == str(
         prediction_dir(dataset_root, "undated_model@r2", None))
 
+    # The seeded state is a bulk accept (no detection entry); the publishers' own reading (off
+    # by default) still answers BucketHoldsDocuments, never BucketHasVerdicts, on this bucket.
+    assert dated_refusal["document_stem_count"] == 1
+    assert "verdict_count" not in dated_refusal
+
 
 def test_run_inference_forwards_split_manifest_dir_to_the_verified_pass(tmp_path, monkeypatch):
     """A manifest-restricted calibration's evidence can only earn a validation record through

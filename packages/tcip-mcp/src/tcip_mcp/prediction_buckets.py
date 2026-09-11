@@ -511,25 +511,35 @@ def stage_prediction_shapes(
     """Write already-built prediction :class:`Annotation` records into a verdict-guarded bucket.
 
     The one staging path both of ``stage_proposals``'s input regimes share so each honors
-    prediction-bucket immutability: a bucket that carries review verdicts is never overwritten (the
-    default redirects to the next free ``<name>@r2`` variant; ``overwrite=True`` raises
-    :class:`BucketHasVerdicts`). ``annotations`` are name-based prediction records (subject + geometry
-    + score) already stamped with their producer; boxes and polygons live in the one per-image file.
+    prediction-bucket immutability: a bucket that carries review state (a detection verdict or a
+    bulk accept alike) is never overwritten (the default redirects to the next free ``<name>@r2``
+    variant; ``overwrite=True`` raises :class:`BucketHasVerdicts`). ``annotations`` are name-based
+    prediction records (subject + geometry + score) already stamped with their producer; boxes
+    and polygons live in the one per-image file.
 
     This door leaves ``resolve_prediction_bucket``'s ``refuse_documents`` at its default off: a
     staging bucket accumulates one stem per call by contract, so a stem this call adds beside
     another call's own document is the bucket working as designed, never the second-publish the
-    document guard exists to refuse. ``run_inference``, ``deliver_per_image_counts``'s live path
-    and the web route's own launch, the three publishers that opt into that guard, never call
-    this function.
+    document guard exists to refuse. It turns ``count_review_state`` on instead, so a bucket a
+    reviewer has simply finished (a bulk accept, no detection entry at all) is exactly as immutable
+    to this door as one carrying a verdict: a session that stages one image, then completes it on
+    the Review canvas, before staging the next sends the next stage into a fresh ``@r2`` rather
+    than beside the one just finished. ``run_inference``, ``deliver_per_image_counts``'s live path
+    and the web route's own launch, the three publishers that leave ``count_review_state`` off and
+    turn ``refuse_documents`` on instead, never call this function.
 
     This door writes no stamp of its own, so a bucket holding nothing but staged shapes carries
     none, and the promotion path refuses it as a bucket with no stamp a producer wrote. A bucket a
     producer already stamped (``run_inference``, say) keeps that producer's stamp: staging into it
-    only redirects when it carries review verdicts, so a stamped-but-unreviewed bucket can gain
+    only redirects when it carries review state, so a stamped-but-unreviewed bucket can gain
     staged shapes beside its own stamp.
 
-    Returns the bucket actually written and the path.
+    Returns the bucket actually written and the path; ``verdict_count`` counts reviewed images (a
+    detection verdict or a bulk accept alike), not detection entries, so a session that interleaves
+    staging with completing images on the Review canvas can see one engine's proposals spread over
+    ``@r2``, ``@r3`` and onward, each variant frozen by the review state it acquired. Stage every
+    image of a run before reviewing any to avoid it, or read ``bucket``/``bucket_redirected`` off
+    each result.
     """
     from tcip_annotation import json_io
 
@@ -546,6 +556,7 @@ def stage_prediction_shapes(
         date,
         review_state_dir=review_state_dir_of(dataset_root),
         overwrite=overwrite,
+        count_review_state=True,
     )
 
     path = None

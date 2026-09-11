@@ -1688,7 +1688,8 @@ def clear_prediction_bucket(
     delete and reported in ``review_state_landed_during_clear`` instead. The resolver's own
     document-guard publishers (``resolve_writable_bucket``) count a detection verdict alone;
     refusing here is this door's own gate, not a platform-wide lock against writing beside
-    review state. A publisher that resolved
+    review state, and the staging door counts review state scoped to its documents' stems
+    (``count_review_state``). A publisher that resolved
     this bucket clean before the clear began can still write into it during or after: its document
     and stamp writes are unconditional, and a resume that finds a fresh ``operating_point`` stamp
     beside documents the clear had not yet moved reads it as a re-publication and leaves those
