@@ -25,22 +25,22 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 3fbb5b6f.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 331d9090.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 3fbb5b6f has 438 modules across the six scanned roots (146661 total lines):
+HEAD 331d9090 has 439 modules across the six scanned roots (147016 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 137 | 64754 |
+| tcip-mcp | 138 | 65099 |
 | tcip-annotation | 12 | 4346 |
 | tcip-web | 40 | 14090 |
 | tcip-store | 13 | 5281 |
 | tcip-web-frontend | 216 | 52297 |
-| tools | 20 | 5893 |
+| tools | 20 | 5903 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
 `packages/`; `tools` is `tools/` at the repo root (not an installed package);
@@ -72,7 +72,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/cli/calibrate_operating_point.py | Calibrate + held-out validate a detection operating point over a labeled split. | 3 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/check_dataset_identity.py | Check a dataset's on-disk content against its recorded identity: detect changed / moved data. | 5 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/complete_removals.py | Move every workspace project carrying a pending-removal marker onto its own holding directory: the operator/agent entry point for ``tcip_mcp.project_removal.complete_pending_removals``, the same walk a served backend runs once at its own startup, run by hand or on a schedule with no backend running. | 3 | 0 |
-| packages/tcip-mcp/src/tcip_mcp/cli/doctor.py | Data-state doctor: scan a live project for state inconsistencies code audits can't see. | 22 | 0 |
+| packages/tcip-mcp/src/tcip_mcp/cli/doctor.py | Data-state doctor: scan a live project for state inconsistencies code audits can't see. | 24 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/export_store.py | Write a root's database-held records and logs back out as files. | 6 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/import_project.py | Import an annotation project from a bundle ``tcip archive-project`` wrote: a ZIP archive, or a directory tree written by its ``--output-dir`` mode. | 3 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/inspect_compute_resources.py | Report the host's current compute headroom. | 3 | 0 |
@@ -167,14 +167,15 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/project_record.py | The project record: the one document every project carries, holding its authored site. | 2 | 6 |
 | packages/tcip-mcp/src/tcip_mcp/project_removal.py | Project removal: archive now, mark for removal, move at the next backend start. | 11 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/project_status.py | Per-project status pointer: a small, persisted summary of recent activity. | 2 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/registry_paths.py | Where a registry entry's stored path resolves, and the containment core the checkpoint and dataset registries share when they decide whether a target sits under their own scope root. | 0 | 7 |
+| packages/tcip-mcp/src/tcip_mcp/registry_paths.py | Where a registry entry's stored path resolves, and the containment core the checkpoint and dataset registries share when they decide whether a target sits under their own scope root. | 0 | 8 |
 | packages/tcip-mcp/src/tcip_mcp/server.py | MCP server entry point: register all domain tools and run on stdio. | 25 | 24 |
 | packages/tcip-mcp/src/tcip_mcp/statements.py | Comparable-value and content-hash primitives shared by every statement kind. | 0 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/store_catalogue.py | The whole store catalogue in one import: every module that registers a store. | 30 | 9 |
+| packages/tcip-mcp/src/tcip_mcp/stray_state.py | What a stray file under a project's ``.tcip/state`` root is, and whether one path may be deleted: one predicate, read by the doctor's own listing and by :func:`delete_stray_state_file` (``tools/project_tools.py``), so the two cannot disagree (CLAUDE.md: when two code paths must agree, call one from the other). | 3 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/subject_registry.py | The dataset's subject registry, subjects, their attributes, and the deterministic name→id assignment a training run uses (and records, so predictions stay decodable). | 3 | 17 |
 | packages/tcip-mcp/src/tcip_mcp/tools/__init__.py | Tool sub-package: each module registers tools with the MCP server. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py | Annotation tools: load, save, and evaluate name-based annotations via MCP. | 13 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/tools/bundle.py | What a project bundle holds: the one membership accounting both doors compose from. | 9 | 1 |
+| packages/tcip-mcp/src/tcip_mcp/tools/bundle.py | What a project bundle holds: the one membership accounting both doors compose from. | 9 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/tools/calibration_tools.py | Calibration-administration tools: redrawing a locked cal/holdout split, calibrating a scalar (ordinal-rank or continuous-value) trait against a disjoint held-out split, and earning a validated count operating point over an already-published prediction bucket. | 18 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py | Data management tools: census a dataset, split data. | 16 | 11 |
 | packages/tcip-mcp/src/tcip_mcp/tools/delivery_tools.py | Delivery-general tools: doors over the delivery record and its writer that no one trait or delivery kind owns. | 9 | 1 |
@@ -189,7 +190,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/tools/operationalization_tools.py | The agent-facing surface for recording what a trait's delivered number means. | 4 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/orthomosaic_tools.py | Orthomosaic MCP tools: per-plant delivery from a persisted whole-raster prediction bucket plus a plant-locations CSV. | 14 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/phenology_tools.py | Phenology MCP tools, the agent-facing surface for the per-plant phenology pipeline. | 21 | 5 |
-| packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py | Project management tools. | 20 | 12 |
+| packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py | Project management tools. | 21 | 12 |
 | packages/tcip-mcp/src/tcip_mcp/tools/proposal_tools.py | Proposal-workflow tools: turn a chosen auto-labeling engine's output into predictions for canvas review. | 19 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/scale_tools.py | Physical per-pixel scale calibration: the delivery-gating producer for ``resolve_scale.json``. | 10 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py | Training MCP tools, config validation, launch training, HPO, status. | 32 | 13 |
@@ -226,7 +227,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-store/src/tcip_store/__init__.py | TCIP's storage seam: one interface for the platform's mutable records, logs, and blobs. | 6 | 71 |
 | packages/tcip-store/src/tcip_store/adoption.py | Moving a root's existing record and log files into a database, atomically or not at all. | 6 | 3 |
 | packages/tcip-store/src/tcip_store/binding.py | Which backend a process binds, decided once at its entry point. | 3 | 28 |
-| packages/tcip-store/src/tcip_store/errors.py | Every refusal the storage seam raises. | 1 | 17 |
+| packages/tcip-store/src/tcip_store/errors.py | Every refusal the storage seam raises. | 1 | 18 |
 | packages/tcip-store/src/tcip_store/export.py | Writing one root's database back out as the file layout, and saying when it is stale. | 4 | 3 |
 | packages/tcip-store/src/tcip_store/file_backend.py | The filesystem backend: identity to path, atomic replace, file locks, logs, and blobs. | 5 | 39 |
 | packages/tcip-store/src/tcip_store/layout_claims.py | Which store could own which path under a root, as data rather than as locator inversion. | 3 | 13 |
