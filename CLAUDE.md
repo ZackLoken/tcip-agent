@@ -5,6 +5,10 @@ invariants, not documentation. When this file and a skill disagree on a domain f
 wins; on behavior, this file wins. Machine and harness facts live in `CLAUDE.local.md` (not
 shipped); commit, push and prose rules that hold across projects live in the global `CLAUDE.md`.
 
+While the architecture contraction is underway, `docs/NEXT_SESSION_PROMPT.md` governs wherever it
+and this file disagree, and a conflict between them is brought to the owner rather than resolved
+silently.
+
 ## The foundation
 
 The platform's job is to give the agent the facts it cannot otherwise know (what primitives exist
@@ -20,133 +24,86 @@ reason not to change it.
 
 ## What this is
 
-TCIP is an agentic ML/CV platform for automated phenotyping in tree-crop breeding: a
-PyTorch-native, no-fixed-task-taxonomy pipeline builder, with you as the ML/CV engineer driving
-it. Scope today: 2D imagery (RGB and N-channel), object detection first; instance segmentation is
-built (one of `build_detector`'s four builders is mask-capable); 3D point clouds are not built and
-carry no scaffolding. `README.md` has the
-pitch, the process diagram and the roadmap. Four packages share one `.tcip/` state directory,
-each with its own `CLAUDE.md` for layout: `packages/tcip-store/` (the storage seam: keyed, locked,
-atomic records, logs and blobs over a database backend and a file backend that must mean the same
-thing; bottom of the stack), `packages/tcip-annotation/` (headless annotation and review engine),
-`packages/tcip-mcp/` (the MCP server, domain tools and composable ML; your primary surface),
-`packages/tcip-web/` (FastAPI plus Vite/React/TS/Konva; the breeder's only surface). `tools/`
-holds CI and development tooling, never a project-facing command; an operator command lives in
-its package's own `cli/` module, behind the `tcip` console command. Domain knowledge lives in
-`packages/tcip-mcp/src/tcip_mcp/knowledge/` as repo files, loaded before acting in its domain.
-Claude Code reaches it through the generated skills under `.claude/skills/`; Codex and Antigravity
-reach it under `.agents/skills/`, and Codex also through the generated block in `AGENTS.md`; any
-other client reaches it through the `serve_domain_knowledge` tool. A document is read in full by
-every route. The registered crops are
-`crops.yml`'s, six today.
+TCIP is an agentic ML/CV platform for automated phenotyping in tree-crop breeding, with you as the
+ML/CV engineer driving it. Scope today is 2D imagery, RGB and N-channel; 3D point clouds are not
+built. `README.md` has the pitch and the roadmap. Four packages under `packages/` share one
+`.tcip/` state directory, each with its own `CLAUDE.md` for layout. Domain knowledge lives in
+`packages/tcip-mcp/src/tcip_mcp/knowledge/` as repo files and reaches every harness through
+generated skills or the `serve_domain_knowledge` tool; a document is read in full by every route.
 
 ## Operating posture
 
 Your default failure is pushing through friction by guessing.
 
-- Scope the project-data ritual before running it. Platform work skips `load_project_memory`,
-  `inspect_project` and `tcip doctor` entirely. Project work first confirms the active-project
-  marker names the task's project (`view_gui_state`, cheaply; the marker is rewritten by
-  `activate_project` on every project switch and persists across sessions between switches),
-  asking when the task names none; then
-  `load_project_memory` (reports and retrospectives), `inspect_project`, and
-  `tcip doctor <project_root>`, reporting what it finds through `report_friction`
-  before acting on the data.
-- Report friction through `report_friction` the moment you hit it (a missing tool, ambiguous data,
-  an op that failed twice, a decision needing human judgment, behavior that surprised you); the
+- Project work confirms which project is active before touching data, and reads that project's own
+  memory first. Platform work skips the project ritual entirely.
+- Report friction through `report_friction` the moment you hit it: a missing tool, ambiguous data,
+  an op that failed twice, a decision needing human judgment, behavior that surprised you. The
   free-text detail matters more than the category. A mandated action that is blocked is itself a
   report, never a silent skip. End substantial work with `write_retrospective`.
 - Never state a fact about this codebase, a domain, or a workflow that you have not executed or
   read this session. One docstring, one sample project, one capture rig describes that instance,
   not the platform's general case; ask before generalizing. A claim about purpose is checked by
   testing its premise.
-- Before any consumer sweep or exploratory read: when a claude-context server is configured for
-  the session, run its search first (concept-shaped matches grep misses), then `git grep` to pin
-  the file and line; without one configured, `git grep` alone. The index reflects the last
-  rebuild, so uncommitted code is grep-only.
+- Semantic search first, grep second. When a claude-context server is configured, its search is the
+  default for any exploratory or orientation read: it finds concept-shaped matches grep cannot, and
+  it is much faster than sweeping the tree. Reach for `git grep` once you know the exact string you
+  are pinning, which is a symbol, a call site or a line number. Do not default to grep for
+  everything. The index reflects the last rebuild, so uncommitted code is grep-only, and `docs/` is
+  not indexed at all.
 - Progressive disclosure: start simple; add complexity only when data or metrics justify it.
 
 ## Invariants that protect the science
 
-- Measurement integrity is the highest rule. The domain expert defines each trait's
-  measurement; you operationalize their definition and never substitute your own (unclear:
-  stop and ask). A delivered number requires
-  a breeder-confirmed operationalization per trait and delivery kind
-  (`state_trait_operationalization`, confirmed in the Results tab), and the door refuses
-  otherwise. Geometry measures dimensions on a validated mask with scale calibration; it never
-  stands in for finding the object or judging a biological state. Validate before any downstream
-  result: GT annotations or a breeder-confirmed sample of the model's own outputs, either through
-  the identical disjoint-split and count-bias gate, the provenance recording which. No validated
-  measurement, no result. Tentative domain logic, whatever made it tentative, is labelled
-  tentative and validated or removed; it never becomes institutional truth by reuse.
-- Scientific defensibility: every phenotype reproducible and auditable end to end (data, model
-  and environment, predictions, operating point, measurement). Parameters are derived from the
-  data at runtime, never frozen constants; when a threshold or operating point varies by dataset,
-  model or trait, the deliverable is the capability to derive it, never the value.
-- Agent-legible and breeder-coherent: a discoverable toolkit with docs that match the code, and
-  a GUI that guides the breeder without stranding them, at equal weight.
-- A subject is an object class to isolate, not a trait; subject names are not validated against
-  `crops.yml`. Labels are one file per image (`annotations/<date>/<stem>.json`), `subject` a
-  field in each record resolved through the dataset's `subjects.json`.
-- No pilot vocabulary as framing: a trait's own name, state or column prefix never names a
-  general mechanism in identifiers, comments or docs; thread the real trait through as data from
-  the project's registry. A concrete trait is fine as one marked example.
-- A negative is an empty label file plus a human marking the image done with nothing on it,
-  recorded as `"negative"`; `"complete"` is the opposite, a finished image with content. The store
-  is `image_status.json` resolved through `image_status_path`, never reconstructed; each status is
-  a record naming who and when, scoped to one subject on one image, read only under the bucket its
-  writer stated. An empty label file alone is never a negative. Never delete empty label files
-  without asking.
-- Never train or evaluate on an unconfirmed format: `tcip_annotation.format_io.detect_format`
-  refuses rather than guesses, inherited by `load_annotations_any` and
-  `annotation_tools.read_annotations`.
-- State changes go through `@audited` MCP tools, or an explicit `record_event`/
-  `record_event_or_raise` emitter for code that is neither: the record is one store's three
-  logs (the platform's, a dataset's own, a project's own; an adopted project's log and the
-  platform's are one file at one key, by the repin). An entry the
-  decorator cannot append raises `MutationCommittedWithoutAuditLine`; an explicit emitter's own
-  unwritten entry raises `AuditEntryNotWritten` the same way, rather than either letting a
-  caller blind-retry. Experiments are immutable: new run, never an overwritten record.
+These state guarantees the platform owes. They do not protect the mechanisms that happen to
+provide those guarantees today: where a tool, file, refusal or schema currently serves one, that
+implementation is replaceable and the guarantee is not.
+
+- Measurement integrity is the highest rule. The domain expert defines each trait's measurement;
+  you operationalize their definition and never substitute your own, and when it is unclear you
+  stop and ask. A delivered number requires a breeder-confirmed operationalization and a
+  validation against a reference sized to the trait, with the provenance recording which reference
+  answered for it. No validated measurement, no result. Geometry measures dimensions on a
+  validated mask with scale calibration; it never stands in for finding the object or judging a
+  biological state. Tentative domain logic, whatever made it tentative, is labelled tentative and
+  validated or removed; it never becomes institutional truth by reuse.
+- Scientific defensibility: every phenotype reproducible and auditable end to end, from data and
+  environment through predictions and operating point to the measurement. Parameters are derived
+  from the data at runtime, never frozen constants; when a threshold varies by dataset, model or
+  trait, the deliverable is the capability to derive it, never the value.
+- Agent-legible and breeder-coherent: a discoverable toolkit with docs that match the code, and a
+  GUI that guides the breeder without stranding them, at equal weight.
+- Every state change leaves a record, and a record that cannot be written is raised rather than
+  swallowed. Experiments are immutable: a new run, never an overwritten one.
+- A subject is an object class to isolate, not a trait.
+- No pilot vocabulary as framing: a trait's own name, state or column prefix never names a general
+  mechanism in identifiers, comments or docs; thread the real trait through as data from the
+  project's registry. A concrete trait is fine as one marked example.
+- A negative is an empty label file plus a human marking the image done with nothing on it.
+  An empty label file alone is never a negative, and empty label files are never deleted without
+  asking.
+- Never train or evaluate on a format the data does not positively confirm; refuse rather than
+  guess.
 - Confirm before destructive or outward actions (deleting labels, overwriting weights, exporting
   deliverables); approval for one does not extend to the next.
-- Persisted formats are frozen. `frozen-formats.json`, generated from the store registry by
-  `tools/generate_frozen_manifest.py` and held to it by `tests/test_frozen_manifest.py`, is the
-  commitment: every store's classification and version ceiling, total over the registry. The version
-  field is lazy (absence means the frozen version 1; the first writer of the field is whichever
-  change bumps a format), and the seam refuses, on read and on write, a version it does not know. A
-  bump is a deliberate change landed as its own reviewed family with its obligations stated: the
-  append-only audit log defines a new line shape without rewriting old lines, a content-addressed
-  document (a label, a checkpoint) states its digest-transition plan, an array-topped store wraps
-  into a versioned mapping. Unstable-by-design stores and interop formats (COCO, other tools'
-  formats, browser APIs) stay outside the freeze and are never called legacy. Still no migration
-  paths, fallbacks or shims at runtime: existing dev state and the sample projects are conformed by
-  a format bump's own `cli/` command, shipped with the bump and deleted once every root that
-  needed it is conformed. The manifest pins declarations only; an undeclared shape change inside
-  version 1 is caught by producer-fed round trips and the review shape, not by the manifest.
 - Enumerate the consumers before deleting anything; a deleted assertion's fact needs a new home.
 - When two code paths must agree, call one from the other. A consistency check whose two sides
   share an implementation proves nothing.
 - A rail must admit valid work, not only reject invalid work: every refusal ships with a test
   proving a legitimate call still succeeds, constructed through the platform's own producer.
 - No silent fallback when required information is missing: require it or refuse, naming the real
-  primitive. A guessed value that can reach a delivered result (a filename-parsed plant id, or
-  anything shaped like it) is a fabrication with a warning attached.
+  primitive. A guessed value that can reach a delivered result is a fabrication with a warning
+  attached.
 - A stated format, subject or root is a claim the data must positively carry, never one it merely
   fails to contradict.
 
 ## Pipelines, models, seeing
 
-No universal pipeline: derive the decomposition from the data in hand (`pipeline-design` skill).
-One build path: an `nn.Module` plus a `train(ctx)` loop, built via `model_source` → `build_model`,
-proven by `check_model_contract`/`overfit_check`, run through the audited envelope; no model spec,
-composer or registry (`toolkit-inventory` maps the pieces, the derivations and the
-`model_source`/`training_source`/`dataset_source` seams). A detector at `in_chans != 3` needs
-per-band `image_mean`/`image_std` from `derivations.band_normalization_stats` through
-`builder_kwargs`; `build_detector` refuses without them. You can see images: `tcip_annotation.viz`'s
-renderers, `vision_tools.visualize` and `tcip visualize` write to `.tcip/artifacts/viz/`; read
-the path with your image-capable tool, describe, then recommend. External phenotyping resources
-(PlantCV and the like) are read for general techniques only, never for a per-trait pipeline; the
-endpoint is a trained model.
+No universal pipeline: derive the decomposition from the data in hand (`pipeline-design` skill);
+`toolkit-inventory` maps the pieces that already exist so you do not rebuild one. You can see
+images. The platform's renderers write to `.tcip/artifacts/viz/`; read the path with your
+image-capable tool, describe what you see, then recommend. External phenotyping resources are read
+for general techniques only, never for a per-trait pipeline; the endpoint is a trained model.
 
 ## Working a change
 
@@ -158,6 +115,8 @@ endpoint is a trained model.
   reader's contract. Never report a gate before its slowest part finishes; green means no detected
   breakage, never correctness. A test touching the filesystem outside `tmp_path` is the first
   reread on a break that only shows in CI.
+- A green suite is evidence only about the defects its fixtures can distinguish. Before trusting it
+  as proof a change was safe, check that some fixture could have come out differently.
 - The production mypy gate is the full one; only `tests` keeps grandfathered codes, in `mypy.ini`.
 - Commits: one concern each, in dependency order, LF endings, messages stating the standing
   constraint the change installs, never a narrative of the session that made it.
@@ -173,44 +132,35 @@ endpoint is a trained model.
 ```bash
 conda activate tcip-agent          # Python 3.12; torch installs CUDA by default, runs without a GPU
 pytest tests/ -n 4 --tb=short --timeout=300 -q
-ruff check .
+ruff check packages tests tools
 mypy                               # roots from mypy.ini, run from the repo root
 python tools/list_tools.py         # the MCP tool list (never hardcode counts in docs)
-python tools/gate_baseline.py --out <dir>   # the CI-parity gate, Git Bash on Windows
-cd packages/tcip-web/frontend && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
+npm --prefix packages/tcip-web/frontend run build   # lint, typecheck and test take the same prefix
 python -m tcip_web                 # backend plus built UI at http://127.0.0.1:8765
 tcip export-store <root>           # a root's database-held records back out as files
 tcip adopt-store <root>            # a root's loose record files into its database
 ```
 
 Every process binds one storage backend at its entry point; an unset environment or
-`TCIP_STORE_BACKEND=sqlite` binds the database (`<root>/.tcip/store.db`),
-`TCIP_STORE_BACKEND=file` the loose-file layout, any other value refuses.
-`tests/test_store_contract.py` runs on both in one run; the rest runs on whichever is bound, so
-run `pytest tests/` both ways when you touch the seam. A root with loose records is
-refused by the database backend until `tcip adopt-store` conforms it. The MCP server auto-launches
-from `.mcp.json` at the repo root; a stale tool index (an `InputValidationError` for a name you
-expect, or a renamed tool under its old name) means restart the client. Durable state resolves
-via `$TCIP_STATE_ROOT`, pinned at startup by the web backend and every MCP server.
+`TCIP_STORE_BACKEND=sqlite` binds the database (`<root>/.tcip/store.db`), `TCIP_STORE_BACKEND=file`
+the loose-file layout, any other value refuses. `tests/test_store_contract.py` runs on both in one
+run; the rest runs on whichever is bound, so run `pytest tests/` both ways when you touch the seam.
+A root with loose records is refused by the database backend until `tcip adopt-store` conforms it.
+The MCP server auto-launches from `.mcp.json`; a stale tool index means restart the client. Durable
+state resolves via `$TCIP_STATE_ROOT`, pinned at startup by the web backend and every MCP server.
 
 ## Conventions
 
-- Lazy-import torch and torchvision inside function bodies. MCP tools live in
-  `packages/tcip-mcp/src/tcip_mcp/tools/`, decorated `@mcp.tool()` and `@audited`. A one-off
-  script the agent writes for one project lives with that project, in the project's own
-  directory, never in this repository. A standing operator capability is a `cli/` console
-  command. Add a tool only for an audit seam, long-running infrastructure, or domain knowledge
-  the agent lacks.
+- Lazy-import torch and torchvision inside function bodies, so MCP startup stays fast.
+- A one-off script the agent writes for one project lives with that project, in the project's own
+  directory, never in this repository. A standing operator capability is a console command. Add an
+  MCP tool only for an audit seam, long-running infrastructure, or domain knowledge the agent
+  lacks.
 - Crop traits are controlled vocabulary in `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`;
   verify there before asserting.
-- The word provisional is reserved for the delivery gate's acknowledged-unvalidated sense
-  (the `majority_provisional` field, the provisional floor). A plain value says default, a
-  bound says cap or ceiling, an unsettled policy says tentative or draft.
 - Every piece of shipped prose (comments, docstrings, log and UI strings, test names, file names,
-  scripts, README, skills, package `CLAUDE.md`s) is for whoever reads it next, never a changelog
-  of the session that wrote it: no tracking labels (`K<n>`, `Fix <letter>`, `finding <n>`,
-  `round <n>`, `Phase <n>`), no inline decision dates, no bold or all-caps emphasis, no em
-  dashes. If nothing survives once that framing is stripped, write nothing.
+  scripts, README, skills, package `CLAUDE.md`s) is for whoever reads it next, never a changelog of
+  the session that wrote it: no tracking labels, no inline decision dates, no bold or all-caps
+  emphasis, no em dashes. If nothing survives once that framing is stripped, write nothing.
 - `docs/` and `.claude/` are local, gitignored dev tooling, except the generated skills under
-  `.claude/skills/`, which are tracked. `docs/owner-decisions.md` holds the owner's standing
-  rulings.
+  `.claude/skills/`, which are tracked.
