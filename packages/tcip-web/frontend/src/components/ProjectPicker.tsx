@@ -12,14 +12,17 @@ import { useEffect, useId, useRef, useState } from "react";
 import {
   api,
   type PendingRemovalEntry,
+  type PendingRenameEntry,
   type ProjectSummary,
   type RemovalOutcome,
+  type RenameOutcome,
 } from "@/api/client";
 import type {
   DependencyWarning,
   DependentProject,
   ExternalRoot,
   RemovalPreview,
+  RenamePreview,
 } from "@/api/types.generated";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SeasonRail } from "@/components/SeasonRail";
@@ -269,6 +272,162 @@ function RemovalDialog({
   );
 }
 
+function RenameDialog({
+  name,
+  onClose,
+  onRenamed,
+  onRefetchListing,
+}: {
+  name: string;
+  onClose: () => void;
+  onRenamed: () => void;
+  onRefetchListing: () => void;
+}) {
+  const user = useStore((s) => s.user);
+  const newNameFieldId = useId();
+  const nameFieldId = useId();
+  const [preview, setPreview] = useState<RenamePreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+  const [confirmText, setConfirmText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.projects
+      .renamePreview(name)
+      .then((p) => {
+        if (!cancelled) setPreview(p);
+      })
+      .catch((e) => {
+        if (!cancelled) setPreviewError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [name]);
+
+  const previewSettled = preview !== null;
+  const checking = !previewSettled && previewError === null;
+  const refusal = submitError ?? preview?.refusal ?? null;
+  const canConfirm =
+    previewSettled &&
+    !refusal &&
+    confirmText === name &&
+    newName.trim().length > 0 &&
+    newName !== name &&
+    !submitting;
+
+  async function confirmRename() {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const res = await api.projects.rename({
+        name,
+        new_name: newName,
+        confirm_name: confirmText,
+        user,
+      });
+      forgetRecentProject(name);
+      const dependentsSuffix =
+        res.dependent_projects.length > 0
+          ? ` ${res.dependent_projects.length} project(s) depend on it; see their cards.`
+          : "";
+      useStore
+        .getState()
+        .pushToast(
+          `Rename requested: ${name} moves to ${res.new_name} at the next backend start. It is ` +
+            `hidden from the picker until then.${dependentsSuffix}`,
+          "success",
+        );
+      onRenamed();
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : String(e));
+      onRefetchListing();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function dependentLine(d: DependentProject): string {
+    if (d.unreadable) {
+      return `${d.project}: ${d.unreadable}`;
+    }
+    return (
+      `${d.project} registers images from this project as dataset ${d.dataset_id}; it keeps ` +
+      "pointing at the old path until its owner re-registers it"
+    );
+  }
+
+  return (
+    <ConfirmDialog heading={`Rename ${name}`} onClose={onClose} busy={checking}>
+      <div className="flex flex-col gap-3 text-[12px]">
+        <div className="flex flex-col gap-3" aria-live="polite">
+          {checking && (
+            <p className="text-tcip-muted">Checking this project&apos;s dependents and refusals…</p>
+          )}
+          {previewError && (
+            <p className="text-tcip-warn">
+              This project&apos;s dependents and refusals could not be checked: {previewError}.
+              Close and try again.
+            </p>
+          )}
+          {refusal && <p className="text-tcip-fp">{refusal}</p>}
+          {preview && preview.dependent_projects.length > 0 && (
+            <div className="text-tcip-fp">
+              <p className="font-medium">Other projects depend on this one:</p>
+              <ul className="list-disc pl-4">
+                {preview.dependent_projects.map((d, i) => (
+                  <li key={i}>{dependentLine(d)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+        <p className="text-tcip-muted">
+          {name} renames at the next backend start; it is hidden from the picker until then, or
+          withdrawn from the pending list below before that.
+        </p>
+        <label className="flex flex-col gap-1" htmlFor={newNameFieldId}>
+          <span className="tcip-label">New name</span>
+          <input
+            id={newNameFieldId}
+            className="tcip-input"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+        <label className="flex flex-col gap-1" htmlFor={nameFieldId}>
+          <span className="tcip-label">Type the project name to confirm</span>
+          <input
+            id={nameFieldId}
+            className="tcip-input"
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+        <div className="flex gap-2">
+          <button
+            className="tcip-btn-primary flex-1"
+            disabled={!canConfirm}
+            onClick={confirmRename}
+          >
+            {submitting ? "Renaming…" : "Rename"}
+          </button>
+          <button className="tcip-btn flex-1" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </ConfirmDialog>
+  );
+}
+
 function relativeTime(epochSeconds: number): string {
   const deltaMs = Date.now() - epochSeconds * 1000;
   const mins = Math.round(deltaMs / 60000);
@@ -298,6 +457,7 @@ function holdingDirName(path: string): string {
 interface DependencyWarningGroup {
   target: string;
   present: boolean;
+  pendingKind: string | null;
   count: number;
 }
 
@@ -310,7 +470,12 @@ function groupDependencyWarnings(warnings: DependencyWarning[]): DependencyWarni
     if (existing) {
       existing.count += 1;
     } else {
-      byTarget.set(w.target, { target: w.target, present: w.present, count: 1 });
+      byTarget.set(w.target, {
+        target: w.target,
+        present: w.present,
+        pendingKind: w.pending_kind ?? null,
+        count: 1,
+      });
     }
   }
   return Array.from(byTarget.values());
@@ -319,6 +484,12 @@ function groupDependencyWarnings(warnings: DependencyWarning[]): DependencyWarni
 function dependencyWarningLine(g: DependencyWarningGroup): string {
   const countSuffix = g.count > 1 ? ` (${g.count} datasets)` : "";
   const remedy = g.count > 1 ? "the datasets" : "the dataset";
+  if (g.present && g.pendingKind === "rename") {
+    return (
+      `Depends on ${g.target}${countSuffix}, which is being renamed; its images stay where ` +
+      `they are. Register ${remedy} again at the new path once the move lands to clear this.`
+    );
+  }
   if (g.present) {
     return (
       `Depends on ${g.target}${countSuffix}, which is pending removal; its images move to the ` +
@@ -354,6 +525,32 @@ function removalOutcomeLine(o: RemovalOutcome): string {
   return `${o.name}: skipped (${o.skipped})`;
 }
 
+function renameOutcomeLine(o: RenameOutcome): string {
+  if (o.blocked_by) {
+    if (o.blocked_errno === EACCES || o.blocked_errno === EPERM) {
+      return (
+        `${o.name}: the rename at this start was refused, another process still holds its ` +
+        `files (${o.blocked_by}); it stays pending and moves at the next start after that ` +
+        "process exits."
+      );
+    }
+    if (o.blocked_errno === EXDEV) {
+      return (
+        `${o.name}: the rename at this start was refused, it cannot move across filesystems ` +
+        `(${o.blocked_by}); it stays pending until moved by hand.`
+      );
+    }
+    return `${o.name}: blocked (${o.blocked_by})`;
+  }
+  if (o.skipped) {
+    return `${o.name}: skipped (${o.skipped})`;
+  }
+  if (o.already_renamed) {
+    return `${o.name} was already renamed to ${o.new_name}.`;
+  }
+  return `${o.name} renamed to ${o.new_name}.`;
+}
+
 export function ProjectPicker() {
   const user = useStore((s) => s.user);
   const setUser = useStore((s) => s.setUser);
@@ -368,6 +565,10 @@ export function ProjectPicker() {
   const [pendingRemoval, setPendingRemoval] = useState<PendingRemovalEntry[]>([]);
   const [removalOutcomes, setRemovalOutcomes] = useState<RemovalOutcome[]>([]);
   const [removalTarget, setRemovalTarget] = useState<string | null>(null);
+  const [pendingRename, setPendingRename] = useState<PendingRenameEntry[]>([]);
+  const [renameOutcomes, setRenameOutcomes] = useState<RenameOutcome[]>([]);
+  const [renameTarget, setRenameTarget] = useState<string | null>(null);
+  const [withdrawingRename, setWithdrawingRename] = useState<string | null>(null);
   const openedRef = useRef(false);
   const annotatorFieldRef = useRef<HTMLInputElement | null>(null);
 
@@ -426,10 +627,31 @@ export function ProjectPicker() {
         setProjects(res.projects);
         setPendingRemoval(res.pending_removal);
         setRemovalOutcomes(res.removal_startup_outcomes);
+        setPendingRename(res.pending_rename);
+        setRenameOutcomes(res.rename_startup_outcomes);
       })
       .catch((e) => {
         setLoadError(e instanceof Error ? e.message : String(e));
       });
+  }
+
+  async function withdrawRename(name: string) {
+    setWithdrawingRename(name);
+    try {
+      await api.projects.withdrawRename(name, user);
+      await refetch();
+    } catch (e) {
+      useStore
+        .getState()
+        .pushToast(
+          `Could not withdraw the pending rename for ${name}: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+          "error",
+        );
+    } finally {
+      setWithdrawingRename(null);
+    }
   }
 
   useEffect(() => {
@@ -445,6 +667,8 @@ export function ProjectPicker() {
         setProjects(res.projects);
         setPendingRemoval(res.pending_removal);
         setRemovalOutcomes(res.removal_startup_outcomes);
+        setPendingRename(res.pending_rename);
+        setRenameOutcomes(res.rename_startup_outcomes);
         // Auto-open the active project on first app load.
         if (!alreadyAttempted) {
           const active = res.projects.find((p) => p.name === res.active);
@@ -469,8 +693,11 @@ export function ProjectPicker() {
   }, []);
 
   // A project with a blocked outcome from this start already appears under the outcomes list
-  // below; the plain "Pending removal" line would only repeat it.
+  // below; the plain "Pending removal"/"Pending rename" line would only repeat it.
   const blockedThisStart = new Set(removalOutcomes.filter((o) => o.blocked_by).map((o) => o.name));
+  const blockedRenameThisStart = new Set(
+    renameOutcomes.filter((o) => o.blocked_by).map((o) => o.name),
+  );
 
   return (
     <div className="h-full w-full overflow-auto bg-gradient-to-b from-tcip-bg to-[#181a12] p-6 flex justify-center">
@@ -672,9 +899,18 @@ export function ProjectPicker() {
                         </button>
                         {(() => {
                           const reason = p.removal_refusal;
-                          const reasonId = `remove-reason-${p.name}`;
+                          const reasonId = `refusal-reason-${p.name}`;
                           return (
                             <>
+                              <button
+                                type="button"
+                                className="tcip-btn"
+                                disabled={!!reason && !p.removal_releasable}
+                                aria-describedby={reason ? reasonId : undefined}
+                                onClick={() => setRenameTarget(p.name)}
+                              >
+                                Rename…
+                              </button>
                               <button
                                 type="button"
                                 className="tcip-btn"
@@ -718,6 +954,29 @@ export function ProjectPicker() {
           </div>
         )}
 
+        {pendingRename.filter((p) => !blockedRenameThisStart.has(p.name)).length > 0 && (
+          <div className="text-[11px] text-tcip-muted flex flex-col gap-1">
+            {pendingRename
+              .filter((p) => !blockedRenameThisStart.has(p.name))
+              .map((p) => (
+                <div key={p.name} className="flex items-center gap-2">
+                  <span>
+                    Pending rename: {p.name} to {p.new_name}, requested {localTime(p.requested_at)};
+                    moves at the next backend start.
+                  </span>
+                  <button
+                    type="button"
+                    className="tcip-btn"
+                    disabled={withdrawingRename === p.name}
+                    onClick={() => void withdrawRename(p.name)}
+                  >
+                    {withdrawingRename === p.name ? "Withdrawing…" : "Withdraw"}
+                  </button>
+                </div>
+              ))}
+          </div>
+        )}
+
         {removalOutcomes.length > 0 && (
           <div className="text-[11px] text-tcip-muted flex flex-col gap-0.5">
             {removalOutcomes.map((o, i) => (
@@ -725,7 +984,27 @@ export function ProjectPicker() {
             ))}
           </div>
         )}
+
+        {renameOutcomes.length > 0 && (
+          <div className="text-[11px] text-tcip-muted flex flex-col gap-0.5">
+            {renameOutcomes.map((o, i) => (
+              <span key={`${o.name}-${i}`}>{renameOutcomeLine(o)}</span>
+            ))}
+          </div>
+        )}
       </div>
+
+      {renameTarget && (
+        <RenameDialog
+          name={renameTarget}
+          onClose={() => setRenameTarget(null)}
+          onRenamed={() => {
+            setRenameTarget(null);
+            void refetch();
+          }}
+          onRefetchListing={() => void refetch()}
+        />
+      )}
 
       {removalTarget && (
         <RemovalDialog

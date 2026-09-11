@@ -13,6 +13,9 @@ vi.mock("@/api/client", () => {
         removalPreview: vi.fn(),
         remove: vi.fn(),
         releaseBinding: vi.fn(),
+        renamePreview: vi.fn(),
+        rename: vi.fn(),
+        withdrawRename: vi.fn(),
       },
       dataset: {
         select: vi.fn(),
@@ -82,6 +85,9 @@ beforeEach(() => {
   vi.mocked(api.projects.removalPreview).mockReset();
   vi.mocked(api.projects.remove).mockReset();
   vi.mocked(api.projects.releaseBinding).mockReset();
+  vi.mocked(api.projects.renamePreview).mockReset();
+  vi.mocked(api.projects.rename).mockReset();
+  vi.mocked(api.projects.withdrawRename).mockReset();
 });
 
 const NO_REFUSAL_PREVIEW = {
@@ -100,6 +106,8 @@ describe("ProjectPicker", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -116,6 +124,8 @@ describe("ProjectPicker", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -136,6 +146,8 @@ describe("ProjectPicker", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -150,6 +162,8 @@ describe("ProjectPicker", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -177,6 +191,8 @@ describe("ProjectPicker", () => {
       projects: withLabelProblem,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -195,6 +211,8 @@ describe("ProjectPicker", () => {
       projects: [],
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
     expect(await screen.findByText("No projects yet")).toBeInTheDocument();
@@ -208,6 +226,8 @@ describe("ProjectPicker", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
@@ -251,6 +271,8 @@ describe("ProjectPicker", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
@@ -288,6 +310,8 @@ describe("ProjectPicker", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
     fireEvent.click(await screen.findByText("crop_a_subject_a_valley-farm"));
@@ -313,6 +337,8 @@ describe("ProjectPicker", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -353,6 +379,8 @@ describe("ProjectPicker", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(freshApi.dataset.select).mockResolvedValue({
       status: "ok",
@@ -394,6 +422,8 @@ describe("ProjectPicker", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(freshApi.dataset.select).mockResolvedValue({
       status: "ok",
@@ -426,6 +456,8 @@ describe("ProjectPicker", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -445,6 +477,8 @@ describe("ProjectPicker", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -463,6 +497,8 @@ describe("ProjectPicker", () => {
       projects: [active, PROJECTS[1]],
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -486,6 +522,8 @@ describe("ProjectPicker", () => {
       projects: [spaced, PROJECTS[1]],
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -502,6 +540,8 @@ describe("ProjectPicker", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
     fireEvent.click(await screen.findByText("crop_a_subject_a_valley-farm"));
@@ -517,6 +557,8 @@ describe("ProjectPicker", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
     fireEvent.click(await screen.findByText("crop_a_subject_a_valley-farm"));
@@ -539,6 +581,8 @@ describe("ProjectPicker", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
     await screen.findByText(PROJECTS[0].name);
@@ -570,6 +614,8 @@ describe("ProjectPicker removal", () => {
       projects: projectsWithReason,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
     await selectFirstCard();
@@ -596,6 +642,8 @@ describe("ProjectPicker removal", () => {
       projects: projectsWithReason,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
     await selectFirstCard();
@@ -615,6 +663,8 @@ describe("ProjectPicker removal", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
     await selectFirstCard();
@@ -630,6 +680,8 @@ describe("ProjectPicker removal", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview).mockResolvedValue({
       external_roots: [{ path: "/data/external", layouts: ["root"], present: true }],
@@ -667,6 +719,8 @@ describe("ProjectPicker removal", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview).mockResolvedValue({
       external_roots: [],
@@ -696,6 +750,8 @@ describe("ProjectPicker removal", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview).mockRejectedValue(new Error("backend unreachable"));
     render(<ProjectPicker />);
@@ -723,6 +779,8 @@ describe("ProjectPicker removal", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
     render(<ProjectPicker />);
@@ -749,6 +807,8 @@ describe("ProjectPicker removal", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     let resolvePreview: (value: typeof NO_REFUSAL_PREVIEW) => void = () => {};
     vi.mocked(api.projects.removalPreview).mockReturnValue(
@@ -780,6 +840,8 @@ describe("ProjectPicker removal", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview).mockResolvedValue({
       external_roots: [{ path: "/data/external", layouts: ["root"], present: true }],
@@ -809,6 +871,8 @@ describe("ProjectPicker removal", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
     render(<ProjectPicker />);
@@ -835,6 +899,8 @@ describe("ProjectPicker removal", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
     vi.mocked(api.projects.remove).mockRejectedValue(
@@ -860,6 +926,8 @@ describe("ProjectPicker removal", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
     vi.mocked(api.projects.remove).mockRejectedValue(
@@ -889,6 +957,8 @@ describe("ProjectPicker removal", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview)
       .mockResolvedValueOnce({
@@ -965,6 +1035,8 @@ describe("ProjectPicker removal", () => {
         projects: PROJECTS,
         pending_removal: [],
         removal_startup_outcomes: [],
+        pending_rename: [],
+        rename_startup_outcomes: [],
       });
       vi.mocked(api.projects.removalPreview).mockResolvedValue({
         external_roots: [],
@@ -1002,6 +1074,8 @@ describe("ProjectPicker removal", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview).mockResolvedValue({
       external_roots: [],
@@ -1025,6 +1099,8 @@ describe("ProjectPicker removal", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
     vi.mocked(api.projects.remove).mockResolvedValue({
@@ -1090,6 +1166,8 @@ describe("ProjectPicker removal", () => {
       projects: withWarnings,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -1119,6 +1197,8 @@ describe("ProjectPicker removal", () => {
       projects: withProblem,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -1135,6 +1215,8 @@ describe("ProjectPicker removal", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview).mockResolvedValue({
       external_roots: [],
@@ -1185,6 +1267,8 @@ describe("ProjectPicker removal", () => {
       projects: withWarnings,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -1223,6 +1307,8 @@ describe("ProjectPicker removal", () => {
       projects: withWarnings,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
 
@@ -1243,6 +1329,8 @@ describe("ProjectPicker removal", () => {
         projects: PROJECTS,
         pending_removal: [],
         removal_startup_outcomes: [],
+        pending_rename: [],
+        rename_startup_outcomes: [],
       })
       .mockReturnValueOnce(
         new Promise((resolve) => {
@@ -1307,6 +1395,8 @@ describe("ProjectPicker removal", () => {
         },
       ],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
 
     await screen.findByText(new RegExp(`Pending removal: ${PROJECTS[0].name}`));
@@ -1323,6 +1413,8 @@ describe("ProjectPicker removal", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview).mockResolvedValue(NO_REFUSAL_PREVIEW);
     vi.mocked(api.projects.remove).mockResolvedValue({
@@ -1365,6 +1457,8 @@ describe("ProjectPicker removal", () => {
       projects: PROJECTS,
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     vi.mocked(api.projects.removalPreview)
       .mockResolvedValueOnce({
@@ -1417,6 +1511,8 @@ describe("ProjectPicker removal", () => {
         { name: "moved_one", moved_to: "/ws/.removed/moved_one-x", archive_path: "/ws/a.zip" },
         { name: "blocked_one", blocked_by: "a held database", archive_path: "/ws/b.zip" },
       ],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
     await screen.findByText(PROJECTS[0].name);
@@ -1448,6 +1544,8 @@ describe("ProjectPicker removal", () => {
           archive_path: "/ws/b.zip",
         },
       ],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectPicker />);
     await screen.findByText(PROJECTS[0].name);
@@ -1456,6 +1554,287 @@ describe("ProjectPicker removal", () => {
     expect(screen.getByText(/xdev_one.*cannot move across filesystems/)).toBeInTheDocument();
     // held_one has a blocked outcome from this start: the plain pending line is not shown too.
     expect(screen.queryByText(/^Pending removal: held_one/)).not.toBeInTheDocument();
+  });
+});
+
+describe("ProjectPicker rename", () => {
+  const NO_REFUSAL_RENAME_PREVIEW = {
+    refusal: null,
+    releasable: false,
+    dependent_projects: [],
+    records_present: [],
+  };
+
+  it("shares one refusal span between the Rename… and Remove… buttons", async () => {
+    const reasonText = "sample plot is the project the GUI has open";
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: [
+        { ...PROJECTS[0], removal_refusal: reasonText, removal_releasable: false },
+        PROJECTS[1],
+      ],
+      pending_removal: [],
+      removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
+    });
+    render(<ProjectPicker />);
+    await selectFirstCard();
+
+    const rename = screen.getByRole("button", { name: "Rename…" });
+    const remove = screen.getByRole("button", { name: "Remove…" });
+    expect(rename).toBeDisabled();
+    expect(remove).toBeDisabled();
+    expect(rename.getAttribute("aria-describedby")).toBe(remove.getAttribute("aria-describedby"));
+    expect(document.querySelectorAll(`#${remove.getAttribute("aria-describedby")}`)).toHaveLength(
+      1,
+    );
+  });
+
+  it("renders the records refusal in the rename dialog", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.renamePreview).mockResolvedValue({
+      refusal:
+        "'crop_a_subject_a_valley-farm' holds records in experiments; rename is only " +
+        "for a project before it trains, maps or delivers",
+      releasable: false,
+      dependent_projects: [],
+      records_present: ["experiments"],
+    });
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Rename…" }));
+
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText(/holds records in experiments/);
+  });
+
+  it("renders the dependents warning list in the rename dialog", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.renamePreview).mockResolvedValue({
+      refusal: null,
+      releasable: false,
+      dependent_projects: [{ project: "other_project", dataset_id: "ds1" }],
+      records_present: [],
+    });
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Rename…" }));
+
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText(/other_project/);
+    await within(dialog).findByText(/keeps pointing at the old path/);
+  });
+
+  it("gates confirm on a typed current name and a new, non-empty new name", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.renamePreview).mockResolvedValue(NO_REFUSAL_RENAME_PREVIEW);
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Rename…" }));
+
+    const dialog = await screen.findByRole("dialog");
+    const nameField = await within(dialog).findByLabelText(/type the project name to confirm/i);
+    const newNameField = within(dialog).getByLabelText(/new name/i);
+    const confirm = within(dialog).getByRole("button", { name: /^Rename$/ });
+    await waitFor(() => expect(confirm).toBeDisabled());
+
+    fireEvent.change(nameField, { target: { value: PROJECTS[0].name } });
+    expect(confirm).toBeDisabled();
+
+    fireEvent.change(newNameField, { target: { value: PROJECTS[0].name } });
+    expect(confirm).toBeDisabled();
+
+    fireEvent.change(newNameField, { target: { value: "crop_a_subject_a_new-site" } });
+    expect(confirm).not.toBeDisabled();
+  });
+
+  it("requests the rename, toasts, forgets the recent entry, and closes the dialog on success", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
+    });
+    vi.mocked(api.projects.renamePreview).mockResolvedValue(NO_REFUSAL_RENAME_PREVIEW);
+    vi.mocked(api.projects.rename).mockResolvedValue({
+      name: PROJECTS[0].name,
+      new_name: "crop_a_subject_a_new-site",
+      completes: "at the next backend start, or tcip complete-renames",
+      dependent_projects: [],
+      audit_scope: "/ws/target",
+      recorded_in_open_project: true,
+      audit_note: "its own line is in its own log.",
+    });
+    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+    localStorage.setItem(
+      "tcip.recent_projects",
+      JSON.stringify([{ name: PROJECTS[0].name, path: PROJECTS[0].path }]),
+    );
+
+    render(<ProjectPicker />);
+    await selectFirstCard();
+    fireEvent.click(screen.getByRole("button", { name: "Rename…" }));
+    const dialog = await screen.findByRole("dialog");
+    const nameField = await within(dialog).findByLabelText(/type the project name to confirm/i);
+    const newNameField = within(dialog).getByLabelText(/new name/i);
+    fireEvent.change(nameField, { target: { value: PROJECTS[0].name } });
+    fireEvent.change(newNameField, { target: { value: "crop_a_subject_a_new-site" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Rename$/ }));
+
+    await waitFor(() =>
+      expect(api.projects.rename).toHaveBeenCalledWith({
+        name: PROJECTS[0].name,
+        new_name: "crop_a_subject_a_new-site",
+        confirm_name: PROJECTS[0].name,
+        user: expect.any(String),
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(pushToast).toHaveBeenCalledWith(
+      expect.stringContaining("crop_a_subject_a_new-site"),
+      "success",
+    );
+    expect(JSON.parse(localStorage.getItem("tcip.recent_projects") ?? "[]")).toEqual([]);
+  });
+
+  it("renders the pending-rename line with a Withdraw control that clears it", async () => {
+    vi.mocked(api.projects.list)
+      .mockResolvedValueOnce({
+        workspace: "/ws",
+        active: null,
+        active_path: null,
+        projects: [PROJECTS[1]],
+        pending_removal: [],
+        removal_startup_outcomes: [],
+        pending_rename: [
+          {
+            name: PROJECTS[0].name,
+            new_name: "crop_a_subject_a_new-site",
+            requested_at: "20260304T120000Z",
+          },
+        ],
+        rename_startup_outcomes: [],
+      })
+      .mockResolvedValueOnce({
+        workspace: "/ws",
+        active: null,
+        active_path: null,
+        projects: PROJECTS,
+        pending_removal: [],
+        removal_startup_outcomes: [],
+        pending_rename: [],
+        rename_startup_outcomes: [],
+      });
+    vi.mocked(api.projects.withdrawRename).mockResolvedValue({
+      withdrawn: true,
+      name: PROJECTS[0].name,
+      new_name: "crop_a_subject_a_new-site",
+    });
+    render(<ProjectPicker />);
+
+    await screen.findByText(new RegExp(`Pending rename: ${PROJECTS[0].name}`));
+    fireEvent.click(screen.getByRole("button", { name: "Withdraw" }));
+
+    await waitFor(() =>
+      expect(api.projects.withdrawRename).toHaveBeenCalledWith(
+        PROJECTS[0].name,
+        expect.any(String),
+      ),
+    );
+    await waitFor(() => expect(api.projects.list).toHaveBeenCalledTimes(2));
+    await screen.findByText(PROJECTS[0].name);
+  });
+
+  it("renders a blocked rename's own sentence and filters it from the plain pending line", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+      pending_rename: [
+        { name: "held_target", new_name: "held_target_2", requested_at: "20260304T120000Z" },
+      ],
+      rename_startup_outcomes: [
+        { name: "held_target", new_name: "held_target_2", blocked_by: "in use", blocked_errno: 13 },
+      ],
+    });
+    render(<ProjectPicker />);
+    await screen.findByText(PROJECTS[0].name);
+
+    expect(
+      screen.getByText(/held_target.*another process still holds its files/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^Pending rename: held_target/)).not.toBeInTheDocument();
+  });
+
+  it("renders the rename sentence, not the removal one, for a dependent whose target is pending rename", async () => {
+    const withWarnings: ProjectSummary[] = [
+      {
+        ...PROJECTS[0],
+        dependency_warnings: [
+          {
+            dataset_id: "ds1",
+            dataset_path: "/ws/target/a",
+            target: "sample_plot_renaming",
+            present: true,
+            pending_kind: "rename",
+          },
+        ],
+      },
+      PROJECTS[1],
+    ];
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: withWarnings,
+      pending_removal: [],
+      removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
+    });
+    render(<ProjectPicker />);
+
+    await screen.findByText(
+      /Depends on sample_plot_renaming, which is being renamed; its images stay where they are\. Register the dataset again at the new path once the move lands to clear this\./,
+    );
+    expect(screen.queryByText(/pending removal/)).not.toBeInTheDocument();
   });
 });
 

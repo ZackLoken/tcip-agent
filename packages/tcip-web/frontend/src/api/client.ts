@@ -17,6 +17,8 @@ import {
   type ReleaseResponse,
   type RemovalPreview,
   type RemovalResponse,
+  type RenamePreview,
+  type RenameResponse,
 } from "@/api/types.generated";
 import type { CanvasStateBody } from "@/lib/canvasSync";
 import type {
@@ -186,6 +188,25 @@ export interface RemovalOutcome {
   archive_path: string | null;
 }
 
+/** One workspace project the listing carries under `pending_rename`: marked, moving onto its
+ *  new name at the next backend start. */
+export interface PendingRenameEntry {
+  name: string;
+  new_name: string;
+  requested_at: string;
+}
+
+/** One outcome of the last `complete_pending_renames` run this backend reported at startup. */
+export interface RenameOutcome {
+  name: string;
+  new_name?: string;
+  blocked_by?: string;
+  blocked_errno?: number | null;
+  already_renamed?: boolean;
+  skipped?: string;
+  note?: string;
+}
+
 export const api = {
   projects: {
     list: () =>
@@ -195,7 +216,9 @@ export const api = {
         active_path: string | null;
         projects: ProjectSummary[];
         pending_removal: PendingRemovalEntry[];
+        pending_rename: PendingRenameEntry[];
         removal_startup_outcomes: RemovalOutcome[];
+        rename_startup_outcomes: RenameOutcome[];
       }>(ROUTES.getProjects),
     setActive: (name: string) =>
       call<{ name: string; path: string }>(ROUTES.postProjectsActive, {
@@ -214,6 +237,21 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ user }),
       }),
+    renamePreview: (name: string) =>
+      call<RenamePreview>(ROUTES.getProjectsByNameRenamePreview(name)),
+    rename: (body: { name: string; new_name: string; confirm_name: string; user: string }) =>
+      call<RenameResponse>(ROUTES.postProjectsRename, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    withdrawRename: (name: string, user: string) =>
+      call<{ withdrawn: boolean; name: string; new_name: string }>(
+        ROUTES.postProjectsRenameWithdraw,
+        {
+          method: "POST",
+          body: JSON.stringify({ name, user }),
+        },
+      ),
   },
 
   dataset: {

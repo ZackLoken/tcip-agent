@@ -65,6 +65,8 @@ describe("openProjectByName", () => {
       projects: [p],
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
 
     await openProjectByName("hz");
@@ -92,6 +94,8 @@ describe("openProjectByName", () => {
       projects: [p],
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
 
     await openProjectByName("fresh");
@@ -117,6 +121,8 @@ describe("openProjectByName", () => {
       projects: [p],
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
 
     await openProjectByName("hz2");
@@ -142,6 +148,8 @@ describe("openProjectByName", () => {
       projects: [p],
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
 
     await openProjectByName("site-a");
@@ -159,6 +167,8 @@ describe("openProjectByName", () => {
       projects: [],
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     expect(await openProjectByName("nope")).toBeNull();
     expect(api.dataset.select).not.toHaveBeenCalled();
@@ -173,6 +183,8 @@ describe("openProjectByName", () => {
       projects: [p],
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
 
     await openProjectByName("hz");
@@ -191,6 +203,8 @@ describe("adoptProjectByName", () => {
       projects: [p],
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
 
     await adoptProjectByName("hz");
@@ -207,6 +221,8 @@ describe("adoptProjectByName", () => {
       projects: [],
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
 
     expect(await adoptProjectByName("nope")).toBeNull();
