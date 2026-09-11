@@ -32,16 +32,42 @@ def _is_under(path: Path, ancestor: Path) -> bool:
     return path == ancestor or ancestor in path.parents
 
 
+def _existing_workspace_conflict(root: Path) -> str | None:
+    """``None`` when ``root`` looks safe to seed a fresh harness workspace under; otherwise the
+    reason it does not: ``root`` itself already carries a ``.tcip`` directory (it is already a
+    project root), or an immediate child of it does (a project already lives directly under
+    ``root``). Either means real state already sits where a scratch workspace would be built."""
+    if (root / ".tcip").is_dir():
+        return f"{root} already carries its own .tcip state"
+    if root.is_dir():
+        for child in sorted(root.iterdir()):
+            if child.is_dir() and (child / ".tcip").is_dir():
+                return f"{child} already carries its own .tcip state"
+    return None
+
+
 def _refuse_unsafe_root(root: Path) -> None:
-    """A harness root is never inside this repository, and never the workspace the caller's own
-    process is currently bound to: either would point a scratch server at real state."""
+    """A harness root is never inside this repository. When this process is itself bound to a
+    ``TCIP_WORKSPACE``, the root must alias it in neither direction (under it, or containing it);
+    when no ``TCIP_WORKSPACE`` is bound, the root must not already look like a workspace, by
+    :func:`_existing_workspace_conflict`. Any of these would point a scratch server at real
+    state."""
     if _is_under(root, REPO_ROOT):
         raise SystemExit(f"{root} is under the repository ({REPO_ROOT}); name a root outside it")
     current_workspace = os.environ.get("TCIP_WORKSPACE")
-    if current_workspace and _is_under(root, Path(current_workspace)):
+    if current_workspace:
+        workspace_path = Path(current_workspace)
+        if _is_under(root, workspace_path) or _is_under(workspace_path, root):
+            raise SystemExit(
+                f"{root} and this process's own TCIP_WORKSPACE ({current_workspace}) alias one "
+                "another (one contains the other, or they are the same directory); a harness "
+                "root must never alias the caller's active workspace in either direction"
+            )
+        return
+    conflict = _existing_workspace_conflict(root)
+    if conflict:
         raise SystemExit(
-            f"{root} is under this process's own TCIP_WORKSPACE ({current_workspace}); a "
-            "harness root must never alias the caller's active workspace"
+            f"{root} already looks like a workspace ({conflict}); name a fresh root"
         )
 
 

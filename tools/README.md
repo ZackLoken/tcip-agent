@@ -72,10 +72,11 @@ breeder or an operator runs against a project are documented in `README.md` and
   isn't a real name in `crops.yml`, to catch fabricated trait names in skill prose.
 - `serve_capture_app.py` - starts and stops `python -m tcip_web` under a scratch environment for
   a GUI capture harness: `start` sets `TCIP_WORKSPACE`/`TCIP_STATE_ROOT` beneath a caller-named
-  harness root (refusing one under the repository or under the caller's own active
-  `TCIP_WORKSPACE`), waits for the projects route to answer, and records pid and port; `stop`
-  kills the recorded process tree. Carries no project fixture, seed, or crop name; seeding a
-  project is the capture script's own job.
+  harness root (refusing one under the repository; refusing one that aliases the caller's own
+  active `TCIP_WORKSPACE` in either direction; refusing, when no `TCIP_WORKSPACE` is bound, a
+  root that already looks like a workspace itself), waits for the projects route to answer, and
+  records pid and port; `stop` kills the recorded process tree. Carries no project fixture, seed,
+  or crop name; seeding a project is the capture script's own job.
 - `generate_favicon.ps1` - renders the browser-tab favicon from the source logo: crops its
   transparent margins, resizes the result to 512x512, and writes it plus a 32x32 copy to the
   frontend's public assets.
