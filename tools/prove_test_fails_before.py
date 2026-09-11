@@ -468,13 +468,23 @@ def run_capturing_outcome(tree: Path, targets: list[str], expr: str, env: dict[s
     return proc, observed
 
 
-_TIMEOUT_HEADLINE = re.compile(r"^Timeout \(>[\d.]+s\) from pytest-timeout\.$")
+_TIMEOUT_HEADLINE = re.compile(
+    r"^(?:[A-Za-z_][\w.]*: )?Timeout \(>[\d.]+s\) from pytest-timeout\.$"
+)
 
 
 def _is_timeout(headline: str) -> bool:
     """Whether this failure is pytest-timeout's own signal-method report (its literal
     ``PYTEST_FAILURE_MESSAGE``), never behavioral evidence and never confused with a hang the
-    thread method reports through the ``FAIL_BEFORE_CURRENT_TEST`` marker instead."""
+    thread method reports through the ``FAIL_BEFORE_CURRENT_TEST`` marker instead.
+
+    The leading exception class is optional because pytest writes the headline both ways: bare
+    where the timeout is the whole report, and prefixed ``Failed: `` where pytest-timeout's
+    signal method raises it as an ordinary ``Failed`` inside the test. Only hosts carrying
+    ``SIGALRM`` take that second path, so a pattern anchored on the bare form alone reads a hang
+    as the test's own ``Failed`` assertion and scores it GUARDS on Linux while scoring it
+    INDETERMINATE on Windows.
+    """
     return bool(_TIMEOUT_HEADLINE.match(headline.strip()))
 
 

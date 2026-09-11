@@ -18,6 +18,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / "tools" / "prove_test_fails_before.py"
 SCRIPT_SOURCE = SCRIPT.read_text(encoding="utf-8")
@@ -382,19 +384,29 @@ def _load_tool():
     return module
 
 
-def test_the_signal_method_timeout_message_is_a_timeout_not_a_behavioral_pass():
-    """Where SIGALRM exists, pytest-timeout raises pytest.fail(PYTEST_FAILURE_MESSAGE), a Failed
-    exception that would otherwise misread as a genuine assertion failure (GUARDS)."""
+@pytest.mark.parametrize("headline", [
+    "Timeout (>5.0s) from pytest-timeout.",
+    "Failed: Timeout (>1.0s) from pytest-timeout.",
+])
+def test_the_signal_method_timeout_message_is_a_timeout_not_a_behavioral_pass(headline):
+    """guard. Where SIGALRM exists, pytest-timeout raises pytest.fail(PYTEST_FAILURE_MESSAGE), a
+    Failed exception that would otherwise misread as a genuine assertion failure (GUARDS). pytest
+    writes that headline both bare and prefixed with the exception class, and the prefixed form is
+    the one a real signal-method run produces, so both must read as a timeout."""
     tool = _load_tool()
-    entry = {"headline": "Timeout (>5.0s) from pytest-timeout.", "phase": "call",
-              "exc_typename": "Failed"}
+    entry = {"headline": headline, "phase": "call", "exc_typename": "Failed"}
     assert tool._failure_kind(entry, Path(".")) == "timeout"
 
 
 def test_a_hung_test_under_per_test_timeout_reports_indeterminate_naming_it(tmp_path):
-    """On this project's harness (no SIGALRM), pytest-timeout kills the process outright; the
-    tool must still say which test hung, from the logstart marker it writes as each test starts,
-    rather than reporting a bare no-outcome refusal that reads the same as any other crash."""
+    """guard. A hung test scores INDETERMINATE and is named, on either host, rather than a bare
+    no-outcome refusal that reads the same as any other crash.
+
+    The route differs and the verdict must not. Where SIGALRM is absent pytest-timeout kills the
+    process outright and the name comes from the logstart marker the tool writes as each test
+    starts; where SIGALRM exists the timeout is raised inside the test as a Failed, and the
+    headline's own pattern is what keeps it from reading as the test's own assertion. This
+    asserts the verdict and the name, never the route, so it holds on both."""
     repo = _scratch_repo(tmp_path)
     _write(repo / "tests" / "test_widgets.py",
            "import time\n"
