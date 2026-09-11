@@ -13,16 +13,16 @@ names that constant directly; it calls a key builder or scope resolver the decla
 defines, one that closes over the constant internally. So the identifying set is the symbol
 itself plus the name of every top-level function in the declaring module whose own body mentions
 the symbol. A module counts as referencing the store when the import graph
-``tools/build_module_inventory.py`` builds says it imports the declaring module, *and* its own
-source text mentions any name in that set. Among referencing modules: a **writer** calls one of
+``tools/build_module_inventory.py`` builds says it imports the declaring module, and its own
+source text mentions any name in that set. Among referencing modules: a writer calls one of
 the writing seam operations (``replace``, ``append``, ``delete``, ``clear_log``) either on a
 store-seam receiver (a name bound to a store handle by this repository's own convention, ``ts``,
 ``tcip_store``, ``store``, ``txn``, dotted onto the operation) or as the bare name the module
-itself imports from ``tcip_store`` (``from tcip_store import replace``); a **reader** does the
+itself imports from ``tcip_store`` (``from tcip_store import replace``); a reader does the
 same for the read-shaped seam operations (``read``, ``read_versioned``, ``exists``, ``keys``,
 ``read_log``, ``read_blob_versioned``, ``open_blob``, ``blob_path``) and calls no writing
 operation this way; a module that references the store but calls neither recognizably is printed
-under **references** rather than folded into readers. This is textual over the whole module, not
+under references rather than folded into readers. This is textual over the whole module, not
 tied to the call site that actually uses this key, so a module calling a store-seam operation for
 an unrelated reason (through the same receiver name, or importing an unrelated symbol of the same
 bare name) would misclassify; it is a starting point for a human sweep, not a proof.
