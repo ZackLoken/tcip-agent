@@ -53,7 +53,7 @@ def hpo_root(tmp_path, monkeypatch) -> Path:
 _RELAUNCH_FIELD_DEFAULTS = {
     "search_alg": "random", "scheduler": "asha", "grace_period": 5, "reduction_factor": 3,
     "max_concurrent": 1, "warm_start": False, "baseline_params": None, "resources_per_trial": None,
-    "param_space": {},
+    "param_space": {}, "trial_budget": None,
 }
 """Every ``run_hyperparameter_search`` argument beside ``n_trials``/``base_config`` a manifest carries, at the
 values ``run_hyperparameter_search`` itself defaults to; :func:`_write_sweep` folds these in so a hand-written
@@ -967,7 +967,7 @@ def test_relaunch_replays_every_manifest_field_run_hyperparameter_search_was_giv
                  n_trials=7, search_alg="bayesopt", scheduler="median",
                  grace_period=3, reduction_factor=4, max_concurrent=2,
                  warm_start=True, baseline_params={"lr": 0.05},
-                 resources_per_trial={"cpu": 2.0, "gpu": 0.5})
+                 resources_per_trial={"cpu": 2.0, "gpu": 0.5}, trial_budget=9)
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_fields001"})
     assert resp.status_code == 200
@@ -986,13 +986,15 @@ def test_relaunch_replays_every_manifest_field_run_hyperparameter_search_was_giv
     assert captured["resources_per_trial"] == {"cpu": 2.0, "gpu": 0.5}
     assert captured["auto_tensorboard"] is False
     assert captured["relaunched_from"] == "hpo_fields001"
+    assert captured["trial_budget"] == 9
 
 
 def test_relaunch_of_a_manifest_predating_split_draws_still_relaunches(
     client: TestClient, hpo_root, monkeypatch
 ) -> None:
     """A manifest without the field carries neither split_draws nor split_draw_seeds; the
-    relaunch route reads them as run_hyperparameter_search's own defaults (1, None) rather than refusing."""
+    relaunch route reads them, and trial_budget, as run_hyperparameter_search's own defaults
+    (1, None, None) rather than refusing."""
     from tcip_web.routes import tuning
 
     captured: dict = {}
@@ -1017,6 +1019,7 @@ def test_relaunch_of_a_manifest_predating_split_draws_still_relaunches(
 
     assert captured["split_draws"] == 1
     assert captured["split_draw_seeds"] is None
+    assert captured["trial_budget"] is None
 
 
 def test_relaunch_passes_through_a_manifests_own_split_draws(
@@ -1041,6 +1044,31 @@ def test_relaunch_passes_through_a_manifests_own_split_draws(
 
     assert captured["split_draws"] == 3
     assert captured["split_draw_seeds"] == [1, 2, 3]
+
+
+def test_relaunch_passes_a_manifests_unreadable_trial_budget_through_to_the_tool(
+    client: TestClient, hpo_root, monkeypatch
+) -> None:
+    """coverage. A manifest recording trial_budget as a non-numeric string relaunches with the
+    string passed through unread by this route: _relaunch_spec reads trial_budget raw, and the
+    tool's own door refuses it as not a count of trials."""
+    from tcip_web.routes import tuning
+
+    captured: dict = {}
+
+    def fake_run_hyperparameter_search(**kwargs):
+        captured.update(kwargs)
+        return {"study_name": kwargs["study_name"]}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    _write_sweep(hpo_root, "hpo_budget001", base_config=base_config, trial_budget="nine")
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_budget001"})
+    assert resp.status_code == 200
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+
+    assert captured["trial_budget"] == "nine"
 
 
 def test_relaunch_coerces_a_manifests_numeric_string_split_draws(
@@ -1434,10 +1462,11 @@ def test_manifest_fields_reports_not_relaunchable_for_an_unreadable_split_draws_
 
 
 def test_manifest_fields_reports_relaunchable_for_a_manifest_recording_split_draws_zero() -> None:
-    """split_draws=0 reads as one draw at every consumer of coerce_split_draws, the tool's own
-    argument's own regime, so a manifest recording it, with every other relaunch field present
-    and no caller-supplied seed axis, is relaunchable rather than refused as an invalid draw
-    count the way the tool itself never refuses it."""
+    """The marker checks nothing the tool's own door checks: split_draws=0 reads as one draw
+    through coerce_split_draws, so a manifest recording it, with every other relaunch field
+    present and no caller-supplied seed axis, lists relaunchable here; its actual relaunch
+    reaches the door, which refuses it by name (the below-one argument leg), and the job records
+    that reason as its own error."""
     from tcip_web.routes.tuning import _manifest_fields
 
     manifest = {

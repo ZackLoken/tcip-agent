@@ -385,6 +385,7 @@ class _RelaunchSpec:
     resources_per_trial: Optional[dict[str, Any]]
     split_draws: int = 1
     split_draw_seeds: Optional[list[int]] = None
+    trial_budget: Optional[int] = None
 
 
 _RELAUNCH_FIELDS: tuple[str, ...] = (
@@ -394,7 +395,9 @@ _RELAUNCH_FIELDS: tuple[str, ...] = (
 """Every ``run_hyperparameter_search`` argument a relaunch replays. ``run_hyperparameter_search`` writes every one of these as a
 key whenever it creates a manifest (a value of ``None`` is a recorded choice, not an absence),
 so only a manifest without the field, or one truncated some other way, names anything as
-missing here."""
+missing here. ``split_draws``, ``split_draw_seeds`` and ``trial_budget`` are not in this tuple:
+each is read with ``run_hyperparameter_search``'s own default (:func:`_relaunch_spec`) rather than required, so a
+manifest predating any one of them still relaunches."""
 
 
 def _missing_relaunch_fields(manifest: dict) -> list[str]:
@@ -470,14 +473,18 @@ def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
     checks :func:`_missing_relaunch_fields` first, so a key absent here would be a programming
     error, never a silently substituted value that was never the sweep's own.
 
-    ``split_draws``/``split_draw_seeds`` are the one exception, read with ``run_hyperparameter_search``'s own
-    defaults (1, ``None``) rather than required: a manifest without the field carries neither
-    key, and must still relaunch. ``split_draws`` is read through
+    ``split_draws``, ``split_draw_seeds`` and ``trial_budget`` are the exception, read with
+    ``run_hyperparameter_search``'s own
+    defaults (1, ``None``, ``None``) rather than required: a manifest without one of these fields
+    carries neither key, and must still relaunch. ``split_draws`` is read through
     :func:`training_tools.coerce_split_draws`, the same coercion :func:`caller_split_seed_refusal`
     applies, so a manifest recording it as a numeric string still relaunches as the int it names
     rather than crashing the worker's own comparison; a caller checks
     :func:`_invalid_split_draws_field` first, so the coercion here is asserted to never read
-    ``None``: that obligation is the caller's, never a value this function substitutes."""
+    ``None``: that obligation is the caller's, never a value this function substitutes.
+    ``trial_budget`` is read raw: a record with one is checked against it by the tool's own door
+    exactly as a launch is, and a record with none replays as recorded, admitted, with no bound
+    for the door to check."""
     from tcip_mcp.tools.training_tools import coerce_split_draws
 
     draws = coerce_split_draws(manifest.get("split_draws"))
@@ -499,6 +506,7 @@ def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
         resources_per_trial=manifest["resources_per_trial"],
         split_draws=draws,
         split_draw_seeds=manifest.get("split_draw_seeds"),
+        trial_budget=manifest.get("trial_budget"),
     )
 
 
@@ -539,6 +547,7 @@ def _worker(job: HPOJob, spec: _RelaunchSpec, output_dir: str, relaunched_from: 
             auto_tensorboard=False,
             split_draws=spec.split_draws,
             split_draw_seeds=spec.split_draw_seeds,
+            trial_budget=spec.trial_budget,
             relaunched_from=relaunched_from,
         )
         if isinstance(res, dict) and res.get("status") == "cancelled":
