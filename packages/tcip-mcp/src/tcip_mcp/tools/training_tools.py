@@ -2209,6 +2209,7 @@ def run_hyperparameter_search(
     split_draws: int = 1,
     split_draw_seeds: list[int] | None = None,
     *,
+    trial_budget: int | None = None,
     relaunched_from: str | None = None,
 ) -> dict:
     """Run hyperparameter optimization on Ray Tune, training each trial for real.
@@ -2257,7 +2258,15 @@ def run_hyperparameter_search(
     split seed itself. Also refuses ``split_draws`` above 1 on an unbound, built-in detection
     config with tiling on that admits exactly one trainable source under ``data.labels_dir``:
     that config's own single-source spatial-strip path pairs no distinct partition with any
-    draw (see :func:`_split_draws_refusal`). ``cancel_hyperparameter_search`` requested against
+    draw (see :func:`_split_draws_refusal`). Also refuses, whatever else is true, a ``split_draws``
+    that is not an integer, or below 1 (see :func:`_split_draws_argument_refusal`, checked before
+    every other leg). Also refuses, on a launch (never a relaunch) above one draw, or on any call
+    naming a ``trial_budget``: an ``n_trials`` or ``trial_budget`` that is not a positive integer;
+    an unbuildable or ungenerable ``param_space``, naming what could not be counted; a launch above
+    one draw that names no ``trial_budget``, naming the budget Ray's own variant count over the
+    built space would admit; and a stated ``trial_budget`` Ray's own count exceeds, naming the
+    count, the budget and, when even one draw would exceed it, that fact, else how many draws the
+    budget admits (see :func:`_trial_budget_refusal`). ``cancel_hyperparameter_search`` requested against
     this study before or during the run instead ends the sweep ``{"status": "cancelled", ...}``,
     the manifest recording the same, rather than a completed result.
 
@@ -2267,10 +2276,13 @@ def run_hyperparameter_search(
             Every axis is checked against ``base_config``'s own resolved selection metric and
             direction (see above); an axis that would disagree at any sampled point is refused
             rather than minted. A ``data.split.seed`` axis is refused outright whenever
-            ``split_draws`` draws at most one partition, unset, 1, zero or below (see
+            ``split_draws`` draws at most one partition, unset or 1, since zero or below is
+            refused at the door (see
             :func:`caller_split_seed_refusal`); above 1 it
             belongs to ``split_draws``/``split_draw_seeds`` instead, never to this dict.
-        n_trials: Number of trials.
+        n_trials: Number of trials; a whole number of at least one on a call that reads a
+            ``trial_budget`` bound (see ``trial_budget`` below), since Ray runs a negative count
+            as an unbounded sweep and a zero count as none.
         output_dir: Base output directory for trial results (defaults under ``.tcip/hpo``).
         search_alg: Search algorithm, see the list above; call ``hpo.available_search_algs()``
             for what's actually installed on this box.
@@ -2295,7 +2307,15 @@ def run_hyperparameter_search(
         relaunched_from: The sweep this one replays, for a caller (the Tuning route's relaunch)
             that started it from another sweep's own recorded manifest; recorded on this
             sweep's manifest so a listing can show the fork, ``None`` when this sweep was not
-            a relaunch. Refused when it names no sweep manifest under this resolved root.
+            a relaunch. Refused when it names no sweep manifest under this resolved root. A
+            relaunch replays the source manifest's own ``trial_budget`` (or none, admitted with
+            no bound to check), never a value this call states.
+        trial_budget: The most trials this sweep may launch, counted the way Ray will launch
+            them (see :func:`~tcip_mcp.pipelines.training.hpo.planned_trial_count`). Required by
+            name above one draw on a launch that is not a relaunch, since the paired grid
+            multiplies a count this call never stated otherwise; checked whenever stated,
+            including at one draw. Recorded on the sweep manifest beside ``split_draws``,
+            ``None`` when the caller stated none.
         split_draws: Above 1, adds ``data.split.seed`` to the search space as a grid over
             ``split_draw_seeds`` (default: the base config's own ``data.split.seed``, else 42,
             plus the draw index), paired with every sampled point through Ray's own
@@ -2331,11 +2351,17 @@ def run_hyperparameter_search(
             ``result["best_value_spread"]``, and every point's own block at
             ``result["split_sensitivity"]`` beside ``result["n_points"]`` (planned points) and
             ``result["split_draws"]``, both mirrored onto the sweep manifest's own ``result``.
-            1 (the default) changes nothing.
+            1 is the default and pairs no spread; zero or below is refused at the door naming the
+            value (see :func:`_split_draws_argument_refusal`); above 1, a launch (never a
+            relaunch) states a ``trial_budget``.
         split_draw_seeds: The seeds ``split_draws`` pairs with every sampled point, one per
             draw; omit for the derived default (see ``split_draws``).
     """
-    from tcip_mcp.pipelines.training.hpo import SPLIT_DRAW_SEED_KEY, tune_search, get_default_space
+    from tcip_mcp.pipelines.training.hpo import (
+        get_default_space,
+        split_draw_search_space,
+        tune_search,
+    )
 
     if param_space is None:
         param_space = get_default_space()
@@ -2357,6 +2383,14 @@ def run_hyperparameter_search(
             if not source_exists:
                 return {"error": f"relaunched_from names no sweep manifest under this root: "
                                   f"{relaunched_from!r}", "issues": []}
+
+        # Computed once so the argument and budget legs below can never disagree on whether a
+        # bound is read (a stated trial_budget, or a launch, never a relaunch, above one draw).
+        reads_bound = trial_budget is not None or (split_draws > 1 and relaunched_from is None)
+
+        argument_refusal = _split_draws_argument_refusal(split_draws)
+        if argument_refusal is not None:
+            return {"error": argument_refusal, "issues": []}
 
         # A bound base_config admitted to split_draws redraws inside its manifest from here on.
         base_config = _base_config_for_split_draws(base_config, split_draws)
@@ -2407,18 +2441,17 @@ def run_hyperparameter_search(
                 return {"error": f"the sweep's base config fails preflight at {label}",
                         "issues": preflight["issues"]}
 
-        search_param_space = param_space
-        resolved_draw_seeds: list[int] | None = None
-        if split_draws > 1:
-            base_seed = int(((base_config.get("data") or {}).get("split") or {}).get("seed", 42))
-            resolved_draw_seeds = (
-                list(split_draw_seeds) if split_draw_seeds is not None
-                else [base_seed + i for i in range(split_draws)]
-            )
-            search_param_space = {
-                **param_space,
-                SPLIT_DRAW_SEED_KEY: {"type": "categorical", "choices": resolved_draw_seeds},
-            }
+        search_param_space, resolved_draw_seeds = split_draw_search_space(
+            param_space, base_config, split_draws, split_draw_seeds)
+
+        budget_refusal = _trial_budget_refusal(
+            reads_bound=reads_bound, split_draws=split_draws, n_trials=n_trials,
+            search_alg=search_alg, warm_start=warm_start, trial_budget=trial_budget,
+            relaunched_from=relaunched_from, search_param_space=search_param_space,
+            baseline_params=baseline_params,
+        )
+        if budget_refusal is not None:
+            return {"error": budget_refusal, "issues": []}
 
         import uuid
         from datetime import datetime, timezone
@@ -2449,6 +2482,7 @@ def run_hyperparameter_search(
             "relaunched_from": relaunched_from,
             "split_draws": split_draws,
             "split_draw_seeds": resolved_draw_seeds,
+            "trial_budget": trial_budget,
         }
         manifest_key = sweep_manifest_key(study_name, output_dir)
         manifest_lock = threading.Lock()
@@ -2830,15 +2864,105 @@ def _base_config_for_split_draws(base_config: dict, split_draws: int) -> dict:
     return {**base_config, "data": {**data_cfg, "split": new_split}}
 
 
+def _split_draws_argument_refusal(split_draws: object) -> str | None:
+    """Whether ``split_draws`` itself is a draw count at all, checked before every other leg
+    (including :func:`_base_config_for_split_draws`), so every later leg sees a draw count of at
+    least one: a value that is not an ``int`` (a ``bool`` is an ``int`` and reads as the integer
+    it names, so ``False`` reaches the next clause) refuses by name, and a value below one
+    refuses by name, rather than failing inside ``range(split_draws)`` or being read as one draw
+    with no reason given. Reachable by a direct Python call alone for the not-an-int clause (the
+    MCP boundary coerces ``"2"``/``2.0`` to ``2`` and rejects ``2.5``; the relaunch worker passes
+    :func:`coerce_split_draws`'s own ``int``).
+    """
+    if not isinstance(split_draws, int):
+        return (f"split_draws={split_draws!r} is not a draw count; pass a whole number of "
+                "partitions to pair.")
+    if split_draws < 1:
+        return (f"split_draws={split_draws} pairs no partition; a sweep pairs at least one, so "
+                "pass 1 (the default, one draw and no spread) or the number of partitions to "
+                "pair.")
+    return None
+
+
+def _trial_budget_refusal(
+    *, reads_bound: bool, split_draws: int, n_trials: object, search_alg: str, warm_start: bool,
+    trial_budget: object, relaunched_from: str | None, search_param_space: dict,
+    baseline_params: dict | None,
+) -> str | None:
+    """Whether this call's own trial count fits the bound it must state or check, run only when
+    ``reads_bound`` says one is read (a launch, never a relaunch, above one draw; or any call
+    naming ``trial_budget``): not called at all otherwise, so a one-draw budgetless launch and a
+    budgetless relaunch import no Ray, count nothing, and behave exactly as before this family.
+
+    Runs its two argument clauses first (an ``n_trials`` or ``trial_budget`` that is not a
+    positive ``int``, a ``bool`` excluded by name), then counts Ray's own variant count over
+    ``search_param_space`` via :func:`~tcip_mcp.pipelines.training.hpo.planned_trial_count`
+    (a space that cannot be counted or generated answers its own refusal, naming the exception,
+    rather than raising out of an audited door), then its two bound clauses: a launch above one
+    draw naming no ``trial_budget`` refuses naming the budget Ray's own count would admit; a
+    stated ``trial_budget`` the count exceeds refuses naming the count, the budget, and whether
+    even one draw exceeds it (the per-draw count, exact by construction: the seed axis is a grid
+    factor of every sample, so ``count // split_draws`` is one draw's own count of this sweep,
+    with no second count taken). Everything else answers ``None``: a budget the count fits
+    under, or a call that reads no bound at all.
+    """
+    if not reads_bound:
+        return None
+    if not isinstance(n_trials, int) or isinstance(n_trials, bool) or n_trials <= 0:
+        return (f"n_trials={n_trials!r} is not a count of trials; Ray runs a negative count as "
+                "an unbounded sweep and a zero count as none, so pass the number of sampled "
+                "points, a whole number of at least one.")
+    if trial_budget is not None and (
+        not isinstance(trial_budget, int) or isinstance(trial_budget, bool) or trial_budget <= 0
+    ):
+        return (f"trial_budget={trial_budget!r} is not a count of trials; pass the most trials "
+                "this sweep may launch, a whole number of at least one, or omit it at one draw.")
+
+    from tcip_mcp.pipelines.training.hpo import planned_trial_count
+
+    try:
+        count = planned_trial_count(
+            search_param_space, n_trials, search_alg, split_draws, warm_start, baseline_params)
+    except (ValueError, KeyError, TypeError, IndexError, OverflowError) as exc:
+        return f"the sweep's param_space cannot be counted as a search space: {exc!r}"
+
+    per_draw = count // split_draws
+    warm_state = "on" if warm_start else "off"
+    built = (f"Ray's own variant count over the space this call builds: n_trials={n_trials} "
+             f"sample(s), search_alg={search_alg!r}, warm start {warm_state}, {per_draw} per draw")
+
+    if split_draws > 1 and trial_budget is None and relaunched_from is None:
+        return (f"split_draws={split_draws} pairs every sampled point with {split_draws} "
+                f"partitions, so this sweep would launch {count} trials ({built}), a total the "
+                f"call never stated; pass trial_budget={count} ({count} admits it as "
+                "configured), or run at split_draws=1.")
+    if trial_budget is not None and count > trial_budget:
+        if per_draw > trial_budget:
+            return (f"this sweep would launch {count} trials ({built}) against "
+                    f"trial_budget={trial_budget}, which this sweep exceeds at one draw "
+                    f"({per_draw} trials per draw); lower n_trials, narrow the gridded axes, or "
+                    "state a larger trial_budget.")
+        admitted_draws = trial_budget // per_draw
+        return (f"this sweep would launch {count} trials ({built}) against "
+                f"trial_budget={trial_budget}, which admits at most {admitted_draws} draw(s) at "
+                f"these settings; lower split_draws to {admitted_draws}, lower n_trials, narrow "
+                "the gridded axes, or state a larger trial_budget.")
+    return None
+
+
 def _split_draws_refusal(
     base_config: dict, param_space: dict | None, task: str, search_alg: str, scheduler: str,
     split_draws: int, split_draw_seeds: list[int] | None, warm_start: bool,
     baseline_params: dict | None,
 ) -> str | None:
-    """Every reason ``run_hyperparameter_search`` refuses ``split_draws`` above 1, checked before minting the
-    sweep. ``None`` when nothing here objects; every call at ``split_draws`` of one or below is
-    one of them, since split_draws governs nothing at or under its default. A caller-supplied
-    ``data.split.seed`` axis at one draw is its sibling's own refusal, not this one's: see
+    """Every reason of the paired path's own that ``run_hyperparameter_search`` refuses
+    ``split_draws`` above 1 for, checked before minting the sweep (the door's own
+    :func:`_split_draws_argument_refusal` and :func:`_trial_budget_refusal` run separately, the
+    budget being the door's own to check, never this function's). ``None`` when nothing here
+    objects; the door's own :func:`_split_draws_argument_refusal` has already refused every value
+    below one before this runs, so one draw alone reaches the early return below, since
+    split_draws governs nothing at or under its default. A caller-supplied ``data.split.seed``
+    axis at one draw is its sibling's own refusal, not this one's: see
     :func:`caller_split_seed_refusal`.
 
     ``base_config`` bound to a split manifest is admitted rather than refused: ``run_hyperparameter_search`` has
@@ -3034,7 +3158,9 @@ _SEED_AXIS_REMEDY = (
     "baseline_params names the seed under a warm start; no other data.* axis is in param_space; "
     "and, for a built-in detection config with tiling on, more than one trainable source is "
     "admitted under data.labels_dir (a single admitted source's own single-source spatial-strip "
-    "path pairs no distinct partition with any draw). A single fixed seed belongs in "
+    "path pairs no distinct partition with any draw); a trial_budget is stated on a launch that "
+    "is not a relaunch, and Ray's variant count over the sweep fits under it. A single fixed "
+    "seed belongs in "
     "base_config's own data.split.seed: the drawn path's partition depends on it, and the "
     "single-source spatial path's, a config with "
     "data.val_images_dir's, or a manifest-bound config's without redraw_within_manifest never "
@@ -3046,20 +3172,20 @@ _SEED_AXIS_REMEDY = (
 def coerce_split_draws(split_draws: object) -> int | None:
     """``split_draws`` read the way a manifest of unknown provenance must be read: ``None``
     stands for 1, the platform's own unset default; an ``int`` is read directly, whatever its
-    sign, a ``bool`` included, since ``run_hyperparameter_search``'s own ``split_draws``
-    argument reads ``True`` as 1 and ``False`` as 0; a ``str`` or a finite ``float`` is read as
-    the integer its ``int()`` names when that integer equals the value it was given, so ``2``
-    and ``"2"`` and ``2.0`` all read as ``2`` while ``2.5`` reads as ``None`` rather than
-    silently truncating to ``2``. This helper carries no lower bound of its own: a value at or
-    below one, positive, zero or negative alike, is not a draw count for it to refuse, since
-    every consumer already reads such a value as one draw (at ``split_draws <= 1``
-    ``_split_draws_refusal`` answers ``None`` and ``_base_config_for_split_draws`` answers the
-    config unchanged), the same way the tool's own argument reads it; a refusal of such a
-    value belongs at the tool's own door, which this helper does not own. A non-numeric
-    string, a non-finite float and anything else ``int()`` cannot read answer ``None``. Shared by
-    :func:`caller_split_seed_refusal`, which treats an unreadable value as no refusal, and by the
-    Tuning route's relaunch surface, which refuses a manifest recording one outright rather than
-    replaying it into a crash or a silently reinterpreted value.
+    sign, a ``bool`` included, since the helper reads a ``bool`` as the integer it names (the
+    door itself refuses ``False`` as below one; see :func:`_split_draws_argument_refusal`); a
+    ``str`` or a finite ``float`` is read as the integer its ``int()`` names when that integer
+    equals the value it was given, so ``2`` and ``"2"`` and ``2.0`` all read as ``2`` while
+    ``2.5`` reads as ``None`` rather than silently truncating to ``2``. This helper carries no
+    lower bound of its own: it reads whatever integer a value names and bounds nothing, whether
+    that integer is at or below one, positive, zero or negative; the tool's own door refuses a
+    value below one, and the Tuning route's relaunch worker reads through this coercion before
+    that door ever sees it, so a manifest recording zero or a negative value reaches the same
+    refusal a fresh call does. A non-numeric string, a non-finite float and anything else
+    ``int()`` cannot read answer ``None``. Shared by :func:`caller_split_seed_refusal`, which
+    treats an unreadable value as no refusal, and by the Tuning route's relaunch surface, which
+    refuses a manifest recording one outright rather than replaying it into a crash or a silently
+    reinterpreted value.
     """
     if split_draws is None:
         return 1
