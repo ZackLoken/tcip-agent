@@ -98,6 +98,62 @@ def test_a_definition_fragment_cited_at_a_docstring_mention_is_re_anchored_to_th
     assert "scripts/example.py:6" not in fixed_text
 
 
+def test_a_definition_fragment_cited_at_a_bare_call_is_re_anchored_not_verified(tmp_path):
+    """A definition-shaped fragment must try itself alone under strict matching, never the
+    bare-symbol candidates candidates() also yields; a bare call line (helper()) starts with the
+    bare name and would otherwise pass the loose check."""
+    _write_source(tmp_path, "scripts/example.py", [
+        "def helper():",
+        "    return 1",
+        "",
+        "",
+        "def caller():",
+        "    helper()",
+        "    return None",
+    ])
+    doc = tmp_path / "ARCHITECTURE.md"
+    doc.write_text("- `def helper(` (`scripts/example.py:6`)\n", encoding="utf-8")
+
+    checker = _load()
+    findings, unanchored = checker.check(doc, tmp_path)
+
+    assert unanchored == 0
+    assert len(findings) == 1
+    assert findings[0]["status"] == "re-anchorable"
+    assert findings[0]["path"] == "scripts/example.py"
+    assert findings[0]["line"] == 1
+
+
+def test_a_definition_fragment_cited_at_a_docstring_line_starting_with_the_name_is_re_anchored(
+    tmp_path,
+):
+    """A docstring line that itself begins with the bare name (never the def keyword) would also
+    pass the loose bare-symbol candidate under the old strict matching; the fragment alone,
+    tried in isolation, must not verify against it either."""
+    _write_source(tmp_path, "scripts/example.py", [
+        "def helper():",
+        "    return 1",
+        "",
+        "",
+        "def caller():",
+        '    """',
+        "    helper is documented here for readers.",
+        '    """',
+        "    return helper()",
+    ])
+    doc = tmp_path / "ARCHITECTURE.md"
+    doc.write_text("- `def helper(` (`scripts/example.py:7`)\n", encoding="utf-8")
+
+    checker = _load()
+    findings, unanchored = checker.check(doc, tmp_path)
+
+    assert unanchored == 0
+    assert len(findings) == 1
+    assert findings[0]["status"] == "re-anchorable"
+    assert findings[0]["path"] == "scripts/example.py"
+    assert findings[0]["line"] == 1
+
+
 def test_a_wide_gap_with_real_prose_between_stays_unanchored(tmp_path):
     """The widened gap admits whitespace and connector punctuation only, so a fragment and a
     citation separated by an unrelated sentence still count as unanchored."""

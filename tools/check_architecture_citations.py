@@ -154,6 +154,16 @@ def candidates(fragment: str) -> list[str]:
     return uniq
 
 
+def match_keys(fragment: str, strict: bool) -> list[str]:
+    """Keys to try against a source line: the fragment alone when it is definition-shaped, so a
+    bare call (``helper()``) or a docstring line that itself begins with the definition text
+    never verifies a citation meant to anchor a definition; the looser candidate set otherwise.
+    """
+    if strict:
+        return [fragment.strip()]
+    return candidates(fragment)
+
+
 def defines(source_line: str, key: str) -> bool:
     """Whether this line is where ``key`` is defined, rather than one of its use sites.
 
@@ -235,7 +245,7 @@ def check(doc_path: Path, repo_root: Path) -> tuple[list[dict], int]:
         # its own definition line, never a later mention (a call, a docstring naming it).
         strict = bool(DEF_RE.match(fragment.strip()))
         hit = None
-        for key in candidates(fragment):
+        for key in match_keys(fragment, strict):
             for n in cited_lines:
                 if not (1 <= n <= len(source)):
                     continue
@@ -251,7 +261,7 @@ def check(doc_path: Path, repo_root: Path) -> tuple[list[dict], int]:
                              "fragment": fragment, "path": rel, "key": hit[0], "line": hit[1]})
             continue
         elsewhere = None
-        for key in candidates(fragment):
+        for key in match_keys(fragment, strict):
             if strict:
                 found = [n for n, s in enumerate(source, 1) if s.lstrip().startswith(key)]
             else:
