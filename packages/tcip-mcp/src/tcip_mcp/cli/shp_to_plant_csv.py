@@ -1,10 +1,10 @@
 """Convert a plant-locations shapefile into ``read_plant_csvs``' CSV schema.
 
-GDAL 3's authority-compliant axis order for EPSG:4326 returns (lat, lon); reprojecting without
-``SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER)`` silently writes latitude into the
-``WGS84_centroid_x`` (longitude) column instead. Refuses a source ``.shp`` with no resolvable CRS
-(missing/unreadable ``.prj``) rather than guessing one, handles both point and polygon source
-geometry (a polygon's own centroid), and validates its own output by reading it back through
+Composes ``plant_mapping.read_plant_shapefile`` for the actual read (the CRS refusal, the
+point/polygon/multipolygon geometry rule, the DBF field resolution and truncation) and writes its
+rows through ``PLANT_CSV_COLUMNS``, the same header ``read_plant_csv_bytes`` reads, so the two
+sides cannot drift; ``n_features`` is the rows written, which excludes the null-geometry features
+``skipped_null_geometry`` counts. Validates its own output by reading it back through
 ``read_plant_csvs`` before reporting success.
 
 Usage:
@@ -20,42 +20,19 @@ import csv
 import sys
 from pathlib import Path
 
-#: read_plant_csvs' exact column schema (plant_mapping.py's read_plant_csvs/PlantRecord).
-CSV_FIELDS = [
-    "plot_name", "accession_name", "plot_number", "row_number", "col_number",
-    "WGS84_centroid_x", "WGS84_centroid_y",
-]
-
-# Optional pass-through columns' default source-attribute field names, overridable per shapefile:
-# an ESRI Shapefile DBF caps field names at 10 characters, so a source rarely matches these exactly.
-_DEFAULT_FIELD_MAP = {
-    "plot_name": "plot_name",
-    "accession_name": "accession_name",
-    "plot_number": "plot_number",
-    "row_number": "row_number",
-    "col_number": "col_number",
-}
-
-
-def _field_value(properties: dict, field_name: str | None) -> str:
-    if field_name is None:
-        return ""
-    value = properties.get(field_name)
-    return "" if value is None else str(value)
-
 
 def _validate_round_trip(csv_path: Path, n_written: int) -> int:
     """Read ``csv_path`` back through ``read_plant_csvs`` and fail loudly, naming the real cause,
     rather than letting a schema/column mismatch surface later as ``draw_splits``' generic
     "group_key_map is missing N stems"."""
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import PLANT_CSV_COLUMNS, read_plant_csvs
 
     parsed = read_plant_csvs([csv_path])
     if len(parsed) == 0:
         raise ValueError(
             f"{csv_path}: wrote {n_written} row(s) but read_plant_csvs parsed 0 plant records back "
             f"from it. The likely cause is a WGS84_centroid_x/WGS84_centroid_y value that failed "
-            f"float() parsing, or a header not matching the expected columns {CSV_FIELDS}."
+            f"float() parsing, or a header not matching the expected columns {PLANT_CSV_COLUMNS}."
         )
     if len(parsed) != n_written:
         raise ValueError(
@@ -74,87 +51,39 @@ def convert_shp_to_plant_csv(
     """Convert ``shp_path`` (a point or polygon plant-locations shapefile) to ``csv_path`` in
     ``read_plant_csvs``' schema, reprojecting every feature's own coordinate to WGS84.
 
-    Returns ``{csv_path, n_features, n_parsed, geometry_kinds, missing_fields}``. Raises
-    ``ValueError`` if the source has no resolvable CRS, has zero features with readable geometry,
-    or if the written CSV fails to round-trip through ``read_plant_csvs``.
+    Returns ``{csv_path, n_features, n_parsed, geometry_kinds, missing_fields,
+    skipped_null_geometry}``. Raises ``ValueError`` if the source has no resolvable CRS
+    (``ShapefileCrsUnknown``), a feature's geometry is neither point, polygon nor multipolygon,
+    has zero features with readable geometry, or if the written CSV fails to round-trip through
+    ``read_plant_csvs``.
     """
-    import fiona
-    from pyproj import Transformer
-    from shapely.geometry import shape
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        PLANT_CSV_COLUMNS,
+        read_plant_shapefile,
+    )
 
     shp_path = Path(shp_path)
     csv_path = Path(csv_path)
-    fields = dict(_DEFAULT_FIELD_MAP)
-    if field_map:
-        fields.update(field_map)
 
-    geom_kinds: set[str] = set()
-    rows: list[dict] = []
-    with fiona.open(str(shp_path)) as layer:
-        # fiona reports a missing .prj as an empty CRS rather than None, so this tests for
-        # emptiness; a bare `is None` would let an unprojected source through to pyproj.
-        if not layer.crs:
-            raise ValueError(
-                f"{shp_path}: no resolvable coordinate reference system (missing or unreadable "
-                ".prj). Refusing to guess a CRS; supply a .prj alongside the .shp."
-            )
-        # always_xy keeps both sides in (lon, lat) order; EPSG:4326's authority-declared order is
-        # (lat, lon), and without this every coordinate lands in the wrong CSV column.
-        transform = Transformer.from_crs(layer.crs, "EPSG:4326", always_xy=True)
-
-        available = set(layer.schema["properties"])
-        resolved_fields: dict[str, str | None] = {}
-        for csv_col, shp_field in fields.items():
-            if shp_field in available:
-                resolved_fields[csv_col] = shp_field
-            elif shp_field[:10] in available:
-                # The ESRI Shapefile DBF driver truncates a field name over 10 chars (e.g.
-                # "accession_name" -> "accession_"); try that truncated form before giving up.
-                resolved_fields[csv_col] = shp_field[:10]
-            else:
-                resolved_fields[csv_col] = None
-        missing = sorted(csv_col for csv_col, f in resolved_fields.items() if f is None)
-
-        for feature in layer:
-            if feature.geometry is None:
-                continue
-            geom = shape(feature.geometry)
-            if geom.geom_type == "Point":
-                geom_kinds.add("point")
-                x, y = geom.x, geom.y
-            else:
-                geom_kinds.add("polygon")
-                centroid = geom.centroid
-                x, y = centroid.x, centroid.y
-            lon, lat = transform.transform(x, y)
-            properties = dict(feature.properties)
-            rows.append({
-                "plot_name": _field_value(properties, resolved_fields["plot_name"]),
-                "accession_name": _field_value(properties, resolved_fields["accession_name"]),
-                "plot_number": _field_value(properties, resolved_fields["plot_number"]),
-                "row_number": _field_value(properties, resolved_fields["row_number"]),
-                "col_number": _field_value(properties, resolved_fields["col_number"]),
-                "WGS84_centroid_x": lon,
-                "WGS84_centroid_y": lat,
-            })
-
-    if not rows:
+    result = read_plant_shapefile(shp_path, field_map=field_map)
+    if not result.rows:
         raise ValueError(f"{shp_path}: zero features with readable geometry; nothing to convert.")
 
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+        writer = csv.DictWriter(f, fieldnames=PLANT_CSV_COLUMNS)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(result.rows)
 
-    n_parsed = _validate_round_trip(csv_path, len(rows))
+    n_parsed = _validate_round_trip(csv_path, len(result.rows))
 
     return {
         "csv_path": str(csv_path),
-        "n_features": len(rows),
+        "n_features": len(result.rows),
         "n_parsed": n_parsed,
-        "geometry_kinds": sorted(geom_kinds),
-        "missing_fields": missing,
+        "geometry_kinds": result.geometry_kinds,
+        "missing_fields": result.missing_fields,
+        "skipped_null_geometry": result.skipped_null_geometry,
     }
 
 

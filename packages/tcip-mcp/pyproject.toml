@@ -18,6 +18,9 @@ dependencies = [
     "rasterio>=1.4",
     "pyproj>=3.5",
     "shapely>=2.0",
+    # Same GDAL-wheel bundling as rasterio, for plant_mapping.read_plant_shapefile and the
+    # tcip shp-to-plant-csv command built over it.
+    "fiona>=1.9",
     "pycocotools>=2.0.7",
     "pydantic>=2",
     "tcip-store",
@@ -31,10 +34,7 @@ dependencies = [
 # [default] adds the dashboard's own deps (aiohttp, grpcio); hpo._ray_session only requests it when importable.
 hpo = ["ray[default,tune]>=2.9", "optuna>=3.0", "hyperopt", "bayesian-optimization",
        "nevergrad", "ax-platform"]
-# fiona is the vector reader tcip_mcp.cli.shp_to_plant_csv uses; no shipped module imports it
-# at runtime, so it belongs here rather than the runtime deps.
-dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "pytest-timeout>=2.0", "pytest-xdist>=3.0",
-       "fiona>=1.9"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "pytest-timeout>=2.0", "pytest-xdist>=3.0"]
 
 [build-system]
 requires = ["hatchling"]
