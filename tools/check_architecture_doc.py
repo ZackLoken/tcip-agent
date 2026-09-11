@@ -592,6 +592,16 @@ def main() -> int:
             ap.error("--fix requires --inventory-json")
         inventory = json.loads(Path(args.inventory_json).read_text(encoding="utf-8"))
         head = args.head or _default_head(repo_root)
+        stamp_findings, stamp_skips = _check_head_is_real(head, repo_root, line_no=0)
+        for note in stamp_skips:
+            print(note)
+        if stamp_findings:
+            kind = stamp_findings[0]["kind"]
+            reason = ("names no commit on this checkout"
+                      if kind == "head_not_a_commit" else "is not an ancestor of the current HEAD")
+            print(f"REFUSED: --head {head} {reason}; stamping it would write a hash no reader can "
+                  f"resolve. Pass the landing's own last content commit.")
+            return 1
         md_path = Path(args.architecture_md)
         fixed = fix_architecture_doc(md_path.read_text(encoding="utf-8"), inventory, head)
         md_path.write_text(fixed, encoding="utf-8", newline="\n")
