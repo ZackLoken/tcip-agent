@@ -164,6 +164,9 @@ endpoint is a trained model.
 - Match the weight of the process to the change. Reach for a worktree, a second reader or another
   model family when the change is genuinely hard to get right, not as a standing ritual, and say
   why you reached for it.
+- A second model family's verdict is not advisory. When two families agree against your own
+  position, conform to them or bring the split to the owner; the outvoted side never lands on the
+  adjudicator's own authority.
 
 ## Commands
 
