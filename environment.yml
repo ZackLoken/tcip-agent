@@ -30,7 +30,7 @@ dependencies:
       - imagecodecs>=2023.1  # LZW/JPEG decode for compressed multi-band GeoTIFF (e.g. a drone orthomosaic)
       # rasterio bundles its own GDAL and ships wheels for every platform this runs on, so no separate osgeo binding, no system libgdal, and no pinned third-party wheel.
       - rasterio>=1.4
-      - fiona>=1.9  # vector side of the same stack, for tcip_mcp.cli.shp_to_plant_csv
+      - fiona>=1.9  # vector side of the same stack, for plant_mapping.read_plant_shapefile and tcip shp-to-plant-csv
       - pyproj>=3.5
       - shapely>=2.0
       - pyyaml>=6.0

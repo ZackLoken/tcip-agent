@@ -43,7 +43,7 @@ import statistics
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Iterable, Optional, Sequence
+from typing import TYPE_CHECKING, ClassVar, Iterable, NamedTuple, Optional, Sequence
 
 import tcip_store
 from PIL import ExifTags, Image
@@ -449,6 +449,15 @@ def capture_digests(stamps: list[ImageStamp]) -> dict[str, str]:
 # ── Plant CSV parsing ───────────────────────────────────────────────────
 
 
+PLANT_CSV_COLUMNS = [
+    "plot_name", "accession_name", "plot_number", "row_number", "col_number",
+    "WGS84_centroid_x", "WGS84_centroid_y",
+]
+"""The seven column names :func:`read_plant_csv_bytes` reads, and the header
+``tcip_mcp.cli.shp_to_plant_csv.convert_shp_to_plant_csv`` writes over :func:`read_plant_shapefile`'s
+own rows, so a shapefile's CSV output cannot drift from what this module parses."""
+
+
 def read_plant_csv_bytes(data: bytes) -> list[PlantRecord]:
     """Parse one plant-locations CSV's own bytes into :class:`PlantRecord` rows.
 
@@ -483,6 +492,9 @@ def read_plant_csv_bytes(data: bytes) -> list[PlantRecord]:
 
 
 def read_plant_csvs(paths: Iterable[Path]) -> list[PlantRecord]:
+    """Read every ``paths`` entry that exists through :func:`read_plant_csv_bytes`, silently
+    skipping a path that is not a file. A plant-locations shapefile is not one of these paths:
+    convert it first with :func:`read_plant_shapefile`'s own CLI, ``tcip shp-to-plant-csv``."""
     records: list[PlantRecord] = []
     for path in paths:
         p = Path(path)
@@ -490,6 +502,140 @@ def read_plant_csvs(paths: Iterable[Path]) -> list[PlantRecord]:
             continue
         records.extend(read_plant_csv_bytes(p.read_bytes()))
     return records
+
+
+class ShapefileRows(NamedTuple):
+    """One :func:`read_plant_shapefile` call's rows and bookkeeping. ``rows`` carries
+    :data:`PLANT_CSV_COLUMNS`' seven keys per feature: the five attribute columns as the DBF
+    value's ``str()`` verbatim (empty when the field is unresolved, exactly the rule
+    :func:`_shapefile_field_value` states), and ``WGS84_centroid_x``/``WGS84_centroid_y`` as the
+    reprojected floats. ``missing_fields`` names every CSV column with no resolvable source
+    attribute; ``geometry_kinds`` is every geometry type actually read (``"point"``,
+    ``"polygon"``, ``"multipolygon"``); ``skipped_null_geometry`` counts features with no
+    geometry at all, invisible in ``rows``."""
+
+    rows: list[dict[str, object]]
+    missing_fields: list[str]
+    geometry_kinds: list[str]
+    skipped_null_geometry: int
+
+
+_DEFAULT_SHAPEFILE_FIELD_MAP = {
+    "plot_name": "plot_name",
+    "accession_name": "accession_name",
+    "plot_number": "plot_number",
+    "row_number": "row_number",
+    "col_number": "col_number",
+}
+"""Optional pass-through columns' default source-attribute field names, overridable per
+shapefile through :func:`read_plant_shapefile`'s own ``field_map``: an ESRI Shapefile DBF caps
+field names at 10 characters, so a source rarely matches these exactly."""
+
+
+def _shapefile_field_value(properties: dict, field_name: Optional[str]) -> str:
+    if field_name is None:
+        return ""
+    value = properties.get(field_name)
+    return "" if value is None else str(value)
+
+
+def read_plant_shapefile(
+    path: Path | str, *, field_map: Optional[dict[str, str]] = None,
+) -> ShapefileRows:
+    """Read a plant-locations shapefile's own features into :data:`PLANT_CSV_COLUMNS`-shaped
+    rows, reprojecting every feature's own coordinate to WGS84 with ``always_xy=True`` (GDAL 3's
+    authority-compliant EPSG:4326 axis order is lat/lon; without this every coordinate would land
+    in the wrong column). An EPSG match is never required and never checked:
+    ``pyproj.Transformer.from_crs`` takes the layer's own CRS object directly, so a custom
+    projected CRS with a valid ``.prj`` converts.
+
+    A point's own coordinate is read; a polygon's or multipolygon's centroid is read; any other
+    geometry type refuses by name (naming the feature index and ``geom_type``), rather than
+    centroiding it silently as a plain nearest-point conversion would. A feature with null
+    geometry is skipped and counted in the return's ``skipped_null_geometry``, not raised on.
+    Raises :class:`ShapefileCrsUnknown` when the layer's CRS cannot be resolved.
+
+    Yields rows, never :class:`PlantRecord`: that dataclass narrows ``plot_number``,
+    ``row_number`` and ``col_number`` to ``Optional[float]`` (:func:`_maybe_float`), which would
+    turn a plot number like ``"A1"`` into an empty cell no count-only round trip would catch. The
+    narrowing stays in :func:`read_plant_csv_bytes`, the reader every consumer of a registered CSV
+    goes through; this function hands back the DBF value's own string, verbatim.
+
+    fiona, pyproj and shapely are imported inside this function body, the package's convention
+    for GDAL-backed dependencies.
+    """
+    import fiona
+    from pyproj import Transformer
+    from shapely.geometry import shape
+
+    shp_path = Path(path)
+    fields = dict(_DEFAULT_SHAPEFILE_FIELD_MAP)
+    if field_map:
+        fields.update(field_map)
+
+    geom_kinds: set[str] = set()
+    rows: list[dict[str, object]] = []
+    skipped_null_geometry = 0
+    with fiona.open(str(shp_path)) as layer:
+        # fiona reports a missing or unparseable .prj as an empty CRS (probed directly, neither
+        # raises), so one falsy check catches both without a second except clause.
+        if not layer.crs:
+            raise ShapefileCrsUnknown(
+                f"{shp_path}: no resolvable coordinate reference system (missing or unreadable "
+                ".prj); refusing to guess a CRS, supply a .prj alongside the .shp"
+            )
+        # always_xy keeps both sides in (lon, lat) order; EPSG:4326's authority-declared order is
+        # (lat, lon), and without this every coordinate lands in the wrong column.
+        transform = Transformer.from_crs(layer.crs, "EPSG:4326", always_xy=True)
+
+        available = set(layer.schema["properties"])
+        resolved_fields: dict[str, Optional[str]] = {}
+        for csv_col, shp_field in fields.items():
+            if shp_field in available:
+                resolved_fields[csv_col] = shp_field
+            elif shp_field[:10] in available:
+                # A source field name over 10 chars is truncated by the ESRI Shapefile DBF
+                # driver; try that truncated form before giving up.
+                resolved_fields[csv_col] = shp_field[:10]
+            else:
+                resolved_fields[csv_col] = None
+        missing_fields = sorted(c for c, f in resolved_fields.items() if f is None)
+
+        for index, feature in enumerate(layer):
+            if feature.geometry is None:
+                skipped_null_geometry += 1
+                continue
+            geom = shape(feature.geometry)
+            if geom.geom_type == "Point":
+                geom_kinds.add("point")
+                x, y = geom.x, geom.y
+            elif geom.geom_type in ("Polygon", "MultiPolygon"):
+                geom_kinds.add("polygon" if geom.geom_type == "Polygon" else "multipolygon")
+                centroid = geom.centroid
+                x, y = centroid.x, centroid.y
+            else:
+                raise ValueError(
+                    f"{shp_path}: feature {index} has geometry type {geom.geom_type!r}, which "
+                    "this reader does not read a point or centroid from; only Point, Polygon "
+                    "and MultiPolygon geometry is read"
+                )
+            lon, lat = transform.transform(x, y)
+            properties = dict(feature.properties)
+            rows.append({
+                "plot_name": _shapefile_field_value(properties, resolved_fields["plot_name"]),
+                "accession_name": _shapefile_field_value(
+                    properties, resolved_fields["accession_name"]),
+                "plot_number": _shapefile_field_value(properties, resolved_fields["plot_number"]),
+                "row_number": _shapefile_field_value(properties, resolved_fields["row_number"]),
+                "col_number": _shapefile_field_value(properties, resolved_fields["col_number"]),
+                "WGS84_centroid_x": lon,
+                "WGS84_centroid_y": lat,
+            })
+
+    return ShapefileRows(
+        rows=rows, missing_fields=missing_fields, geometry_kinds=sorted(geom_kinds),
+        skipped_null_geometry=skipped_null_geometry,
+    )
 
 
 def _maybe_float(x: Optional[str]) -> Optional[float]:
@@ -512,6 +658,13 @@ def registry_content_digest(plants: list[PlantRecord]) -> str:
     rows = sorted(
         (asdict(p) for p in plants), key=lambda r: json.dumps(r, sort_keys=True))
     return hashlib.sha256(json.dumps(rows, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+class ShapefileCrsUnknown(ValueError):
+    """A shapefile's coordinate reference system cannot be resolved: fiona reports a missing
+    ``.prj`` as an empty ``layer.crs``, and (probed directly, since fiona raises nothing at open
+    or at read for this case) a ``.prj`` whose WKT does not parse answers the same falsy
+    ``layer.crs`` rather than an exception, so one check catches both. No CRS is ever guessed."""
 
 
 class NoGeoreferencedPlantsRefusal(Exception):

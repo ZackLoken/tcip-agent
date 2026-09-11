@@ -254,3 +254,183 @@ def test_main_cli_refusal_returns_nonzero(tmp_path: Path) -> None:
 
     assert rc == 1
     assert not csv_path.exists()
+
+
+# ── read_plant_shapefile itself ──────────────────────────────────────────
+
+
+def _alnum_point_shapefile(tmp_path: Path) -> Path:
+    """A ``plot_number`` held as a string field with a non-numeric value, the shape a real plot
+    naming scheme can take; the reader carries it through verbatim, unlike ``PlantRecord``'s own
+    ``Optional[float]`` field."""
+    import fiona
+
+    path = tmp_path / "alnum.shp"
+    schema = {"geometry": "Point",
+              "properties": {"plot_name": "str", "accession_name": "str", "plot_number": "str"}}
+    with fiona.open(str(path), "w", driver="ESRI Shapefile", crs=f"EPSG:{UTM_15N_EPSG}",
+                    schema=schema) as dst:
+        dst.write({"geometry": {"type": "Point", "coordinates": tuple(POINT_NATIVE)},
+                   "properties": {"plot_name": "P9", "accession_name": "acc-Z",
+                                  "plot_number": "A1"}})
+    return path
+
+
+def test_read_plant_shapefile_point_rows_match_reference_and_attrs_verbatim(
+    tmp_path: Path,
+) -> None:
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_shapefile
+
+    result = read_plant_shapefile(_point_shapefile(tmp_path))
+
+    assert result.geometry_kinds == ["point"]
+    assert result.skipped_null_geometry == 0
+    row = result.rows[0]
+    expected_lon, expected_lat = _reference_lonlat(*POINT_NATIVE)
+    assert row["WGS84_centroid_x"] == pytest.approx(expected_lon, abs=1e-6)
+    assert row["WGS84_centroid_y"] == pytest.approx(expected_lat, abs=1e-6)
+    assert row["plot_name"] == "P1"
+    assert row["accession_name"] == "acc-A"
+    assert row["plot_number"] == "1.0"
+
+
+def test_read_plant_shapefile_polygon_rows_match_reference_and_attrs_verbatim(
+    tmp_path: Path,
+) -> None:
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_shapefile
+
+    result = read_plant_shapefile(_polygon_shapefile(tmp_path))
+
+    assert result.geometry_kinds == ["polygon"]
+    row = result.rows[0]
+    expected_lon, expected_lat = _reference_lonlat(*POINT_NATIVE)
+    assert row["WGS84_centroid_x"] == pytest.approx(expected_lon, abs=1e-6)
+    assert row["WGS84_centroid_y"] == pytest.approx(expected_lat, abs=1e-6)
+    assert row["plot_name"] == "P2"
+    assert row["accession_name"] == "acc-B"
+
+
+def test_read_plant_shapefile_non_numeric_plot_number_carried_verbatim(tmp_path: Path) -> None:
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_shapefile
+
+    result = read_plant_shapefile(_alnum_point_shapefile(tmp_path))
+    assert result.rows[0]["plot_number"] == "A1"
+
+
+def test_read_plant_shapefile_refuses_a_crs_it_cannot_resolve(tmp_path: Path) -> None:
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        ShapefileCrsUnknown,
+        read_plant_shapefile,
+    )
+
+    shp = _point_shapefile(tmp_path, epsg=None)
+    with pytest.raises(ShapefileCrsUnknown, match="resolvable coordinate reference system"):
+        read_plant_shapefile(shp)
+
+
+# ── a .prj that exists but does not parse ────────────────────────────────
+
+
+def _garbage_prj_shapefile(tmp_path: Path) -> Path:
+    """A ``.shp`` with a valid geometry beside a ``.prj`` holding unparseable WKT: fiona answers
+    the same falsy ``layer.crs`` a missing ``.prj`` would (probed directly against this
+    environment's fiona), never an exception at open or at read."""
+    shp = _point_shapefile(tmp_path, epsg=UTM_15N_EPSG)
+    (tmp_path / "points.prj").write_text("this is not valid WKT at all !!! ###")
+    return shp
+
+
+def test_garbage_prj_refuses_through_convert_shp_to_plant_csv(tmp_path: Path) -> None:
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import ShapefileCrsUnknown
+
+    shp = _garbage_prj_shapefile(tmp_path)
+    csv_path = tmp_path / "plants.csv"
+    with pytest.raises(ShapefileCrsUnknown, match="resolvable coordinate reference system"):
+        convert_shp_to_plant_csv(shp, csv_path)
+    assert not csv_path.exists()
+
+
+# ── a geometry type this reader does not centroid or read a point from ──
+
+
+def _line_string_shapefile(tmp_path: Path) -> Path:
+    import fiona
+
+    path = tmp_path / "lines.shp"
+    schema = {"geometry": "LineString", "properties": dict(_SCHEMA_PROPERTIES)}
+    with fiona.open(str(path), "w", driver="ESRI Shapefile", crs=f"EPSG:{UTM_15N_EPSG}",
+                    schema=schema) as dst:
+        dst.write({
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [tuple(POINT_NATIVE), (POINT_NATIVE[0] + 10, POINT_NATIVE[1] + 10)],
+            },
+            "properties": dict(_ATTRS_POINT),
+        })
+    return path
+
+
+def test_line_string_geometry_refuses_named_through_convert_shp_to_plant_csv(
+    tmp_path: Path,
+) -> None:
+    """Today a line string is centroided silently and labelled "polygon"; the reader refuses it
+    by name instead, since a line's centroid is not a plant's location."""
+    shp = _line_string_shapefile(tmp_path)
+    with pytest.raises(ValueError, match="LineString"):
+        convert_shp_to_plant_csv(shp, tmp_path / "plants.csv")
+
+
+# ── null-geometry features ───────────────────────────────────────────────
+
+
+def _point_shapefile_with_null_feature(tmp_path: Path) -> Path:
+    import fiona
+
+    path = tmp_path / "with_null.shp"
+    schema = {"geometry": "Point", "properties": dict(_SCHEMA_PROPERTIES)}
+    with fiona.open(str(path), "w", driver="ESRI Shapefile", crs=f"EPSG:{UTM_15N_EPSG}",
+                    schema=schema) as dst:
+        dst.write({"geometry": {"type": "Point", "coordinates": tuple(POINT_NATIVE)},
+                   "properties": dict(_ATTRS_POINT)})
+        dst.write({"geometry": None, "properties": dict(_ATTRS_POLYGON)})
+    return path
+
+
+def test_null_geometry_feature_is_skipped_and_counted(tmp_path: Path) -> None:
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_shapefile
+
+    result = read_plant_shapefile(_point_shapefile_with_null_feature(tmp_path))
+    assert len(result.rows) == 1
+    assert result.skipped_null_geometry == 1
+
+
+def test_convert_shp_to_plant_csv_reports_skipped_null_geometry(tmp_path: Path) -> None:
+    shp = _point_shapefile_with_null_feature(tmp_path)
+    result = convert_shp_to_plant_csv(shp, tmp_path / "plants.csv")
+    assert result["n_features"] == 1
+    assert result["skipped_null_geometry"] == 1
+
+
+# ── PLANT_CSV_COLUMNS: one schema both sides own ─────────────────────────
+
+
+def test_plant_csv_columns_matches_written_header(tmp_path: Path) -> None:
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import PLANT_CSV_COLUMNS
+
+    csv_path = tmp_path / "plants.csv"
+    convert_shp_to_plant_csv(_point_shapefile(tmp_path), csv_path)
+    with csv_path.open(newline="", encoding="utf-8") as f:
+        header = next(csv.reader(f))
+
+    assert header == PLANT_CSV_COLUMNS
+    assert PLANT_CSV_COLUMNS == [
+        "plot_name", "accession_name", "plot_number", "row_number", "col_number",
+        "WGS84_centroid_x", "WGS84_centroid_y",
+    ]
+
+
+def test_converter_csv_carries_non_numeric_plot_number_verbatim(tmp_path: Path) -> None:
+    csv_path = tmp_path / "plants.csv"
+    convert_shp_to_plant_csv(_alnum_point_shapefile(tmp_path), csv_path)
+    rows = _read_csv_rows(csv_path)
+    assert rows[0]["plot_number"] == "A1"
