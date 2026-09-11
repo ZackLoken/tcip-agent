@@ -204,11 +204,11 @@ The agent must never write ground truth the human hasn't seen. Stage proposals t
   bulk-accepted image) is immutable: a stage into it is redirected to a fresh `<engine>@r2` or
   `<model_name>@r2` bucket (the response's `bucket` field is the one actually written), so a
   re-run never overwrites reviewed predictions. Pass `overwrite=True` to force in-place (explicit
-  regime only), which is still refused when verdicts exist. That reach is wider than a detection
-  verdict alone: completing an image on the Review canvas with nothing on it, the far more common
-  way an image is finished, freezes its bucket the same way, so a session that interleaves staging
-  with completing images sends each later stage into its own fresh variant unless every image of
-  a run is staged before any is reviewed.
+  regime only), which is still refused when the bucket carries review state. That reach is wider
+  than a detection verdict alone: completing an image on the Review canvas with nothing on it, the
+  far more common way an image is finished, freezes its bucket the same way, so a session that
+  interleaves staging with completing images sends each later stage into its own fresh variant
+  unless every image of a run is staged before any is reviewed.
 - `focus_human_attention(tab='review', project_root, dataset_root, subject, date, model_name, image_index,
   detection_idx, filter_type, iou_threshold, conf_threshold)` drives the live Review tab straight to a model's
   predictions on a frame/detection, so the human sees exactly what you flagged (a false positive, a

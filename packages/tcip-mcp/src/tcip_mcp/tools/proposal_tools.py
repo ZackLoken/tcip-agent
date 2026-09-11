@@ -781,22 +781,23 @@ def stage_proposals(
       one of two frames per proposal: ``points``, one ring of ``[x, y]`` pairs normalized to
       [0, 1]; or ``rings``, a list of rings in pixel coordinates, each vertex an ``[x, y]`` pair
       or an ``{"x":, "y":}`` mapping, the frame ``segment_prompt`` returns. Both build the same
-      ``Polygon`` through the ground-truth door's own vertex parser. ``overwrite=True`` writes in
-      place even into an existing bucket, refused if the bucket has review state (a verdict or a
-      bulk accept); the default redirects to a fresh run-scoped bucket (``<model_name>@r2``, next
-      free) instead, returned as ``bucket`` alongside ``bucket_redirected``. The count behind that
-      redirect (``verdict_count`` in the error dict, held under its name) counts reviewed images,
-      a detection verdict or a bulk accept alike, not detection entries, so a session that stages
-      one image and completes it on the Review canvas before staging the next spreads one run's
-      proposals over ``@r2``, ``@r3`` and onward, one variant per image already finished; stage
-      every image of a run before reviewing any to avoid it.
+      ``Polygon`` through the ground-truth door's own vertex parser. ``overwrite=True``, this
+      regime alone, writes in place even into an existing bucket, and is itself refused when the
+      bucket carries review state.
 
     Either regime resolves the dataset root, capture date and stem from ``image_path`` itself
     (the same resolver ``propose_annotations`` uses), so the explicit regime takes no
     path fragments a caller must keep consistent with the image. Both write through the one
     staging door guarded on review state (a verdict or a bulk accept,
     ``prediction_buckets.stage_prediction_shapes``), so a re-run never overwrites reviewed
-    predictions or orphans their verdicts. Pair with
+    predictions or orphans their verdicts. Both redirect to the next free run-scoped variant
+    (``<engine>@r2`` for the staged regime, ``<model_name>@r2`` for the explicit one) when the
+    requested bucket carries review state, returned as ``bucket`` alongside ``bucket_redirected``;
+    the count behind that redirect (``verdict_count`` in the error dict, held under its name)
+    counts reviewed images, a detection verdict or a bulk accept alike, not detection entries. So
+    a session that stages one image and completes it on the Review canvas before staging the next
+    spreads one run's proposals over ``@r2``, ``@r3`` and onward, one variant per image already
+    finished; stage every image of a run before reviewing any to avoid it. Pair with
     ``focus_human_attention(tab='review')`` to send the human straight to the result.
 
     A staged record's ``subject`` is whatever ``assignments``/``boxes``/``polygons`` named; the
