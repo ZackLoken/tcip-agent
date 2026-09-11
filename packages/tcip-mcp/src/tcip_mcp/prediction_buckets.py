@@ -8,9 +8,12 @@ a score bin or a quota allocation. The canonical ``predictions/<model>/<date>`` 
 regime's convention for building that path, not the definition of a bucket's identity. Once a
 reviewer has recorded verdicts (accept/reject/edit) against any of a bucket's images,
 re-running inference or re-staging into it would orphan those verdicts (they reference the
-predictions by geometry). So the prediction writers resolve a run-scoped
-bucket through here: with verdicts present the default writes are redirected to the next free
-``<name>@r2`` / ``@r3`` variant, and an explicit ``overwrite=True`` is refused with a count.
+predictions by geometry); the staging door's own reading is wider still, since a bucket a
+reviewer has simply finished with no verdict at all (a bulk accept) is just as immutable to it
+(:func:`review_state_count`'s ``names`` form, see below). So the prediction writers resolve a
+run-scoped bucket through here: with verdicts (or, for the staging door, review state) present
+the default writes are redirected to the next free ``<name>@r2`` / ``@r3`` variant, and an
+explicit ``overwrite=True`` is refused with a count.
 
 A second, narrower rule applies only to the callers that opt into it
 (:func:`resolve_writable_bucket`'s ``refuse_documents``): a requested bucket that already holds
@@ -19,6 +22,13 @@ redirecting or overwriting, since a bucket left in that state was already publis
 run this call would otherwise write beside or over. Three publishers opt in (``run_inference``,
 ``deliver_per_image_counts``'s live path, and the web route's own launch); ``stage_prediction_shapes``
 alone leaves this off, since it accumulates one stem per call into a bucket by contract.
+
+A third keyword, ``count_review_state``, widens what the guard above counts: off by default (the
+three publishers' reading, detection verdicts alone), on for the staging door alone, which reads
+every image a reviewer has finished, a bulk accept included, so a bucket a reviewer merely
+completed is exactly as immutable to it as one carrying a verdict. The shape is the one
+``refuse_documents`` already has: a caller opts into a stricter reading of the same bucket, and
+the module's one guard (:func:`_bucket_guard_count`) answers either reading.
 
 A staged bucket carries no ``operating_point.json`` stamp and so no recorded ``(subject,
 attribute)`` scope: each record's ``subject`` is whatever the caller named
@@ -203,46 +213,68 @@ something against the image, a detection verdict or a bulk accept alike. A ``not
 an ``unmark_image_reviewed`` call leaves behind never counts: it names no review decision."""
 
 
-def review_state_count(review_state_dir: Path | str, bucket: str) -> int:
+def review_state_count(
+    review_state_dir: Path | str, bucket: str, names: Iterable[str] | None = None
+) -> int:
     """Every image the review engine holds state for on ``bucket``, whether or not that state
     carries a detection verdict: a bulk-accepted image (``img_status`` ``completed`` with no
     verdict entries) counts here and not in :func:`verdict_count`, and so does a reviewed image
-    whose prediction document has since been removed, since this counts over every image name the
-    engine holds state for, not only the stems a document exists for today (the resolver's own
-    residual, see :func:`resolve_writable_bucket`). A ``not_started`` shard never counts. 0 when
-    the store holds no verdicts at all, the same fold :func:`verdict_count` applies.
+    whose prediction document has since been removed. A ``not_started`` shard never counts. 0
+    when the store holds no verdicts at all, the same fold :func:`verdict_count` applies.
 
-    Bucket-wide, not stem-scoped: the door this backs (``clear_prediction_bucket``) refuses a
-    bucket carrying review state, not its documents, so an image whose document is gone must
-    still be counted.
+    With ``names`` omitted (``None``), bucket-wide: every image name the engine holds state for
+    under ``bucket``, not only the stems a document exists for today (the resolver's own residual,
+    see :func:`resolve_writable_bucket`). The door this backs (``clear_prediction_bucket``)
+    refuses a bucket carrying review state, not its documents, so an image whose document is gone
+    must still be counted.
+
+    With ``names`` given (identity against ``None``, never truthiness, so an empty ``()`` or an
+    exhausted iterable counts nothing rather than falling back to bucket-wide), stem-scoped: only
+    the images whose ``Path(img_name).stem`` is among ``{Path(n).stem for n in names}``, the exact
+    rule :meth:`~tcip_annotation.review_engine.ReviewEngine.verdict_count_for_images` applies, so a
+    stem the detection count matches this count matches too, and a stem carrying a dot (e.g.
+    ``plot_3.east``) misses in both counts the same way, a residual of that shared matching rule
+    rather than of this function; a fix belongs to the engine's rule, not to either count alone.
+    Backs the staging door's guard, scoped to the stems a document is held for.
     """
     engine = _open_review_engine(review_state_dir)
     if engine is None:
         return 0
-    return sum(
-        1 for data in engine.image_states(bucket).values()
-        if data.get("img_status") in _REVIEWED_IMAGE_STATUSES
-    )
+    states = engine.image_states(bucket)
+    if names is not None:
+        wanted = {Path(n).stem for n in names}
+        if not wanted:
+            return 0
+        return sum(
+            1 for img_name, data in states.items()
+            if Path(img_name).stem in wanted and data.get("img_status") in _REVIEWED_IMAGE_STATUSES
+        )
+    return sum(1 for data in states.values() if data.get("img_status") in _REVIEWED_IMAGE_STATUSES)
 
 
 class BucketHasVerdicts(Exception):
     """Raised on ``overwrite=True`` when the target bucket has review verdicts recorded, or when
     the variant search that would otherwise redirect around them finds every candidate up to the
-    search's ceiling taken."""
+    search's ceiling taken. ``unit`` names what ``count`` counts in the message: the three
+    publishers' default, ``"review verdict(s)"`` (detection entries alone), or the staging door's
+    own ``"reviewed image(s)"`` under ``count_review_state`` (a detection verdict or a bulk accept
+    alike), so a caller reading the message is never told a verdict was given when only a bulk
+    accept was."""
 
-    def __init__(self, name: str, count: int, suggested: str | None) -> None:
+    def __init__(self, name: str, count: int, suggested: str | None, *,
+                 unit: str = "review verdict(s)") -> None:
         self.name = name
         self.count = count
         self.suggested = suggested
         if suggested is None:
             message = (
-                f"prediction bucket {name!r} has {count} review verdict(s) recorded against it, "
+                f"prediction bucket {name!r} has {count} {unit} recorded against it, "
                 f"and every {name}@r<n> variant up to the search's ceiling is taken too: refusing "
                 f"to overwrite in place with no free variant to redirect to or suggest."
             )
         else:
             message = (
-                f"prediction bucket {name!r} has {count} review verdict(s) recorded against it; "
+                f"prediction bucket {name!r} has {count} {unit} recorded against it; "
                 f"refusing to overwrite in place. Write to a new bucket (e.g. {suggested!r}) or "
                 f"reconcile the verdicts first."
             )
@@ -280,7 +312,7 @@ class BucketHoldsDocuments(Exception):
 class BucketResolution:
     name: str  # the bucket name to actually write to
     redirected: bool  # True when the requested bucket was frozen and a fresh one was chosen
-    verdict_count: int  # verdicts on the requested bucket (0 unless redirected)
+    verdict_count: int  # count under the caller's reading (verdicts, or count_review_state's reviewed images); 0 unless redirected
     requested: str  # the originally requested bucket name
 
 
@@ -291,7 +323,9 @@ def bucket_document_stem_count(dirs: Iterable[Path]) -> int:
     return len(bucket_stems(*dirs))
 
 
-def _bucket_verdicts(review_state_dir: Path | str | None, dirs: list[Path]) -> int:
+def _bucket_guard_count(
+    review_state_dir: Path | str | None, dirs: list[Path], *, count_review_state: bool
+) -> int:
     # No store to guard against: a bucket under no dataset root never reaches Path(None) below.
     if review_state_dir is None:
         return 0
@@ -302,7 +336,12 @@ def _bucket_verdicts(review_state_dir: Path | str | None, dirs: list[Path]) -> i
         stems = bucket_stems(d)
         if not stems:  # empty (or missing) bucket: nothing was ever reviewed there
             continue
-        total += verdict_count(review_state_dir, bucket_key_of(d), stems)
+        # count_review_state reads every finished image (a verdict or a bulk accept); off, a verdict alone.
+        total += (
+            review_state_count(review_state_dir, bucket_key_of(d), stems)
+            if count_review_state
+            else verdict_count(review_state_dir, bucket_key_of(d), stems)
+        )
     return total
 
 
@@ -312,16 +351,19 @@ def _first_free_variant(
     dirs_for: Callable[[str], list[Path]],
     *,
     refuse_documents: bool,
+    count_review_state: bool,
     max_variants: int,
 ) -> str | None:
-    """The first ``<requested>@r2`` .. ``@r<max_variants>`` variant free of a verdict (and, with
-    ``refuse_documents``, also free of a document), or ``None`` when every one up to the ceiling
-    is taken. The one search behind both a verdict redirect and either exception's suggestion, so
-    a candidate cannot pass as free under one predicate and fail under the other."""
+    """The first ``<requested>@r2`` .. ``@r<max_variants>`` variant free of the guard's own count
+    under the caller's reading (:func:`_bucket_guard_count`, ``count_review_state``), and, with
+    ``refuse_documents``, also free of a document, or ``None`` when every one up to the ceiling is
+    taken. The one search behind both a redirect and either exception's suggestion, so a candidate
+    cannot pass as free under one predicate and fail under the other."""
     for n in range(2, max_variants + 1):
         cand = f"{requested}@r{n}"
         cand_dirs = dirs_for(cand)
-        if _bucket_verdicts(review_state_dir, cand_dirs) != 0:
+        if _bucket_guard_count(review_state_dir, cand_dirs,
+                                count_review_state=count_review_state) != 0:
             continue
         if refuse_documents and bucket_document_stem_count(cand_dirs):
             continue
@@ -336,6 +378,7 @@ def resolve_writable_bucket(
     *,
     overwrite: bool = False,
     refuse_documents: bool = False,
+    count_review_state: bool = False,
     max_variants: int = 99,
 ) -> BucketResolution:
     """Resolve which bucket to write to, honoring review-verdict immutability and, for the
@@ -343,65 +386,77 @@ def resolve_writable_bucket(
 
     ``dirs_for(name)`` returns the task dir(s) of the bucket variant ``name`` (one for a
     single-dir bucket, detect+segment for a prediction bucket). ``review_state_dir`` is ``None``
-    for a bucket under no dataset root, whose verdict guard is inoperative (:func:`_bucket_verdicts`
-    answers zero without touching disk); the document guard runs regardless, since it consults no
-    store.
+    for a bucket under no dataset root, whose guard is inoperative either way
+    (:func:`_bucket_guard_count` answers zero without touching disk); the document guard runs
+    regardless, since it consults no store.
 
-    With no verdicts on the requested bucket: used as-is, unless ``refuse_documents`` is set and
-    the bucket already holds a prediction document, which raises :class:`BucketHoldsDocuments`
-    whatever ``overwrite`` says, naming the document count and the suggested first variant free of
-    both a verdict and a document (or ``None``, see below). With verdicts on the requested bucket:
-    the verdict check runs first, ahead of any document check, so a bucket a reviewer has already
-    verdicted redirects (or refuses on ``overwrite=True``) whether or not it also holds a
-    document. ``overwrite=False`` (default) picks the next ``<requested>@r2``
-    / ``@r3`` variant free of a verdict (and, with ``refuse_documents``, also free of a document);
-    ``overwrite=True`` raises :class:`BucketHasVerdicts`. Either exception's suggestion is the one
-    variant search: a candidate that holds neither a verdict nor a document (with the keyword off,
-    one that holds no verdict) is free. When no variant up to ``max_variants`` is free, the
-    unchecked next one is never returned as a target: the resolver raises the class it was
-    resolving for with ``suggested=None`` and a message saying every variant is taken, since a
-    redirect or a suggestion onto an unchecked directory is the overwrite this guard exists to
-    refuse. This exhaustion refusal fires whether or not ``refuse_documents`` is set:
-    ``stage_prediction_shapes``, the one caller that leaves it off, is gated on verdicts alone,
-    but on exhaustion meets this same raise rather than an unchecked ``@r100`` fallback.
+    ``count_review_state`` (default off) widens the guard's own count from detection verdicts
+    alone to every image a reviewer has finished, a bulk accept included
+    (:func:`review_state_count`'s stem-scoped form); the shape is the one ``refuse_documents``
+    already has, a caller opting into a stricter reading of the same bucket, and the module's one
+    guard answers either reading through :func:`_bucket_guard_count`.
+
+    With the guard's count zero on the requested bucket: used as-is, unless ``refuse_documents``
+    is set and the bucket already holds a prediction document, which raises
+    :class:`BucketHoldsDocuments` whatever ``overwrite`` says, naming the document count and the
+    suggested first variant free of both the guard's count and a document (or ``None``, see
+    below). With a non-zero count on the requested bucket: that check runs first, ahead of any
+    document check, so a bucket already answered for under the caller's reading redirects (or
+    refuses on ``overwrite=True``) whether or not it also holds a document. ``overwrite=False``
+    (default) picks the next ``<requested>@r2`` / ``@r3`` variant free of the guard's count (and,
+    with ``refuse_documents``, also free of a document); ``overwrite=True`` raises
+    :class:`BucketHasVerdicts`. Either exception's suggestion is the one variant search: a
+    candidate free of the guard's count and, with the document keyword on, also free of a document
+    is free. When no variant up to ``max_variants`` is free, the unchecked next one is never
+    returned as a target: the resolver raises the class it was resolving for with
+    ``suggested=None`` and a message saying every variant is taken, since a redirect or a
+    suggestion onto an unchecked directory is the overwrite this guard exists to refuse. This
+    exhaustion refusal fires whether or not ``refuse_documents`` is set: ``stage_prediction_shapes``,
+    the one caller that leaves ``refuse_documents`` off, is gated on review state alone through
+    ``count_review_state``, but on exhaustion meets this same raise rather than an unchecked
+    ``@r100`` fallback.
 
     A raster pass' own progress records, kept under a bucket's ``<out>/.tcip/`` subdirectory,
     never register as a document either: :func:`bucket_document_stem_count`'s
     :func:`~tcip_annotation.json_io.prediction_documents` enumeration is a non-recursive
     ``*.json`` listing with sidecars excluded, so a directory holding only a progress record and
     no top-level document reads as empty to this check, and a resumed pass survives whichever
-    bucket the verdict check (or this one) resolved it to.
+    bucket the guard (or this one) resolved it to.
 
     What the door guarantees, stated at its size: no publish begins into a bucket that held
     prediction documents when the door resolved it. It does not guarantee that a bucket never
     comes to hold two runs' documents: the check runs at resolution, ahead of a pass that can take
     minutes, so two doors racing into one bucket can each resolve it clean and interleave their
-    writes, the same window the verdict guard already has. Nor does a documentless bucket answer
-    for a verdict the review store still holds against it: ``_bucket_verdicts`` skips a directory
-    with no stems without consulting the store, so a bucket whose documents were removed after
-    review answers zero verdicts here regardless of what the store still holds. The one audited
-    door that empties a bucket on purpose,
+    writes, the same window the guard already has. Nor does a documentless bucket answer for
+    review state the review store still holds against it: ``_bucket_guard_count`` skips a
+    directory with no stems without consulting the store, so a bucket whose documents were removed
+    after review answers zero here regardless of what the store still holds. The one audited door
+    that empties a bucket on purpose,
     :func:`~tcip_mcp.tools.inference_tools.clear_prediction_bucket`, refuses one carrying review
     state for exactly that reason; a bucket emptied by hand, outside it, reaches this same silent
     admission.
     """
     requested_dirs = dirs_for(requested)
-    base = _bucket_verdicts(review_state_dir, requested_dirs)
+    base = _bucket_guard_count(review_state_dir, requested_dirs,
+                                count_review_state=count_review_state)
     if base == 0:
         if refuse_documents:
             doc_count = bucket_document_stem_count(requested_dirs)
             if doc_count:
                 suggested = _first_free_variant(
                     review_state_dir, requested, dirs_for,
-                    refuse_documents=True, max_variants=max_variants)
+                    refuse_documents=True, count_review_state=count_review_state,
+                    max_variants=max_variants)
                 raise BucketHoldsDocuments(requested, doc_count, suggested)
         return BucketResolution(name=requested, redirected=False, verdict_count=0, requested=requested)
 
     suggested = _first_free_variant(
         review_state_dir, requested, dirs_for,
-        refuse_documents=refuse_documents, max_variants=max_variants)
+        refuse_documents=refuse_documents, count_review_state=count_review_state,
+        max_variants=max_variants)
+    unit = "reviewed image(s)" if count_review_state else "review verdict(s)"
     if overwrite or suggested is None:
-        raise BucketHasVerdicts(requested, base, suggested)
+        raise BucketHasVerdicts(requested, base, suggested, unit=unit)
     return BucketResolution(name=suggested, redirected=True, verdict_count=base, requested=requested)
 
 
@@ -413,19 +468,21 @@ def resolve_prediction_bucket(
     review_state_dir: str | Path | None,
     overwrite: bool = False,
     refuse_documents: bool = False,
+    count_review_state: bool = False,
 ) -> tuple[Path, BucketResolution]:
     """The prediction dir a run may write for ``(dataset_root, model_name, date)``.
 
     The one place the platform turns that triple into a writable bucket, so every writer
     agrees on both the path convention (``dataset_layout.prediction_dir``) and which segment
-    varies when the requested bucket carries review verdicts: the *model* one
-    (``predictions/<model>@r2/<date>``), never the date. A model-named bucket is what
+    varies when the requested bucket carries review state under the caller's reading: the
+    *model* one (``predictions/<model>@r2/<date>``), never the date. A model-named bucket is what
     ``list_models`` / ``models_with_predictions`` enumerate, so a redirected run stays
     discoverable; a date-named sibling would be invisible to every reader. ``refuse_documents``
-    forwards to :func:`resolve_writable_bucket`; the staging door leaves it off.
+    and ``count_review_state`` both forward to :func:`resolve_writable_bucket`; the staging door
+    leaves the first off and turns the second on, the three publishers the reverse.
 
-    Returns the dir to write and the resolution behind it (which bucket was requested,
-    whether it was redirected, and the verdict count that forced the redirect).
+    Returns the dir to write and the resolution behind it (which bucket was requested, whether it
+    was redirected, and the count that forced the redirect, in the caller's own unit).
     """
     from tcip_mcp.dataset_layout import prediction_dir
 
@@ -435,6 +492,7 @@ def resolve_prediction_bucket(
     resolution = resolve_writable_bucket(
         review_state_dir, model_name, _bucket_dirs,
         overwrite=overwrite, refuse_documents=refuse_documents,
+        count_review_state=count_review_state,
     )
     return Path(prediction_dir(dataset_root, resolution.name, date)), resolution
 
