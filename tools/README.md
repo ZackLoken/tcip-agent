@@ -75,8 +75,9 @@ breeder or an operator runs against a project are documented in `README.md` and
   harness root (refusing one under the repository; refusing one that aliases the caller's own
   active `TCIP_WORKSPACE` in either direction; refusing, when no `TCIP_WORKSPACE` is bound, a
   root that already looks like a workspace itself), waits for the projects route to answer, and
-  records pid and port; `stop` kills the recorded process tree. Carries no project fixture, seed,
-  or crop name; seeding a project is the capture script's own job.
+  records pid and port; `stop` kills the recorded process tree, Windows-only (`taskkill /T`),
+  refusing outright on any other host. Carries no project fixture, seed, or crop name; seeding a
+  project is the capture script's own job.
 - `generate_favicon.ps1` - renders the browser-tab favicon from the source logo: crops its
   transparent margins, resizes the result to 512x512, and writes it plus a 32x32 copy to the
   frontend's public assets.

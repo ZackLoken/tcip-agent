@@ -9,6 +9,9 @@ in. No project fixture, seed data, or crop name lives here: seeding a project in
 workspace before ``start``, or against the running server after it, is the capture script's own
 job, never this tool's.
 
+``stop`` is Windows-only (``taskkill /T``); it refuses outright on any other host rather than
+kill the recorded pid alone and leave its children running.
+
     python tools/serve_capture_app.py start <root> --state-project my_project --port 8799
     python tools/serve_capture_app.py stop <root>
 """
@@ -121,6 +124,17 @@ def start(root: Path, state_project: str, port: int) -> None:
 
 
 def stop(root: Path) -> None:
+    """Kill the recorded process and remove its record. Windows-only: it kills the process tree
+    with ``taskkill /T``, which has no POSIX equivalent this tool implements (``start`` never
+    puts the child in its own process group, so there is no group id for ``os.killpg`` to target
+    without first changing how the process is launched); a non-Windows host is refused outright
+    rather than left to kill the recorded pid alone and leave its children running.
+    """
+    if sys.platform != "win32":
+        raise SystemExit(
+            "stop is Windows-only (it kills the process tree with taskkill /T); this host is "
+            f"{sys.platform}, which this tool does not support"
+        )
     info_path = root / "server_info.json"
     if not info_path.is_file():
         raise SystemExit(f"no server_info.json under {root}")

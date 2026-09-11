@@ -121,3 +121,19 @@ def test_a_fresh_root_with_no_tcip_workspace_bound_is_admitted(tool, tmp_path, m
     env = tool.build_environ(root, "my_project", 8799)
 
     assert env["TCIP_STATE_ROOT"] == str(root / "workspace" / "my_project")
+
+
+def test_stop_refuses_outright_on_a_non_windows_host(tool, tmp_path, monkeypatch):
+    monkeypatch.setattr(tool.sys, "platform", "linux")
+
+    with pytest.raises(SystemExit, match="Windows-only"):
+        tool.stop(tmp_path)
+
+
+def test_stop_is_not_refused_for_platform_on_windows(tool, tmp_path, monkeypatch):
+    """A legitimate call still succeeds: on a Windows host, stop reaches its real work (the
+    missing server_info.json refusal, never the platform refusal)."""
+    monkeypatch.setattr(tool.sys, "platform", "win32")
+
+    with pytest.raises(SystemExit, match="no server_info.json"):
+        tool.stop(tmp_path)
