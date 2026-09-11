@@ -20,12 +20,27 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "tcip-web" / "src"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "tcip-mcp" / "src"))
 
 MARKER = "SMOKE_OK"
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b[>=()][0-9A-Za-z]?")
+
+
+def terminal_ws_url(client: Any, session_id: str) -> str:
+    """The absolute ``ws://`` URL the trust boundary admits.
+
+    A relative path handed to ``client.websocket_connect`` joins onto ``ws://testserver``
+    (``TestClient``'s own default), a Host the boundary's arrival check refuses; this instead
+    carries the same host and port ``client.base_url`` does, which the boundary reads as a
+    loopback arrival.
+    """
+    parts = urlsplit(str(client.base_url))
+    scheme = "wss" if parts.scheme == "https" else "ws"
+    return urlunsplit((scheme, parts.netloc, f"/api/terminal/ws/{session_id}", "", ""))
 
 
 def main(workspace: str | None = None) -> int:
@@ -56,7 +71,7 @@ def main(workspace: str | None = None) -> int:
     session = terminal_routes._SESSIONS[sid]
 
     try:
-        with client.websocket_connect(f"/api/terminal/ws/{sid}") as ws:
+        with client.websocket_connect(terminal_ws_url(client, sid)) as ws:
             # Answer the DA query the way a real terminal (xterm.js) does, so ConPTY
             # flushes the first paint immediately.
             ws.send_json({"type": "input", "data": "\x1b[?1;2c"})
