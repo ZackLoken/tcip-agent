@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -61,6 +62,7 @@ def prove_resolution(worktree: Path, env: dict[str, str]) -> Path:
 
 
 def run_ruff(worktree: Path, env: dict[str, str]) -> int:
+    # This repository has no scripts/ directory at HEAD; when one exists, add it to this list.
     print("== ruff check packages tests tools ==")
     return subprocess.run(
         [sys.executable, "-m", "ruff", "check", "packages", "tests", "tools"],
@@ -70,10 +72,13 @@ def run_ruff(worktree: Path, env: dict[str, str]) -> int:
 
 def run_mypy(worktree: Path, env: dict[str, str]) -> int:
     cache_dir = tempfile.mkdtemp(prefix="worktree-gate-mypy-")
-    print(f"== mypy --cache-dir {cache_dir} ==")
-    return subprocess.run(
-        [sys.executable, "-m", "mypy", "--cache-dir", cache_dir], cwd=str(worktree), env=env,
-    ).returncode
+    try:
+        print(f"== mypy --cache-dir {cache_dir} ==")
+        return subprocess.run(
+            [sys.executable, "-m", "mypy", "--cache-dir", cache_dir], cwd=str(worktree), env=env,
+        ).returncode
+    finally:
+        shutil.rmtree(cache_dir, ignore_errors=True)
 
 
 def run_pytest(worktree: Path, env: dict[str, str], files: list[str]) -> int:
