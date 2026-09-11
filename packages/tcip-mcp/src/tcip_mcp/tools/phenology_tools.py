@@ -54,11 +54,14 @@ def register_plant_registry(name: str, csv_paths: list[str], *, crop: str, site:
         crop: The crop these plants are of. The expert's fact, never inferred.
         site: The site or block these plants are of. The expert's fact, never inferred.
 
-    Refuses (``{"error": ...}``) naming any missing file, naming any file that parsed no
-    georeferenced plant, and naming a name conflict's two digests. A name outside
-    ``NAME_SEGMENT`` refuses at the door. Unlike ``build_plant_mapping``, this does not require a
-    project record: ``deliver_orthomosaic_plant_counts`` reads a registry without one, and a
-    registry has to be registrable before either door can name it.
+    Refuses (``{"error": ...}``) naming any missing file, naming any shapefile part by suffix
+    (``.shp``/``.shx``/``.dbf``/``.prj``; convert it first with ``tcip shp-to-plant-csv``, since
+    this registry's one-file-one-snapshot verification has no multi-file form), naming any file
+    that parsed no georeferenced, named plant or is not UTF-8 text, and naming a name conflict's
+    two digests. A name outside ``NAME_SEGMENT`` refuses at the door. Unlike
+    ``build_plant_mapping``, this does not require a project record:
+    ``deliver_orthomosaic_plant_counts`` reads a registry without one, and a registry has to be
+    registrable before either door can name it.
     """
     from tcip_store.layout_claims import NAME_SEGMENT
 
@@ -74,6 +77,15 @@ def register_plant_registry(name: str, csv_paths: list[str], *, crop: str, site:
     missing = [p for p in csv_paths if not Path(p).is_file()]
     if missing:
         return {"error": f"plant CSV(s) not found: {missing}"}
+
+    shapefile_suffixes = {".shp", ".shx", ".dbf", ".prj"}
+    shapefile_paths = [p for p in csv_paths if Path(p).suffix.casefold() in shapefile_suffixes]
+    if shapefile_paths:
+        return {"error": (
+            f"{shapefile_paths} look like shapefile parts, not plant-locations CSVs (this "
+            "registry re-verifies and re-parses each file from its own one-snapshot bytes at "
+            "delivery, which a multi-file shapefile has no single-file form for); run "
+            "tcip shp-to-plant-csv <plants.shp> <plants.csv> and register the CSV instead")}
 
     try:
         record = plant_mapping.register_plant_registry_record(
