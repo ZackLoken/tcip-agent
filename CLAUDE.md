@@ -212,7 +212,5 @@ via `$TCIP_STATE_ROOT`, pinned at startup by the web backend and every MCP serve
   `round <n>`, `Phase <n>`), no inline decision dates, no bold or all-caps emphasis, no em
   dashes. If nothing survives once that framing is stripped, write nothing.
 - `docs/` and `.claude/` are local, gitignored dev tooling, except the generated skills under
-  `.claude/skills/`, which are tracked. `docs/current-task.md` and `docs/recent-summary.md` are
-  injected at session start where they exist, and `docs/current-task.md` holds open work only.
-  `docs/open-findings.md` holds the findings that survived re-verification at HEAD 72338936;
-  `docs/owner-decisions.md` holds the owner's standing rulings.
+  `.claude/skills/`, which are tracked. `docs/owner-decisions.md` holds the owner's standing
+  rulings.
