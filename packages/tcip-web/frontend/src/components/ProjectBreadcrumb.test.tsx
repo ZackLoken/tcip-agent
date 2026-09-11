@@ -81,6 +81,8 @@ beforeEach(() => {
     projects: [summary("alpha"), summary("beta")],
     pending_removal: [],
     removal_startup_outcomes: [],
+    pending_rename: [],
+    rename_startup_outcomes: [],
   });
   openOn("alpha");
 });
@@ -211,6 +213,8 @@ describe("switching date", () => {
       projects: [{ ...summary("alpha"), dates: ["2026-01-01", "2026-02-02"] }],
       pending_removal: [],
       removal_startup_outcomes: [],
+      pending_rename: [],
+      rename_startup_outcomes: [],
     });
     render(<ProjectBreadcrumb />);
     fireEvent.click(screen.getByTitle("Switch date"));
