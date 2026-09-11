@@ -448,8 +448,8 @@ def _module_row_text(entry: dict, queued: str | None) -> str:
 def _fix_module_rows(lines: list[str], modules: dict[str, dict]) -> list[str]:
     """Rewrite every module-ownership table: an existing row refreshed from the inventory when
     its path still belongs to the same root, dropped when the inventory no longer carries its
-    path (or the row is a repeat), and a root's inventory modules the tables never named added,
-    sorted, after that root's last retained row.
+    path (or the row is a repeat), and a root's inventory modules the table never named added in
+    the root's own sorted position, never merely appended after the last retained row.
 
     The root a ``## <heading>`` introduces is known only when the inventory itself records a
     module under that name, never from a fixed list, so a root the inventory adds or drops is
@@ -461,28 +461,13 @@ def _fix_module_rows(lines: list[str], modules: dict[str, dict]) -> list[str]:
         by_root.setdefault(entry["root"], []).append(entry)
 
     out: list[str] = []
-    seen: set[str] = set()
-    last_row_index: dict[str, int] = {}
     current_root: str | None = None
-
-    def flush(root: str) -> None:
-        at = last_row_index.get(root)
-        if at is None:
-            return
-        remaining = sorted(
-            (e for e in by_root.get(root, []) if e["path"] not in seen), key=lambda e: e["path"]
-        )
-        for offset, entry in enumerate(remaining, start=1):
-            out.insert(at + offset, _module_row_text(entry, None))
-            seen.add(entry["path"])
 
     i = 0
     while i < len(lines):
         line = lines[i]
         header = re.match(r"^## (.+)$", line)
         if header:
-            if current_root is not None:
-                flush(current_root)
             title = header.group(1).strip()
             current_root = title if title in known_roots else None
             out.append(line)
@@ -492,21 +477,21 @@ def _fix_module_rows(lines: list[str], modules: dict[str, dict]) -> list[str]:
             out.append(line)
             out.append(lines[i + 1])  # markdown separator row
             i += 2
+            retained: dict[str, str] = {}
             while i < len(lines) and lines[i].startswith("|"):
                 m = ROW_RE.match(lines[i])
                 if m:
                     path = m.group("path").strip()
                     resolved = modules.get(path)
-                    if resolved is not None and resolved["root"] == current_root and path not in seen:
-                        out.append(_module_row_text(resolved, m.group("comment")))
-                        seen.add(path)
-                        last_row_index[current_root] = len(out) - 1
+                    if (resolved is not None and resolved["root"] == current_root
+                            and path not in retained):
+                        retained[path] = _module_row_text(resolved, m.group("comment"))
                 i += 1
+            for entry in sorted(by_root.get(current_root, []), key=lambda e: e["path"]):
+                out.append(retained.get(entry["path"]) or _module_row_text(entry, None))
             continue
         out.append(line)
         i += 1
-    if current_root is not None:
-        flush(current_root)
     return out
 
 
