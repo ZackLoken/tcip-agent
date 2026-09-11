@@ -3,9 +3,9 @@
 ``routes/_coverage_models.py`` and ``routes/coverage.py`` declare the view-coverage record's
 shape once, in Python; ``routes/review.py`` declares the review verdict's action vocabulary;
 ``routes/training.py`` and ``routes/terminal.py`` declare their WebSocket frame vocabularies;
-``routes/projects.py`` declares the removal preview/request/response and release-binding
-response shapes, plus the dependency-warning shape ``ProjectSummary`` alone carries (hand-typed
-in ``client.ts``, never generated itself); and
+``routes/projects.py`` declares the removal and rename preview/request/response and
+release-binding response shapes, plus the dependency-warning shape ``ProjectSummary`` alone
+carries (hand-typed in ``client.ts``, never generated itself); and
 ``tcip_web.state.GuiVocabulary`` declares the GUI's tab/mode vocabulary. This script projects
 them into ``frontend/src/api/types.generated.ts`` through each model's own JSON schema, so the
 browser's types are held to the backend's rather than hand-transcribed and left to drift. The
@@ -67,7 +67,7 @@ def declared_models() -> list[type[BaseModel]]:
     from tcip_web.routes.coverage import CompletenessSetPayload, CoveragePayload, GridZoomPayload
     from tcip_web.routes.projects import (
         DependencyWarning, DependentProject, ExternalRoot, ReleaseResponse, RemovalPreview,
-        RemovalRequest, RemovalResponse,
+        RemovalRequest, RemovalResponse, RenamePreview, RenameRequest, RenameResponse,
     )
     from tcip_web.routes.review import ActionPayload
     from tcip_web.routes.terminal import TerminalInputFrame, TerminalResizeFrame
@@ -78,7 +78,8 @@ def declared_models() -> list[type[BaseModel]]:
             CoveragePayload, CompletenessSetPayload, GridZoomPayload, ActionPayload,
             GuiVocabulary, TrainingMetricFrame, TrainingStatusFrame, TerminalInputFrame,
             TerminalResizeFrame, DependencyWarning, DependentProject, ExternalRoot,
-            ReleaseResponse, RemovalPreview, RemovalRequest, RemovalResponse]
+            ReleaseResponse, RemovalPreview, RemovalRequest, RemovalResponse,
+            RenamePreview, RenameRequest, RenameResponse]
 
 
 def render_cache_version() -> int:

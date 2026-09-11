@@ -155,6 +155,7 @@ export interface DependencyWarning {
   present: boolean;
   archive_path?: string | null;
   holding_dir?: string | null;
+  pending_kind?: string | null;
 }
 
 export interface DependentProject {
@@ -200,6 +201,30 @@ export interface RemovalResponse {
   external_roots: ExternalRoot[];
   dependent_projects: DependentProject[];
   completes: string;
+  audit_scope: string;
+  recorded_in_open_project: boolean;
+  audit_note: string;
+}
+
+export interface RenamePreview {
+  refusal?: string | null;
+  releasable: boolean;
+  dependent_projects: DependentProject[];
+  records_present: string[];
+}
+
+export interface RenameRequest {
+  name: string;
+  new_name: string;
+  confirm_name: string;
+  user?: string;
+}
+
+export interface RenameResponse {
+  name: string;
+  new_name: string;
+  completes: string;
+  dependent_projects: DependentProject[];
   audit_scope: string;
   recorded_in_open_project: boolean;
   audit_note: string;
