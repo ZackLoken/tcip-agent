@@ -66,3 +66,43 @@ def test_a_root_outside_both_is_admitted(tool, tmp_path, monkeypatch):
     env = tool.build_environ(root, "my_project", 8799)
 
     assert env["TCIP_STATE_ROOT"] == str(root / "workspace" / "my_project")
+
+
+def test_a_root_containing_the_callers_own_active_workspace_is_refused(tool, tmp_path, monkeypatch):
+    """The old check only refused the root-under-workspace direction; a root that itself
+    contains the caller's own active TCIP_WORKSPACE as a subdirectory aliases it just as much."""
+    root = tmp_path / "harness"
+    active_workspace = root / "nested" / "real-project"
+    monkeypatch.setenv("TCIP_WORKSPACE", str(active_workspace))
+
+    with pytest.raises(SystemExit, match="own TCIP_WORKSPACE"):
+        tool.build_environ(root, "my_project", 8799)
+
+
+def test_a_root_that_already_carries_its_own_tcip_state_is_refused(tool, tmp_path, monkeypatch):
+    monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
+    root = tmp_path / "harness"
+    (root / ".tcip").mkdir(parents=True)
+
+    with pytest.raises(SystemExit, match="already looks like a workspace"):
+        tool.build_environ(root, "my_project", 8799)
+
+
+def test_a_root_whose_child_already_carries_tcip_state_is_refused(tool, tmp_path, monkeypatch):
+    monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
+    root = tmp_path / "harness"
+    (root / "existing_project" / ".tcip").mkdir(parents=True)
+
+    with pytest.raises(SystemExit, match="already looks like a workspace"):
+        tool.build_environ(root, "my_project", 8799)
+
+
+def test_a_fresh_root_with_no_tcip_workspace_bound_is_admitted(tool, tmp_path, monkeypatch):
+    """A legitimate call still succeeds: a brand-new root, with no TCIP_WORKSPACE bound and no
+    .tcip anywhere under it, is not refused."""
+    monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
+    root = tmp_path / "harness"
+
+    env = tool.build_environ(root, "my_project", 8799)
+
+    assert env["TCIP_STATE_ROOT"] == str(root / "workspace" / "my_project")
