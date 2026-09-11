@@ -75,6 +75,27 @@ def test_run_hyperparameter_search_refuses_a_non_integer_split_draws_by_direct_c
     assert not ran
 
 
+@pytest.mark.parametrize("value", ["2", None, [2]])
+def test_run_hyperparameter_search_refuses_a_split_draws_of_another_type_by_direct_call(
+    tmp_path, real_hpo_base_config, monkeypatch, value,
+):
+    """guard. A split_draws of a type that does not order against an integer (reachable by a
+    direct Python call alone) refuses as not a draw count, rather than raising TypeError out of
+    the audited door where the comparison deciding whether a bound is read would meet it."""
+    import tcip_mcp.tools.training_tools as tt
+
+    ran = []
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
+
+    result = tt.run_hyperparameter_search(
+        base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+        scheduler="none", split_draws=value,
+    )
+
+    assert "error" in result and "is not a draw count" in result["error"]
+    assert not ran
+
+
 @pytest.mark.parametrize("value", [0, -1])
 def test_run_hyperparameter_search_refuses_n_trials_not_a_count_when_a_bound_is_read(
     tmp_path, real_hpo_base_config, monkeypatch, value,
@@ -140,7 +161,8 @@ def test_run_hyperparameter_search_refuses_split_draws_above_one_with_no_trial_b
         scheduler="none", split_draws=2,
     )
 
-    assert "error" in result and "trial_budget" in result["error"] and "2" in result["error"]
+    assert "error" in result and "trial_budget=2" in result["error"]
+    assert "would launch 2 trials" in result["error"]
     assert not ran
 
 
@@ -858,7 +880,7 @@ def test_run_hyperparameter_search_admits_a_bare_seed_axis_beside_split_draws(
 def test_run_hyperparameter_search_refuses_a_budget_that_admits_fewer_than_every_draw(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
-    """new behavior. A stated trial_budget the count exceeds, but not at one draw, refuses
+    """coverage. A stated trial_budget the count exceeds, but not at one draw, refuses
     naming the count, the budget and how many draws it admits: Ray's own count over the default
     space at n_trials=4, split_draws=3, random is 12 (4 per draw), which trial_budget=10 does
     not fit whole, admitting 2 draws."""
@@ -881,7 +903,7 @@ def test_run_hyperparameter_search_refuses_a_budget_that_admits_fewer_than_every
 def test_run_hyperparameter_search_refuses_a_budget_at_the_quotient_boundary(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
-    """new behavior. Ray's own count over the default space at n_trials=2, split_draws=3, grid
+    """coverage. Ray's own count over the default space at n_trials=2, split_draws=3, grid
     is 18 (6 per draw); trial_budget=6 is not above the per-draw count, so this is the quotient
     branch (1 admitted draw), never the exceeds-at-one-draw branch."""
     import tcip_mcp.tools.training_tools as tt
@@ -904,7 +926,7 @@ def test_run_hyperparameter_search_refuses_a_budget_at_the_quotient_boundary(
 def test_run_hyperparameter_search_refuses_a_budget_a_single_draw_already_exceeds(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
-    """new behavior. Ray's own count over the default space at n_trials=2, split_draws=2, grid
+    """coverage. Ray's own count over the default space at n_trials=2, split_draws=2, grid
     is 12 (6 per draw); trial_budget=5 is below even one draw's own count, so the sweep exceeds
     the budget at one draw, the exceeds branch, never a positive admitted-draws quotient."""
     import tcip_mcp.tools.training_tools as tt
@@ -926,7 +948,7 @@ def test_run_hyperparameter_search_refuses_a_budget_a_single_draw_already_exceed
 def test_run_hyperparameter_search_admits_a_budget_the_count_fits_and_records_it(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
-    """new behavior. n_trials=2, split_draws=3, random over the default space counts 6, which
+    """coverage. n_trials=2, split_draws=3, random over the default space counts 6, which
     trial_budget=6 admits exactly; the manifest records trial_budget verbatim."""
     import tcip_mcp.tools.training_tools as tt
 
@@ -951,7 +973,7 @@ def test_run_hyperparameter_search_admits_a_budget_the_count_fits_and_records_it
 def test_run_hyperparameter_search_refuses_a_one_draw_launch_a_stated_budget_exceeds(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
-    """new behavior. At one draw a caller need state nothing new, but a stated trial_budget is
+    """coverage. At one draw a caller need state nothing new, but a stated trial_budget is
     still checked: n_trials=5 over the default space (random, the default alg) counts 5, which
     trial_budget=3 does not admit, the exceeds branch since split_draws is 1."""
     import tcip_mcp.tools.training_tools as tt
@@ -973,7 +995,7 @@ def test_run_hyperparameter_search_refuses_a_one_draw_launch_a_stated_budget_exc
 def test_run_hyperparameter_search_admits_a_one_draw_launch_with_no_stated_budget(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
-    """new behavior. One draw with no trial_budget reads no bound at all: the manifest still
+    """coverage. One draw with no trial_budget reads no bound at all: the manifest still
     gains the key, null, so a relaunch has something to read back."""
     import tcip_mcp.tools.training_tools as tt
 
@@ -1030,7 +1052,7 @@ def test_run_hyperparameter_search_relaunch_with_no_budget_replays_as_recorded(
 def test_run_hyperparameter_search_relaunch_with_a_budget_is_still_checked(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
-    """new behavior. A relaunch that does name a trial_budget is checked exactly as a launch is:
+    """coverage. A relaunch that does name a trial_budget is checked exactly as a launch is:
     the count (2, one draw's worth times two draws under random) exceeds trial_budget=1."""
     import tcip_mcp.tools.training_tools as tt
 
@@ -1051,7 +1073,7 @@ def test_run_hyperparameter_search_relaunch_with_a_budget_is_still_checked(
 def test_run_hyperparameter_search_refuses_a_categorical_with_no_choices_as_uncountable(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
-    """new behavior. A param_space naming a categorical axis with no choices key fails the
+    """coverage. A param_space naming a categorical axis with no choices key fails the
     count's own space-building (KeyError), before minting: today the same call mints a manifest
     and fails inside tune_search after the fact; this refusal is earlier, not new in kind."""
     import tcip_mcp.tools.training_tools as tt
@@ -1094,7 +1116,7 @@ def test_run_hyperparameter_search_admits_the_same_uncountable_space_at_one_draw
 def test_run_hyperparameter_search_refuses_an_inverted_int_bound_as_uncountable(
     tmp_path, real_hpo_base_config, monkeypatch, search_alg,
 ):
-    """new behavior. An int axis whose low exceeds high turns into an empty grid list; the
+    """coverage. An int axis whose low exceeds high turns into an empty grid list; the
     count's own generator counts it silently with no exception (0 under grid, a wrong nonzero
     under random), but the one trial the count draws to validate the space raises (IndexError
     under grid, ValueError under random), so the door still refuses before minting."""
@@ -1117,7 +1139,7 @@ def test_run_hyperparameter_search_refuses_an_inverted_int_bound_as_uncountable(
 def test_run_hyperparameter_search_refuses_a_huge_int_span_as_uncountable(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
-    """new behavior. An int axis spanning more than a Python list can index raises OverflowError
+    """coverage. An int axis spanning more than a Python list can index raises OverflowError
     out of _to_tune_space's own list(range(...)), before any generator is built."""
     import tcip_mcp.tools.training_tools as tt
 
@@ -1137,7 +1159,7 @@ def test_run_hyperparameter_search_refuses_a_huge_int_span_as_uncountable(
 def test_run_hyperparameter_search_admits_an_empty_param_space_at_one_draw_proving_the_substitution(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
-    """new behavior. An empty param_space at one draw substitutes the default space
+    """coverage. An empty param_space at one draw substitutes the default space
     (get_default_space's own three batch_size choices), the same substitution tune_search's own
     _to_tune_space makes, carried verbatim by split_draw_search_space: trial_budget=5 does not
     admit the default space's own count of 6 under grid at n_trials=2."""
@@ -1158,7 +1180,7 @@ def test_run_hyperparameter_search_admits_an_empty_param_space_at_one_draw_provi
 def test_run_hyperparameter_search_an_empty_param_space_above_one_draw_counts_the_seed_axis_alone(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
-    """new behavior. Above one draw, an empty param_space runs the seed axis alone (the fact
+    """coverage. Above one draw, an empty param_space runs the seed axis alone (the fact
     stated in The fact), never the substituted default space: at n_trials=1, split_draws=2, grid,
     the count is 2 (one per draw), so trial_budget=1 refuses it and trial_budget=2 admits it."""
     import tcip_mcp.tools.training_tools as tt
