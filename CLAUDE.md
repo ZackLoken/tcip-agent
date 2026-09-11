@@ -150,55 +150,20 @@ endpoint is a trained model.
 
 ## Working a change
 
-- Every change touching a persisted field, a refusal, an operating-point stamp or a delivery gate
-  takes the full review shape: design against the code, an adversarial read of the design, a
-  cross-family round, an implementer in a worktree, land and gate, an adversarial read of the landed
-  commits, a fix-up with the same gates. Relaxing it is the owner's call in a brief. A defect fix
-  that moves no persisted field takes an implementer, a landed read and a fix-up. Readers are
-  briefed to refute, one read workflow at a time, each finding re-run by an independent refuter.
-- Model tiering, stated per delegation: Fable for design and adjudication, Opus for adversarial
-  reads and synthesis, Sonnet for implementation and fail-before proofs, Haiku
-  (`claude-haiku-4-5-20251001`) for sweeps. Cross-family review runs `tools/cross_family_ask.py`
-  at its parity defaults (claude `opus` high, codex from `~/.codex/config.toml`, antigravity
-  `gemini-3.1-pro-high`), and afterwards you quote each `meta.json`'s `model_resolved`,
-  `model_used`, `model_mismatch`, `effort_requested` and `response_source`. Cross-family
-  verdicts are democratic: when two families agree against the adjudicator's own position,
-  conform to them or take the split to the owner before landing; the outvoted side never
-  lands on the adjudicator's own authority.
-- Worktrees: create by hand at a named revision (`git worktree add .claude/worktrees/<name> -b
-  worktree-<name> <rev>`), launch the implementer without isolation, have it confirm the
-  revision; foreground pytest one file at a time; the full suite is the director's gate, never run
-  in a worktree. Land with `git am --3way` from `format-patch` output against a clean, committed
-  main tree, never in the same message as another launch; confirm identity with `git diff --stat
-  <worktree HEAD> HEAD`; re-anchor citations with `--fix` as their own commit (an `ARCHITECTURE.md`
-  conflict that is line numbers only takes main's side); remove the worktree and branch.
-- A test that guards a fix is observed failing without it: `python
-  tools/prove_test_fails_before.py <testfile> -k <expr>` (`--baseline <rev>` when HEAD already
-  holds the fix). Only `GUARDS` counts, and only when the recorded failure is the assertion the
-  test names; `VACUOUS` is said, not counted; `INDETERMINATE` and `REFUSED` are runs to redo. A
-  coverage test is stated as coverage. Every admits-valid-work test constructs its input through
-  the platform's own producer.
-- Gates per change, on the landed tree: `ruff check .`, both architecture checkers as CI runs
-  them (`build_module_inventory.py --out <json>` then `check_architecture_doc.py
-  --inventory-json <json>`, which checks the import counts only when given the inventory, and
-  `check_architecture_citations.py --fix`),
-  `mypy`, the change's test files on both backends in batches of at most 20 with
-  `--timeout=300`, the frontend gate in CI order if a frontend file changed. On the final tree:
-  the same plus `docs/audit/ledger_check.py`, the batch's counts script, `tools/list_tools.py`,
-  and `pytest tests/ -n 4` on both backends with `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1` (the file
-  leg under `TCIP_STORE_BACKEND=file`), on the tree you actually commit. After any change to a
-  reader's contract, the full suite runs before the landed read. Never report a gate before its
-  slowest part finishes; green is "no detected breakage", never correctness. The skips are
-  gates, not work; the SAM and tile-geometry tests time out beside heavy load and pass alone.
-  A test touching the filesystem outside `tmp_path` is the first reread on a CI-only break.
+- A test that guards a fix is observed failing without the fix. Say when you have seen it fail and
+  say when you have not. Every admits-valid-work test constructs its input through the platform's
+  own producer.
+- Gates before reporting a change done: `ruff check packages tests tools`, `mypy`, and the change's
+  own test files. Run the full suite on both storage backends when you touch the store seam or a
+  reader's contract. Never report a gate before its slowest part finishes; green means no detected
+  breakage, never correctness. A test touching the filesystem outside `tmp_path` is the first
+  reread on a break that only shows in CI.
 - The production mypy gate is the full one; only `tests` keeps grandfathered codes, in `mypy.ini`.
 - Commits: one concern each, in dependency order, LF endings, messages stating the standing
-  constraint the change installs (no session narrative, report ids, batch numbers or dates).
-- Every session ends with `write_retrospective`; when a claude-context server is configured for the
-  session, both its indexes rebuilt and confirmed settled by two `get_indexing_status` readings
-  minutes apart with identical counts (the status string alone is not a signal; chunks equal to
-  files means in flight); and the handoff rewritten: `docs/recent-summary.md`, the open material in
-  `docs/current-task.md`, and the next-session prompt, for a session with none of your context.
+  constraint the change installs, never a narrative of the session that made it.
+- Match the weight of the process to the change. Reach for a worktree, a second reader or another
+  model family when the change is genuinely hard to get right, not as a standing ritual, and say
+  why you reached for it.
 
 ## Commands
 
@@ -243,10 +208,8 @@ via `$TCIP_STATE_ROOT`, pinned at startup by the web backend and every MCP serve
   of the session that wrote it: no tracking labels (`K<n>`, `Fix <letter>`, `finding <n>`,
   `round <n>`, `Phase <n>`), no inline decision dates, no bold or all-caps emphasis, no em
   dashes. If nothing survives once that framing is stripped, write nothing.
-- `docs/` and `.claude/` are local, gitignored dev tooling (the audit record, the remediation
-  plan and rulings, hooks, worktrees), except the generated skills under `.claude/skills/`,
-  which are tracked; `docs/current-task.md` and `docs/recent-summary.md` are injected at session
-  start where they exist. `docs/current-task.md` holds open work only: an item's entry says what
-  is open, what closes it and where its record lives, and is deleted at the landing that closes
-  it; the landing's record (hashes, reads, fix-ups, rounds) goes to `docs/recent-summary.md`'s
-  session section and the design record, never to this file.
+- `docs/` and `.claude/` are local, gitignored dev tooling, except the generated skills under
+  `.claude/skills/`, which are tracked. `docs/current-task.md` and `docs/recent-summary.md` are
+  injected at session start where they exist, and `docs/current-task.md` holds open work only.
+  `docs/open-findings.md` holds the findings that survived re-verification at HEAD 72338936;
+  `docs/owner-decisions.md` holds the owner's standing rulings.
