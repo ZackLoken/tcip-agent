@@ -164,6 +164,10 @@ run_hyperparameter_search(base_config=config, n_trials=20, search_alg="optuna", 
   Tuning tab reads, for a host with no browser open: the sweep's manifest plus every trial's own
   params and whether it has logged metrics, from disk alone (no live jobstore, so a sweep just
   launched over HTTP but not yet manifested reads as not found).
+- Above one draw (`split_draws`), on a launch that is not a relaunch, `trial_budget` states the
+  most trials the sweep may launch, checked at the door against Ray's own variant count over the
+  built search space; a stated `trial_budget` is checked at one draw too, and a relaunch replays
+  the record's own `trial_budget` or none, admitted either way.
 
 ## Dataset Splits
 

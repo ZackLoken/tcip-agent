@@ -973,8 +973,8 @@ def test_run_hyperparameter_search_refuses_a_one_draw_launch_a_stated_budget_exc
 def test_run_hyperparameter_search_admits_a_one_draw_launch_with_no_stated_budget(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
-    """coverage. One draw with no trial_budget reads no bound at all: the manifest still gains
-    the key, null, so a relaunch has something to read back."""
+    """new behavior. One draw with no trial_budget reads no bound at all: the manifest still
+    gains the key, null, so a relaunch has something to read back."""
     import tcip_mcp.tools.training_tools as tt
 
     def fake_search(**kw):
@@ -1007,7 +1007,7 @@ def _write_source_manifest(tmp_path, study_name: str) -> None:
 def test_run_hyperparameter_search_relaunch_with_no_budget_replays_as_recorded(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
-    """new behavior. A relaunch (relaunched_from given) with no trial_budget reads no bound at
+    """coverage. A relaunch (relaunched_from given) with no trial_budget reads no bound at
     all, whatever split_draws says: the door counts nothing and the search is reached."""
     import tcip_mcp.tools.training_tools as tt
 
