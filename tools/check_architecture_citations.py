@@ -20,9 +20,13 @@ basename twice, the short form fails as ambiguous (`verdicts.py` under both `tci
 
 The check is quote-tolerant, because a moved line is not a wrong statement:
 
-- verified: the fragment is on a line the citation names.
-- re-anchorable: the fragment is gone from those lines but still present elsewhere in the file,
-  so only the number is stale. ``--fix`` rewrites the number in place.
+- verified: the fragment is on a line the citation names. A definition-shaped fragment (``def
+  name(``, ``class Name``, ``async def name(``) verifies only against a line that begins, after
+  its own indentation, with that definition itself, never a later mention on the cited line (a
+  call, a docstring naming it): a citation pointed at such a mention is re-anchorable, not verified.
+- re-anchorable: the fragment is gone from those lines but still present elsewhere in the file
+  (a definition-shaped fragment only at its real definition line, the same rule), so only the
+  number is stale. ``--fix`` rewrites the number in place.
 - failed: the fragment is nowhere in the file, or the path resolves to no file or to several.
   Only this needs a human, because the statement itself, not its line, has gone stale.
 - oversized span: a backtick-delimited span past ``SPAN_LENGTH_CAP`` characters, reported as its
@@ -227,10 +231,17 @@ def check(doc_path: Path, repo_root: Path) -> tuple[list[dict], int]:
         source = file_lines[cited_path]
         cited_lines = [n for n in line_numbers(m.group("nums"))]
         rel = cited_path.relative_to(repo_root).as_posix()
+        # A definition-shaped fragment (def name(, class Name, async def name() anchors only at
+        # its own definition line, never a later mention (a call, a docstring naming it).
+        strict = bool(DEF_RE.match(fragment.strip()))
         hit = None
         for key in candidates(fragment):
             for n in cited_lines:
-                if 1 <= n <= len(source) and key in source[n - 1]:
+                if not (1 <= n <= len(source)):
+                    continue
+                line = source[n - 1]
+                matched = line.lstrip().startswith(key) if strict else key in line
+                if matched:
                     hit = (key, n)
                     break
             if hit:
@@ -241,7 +252,10 @@ def check(doc_path: Path, repo_root: Path) -> tuple[list[dict], int]:
             continue
         elsewhere = None
         for key in candidates(fragment):
-            found = [n for n, s in enumerate(source, 1) if key in s]
+            if strict:
+                found = [n for n, s in enumerate(source, 1) if s.lstrip().startswith(key)]
+            else:
+                found = [n for n, s in enumerate(source, 1) if key in s]
             if not found:
                 continue
             defined = [n for n in found if defines(source[n - 1], key)]
