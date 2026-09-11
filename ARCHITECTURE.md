@@ -1017,11 +1017,11 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `` (root) | `list_projects` | `routes/projects.py:163` |
-| POST | `/active` | `activate_project` | `routes/projects.py:246` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
-| GET | `/{name}/removal-preview` | `removal_preview_route` | `routes/projects.py:410` |
-| POST | `/remove` | `remove_project` | `routes/projects.py:419` |
-| POST | `/{name}/release-binding` | `release_binding_route` | `routes/projects.py:433` |
+| GET | `` (root) | `list_projects` | `routes/projects.py:166` |
+| POST | `/active` | `activate_project` | `routes/projects.py:249` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
+| GET | `/{name}/removal-preview` | `removal_preview_route` | `routes/projects.py:413` |
+| POST | `/remove` | `remove_project` | `routes/projects.py:422` |
+| POST | `/{name}/release-binding` | `release_binding_route` | `routes/projects.py:436` |
 
 ### routes/results.py, prefix `/api/results` (15 routes)
 
@@ -1995,9 +1995,9 @@ No seam id in `seam-coverage.json`'s 67-entry inventory names `.tcip/datasets.js
 
 Path: `<workspace_root>/.active`, a workspace-root sibling, not inside `.tcip/`.
 
-Writer: `activate_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:521`.
+Writer: `activate_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:523`.
 
-Readers: `read_active_project`, `workspace.py:201`; `resolve_project_path`, `workspace.py:469`.
+Readers: `read_active_project`, `workspace.py:201`; `resolve_project_path`, `workspace.py:471`.
 
 Seam S02 ("Workspace root and the .active project marker"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_tcip_web_projects_routes.py:160`,
@@ -2192,16 +2192,17 @@ suffix=".json")`, the same shape `dataset_registry` and `.tcip/project.json` (fo
 Shape: `{requested_at, requested_by, archive_path, holding_dir, external_roots,
 dependent_projects}`, one document per project. Written once, `concurrency="cas"` with
 `expect=Version.ABSENT`, by `request_project_removal`
-(`packages/tcip-mcp/src/tcip_mcp/project_removal.py:689`); deleted, at the version the
-completing walk read it at, by `complete_pending_removals` (`project_removal.py:989`).
+(`packages/tcip-mcp/src/tcip_mcp/project_removal.py:690`); deleted, at the version the
+completing walk read it at, by `complete_pending_removals` (`project_removal.py:990`).
 
 Readers: `pending_removal_record` (`workspace.py:248`) and `pending_removal_or_none`
 (`workspace.py:261`). Every caller that asks whether a project is spoken for goes through
-`pending_marker_or_none` (`workspace.py:353`), the one predicate that reads this marker and the
+`pending_marker_or_none` (`workspace.py:355`), the one predicate that reads this marker and the
 rename marker in section 29a and answers a `PendingMarker` naming which kind it found. The one
-direct reader left is `_ordered_refusal` (`project_removal.py:476`), which reads each marker by
-name because it must report which kind refused and must let the store's own refusal surface as
-its own 409 rather than fold to no marker. `adoptable_project_root`, `ingest_images`,
+direct reader left is `_ordered_refusal` (`project_removal.py:441`), whose own
+`pending_removal_record` read is `:477`: it reads each marker by name because it must report
+which kind refused and must let the store's own refusal surface as its own 409 rather than fold
+to no marker. `adoptable_project_root`, `ingest_images`,
 `tcip_web.paths.allowed_roots`'s excluded roots, `routes/dataset.py`, `routes/projects.py`'s
 listing and `cli/distill_learnings.py` all go through it, so an opener or a guarded route refuses
 a marked project, of either kind, from the moment its document lands.
@@ -2211,24 +2212,24 @@ No seam id in `seam-coverage.json`'s inventory names this record: the door is ne
 ## 29a. `pending_rename.json`, per-project rename marker
 
 Path: `<project_path>/.tcip/pending_rename.json`, addressed by `pending_rename_key`
-(`packages/tcip-mcp/src/tcip_mcp/workspace.py:303`), on the store `PENDING_RENAME_STORE`
-(`workspace.py:288`), `frozen: true`, locator `RootedFileLocator(prefix=(".tcip",),
+(`packages/tcip-mcp/src/tcip_mcp/workspace.py:305`), on the store `PENDING_RENAME_STORE`
+(`workspace.py:290`), `frozen: true`, locator `RootedFileLocator(prefix=(".tcip",),
 suffix=".json")`, the shape section 29's own marker uses.
 
 Shape: `{requested_at, requested_by, old_name, new_name}`, one document per project. Written
 once, `concurrency="cas"` with `expect=Version.ABSENT`, by `request_project_rename`
-(`packages/tcip-mcp/src/tcip_mcp/project_rename.py:194`); deleted, at the version the reader
-read it at, by `complete_pending_renames` (`project_rename.py:397`) or by
+(`packages/tcip-mcp/src/tcip_mcp/project_rename.py:227`); deleted, at the version the reader
+read it at, by `complete_pending_renames` (`project_rename.py:439`) or by
 `withdraw_project_rename`, the door that clears a branch the completing walk found blocked.
 
-Readers: `pending_rename_record` (`workspace.py:314`) and `pending_rename_or_none`
-(`workspace.py:326`), reached through `pending_marker_or_none` (`workspace.py:353`) by every
+Readers: `pending_rename_record` (`workspace.py:316`) and `pending_rename_or_none`
+(`workspace.py:328`), reached through `pending_marker_or_none` (`workspace.py:355`) by every
 caller that asks whether a project is spoken for, and read directly by `_ordered_refusal`
 (`project_removal.py`), so the removal door refuses a project pending rename and the rename door
 refuses one pending removal through one chain rather than two restatements of it.
 
 The rename is refused outright, never queued, once the project holds a record naming its own
-path: `project_records_present` (`project_rename.py:68`) bounds that at six stores
+path: `project_records_present` (`project_rename.py:82`) bounds that at six stores
 (`experiments`, `plant_mapping`, `plant_registries`, `delivery_events`, `job_registry`,
 `hpo_sweep_manifest`). A dependent project's registered dataset entry is warned, never refused,
 and the request writes one `dependency_pending_rename` line into that dependent's own log.
@@ -2380,7 +2381,7 @@ Phase 3 verdict: single.
 ## S11. Live canvas state files canvas_live.json / canvas_shapes.json, bound to one root by canvas_open_binding
 
 Must agree: which root the GUI currently has open, so the push route writes canvas_live.json/canvas_shapes.json under it and capture_live_canvas reads them from that same root rather than trusting its own pinned one to still be live. The filename half is closed (both sides address through one locator pair); the root half used to be open (the writer took the browser payload's own project_root as authority, Part 20's own rejected shape), and is now resolved through the canvas_open_binding record P5-274 added (docs/audit/remediation/batch8/p5-274-canvas-binding-design.md): a pinned-root refusal landed for the old shape and was reverted after a three-family review refuted its anchor (docs/audit/remediation/batch8/xf-canvas-root/), and this binding is the settled replacement.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:182` (`def canvas_open_binding_key(`, the one workspace-scoped record `{generation, root, project_name, issued_at, released}`, declared alongside `canvas_meta_key` (`web_client.py:146`)/`canvas_geometry_key` (`web_client.py:157`) addressing the two per-project documents the binding's root names) and `packages/tcip-web/src/tcip_web/routes/dataset.py:205` (`def _write_canvas_binding(`, called from `select_dataset` before the selection is adopted; `generation` bumps when `root` actually changes or the current record was released) and `packages/tcip-mcp/src/tcip_mcp/project_removal.py:852` (`def release_project_binding(`, the record's second writer, marking it released and bumping `generation` without deleting it, for a project the marker or the binding names).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:182` (`def canvas_open_binding_key(`, the one workspace-scoped record `{generation, root, project_name, issued_at, released}`, declared alongside `canvas_meta_key` (`web_client.py:146`)/`canvas_geometry_key` (`web_client.py:157`) addressing the two per-project documents the binding's root names) and `packages/tcip-web/src/tcip_web/routes/dataset.py:205` (`def _write_canvas_binding(`, called from `select_dataset` before the selection is adopted; `generation` bumps when `root` actually changes or the current record was released) and `packages/tcip-mcp/src/tcip_mcp/project_removal.py:853` (`def release_project_binding(`, the record's second writer, marking it released and bumping `generation` without deleting it, for a project the marker or the binding names).
 Side B: `packages/tcip-web/src/tcip_web/routes/canvas.py:89` (`def push_canvas_state(`, reads the binding, verifies the payload's `binding_generation` against it, and writes both documents under the binding's own `root`, never a client-supplied one) and the binding's three MCP-side readers, each comparing a root it names against the record through the one predicate `packages/tcip-mcp/src/tcip_mcp/web_client.py:353` (`def gui_binding_matches(`): `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:730` (`def capture_live_canvas(`, beside its own pinned root, with a generation fence re-reading the binding after the documents through the same store-error contract so a switch mid-call cannot render a false live result) and `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:73` (`push_panel_event`) and `tools/gui_tools.py:137` (`focus_human_attention`), each against a caller-stated `project_root` rather than a process's own pin). A mismatch or absence on any of the three is named through the shared helper `packages/tcip-mcp/src/tcip_mcp/web_client.py:385` (`def binding_divergence(`).
 Phase 3 verdict: single. The current generation also rides the GuiState broadcast envelope (`packages/tcip-web/src/tcip_web/app.py:185` `SERVER_EPOCH`, read off `StateStore.binding_generation`, `packages/tcip-web/src/tcip_web/state.py:149`) and is adopted with the dataset in one client-side store update (`packages/tcip-web/frontend/src/store/slices/gui.ts:138` `applyRestoredDataset`, and `mergeSnapshot`), so the push's `binding_generation` and the reader's own comparison never straddle a stale identity.
 
