@@ -49,6 +49,14 @@ refuses the call rather than silently overwriting it.
 
 Scales across 6 crops × subjects × phenotypes, and sorts sensibly on disk.
 
+A name that turns out wrong is corrected from the project picker's own Rename control, which the
+breeder drives by typing the project's name, the way removal already works. Rename before the
+project trains, maps or delivers: the door refuses outright once the project holds an experiment,
+a plant mapping, a plant registry, a delivery event, a registered job or a sweep manifest, since
+those records carry the project's own path and no door re-points them. A dependent project's
+registered dataset entry keeps pointing at the old path after a rename, warned rather than
+refused, until that project's own owner re-registers it.
+
 ## 2. Ingest: `ingest_images`
 
 Structure the raw pile into the canonical layout. One auditable primitive:
