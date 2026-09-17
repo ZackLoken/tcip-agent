@@ -26,6 +26,8 @@ from tests.test_tcip_web_results_routes import _phenology_fixture
 
 pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
 
+from tests._population import mapped_plants
+
 
 @pytest.fixture
 def client() -> TestClient:
@@ -80,7 +82,7 @@ def test_the_web_and_mcp_deliveries_agree_on_the_majority_marker(
 
     out_csv = tmp_path / "mcp_delivery.csv"
     result = deliver_phenology_milestones(
-        trait=body["trait"], mapping_name=body["mapping_name"],
+        trait=body["trait"], mapping_name=body["mapping_name"], plants=mapped_plants(body["mapping_name"]),
         predictions_by_date=body["predictions_by_date"], output_csv_path=str(out_csv),
         classifier_pred_dirs=list(body["predictions_by_date"].values()),
     )

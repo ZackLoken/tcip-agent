@@ -291,7 +291,8 @@ def test_per_plant_phenology_builds_fraction_series_when_classified(tmp_path):
     }
     preds = {"2024-05-01": str(d1), "2024-05-15": str(d2)}
 
-    out = phenology.per_plant_phenology(mapping, preds, positive_value="open", spec=BUD_OPENING)
+    out = phenology.per_plant_phenology(mapping, preds, positive_value="open", spec=BUD_OPENING,
+                                        plants=["P1"])
 
     assert out["positive_class_assessed"] is True
     row = out["rows"][0]
@@ -311,7 +312,8 @@ def test_per_plant_phenology_bare_detector_bucket_refuses_whole_delivery(tmp_pat
     mapping = {"2024-05-01": [_Assignment("P1_a", "P1", "acc-9")]}
     preds = {"2024-05-01": str(d1)}
 
-    out = phenology.per_plant_phenology(mapping, preds, positive_value="open", spec=BUD_OPENING)
+    out = phenology.per_plant_phenology(mapping, preds, positive_value="open", spec=BUD_OPENING,
+                                        plants=["P1"])
 
     assert out["positive_class_assessed"] is False
     row = out["rows"][0]
@@ -329,7 +331,8 @@ def test_per_plant_phenology_missing_image_is_disclosed_not_a_zero(tmp_path):
     mapping = {"2024-05-01": [_Assignment("P1_a", "P1", "acc-9")]}
     preds = {"2024-05-01": str(d1)}
 
-    out = phenology.per_plant_phenology(mapping, preds, positive_value="open", spec=BUD_OPENING)
+    out = phenology.per_plant_phenology(mapping, preds, positive_value="open", spec=BUD_OPENING,
+                                        plants=["P1"])
 
     row = out["rows"][0]
     assert row["series"][0]["n_missing"] == 1
@@ -355,7 +358,8 @@ def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(tmp
     }
     preds = {"2024-05-01": str(d1), "2024-05-15": str(d2)}
 
-    out = phenology.per_plant_phenology(mapping, preds, positive_value="open", spec=BUD_OPENING)
+    out = phenology.per_plant_phenology(mapping, preds, positive_value="open", spec=BUD_OPENING,
+                                        plants=["P1"])
 
     row = out["rows"][0]
     assert row["n_dates"] == 2
@@ -374,7 +378,7 @@ def test_per_plant_series_accepts_dict_assignments(tmp_path):
     _sidecar(d1, {"closed": 0, "open": 1}, attribute="opening")
     mapping = {"2024-05-01": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}]}
     preds = {"2024-05-01": str(d1)}
-    per_plant = phenology.per_plant_series(mapping, preds, positive_value="open")
+    per_plant = phenology.per_plant_series(mapping, preds, positive_value="open", plants=["P1"])
     assert "P1" in per_plant
     assert per_plant["P1"]["accession"] == "acc-9"
     assert per_plant["P1"]["series"][0][:3] == ("2024-05-01", 1, 1)  # total=1, positive=1
@@ -836,7 +840,7 @@ def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(tmp_p
     }
     res = phenology.per_plant_phenology(
         mapping, {"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        positive_value="open", spec=BUD_OPENING)
+        positive_value="open", spec=BUD_OPENING, plants=["GOOD", "BAD"])
     by_plant = {r["plant_id"]: r for r in res["rows"]}
     assert by_plant["BAD"]["n_dates_missing_images"] == 1  # genuinely excluded
     assert set(by_plant["GOOD"]) == set(by_plant["BAD"])
@@ -855,7 +859,7 @@ def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
     mapping = {"2026-02-11": [_Assignment(f"IMG{i}", "P1", "a") for i in range(3)]
                + [_Assignment("GONE", "P1", "a")]}  # named, no prediction file
     per_plant = phenology.per_plant_series(mapping, {"2026-02-11": str(d)},
-                                            positive_value="open")
+                                            positive_value="open", plants=["P1"])
     series = per_plant["P1"]["series"]
     (_date, total, positive, unclassified, missing, n_images) = series[0]
     assert (total, positive, unclassified, missing) == (6, 3, 0, 1)
@@ -876,7 +880,7 @@ def test_per_plant_series_excludes_unattributed_assignments_from_coverage(tmp_pa
         _Assignment("STRAY", None, None),  # no plot_name: never assigned to any plant
     ]}
     per_plant = phenology.per_plant_series(
-        mapping, {"2026-02-11": str(d)}, positive_value="open")
+        mapping, {"2026-02-11": str(d)}, positive_value="open", plants=["P1"])
     assert list(per_plant) == ["P1"]
 
 
@@ -893,7 +897,7 @@ def test_per_plant_phenology_excludes_unattributed_assignments_from_rows(tmp_pat
         _Assignment("STRAY2", "", None),
     ]}
     out = phenology.per_plant_phenology(
-        mapping, {"2026-02-11": str(d)}, positive_value="open", spec=BUD_OPENING)
+        mapping, {"2026-02-11": str(d)}, positive_value="open", spec=BUD_OPENING, plants=["P1"])
     assert [r["plant_id"] for r in out["rows"]] == ["P1"]
     assert "n_images_unmapped" not in out
 

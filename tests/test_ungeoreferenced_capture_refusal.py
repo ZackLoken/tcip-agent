@@ -27,6 +27,8 @@ from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
 DATE = "2026-02-11"
 
+from tests._population import mapped_plants
+
 
 def _write_ungeoreferenced_image(path: Path) -> None:
     """A JPEG carrying no EXIF at all: readable, but with no timestamp and no GPS block."""
@@ -221,7 +223,7 @@ def _assert_all_doors_refuse(
 
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name=mapping_name, predictions_by_date=preds_by_date,
+        trait="currant_bloom", mapping_name=mapping_name, plants=mapped_plants(mapping_name), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv))
     assert "error" in res
     assert expected_fragment in res["error"]
@@ -232,6 +234,7 @@ def _assert_all_doors_refuse(
     payload = {
         "project_root": str(tmp_path), "mapping_name": mapping_name,
         "predictions_by_date": preds_by_date, "trait": "currant_bloom",
+        "plants": ["P1"],
     }
     resp = client.post("/api/results/export_csv",
                        json={**payload, "payload": "milestones", "filename": "x.csv"})
@@ -320,7 +323,7 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(tmp_path: Path)
     assert build.unattributed() == 1
 
     per_plant = phenology.per_plant_series(
-        {DATE: [blank, named]}, {}, positive_value="open")
+        {DATE: [blank, named]}, {}, positive_value="open", plants=["P1"])
     assert list(per_plant) == ["P1"]
 
 
@@ -402,7 +405,7 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
     classifier_dirs = _validate_delivery_buckets(preds_by_date, dataset_root)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
     assert "error" not in res, res
     assert res["n_images_unattributed"] == 1
@@ -449,7 +452,7 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
     classifier_dirs = _validate_delivery_buckets(delivered, dataset_root)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=delivered,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=delivered,
         output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
     assert "error" not in res, res
     assert res["n_images_unattributed"] == 0
@@ -482,7 +485,7 @@ def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one
     classifier_dirs = _validate_delivery_buckets(delivered, dataset_root)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=delivered,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=delivered,
         output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
     assert "error" not in res, res
     assert sorted(res["dates_delivered"]) == sorted([DATE, empty_date])
@@ -502,7 +505,7 @@ def test_a_fully_positioned_scene_keeps_delivering_with_zero_unattributed(
     classifier_dirs = _validate_delivery_buckets(preds_by_date, dataset_root)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
     assert "error" not in res, res
     assert res["n_images_unattributed"] == 0
@@ -525,7 +528,7 @@ def test_a_raster_beside_positioned_photographs_still_delivers(
     classifier_dirs = _validate_delivery_buckets(preds_by_date, dataset_root)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
     assert "error" not in res, res
     assert out_csv.exists()

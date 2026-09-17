@@ -43,6 +43,8 @@ PISTILLATE_SPEC = {
     "majority_label": "flowering",
 }
 
+from tests._population import mapped_plants
+
 
 def _write_specs(project_root: Path) -> None:
     """Register both traits and give each a confirmed crossing record, so both can deliver.
@@ -140,7 +142,7 @@ def _deliver(tmp_path: Path, spec: dict, *, validated: bool) -> dict:
     out_csv = root / f"{spec['phenology_prefix']}_phenology.csv"
     res = deliver_phenology_milestones(
         trait=spec["name"],
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date=dirs,
         output_csv_path=str(out_csv),
         classifier_pred_dirs=classifier_dirs,

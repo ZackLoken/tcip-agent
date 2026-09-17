@@ -17,6 +17,8 @@ from tcip_mcp.tools.phenology_tools import build_plant_mapping, register_plant_r
 
 from tests.test_plant_mapping_binding import PLANTS, _dataset, _init, _write_scene
 
+from tests._population import mapped_plants
+
 
 def _plant_csv(path: Path, plants: list[dict] | None = None) -> Path:
     plants = PLANTS if plants is None else plants
@@ -190,7 +192,7 @@ def test_the_happy_path_through_the_platforms_own_producers_refuses_at_the_class
     out_csv = tmp_path / "out.csv"
 
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv))
 
     assert "error" in res, res
@@ -212,7 +214,7 @@ def test_a_deleted_registry_refuses_at_delivery_naming_the_registry_and_the_mapp
     out_csv = tmp_path / "out.csv"
 
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv))
 
     assert "error" in res
@@ -236,7 +238,7 @@ def test_a_registry_digest_mismatch_refuses_at_delivery(
     out_csv = tmp_path / "out.csv"
 
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv))
 
     assert "error" in res

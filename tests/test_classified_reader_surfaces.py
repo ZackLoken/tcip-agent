@@ -81,7 +81,7 @@ def test_per_plant_series_raises_for_a_neither_key_stamp(tmp_path: Path) -> None
     mapping = {"2026-05-01": [_Assignment("s1", "P1")]}
 
     with pytest.raises(resolution.StampScopeUnstated, match="repair-classified-predictions"):
-        phenology.per_plant_series(mapping, {"2026-05-01": str(pred_dir)}, "open")
+        phenology.per_plant_series(mapping, {"2026-05-01": str(pred_dir)}, "open", ["P1"])
 
 
 def test_per_plant_series_raises_for_an_undecodable_stamp(tmp_path: Path) -> None:
@@ -96,7 +96,7 @@ def test_per_plant_series_raises_for_an_undecodable_stamp(tmp_path: Path) -> Non
     mapping = {"2026-05-02": [_Assignment("s1", "P1")]}
 
     with pytest.raises(Exception):  # the seam's own StoreError subclass
-        phenology.per_plant_series(mapping, {"2026-05-02": str(pred_dir)}, "open")
+        phenology.per_plant_series(mapping, {"2026-05-02": str(pred_dir)}, "open", ["P1"])
 
 
 def test_coco_round_trip_keeps_a_classified_predictions_value(tmp_path: Path) -> None:

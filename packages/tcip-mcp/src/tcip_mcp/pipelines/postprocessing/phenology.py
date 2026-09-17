@@ -398,18 +398,44 @@ def count_by_class(
     return total, positive, 0
 
 
+class EmptyPopulation(ValueError):
+    """A phenology measurement was asked for with no plants named.
+
+    The population is the caller's explicit list of plants; a mapping names every plot the
+    plant CSVs carry, which is never the same thing, so nothing here ever stands in for it.
+    """
+
+
+def _population(plants: Sequence[str]) -> list[str]:
+    """The delivery population as one ordered list of distinct plant ids, refusing an empty one."""
+    ordered = list(dict.fromkeys(str(p) for p in plants))
+    if not ordered:
+        raise EmptyPopulation(
+            "a phenology measurement needs the plants it is for: pass the plant ids to deliver "
+            "(plants=[...]); a mapping names every plot in its plant CSVs, never the population."
+        )
+    return ordered
+
+
 def per_plant_series(
     mapping: dict[str, list],
     predictions_by_date: dict[str, str],
     positive_value: str,
+    plants: Sequence[str],
 ) -> dict[str, dict]:
-    """Aggregate classified predictions into a per-plant positive-fraction series.
+    """Aggregate classified predictions into a per-plant positive-fraction series, for exactly
+    the plants in ``plants``.
 
     ``mapping`` is ``{date: [assignment, ...]}`` where each assignment has ``.stem`` /
-    ``.plot_name`` / ``.accession_name`` (attributes or dict keys). Returns
-    ``{plant_id: {accession, series: [(date, total, positive, unclassified, missing), ...]}}``.
-    An entry naming no plant (``plant_mapping.assignment_is_attributed`` false) is excluded from
-    every plant's coverage; its count is disclosed once, at delivery scope, by
+    ``.plot_name`` / ``.accession_name`` (attributes or dict keys). ``plants`` is the delivery's
+    population, the caller's own list of plant ids: every plant in it gets an entry, in the
+    order given, and a plant the mapping names that is not in it is never read. A population
+    plant the mapping never names on a date has no entry for that date; one the mapping never
+    names at all has an empty series, so a row exists for it and says so rather than the plant
+    silently dropping out of the delivery. Returns
+    ``{plant_id: {accession, series: [(date, total, positive, unclassified, missing, n_images),
+    ...]}}``. An entry naming no plant (``plant_mapping.assignment_is_attributed`` false) is
+    excluded from every plant's coverage; its count is disclosed once, at delivery scope, by
     ``plant_mapping.MappingBuild.unattributed``, never recomputed here.
 
     Coverage is measured against the stems the plant mapping actually names for each (plant, date),
@@ -431,7 +457,10 @@ def per_plant_series(
     def _attr(a, name):
         return getattr(a, name, None) if not isinstance(a, dict) else a.get(name)
 
-    per_plant: dict[str, dict] = {}
+    population = _population(plants)
+    per_plant: dict[str, dict] = {
+        plant_id: {"accession": None, "series": []} for plant_id in population
+    }
     # Iterate the mapping's own dates, not predictions_by_date's, the mapping is the coverage
     # reference, so a date it names is never silently absent just because the caller dropped it.
     for date_str in mapping:
@@ -448,6 +477,8 @@ def per_plant_series(
             if not assignment_is_attributed(a):
                 continue
             plant_id = _attr(a, "plot_name")
+            if plant_id not in per_plant:
+                continue
             acc = by_plant.setdefault(plant_id, [0, 0, 0, 0, 0])
             acc[4] += 1
             accession.setdefault(plant_id, _attr(a, "accession_name"))
@@ -461,7 +492,9 @@ def per_plant_series(
             acc[1] += positive
             acc[2] += unclassified
         for plant_id, (total, positive, unclassified, missing, n_images) in by_plant.items():
-            entry = per_plant.setdefault(plant_id, {"accession": accession.get(plant_id), "series": []})
+            entry = per_plant[plant_id]
+            if entry["accession"] is None:
+                entry["accession"] = accession.get(plant_id)
             entry["series"].append((date_str, total, positive, unclassified, missing, n_images))
     return per_plant
 
@@ -471,9 +504,14 @@ def per_plant_phenology(
     predictions_by_date: dict[str, str],
     positive_value: str,
     spec,
+    plants: Sequence[str],
 ) -> dict:
-    """Full canonical pipeline: classified predictions + plant mapping → per-plant milestones.
+    """Full canonical pipeline: classified predictions + plant mapping → per-plant milestones,
+    one row per plant in ``plants`` and no other.
 
+    ``plants`` is the delivery's population, the caller's explicit list (see
+    :func:`per_plant_series`): the rows come back in its order and number exactly as many as
+    it names, a plant the mapping never covers included, with an empty series.
     Returns ``{rows: [...], positive_class_assessed: bool}``. Each row carries the positive-
     fraction series, the milestone dates, and coverage-disclosure fields
     (``n_dates_unclassified``, ``n_dates_missing_images``). A plant's milestones are computed only
@@ -487,10 +525,10 @@ def per_plant_phenology(
     disclosure). An unattributed image's count is a delivery-wide disclosure, not a per-plant
     field, and is not this function's: see ``plant_mapping.MappingBuild.unattributed``.
     """
-    per_plant = per_plant_series(mapping, predictions_by_date, positive_value)
+    per_plant = per_plant_series(mapping, predictions_by_date, positive_value, plants)
     rows = []
     any_classified_date = False
-    for plant_id, info in sorted(per_plant.items()):
+    for plant_id, info in per_plant.items():
         usable_dates = [(d, total, positive)
                         for (d, total, positive, unclassified, missing, _n_images) in info["series"]
                         if unclassified == 0 and missing == 0]

@@ -17,6 +17,8 @@ from tcip_mcp import subject_registry as cr
 from tcip_mcp import operationalization as op
 from tests import _operationalization_fixtures as fx
 
+from tests._population import mapped_plants
+
 
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
@@ -331,7 +333,7 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_deliver_phenology_
 
     res = deliver_phenology_milestones(
         trait=fx.CROSSING_TRAIT,
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(bucket)},
         output_csv_path=str(tmp_path / "out.csv"),
     )
@@ -351,7 +353,7 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_deliver_phenology_
     )))
     refused = deliver_phenology_milestones(
         trait=fx.CROSSING_TRAIT,
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(bucket)},
         output_csv_path=str(tmp_path / "out2.csv"),
     )

@@ -34,6 +34,8 @@ _NO_MAPPING = MappingBuild(
     record_sha256="0" * 16,
 ).delivery_disclosure({"captures_unverified": [], "plant_csvs_unverified": []}, [])
 
+from tests._population import mapped_plants
+
 
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
@@ -525,7 +527,7 @@ def _compute(body: dict, out_csv: Path, **kwargs) -> dict:
 
     return deliver_phenology_milestones(
         trait=body["trait"],
-        mapping_name=body["mapping_name"],
+        mapping_name=body["mapping_name"], plants=mapped_plants(body["mapping_name"]),
         predictions_by_date=body["predictions_by_date"],
         output_csv_path=str(out_csv),
         **kwargs,

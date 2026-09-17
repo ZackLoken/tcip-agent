@@ -23,6 +23,8 @@ from tests.test_phenology_tools import _delivery_setup, _ds_root
 
 pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
 
+from tests._population import mapped_plants
+
 
 def _delivery_event_records(project_root: Path | None = None) -> list[dict]:
     scope = resolution.delivery_events_scope(project_root)
@@ -39,7 +41,7 @@ def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name,
+        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )
@@ -115,7 +117,7 @@ def test_a_completed_crossing_delivery_reads_back_through_read_delivery_events_w
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name,
+        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )
@@ -148,7 +150,7 @@ def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(
     second_csv = tmp_path / "out" / "second.csv"
     for out_csv in (first_csv, second_csv):
         res = deliver_phenology_milestones(
-            trait="bud_opening", mapping_name=mapping_name,
+            trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
             predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
             output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
         )

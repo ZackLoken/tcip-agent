@@ -27,6 +27,8 @@ from tests._trait_fixtures import BUD_OPENING
 # A registry whose ids are not consecutive: the positive class sits at id 2 with nothing at id 1.
 SPARSE_ID_MAP = {"closed": 0, "open": 2}
 
+from tests._population import mapped_plants
+
 
 class _Assignment:
     def __init__(self, stem: str, plot_name: str, accession_name: str) -> None:
@@ -171,7 +173,7 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
     preds = {d: str(tmp_path / d) for d in dates}
 
     out = phenology.per_plant_phenology(mapping, preds, positive_value="open",
-                                        spec=BUD_OPENING)
+                                        spec=BUD_OPENING, plants=["P1", "P2"])
 
     rows = {r["plant_id"]: r for r in out["rows"]}
     assert set(rows) == {"P1", "P2"}
@@ -295,7 +297,7 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path)
 
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={d: str(buckets[d]) for d in counts},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(buckets["2026-03-01"])],

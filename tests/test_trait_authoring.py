@@ -29,6 +29,8 @@ from tests._trait_fixtures import BUD_OPENING
 
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
+from tests._population import mapped_plants
+
 
 # ── config-driven authoring, crops.yml-cross-checked ────────────────────────
 
@@ -520,7 +522,7 @@ def test_deliver_phenology_milestones_derives_class_id_and_delivers(tmp_path: Pa
 
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -541,7 +543,7 @@ def test_deliver_phenology_milestones_refuses_when_class_id_unresolvable(tmp_pat
     mapping_name, d1, d2 = _pheno_fixture(tmp_path, classified=False)  # no 'open' anywhere
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(tmp_path / "out.csv"),
     )

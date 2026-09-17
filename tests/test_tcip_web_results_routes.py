@@ -21,6 +21,8 @@ from tests._binding_fixtures import producer_checkpoint_sha256
 # seed_bud_operationalization writes the spec plus the confirmed crossing record this root needs.
 pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
 
+from tests._population import mapped_plants
+
 
 @pytest.fixture
 def client() -> TestClient:
@@ -220,7 +222,8 @@ def _phenology_fixture(
     # The Results doors serve the project the GUI has open, the one this evidence belongs to.
     store.open_project(tmp_path.resolve())
     return {"project_root": str(tmp_path), "mapping_name": mapping_name,
-            "predictions_by_date": preds, "trait": "bud_opening"}
+            "predictions_by_date": preds, "trait": "bud_opening",
+            "plants": ["PLANT_A", "PLANT_B"]}
 
 
 def _expected_validation_record(body: dict) -> str:
@@ -755,7 +758,7 @@ def test_web_and_mcp_phenology_doors_agree_on_validity(client: TestClient, tmp_p
         "/api/results/phenology_measurement", json=body).json()["validated"]
 
     mcp_result = deliver_phenology_milestones(
-        trait=body["trait"], mapping_name=body["mapping_name"],
+        trait=body["trait"], mapping_name=body["mapping_name"], plants=mapped_plants(body["mapping_name"]),
         predictions_by_date=body["predictions_by_date"], output_csv_path=str(tmp_path / "out.csv"),
         classifier_pred_dirs=list(body["predictions_by_date"].values()),
     )
@@ -780,7 +783,7 @@ def test_the_two_phenology_doors_classifier_reconciliations_agree_on_a_coinciden
     resolved_dirs = list(web_measurement.predictions_by_date.values())
 
     mcp_result = deliver_phenology_milestones(
-        trait=body["trait"], mapping_name=body["mapping_name"],
+        trait=body["trait"], mapping_name=body["mapping_name"], plants=mapped_plants(body["mapping_name"]),
         predictions_by_date=body["predictions_by_date"], output_csv_path=str(tmp_path / "mcp.csv"),
         classifier_pred_dirs=resolved_dirs,
     )
@@ -813,7 +816,7 @@ def test_web_and_mcp_export_csv_join_confs_the_same_way(
 
     mcp_out = tmp_path / "mcp.csv"
     mcp_result = deliver_phenology_milestones(
-        trait=body["trait"], mapping_name=body["mapping_name"],
+        trait=body["trait"], mapping_name=body["mapping_name"], plants=mapped_plants(body["mapping_name"]),
         predictions_by_date=body["predictions_by_date"], output_csv_path=str(mcp_out),
         classifier_pred_dirs=list(body["predictions_by_date"].values()),
     )
@@ -1905,6 +1908,7 @@ def test_phenology_measurement_refuses_when_the_delivered_dataset_carries_no_reg
     resp = client.post("/api/results/phenology_measurement", json={
         "project_root": str(tmp_path), "mapping_name": "valley",
         "predictions_by_date": {"2026-02-11": str(bucket)}, "trait": "bud_opening",
+        "plants": ["PLANT_A"],
     })
 
     assert resp.status_code == 400

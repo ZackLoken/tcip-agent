@@ -20,6 +20,8 @@ from tests._binding_fixtures import register_plant_registry_for
 from tests.test_plant_mapping_binding import DATES, _dataset, _init, _validate_buckets
 from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
+from tests._population import mapped_plants
+
 
 def _delivered_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     """A real phenology delivery, through the platform's own doors, whose delivery event this
@@ -54,7 +56,7 @@ def test_a_delivered_csv_carries_the_written_files_own_digest(
     preds_by_date = _delivered_scene(tmp_path, monkeypatch)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
 
@@ -81,7 +83,7 @@ def test_supersede_delivery_over_a_real_event_records_the_withdrawal(
     preds_by_date = _delivered_scene(tmp_path, monkeypatch)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
     event = _one_event(tmp_path)
@@ -107,13 +109,13 @@ def test_supersede_delivery_names_a_replacement_event(
     preds_by_date = _delivered_scene(tmp_path, monkeypatch)
     first_csv = tmp_path / "first.csv"
     assert "error" not in deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(first_csv), classifier_pred_dirs=list(preds_by_date.values()))
     first_event = _one_event(tmp_path)
 
     second_csv = tmp_path / "second.csv"
     assert "error" not in deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(second_csv), classifier_pred_dirs=list(preds_by_date.values()))
     scope = resolution.delivery_events_scope(tmp_path)
     events = [ts.read(k) for k in ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
@@ -158,7 +160,7 @@ def test_supersede_delivery_refuses_an_unknown_replacement_event_id(
     preds_by_date = _delivered_scene(tmp_path, monkeypatch)
     out_csv = tmp_path / "out.csv"
     assert "error" not in deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     event = _one_event(tmp_path)
 
@@ -176,7 +178,7 @@ def test_supersede_delivery_refuses_a_second_supersession_of_the_same_event(
     preds_by_date = _delivered_scene(tmp_path, monkeypatch)
     out_csv = tmp_path / "out.csv"
     assert "error" not in deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     event = _one_event(tmp_path)
 
@@ -223,7 +225,7 @@ def test_supersede_delivery_refuses_a_replacement_event_missing_the_acknowledgem
     preds_by_date = _delivered_scene(tmp_path, monkeypatch)
     out_csv = tmp_path / "out.csv"
     assert "error" not in deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     event = _one_event(tmp_path)
 
