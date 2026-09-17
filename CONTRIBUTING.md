@@ -17,11 +17,10 @@ runs a change against:
 ```bash
 conda activate tcip-agent          # Python 3.12; torch installs CUDA by default, runs without a GPU
 pytest tests/ -n 4 --tb=short --timeout=300 -q
-ruff check .
+ruff check packages tests tools
 mypy                               # roots from mypy.ini, run from the repo root
 python tools/list_tools.py         # the MCP tool list (never hardcode counts in docs)
-python tools/gate_baseline.py --out <dir>   # the CI-parity gate, Git Bash on Windows
-cd packages/tcip-web/frontend && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
+npm --prefix packages/tcip-web/frontend run build   # lint, typecheck and test take the same prefix
 python -m tcip_web                 # backend plus built UI at http://127.0.0.1:8765
 tcip export-store <root>           # a root's database-held records back out as files
 tcip adopt-store <root>            # a root's loose record files into its database
@@ -30,12 +29,12 @@ tcip adopt-store <root>            # a root's loose record files into its databa
 `conda activate tcip-agent` is the environment every other line below runs inside, not a gate of
 its own. `pytest tests/` is the suite; it binds one storage backend per run (an unset environment
 binds the database, `TCIP_STORE_BACKEND=file` the loose-file layout), so a change touching the
-storage seam runs it both ways. `ruff check .` and `mypy` are the lint and type gates. `python
-tools/list_tools.py` is how you find the current MCP tool count and names; never hardcode a
-count in a doc, comment, or commit message.
+storage seam runs it both ways. `ruff check packages tests tools` and `mypy` are the lint and
+type gates. `python tools/list_tools.py` is how you find the current MCP tool count and names;
+never hardcode a count in a doc, comment, or commit message.
 `python tools/gate_baseline.py --out <dir>` runs the same stages `.github/workflows/ci.yml`
 declares, so a local pass predicts CI. The frontend line is the frontend's own gate, run only
-when a frontend file changed. `python -m tcip_web` is how you confirm a change against the
+when a frontend file changed; `lint`, `typecheck` and `test` run under the same prefix. `python -m tcip_web` is how you confirm a change against the
 served app rather than tests alone. `tcip export-store` and `tcip adopt-store` move a root's records
 between the database and loose-file layouts; run them, not a hand-written script, whenever a
 change needs to inspect or convert a root's on-disk state.
