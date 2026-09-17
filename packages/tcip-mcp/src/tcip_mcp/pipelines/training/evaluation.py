@@ -129,21 +129,24 @@ def _reported_metrics(values: dict) -> dict:
 
 def compute_composite_objective(
     val_loss: float, f1: float, map50: float, score_weights: dict | None = None
-) -> float:
-    """Lower-is-better selection/tuning score blending loss, F1 and mAP50.
+) -> float | None:
+    """Lower-is-better selection/tuning score blending loss, F1 and mAP50, or ``None`` when
+    the epoch has no useful score.
 
-    ``w["loss"]*loss + w["f1"]*(1-f1)*10 + w["map50"]*(1-map50)*10`` with ``1e6``
-    sentinels for degenerate runs. The ``*10`` lifts the unit-interval quality
-    terms to a typical loss magnitude.
+    ``w["loss"]*loss + w["f1"]*(1-f1)*10 + w["map50"]*(1-map50)*10``; the ``*10`` lifts the
+    unit-interval quality terms to a typical loss magnitude. A degenerate epoch (a non-positive
+    or non-finite loss, or both quality terms at zero) has no score at all, so it answers
+    ``None`` rather than a number: a record carries ``None`` as "not measured", the selection
+    comparison treats it as never improving, and no chart plots it as if it were a value.
     """
     w = score_weights or DEFAULT_SCORE_WEIGHTS
     vl = float(val_loss) if (val_loss is not None and math.isfinite(val_loss)) else float("inf")
     f1v = float(f1) if (f1 is not None and math.isfinite(f1)) else 0.0
     m50 = float(map50) if (map50 is not None and math.isfinite(map50)) else 0.0
-    if vl <= 0:
-        return 1e6
+    if vl <= 0 or not math.isfinite(vl):
+        return None
     if f1v < 0.01 and m50 < 0.01:
-        return 1e6
+        return None
     return w["loss"] * vl + w["f1"] * (1.0 - f1v) * 10 + w["map50"] * (1.0 - m50) * 10
 
 
