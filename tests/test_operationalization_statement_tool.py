@@ -71,7 +71,7 @@ def test_a_refused_statement_records_the_call_it_refused_and_writes_nothing(
 
     assert "error" in result
     rows = _entries(project, "state_trait_operationalization")
-    assert len(rows) == 1 and rows[0]["status"] == "error"
+    assert len(rows) == 1 and rows[0]["status"] == "ok"
     _, stored, _ = fx.resolve(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES)
     assert stored.value is None
 

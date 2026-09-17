@@ -1,8 +1,12 @@
-"""Audit logging decorator for MCP tools.
+"""Audit logging decorator for the platform's mutating doors.
 
-Every tool call is logged with timestamp, tool name, arguments, result status, and duration, into
-an append-only store: entries are added, never rewritten. The bound backend decides where those
-entries sit, one JSON object per line on the file backend.
+Every call of a mutating door is logged with timestamp, tool name, arguments, status, and
+duration, into an append-only store: entries are added, never rewritten. The bound backend
+decides where those entries sit, one JSON object per line on the file backend. A door that only
+reads (a status poll, a listing, a document served back) carries no decorator and leaves no line:
+the log records what changed state, never what looked at it. ``status`` is ``ok`` when the body
+returned and ``exception`` when it raised; a body that answered a refusal dict returned, and its
+line reads ``ok`` like any other return, the refusal itself being the caller's answer.
 
 One store, ``audit_log``, addressed under three kinds of root: the platform audit log (the
 pinned platform state root, the default when a caller names no other), a dataset's audit log
@@ -10,8 +14,8 @@ pinned platform state root, the default when a caller names no other), a dataset
 own, such as a delivery or a plant-mapping build). A project that has been adopted (see
 ``project_paths``) coincides with the platform root, so from then on a project's own log and the
 platform log are one file at one key. Each event is written once, to the one log its scope names:
-:func:`audited` for the platform's doors (every MCP tool in ``tools/``, plus the script-invoked
-doors demoted from them, keeping ``@audited`` without registering), which name the argument
+:func:`audited` for the platform's mutating doors (the MCP tools in ``tools/`` that change state,
+plus the script-invoked doors demoted from them, keeping ``@audited`` without registering), which name the argument
 carrying the dataset or project location with ``@audited(scope_arg=...)``, and :func:`record_event`
 / :func:`record_event_or_raise` for code that is neither.
 
@@ -299,9 +303,12 @@ def audited(
     scope_arg: str | None = None,
     scope_via: Callable[[Any], Any] | None = None,
 ) -> Callable:
-    """Decorator that logs MCP tool calls to the audit log their scope names.
+    """Decorator that logs a mutating door's calls to the audit log their scope names.
 
-    Bare (``@audited``), a call is a platform event and is recorded in the platform's log.
+    Only a function that changes state carries it: a pure read (a status poll a browser drives
+    once a second, a listing, a knowledge document served back) leaves no line, so the log is
+    the record of mutations and nothing else. Bare (``@audited``), a call is a platform event
+    and is recorded in the platform's log.
     ``@audited(scope_arg=...)`` declares which of the tool's own arguments carries the dataset
     or project location the call mutates a record of: that argument's value is resolved at call
     time (:func:`dataset_scope_of` for a dataset argument; a project argument resolves as the
@@ -382,7 +389,7 @@ def audited(
                     # The body's exception is the caller's answer; this one never displaces it.
                     logger.warning("Failed to audit the failed %s call", tool_name, exc_info=True)
                 raise
-            entry["status"] = "error" if isinstance(result, dict) and "error" in result else "ok"
+            entry["status"] = "ok"
             try:
                 record()
             except Exception as exc:

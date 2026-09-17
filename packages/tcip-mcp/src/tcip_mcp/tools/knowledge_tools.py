@@ -15,7 +15,6 @@ the staleness and index tests in ``tests/`` before this one tool would ever be b
 
 from __future__ import annotations
 
-from tcip_mcp.audit import audited
 from tcip_mcp.knowledge import list_documents, read_document
 from tcip_mcp.project_paths import repo_root_from_here
 from tcip_mcp.server import mcp
@@ -42,7 +41,6 @@ def _description() -> str:
 
 
 @mcp.tool(description=_description())
-@audited
 def serve_domain_knowledge(name: str | None = None) -> dict:
     """Read the platform's domain knowledge: trait semantics, workflow patterns, and per-crop
     biology, the same documents Claude Code loads as generated skills. A client without skills

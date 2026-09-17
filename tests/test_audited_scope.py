@@ -123,21 +123,22 @@ def test_propose_annotations_against_a_file_under_no_images_directory_stays_plat
     assert _entries(loose) == []
 
 
-def test_read_only_tool_records_in_the_platform_log_with_the_platform_entry_shape(
+def test_unscoped_mutating_tool_records_in_the_platform_log_with_the_platform_entry_shape(
     platform_root: Path, dataset_root: Path
 ) -> None:
-    """A tool that declares no scope stays a platform event, and its row grows no new field."""
-    from tcip_mcp.tools.data_tools import scan_dataset
+    """A mutating tool that declares no scope stays a platform event, and its row grows no new
+    field."""
+    from tcip_mcp.tools.meta_tools import report_friction
 
-    scan_dataset(str(dataset_root))
+    report_friction(str(dataset_root), "unexpected_behavior", "a platform event")
 
-    rows = _rows_for(platform_root, "scan_dataset")
+    rows = _rows_for(platform_root, "report_friction")
     assert len(rows) == 1
     assert set(rows[0]) == {
         "timestamp", "tool", "arguments", "status", "duration_ms",
     }
-    assert rows[0]["arguments"] == {"folder_path": str(dataset_root)}
-    assert _rows_for(dataset_root, "scan_dataset") == []
+    assert rows[0]["arguments"]["project_path"] == str(dataset_root)
+    assert _rows_for(dataset_root, "report_friction") == []
 
 
 def test_scope_argument_naming_no_dataset_leaves_the_call_a_platform_event(

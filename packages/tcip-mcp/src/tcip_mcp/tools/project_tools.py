@@ -423,7 +423,6 @@ def _root_divergence_report() -> dict[str, str] | None:
 
 
 @mcp.tool()
-@audited
 def view_gui_state() -> dict:
     """The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the
     exact current image. Lets the agent work through the app instead of globbing or asking which image
@@ -470,7 +469,6 @@ def view_gui_state() -> dict:
 
 
 @mcp.tool()
-@audited
 def inspect_project(project_path: str = "") -> dict:
     """Get an overview of a TCIP project.
 

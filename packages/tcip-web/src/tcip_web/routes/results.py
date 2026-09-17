@@ -683,24 +683,14 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
     the same reconciled evidence, refused unless ``show_unvalidated`` asks to see the numbers
     anyway, in which case both ship marked with unvalidated dimensions rather than bare.
 
-    Looking at a number on screen is not delivering it: this route records no delivery event
-    either way, only an audit line, since a delivery event is a fact about an artifact that
-    shipped and nothing here does.
+    Looking at a number on screen is not delivering it and mutates nothing: this route records
+    no delivery event and no audit line, since both are facts about a change of state and
+    nothing here changes any.
     """
     measurement = _measure_phenology(payload)
     if not measurement.gate.ok and not payload.show_unvalidated:
         raise HTTPException(400, _refusal(measurement))
     _still_stated(measurement, payload.trait)
-    # Looking at a number on screen mutates nothing, so this line stays best-effort
-    # (record_event), never the raising _audit other Results doors answer a gap for.
-    from tcip_mcp.audit import record_event
-
-    record_event(
-        "results.phenology_measurement",
-        {"trait": payload.trait, "mapping_name": payload.mapping_name,
-         "has_unvalidated_dimensions": bool(measurement.gate.unvalidated)},
-        source="gui", scope=str(measurement.project_root),
-    )
     return {
         "curves": {
             "rows": measurement.curve_rows(),

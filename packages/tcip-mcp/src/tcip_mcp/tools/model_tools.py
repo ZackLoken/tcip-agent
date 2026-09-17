@@ -115,7 +115,6 @@ def _labeled_available_metrics(models: list[dict]) -> list[dict]:
 
 
 @mcp.tool()
-@audited
 def rank_registered_models(
     project_path: str = "", metric: str = "",
     higher_is_better: bool | None = None, include_unverified: bool = False,

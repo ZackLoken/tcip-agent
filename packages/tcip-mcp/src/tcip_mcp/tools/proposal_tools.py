@@ -496,7 +496,6 @@ def _stage_assignments_regime(image_path: str, img: Path, address: StagingAddres
 
 
 @mcp.tool()
-@audited
 def segment_prompt(
     image_path: str,
     points: list[dict] | None = None,
