@@ -128,12 +128,16 @@ def _redraw_flag_issue(split_cfg: dict) -> str | None:
     return None
 
 
-def _data_dir_issues(data_cfg: dict) -> list[str]:
-    """Every objection ``preflight_config``'s known-loader branch raises about
-    ``data.images_dir``/``data.labels_dir`` presence alone: missing, or naming a directory that
-    does not exist. The one implementation ``preflight_config`` and the data picker's "As
-    recorded" listing both call, so a relaunch whose recorded directories moved shows the same
-    words before Start that ``launch_training`` would refuse it with. A no-op for a bespoke
+def _data_dir_issues(data_cfg: dict, task: str) -> list[str]:
+    """Every objection ``preflight_config``'s known-loader branch raises about the data
+    locations ``task``'s loader reads (:func:`_dataset_source_kwargs` is the one statement of
+    which keys each task reads): a required key missing, or naming a path that does not exist.
+    Detection and instance segmentation read ``images_dir`` and ``labels_dir``; semantic
+    segmentation reads ``images_dir`` and its mask directory; classification, ordinal and
+    regression read ``images_dir`` and, when given, a ``csv_path`` file, never a labels
+    directory. The one implementation ``preflight_config`` and the data picker's "As recorded"
+    listing both call, so a relaunch whose recorded directories moved shows the same words
+    before Start that ``launch_training`` would refuse it with. A no-op for a bespoke
     ``data.dataset_source`` config: the known-loader presence check does not apply when the
     agent's own builder owns loading.
     """
@@ -142,12 +146,21 @@ def _data_dir_issues(data_cfg: dict) -> list[str]:
     if data_cfg.get(DATASET_SOURCE_KEY) is not None:
         return []
     issues: list[str] = []
-    for key in ("images_dir", "labels_dir"):
-        path = data_cfg.get(key)
+    kwargs = _dataset_source_kwargs(task, data_cfg)
+    required_dirs = ["images_dir"]
+    if task in ("detection", "instance_seg"):
+        required_dirs.append("labels_dir")
+    elif task == "semantic_seg":
+        required_dirs.append("masks_dir")
+    for key in required_dirs:
+        path = kwargs.get(key)
         if not path:
             issues.append(f"Missing 'data.{key}'")
         elif not Path(path).is_dir():
             issues.append(f"Directory not found: data.{key} = '{path}'")
+    csv_path = kwargs.get("csv_path")
+    if csv_path and not Path(csv_path).is_file():
+        issues.append(f"File not found: data.csv_path = '{csv_path}'")
     return issues
 
 
@@ -332,19 +345,19 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests and for
     ``launch_training``, which calls this function directly before spawning the training thread.
 
-    Config structure:
+    Config structure, one placement for everything::
+
         model_source: {builder, builder_kwargs, task, in_chans}
-        data: {images_dir, labels_dir, task}  # known loaders, OR a bespoke
-              # {dataset_source: {builder, builder_kwargs, source_files, task}, task}
-        training: {batch_size, ...}  # the full key list generic_trainer.train() reads
-              # (device/seed/deterministic/mixed_precision/stages/optimizer/scheduler/
-              # lr_scaling/stage_warmup_epochs/enforce_monotonic_unfreeze/
-              # gradient_accumulation_steps/checkpoint_every_n_epochs/early_stopping)
-              # is documented on train()'s own docstring, not repeated here, read that for the
-              # canonical, always-current list.
-        evaluation: {trait, selection_metric, ...}  # top level or training.evaluation, top
-              # level wins; read consistently through schemas.evaluation_section.
+        data: {images_dir, labels_dir, task}    # known loaders, or a bespoke
+                                                # {dataset_source: {builder, ...}, task}
+        batch_size, stages, mixed_precision, device, seed, ...   # every key
+                                                # generic_trainer.train() reads, at the top
+                                                # level; train()'s own docstring is the list
+        evaluation: {trait, selection_metric, ...}
         training_source: optional custom train(ctx) loop.
+
+    A nested ``training`` section is refused by name (``schemas.TrainConfigSchema``): a key
+    under it would be read by nothing.
 
     Args:
         config: Full training configuration dict.
@@ -409,7 +422,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
         issues.append("'data' must be a dict")
     elif data_cfg.get(DATASET_SOURCE_KEY) is not None:
         # Bespoke dataset seam (mirrors model_source): the agent's builder owns loading, so the
-        # known-loader images_dir/labels_dir aren't required, only the builder must import.
+        # known-loader directories aren't required, only the builder must import.
         dataset_source = data_cfg[DATASET_SOURCE_KEY]
         if not isinstance(dataset_source, dict) or not dataset_source.get("builder"):
             issues.append("data.dataset_source must be a dict with a 'builder' (module:function)")
@@ -420,7 +433,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             except Exception as exc:
                 issues.append(f"data.dataset_source.builder not importable: {exc}")
     else:
-        issues.extend(_data_dir_issues(data_cfg))
+        issues.extend(_data_dir_issues(data_cfg, _resolved_task(config)))
 
     # Channel firewall: probe one sample raster and check its band count against the declared
     # in_chans, so a channel-wrong train is caught here rather than deep in the training subprocess.
@@ -1363,7 +1376,7 @@ def list_split_choices(experiment_id: str) -> dict:
             "compatible": True, "reason": None,
         }
 
-    dir_issues = _data_dir_issues(data_cfg)
+    dir_issues = _data_dir_issues(data_cfg, _resolved_task(config))
     if dir_issues:
         as_recorded["compatible"] = False
         combined_reason = list(dir_issues)
