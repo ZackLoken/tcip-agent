@@ -375,21 +375,14 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             diverging model's raw losses may hold ``nan``/``inf``, which a JSON-RPC caller such as
             ``launch_training`` cannot answer with directly.
     """
-    from tcip_mcp.pipelines.schemas import (
-        evaluation_section, normalize_train_config, validate_train_config_schema,
-    )
+    from tcip_mcp.pipelines.schemas import validate_train_config_schema
     from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY, MODEL_SOURCE_KEY, TRAINING_SOURCE_KEY
 
-    # The trainer's own view: training.* hoisted onto the top level, top-level wins.
-    normalized = normalize_train_config(config)
-
-    # Pydantic schema over the same normalized view: a model_source nested under training is
-    # then typed by ModelSourceSchema (extra="forbid") exactly as a top-level one is.
-    issues: list[str] = list(validate_train_config_schema(normalized))
+    issues: list[str] = list(validate_train_config_schema(config))
     warnings: list[str] = []
 
     # model_source presence + builder importability (the one build path).
-    model_source = normalized.get(MODEL_SOURCE_KEY)
+    model_source = config.get(MODEL_SOURCE_KEY)
     if not model_source:
         issues.append("Missing 'model_source' section")
     elif not isinstance(model_source, dict) or not model_source.get("builder"):
@@ -403,7 +396,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
     # training_source seam (mirrors model_source/dataset_source above), a bare "module:function"
     # string, not a dict.
-    training_source = normalized.get(TRAINING_SOURCE_KEY)
+    training_source = config.get(TRAINING_SOURCE_KEY)
     if training_source is not None:
         if not isinstance(training_source, str) or not training_source:
             issues.append("training_source must be a non-empty 'module:function' string")
@@ -415,7 +408,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 issues.append(f"training_source not importable: {exc}")
 
     # Data config validation
-    data_cfg = normalized.get("data")
+    data_cfg = config.get("data")
     if not data_cfg:
         issues.append("Missing 'data' section")
     elif not isinstance(data_cfg, dict):
@@ -546,7 +539,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     if manifest_dir:
         from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
-        conflict_issues, task_binds = _manifest_dir_conflicts(normalized)
+        conflict_issues, task_binds = _manifest_dir_conflicts(config)
         issues.extend(conflict_issues)
         if task_binds:
             try:
@@ -554,14 +547,14 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             except ValueError as exc:
                 issues.append(str(exc))
             else:
-                issues.extend(_manifest_dependent_issues(normalized, manifest, manifest_dir))
+                issues.extend(_manifest_dependent_issues(config, manifest, manifest_dir))
                 if split_cfg_dict.get("redraw_within_manifest"):
                     warnings.append(
                         "data.split.redraw_within_manifest=true: this run redraws train and "
                         "val inside the split manifest's own members for this date and seed; "
                         "the manifest's calibration side stays untouched."
                     )
-                    issues.extend(_redraw_starvation_issues(normalized, manifest, manifest_dir))
+                    issues.extend(_redraw_starvation_issues(config, manifest, manifest_dir))
 
     # Four-way spatial split feasibility (reserve_calibration_fraction, opt-in): must refuse by
     # name when infeasible, not silently degrade to no validation (see the helper's own docstring).
@@ -628,21 +621,19 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                     except _ULD as exc:
                         issues.append(f"data.val_labels_dir: {exc}")
 
-    # Training config validation, read through the same top-level hoist train() reads under
-    # (a top-level batch_size/stages entry wins over training.batch_size/training.stages).
-    batch_size = normalized.get("batch_size", 2)
+    # Training keys, read where train() reads them: the top level.
+    batch_size = config.get("batch_size", 2)
     if not isinstance(batch_size, int) or batch_size < 1:
-        issues.append("'training.batch_size' must be a positive integer")
+        issues.append("'batch_size' must be a positive integer")
 
-    # Per-stage 'epochs' is required; 'lr' is optional (StageSpec) and the trainer
-    # reads learning rates from config['optimizer'], never from a stage. Absent
-    # stages are fine, launch_training supplies its own default schedule.
-    for i, stage in enumerate(normalized.get("stages") or []):
+    # Per-stage 'epochs' is required; a per-stage 'lr' is accepted and ignored (StageSpec), the
+    # trainer reads learning rates from config['optimizer'] alone. Absent stages are fine.
+    for i, stage in enumerate(config.get("stages") or []):
         if "epochs" not in stage:
             issues.append(f"Stage {i} missing 'epochs'")
         if "lr" in stage:
             warnings.append(
-                f"training.stages[{i}].lr is set but ignored, the trainer reads learning rate "
+                f"stages[{i}].lr is set but ignored, the trainer reads learning rate "
                 "only from the top-level 'optimizer' block (backbone_lr/head_lr), applied "
                 "uniformly across every stage. Move the value into 'optimizer' if you meant to "
                 "change it."
@@ -650,7 +641,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
     # Fail fast on an explicit selection_metric that is undeclared or, with a center-match trait,
     # comparability-only, at validation time rather than mid-run.
-    eval_cfg = evaluation_section(config)
+    eval_cfg = config.get("evaluation") or {}
     if not isinstance(eval_cfg, dict):
         issues.append(
             f"'evaluation' must be a mapping (trait/selection_metric/... keys), got "
@@ -685,16 +676,16 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 check_model_contract, overfit_check, render_overfit_report,
             )
 
-            ms = normalized.get(MODEL_SOURCE_KEY) or {}
-            task = ms.get("task") or (normalized.get("data") or {}).get("task", "detection")
-            dims = resolve_contract_dims(normalized, task)
-            model = build_model(normalized)
+            ms = config.get(MODEL_SOURCE_KEY) or {}
+            task = ms.get("task") or (config.get("data") or {}).get("task", "detection")
+            dims = resolve_contract_dims(config, task)
+            model = build_model(config)
             report = check_model_contract(model, task, **dims)
             batch, why_no_batch = None, None
             if report.get("not_smokeable"):
                 # No synthetic batch schema for this task: smoke against a real batch from the
                 # run's own dataset instead, the only reference for a task the platform doesn't enumerate.
-                batch, why_no_batch = _one_real_batch(task, normalized)
+                batch, why_no_batch = _one_real_batch(task, config)
                 if batch is not None:
                     report = check_model_contract(model, task, sample_batch=batch, **dims)
             # ``dims`` shape the synthetic batch only, so they describe nothing once a real batch
@@ -796,7 +787,8 @@ def launch_training(
     authentication concern, not this field's.
 
     Args:
-        config: Full training configuration dict with model_source, data, training sections. An
+        config: Full training configuration dict: model_source and data, with every training
+            setting (batch_size, stages, evaluation, seed, device) at the top level. An
             ``experiment_id`` names the record to launch under (one run's immutable record,
             ``tcip_mcp.experiments``; created if absent, reused while pristine, forked if it
             already has history); absent, a fresh id is minted.
@@ -836,17 +828,14 @@ def launch_training(
     if not validation["valid"]:
         return {"error": "Invalid config", "issues": validation["issues"]}
 
-    # The GUI schema nests stages, mixed_precision and batch_size under ``training``; the trainer
-    # reads them top-level, so without this hoist a GUI run trains the default single stage.
-    from tcip_mcp.pipelines.schemas import normalize_train_config
-    config = normalize_train_config(config)
+    # A shallow copy: what follows records onto it, never onto the caller's own dict, so a
+    # launch never hands back an argument it silently mutated.
+    config = dict(config)
 
     # The top-level key, never the smoke sub-report: overfit_check runs beside the contract's
     # build, on the same batch; preflight_config already rendered it for storage.
     rendered_overfit_report = validation.get("overfit_check")
 
-    # Recorded on the copy above, never the caller's own config dict, so a launch never hands
-    # back an argument it silently mutated.
     smoke_report = validation.get("smoke") or {}
     model_contract_record = {
         "subject": "the model as built at launch, before any training step",
@@ -978,7 +967,7 @@ def _child_env_for_launch(config: dict) -> dict[str, str]:
     env = dict(os.environ)
     env["PYTHONPATH"] = child_pythonpath()
 
-    if config.get("device") or config.get("training", {}).get("device"):
+    if config.get("device"):
         return env
 
     try:
@@ -1025,12 +1014,12 @@ def _watch_wall_clock(proc: subprocess.Popen, run: Any, experiment_id: str,
 
 
 @mcp.tool()
-@audited
 def monitor_training(experiment_id: str | None = None, sweep_id: str | None = None) -> dict:
     """Check the status of a training run, or of a hyperparameter sweep.
 
     Exactly one of ``experiment_id`` and ``sweep_id`` names what to check; both or neither
-    refuses by name. The two return different shapes.
+    refuses by name. The two return different shapes. A read: it changes nothing and leaves no
+    audit line, however often a browser polls it.
 
     ``experiment_id``: reads the run's own status/metrics from disk whenever its training body
     runs in a subprocess, the in-memory record for a subprocess-delegated run is a launch-time
@@ -1494,7 +1483,6 @@ def cancel_training(experiment_id: str) -> dict:
     return {"experiment_id": experiment_id, "status": status, "cancel_requested": True}
 
 
-@audited
 def inspect_compute_resources() -> dict:
     """Report the host's current compute headroom, a fact to reason with before launching
     another concurrent training/HPO run, not an enforced cap.
@@ -2426,11 +2414,9 @@ def run_hyperparameter_search(
 
         from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
         from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
-        from tcip_mcp.pipelines.schemas import evaluation_section
-
         # Ray forbids setting metric/mode anywhere but the Tuner, so the direction is resolved
         # once here, from base_config; every point below is checked against it the same way.
-        hpo_eval_cfg = evaluation_section(base_config)
+        hpo_eval_cfg = base_config.get("evaluation") or {}
         try:
             hpo_metric = resolve_selection_metric(
                 hpo_task, hpo_eval_cfg.get("trait"), hpo_eval_cfg.get("selection_metric"))
@@ -2747,18 +2733,13 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
                             (derived, not pinned, a frozen ``lr*0.1`` would discard an agent's
                             own deliberate ratio)
       - ``weight_decay`` -> ``optimizer["weight_decay"]``
-      - ``batch_size``   -> ``training["batch_size"]``
-      - anything else    -> the top level of ``cfg`` (not nested under ``training``, which runs
-                            after ``normalize_train_config``'s hoist and would never reach
-                            ``train()``'s top-level config reads), free for a bespoke
+      - anything else    -> the top level of ``cfg`` (``batch_size`` included), where
+                            ``train()`` reads every key of its own, free for a bespoke
                             ``training_source`` to sweep its own axes; no whitelist, no reject.
     """
     import copy
 
-    from tcip_mcp.pipelines.schemas import normalize_train_config
-
-    cfg = normalize_train_config(copy.deepcopy(base_config))
-    training = cfg.setdefault("training", {})
+    cfg = copy.deepcopy(base_config)
 
     # The ratio the agent already configured, read from base_config's own optimizer block
     # before this loop overwrites head_lr. Default to 1.0 (not a frozen 0.1) only when the agent
@@ -2776,8 +2757,6 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
             optimizer = cfg.setdefault("optimizer", {})
             optimizer["head_lr"] = lr
             optimizer["backbone_lr"] = lr * backbone_head_ratio
-        elif key == "batch_size":
-            training["batch_size"] = value
         elif key == "weight_decay":
             cfg.setdefault("optimizer", {})["weight_decay"] = value
         elif "." in key:
@@ -2824,7 +2803,7 @@ def _selection_metric_axis_conflict(
     forbids setting metric/mode anywhere else).
 
     Resolves every :func:`_preflight_points` point through the same
-    ``evaluation_section``/``resolve_selection_metric``/``HIGHER_IS_BETTER_BY_METRIC`` path the
+    ``evaluation``/``resolve_selection_metric``/``HIGHER_IS_BETTER_BY_METRIC`` path the
     sweep itself uses, rather than enumerating the key shapes that could reach
     ``selection_metric``: this also catches an axis that changes the metric's own task-derived
     default (``model_source.task``, in particular) with no ``selection_metric`` key in sight.
@@ -2833,8 +2812,6 @@ def _selection_metric_axis_conflict(
     """
     from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
     from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
-    from tcip_mcp.pipelines.schemas import evaluation_section
-
     axes = sorted(param_space)
     for label, point in _preflight_points(param_space):
         try:
@@ -2842,7 +2819,7 @@ def _selection_metric_axis_conflict(
         except ValueError:
             continue
         point_task = _resolved_task(point_cfg)
-        point_eval_cfg = evaluation_section(point_cfg)
+        point_eval_cfg = point_cfg.get("evaluation") or {}
         try:
             point_metric = resolve_selection_metric(
                 point_task, point_eval_cfg.get("trait"), point_eval_cfg.get("selection_metric"))

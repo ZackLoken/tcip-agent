@@ -135,7 +135,7 @@ def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
     cfg = {
         "model_source": {"builder": f"{__name__}:_broken_builder", "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
-        "training": {"batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}]},
+        "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
     # Fast path (no smoke) is structurally valid: the builder imports fine.
     assert preflight_config(cfg)["valid"] is True
@@ -159,7 +159,7 @@ def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
                          "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
                          "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
-        "training": {"batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}]},
+        "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
     r = preflight_config(cfg, smoke=True, overfit=True)
     assert r["valid"] is True, r["issues"]
@@ -183,7 +183,7 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
         "data": {"images_dir": str(imgs),
                  "dataset_source": {"builder": f"{__name__}:_bespoke_task_dataset",
                                     "task": "bunch_compactness"}},
-        "training": {"batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}]},
+        "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
     r = preflight_config(cfg, smoke=True, overfit=True)
     assert r["valid"] is True, r["issues"]
@@ -236,7 +236,7 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
         "data": {"images_dir": str(imgs),
                  "dataset_source": {"builder": f"{__name__}:_unbuildable_dataset",
                                     "task": "bunch_compactness"}},
-        "training": {"batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}]},
+        "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
     r = preflight_config(cfg, smoke=True)
     assert r["valid"] is False

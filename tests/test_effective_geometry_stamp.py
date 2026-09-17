@@ -168,7 +168,7 @@ def _base_config(tiling):
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": "imgs", "labels_dir": "lbls", "tiling": tiling},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
 
 

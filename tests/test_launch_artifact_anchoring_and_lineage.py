@@ -71,8 +71,8 @@ def _detection_config(images_dir: Path, labels_dir: Path) -> dict:
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                  "subject": "bud", "auto_val": False},
-        "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-                     "mixed_precision": False, "device": "cpu"},
+        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
+                     "mixed_precision": False, "device": "cpu",
     }
 
 
@@ -250,8 +250,8 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                  "subject": "bud", "auto_val": False},
-        "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-                     "mixed_precision": False, "device": "cpu"},
+        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
+                     "mixed_precision": False, "device": "cpu",
     }
     res = training_tools.launch_training(config, "", overfit_check=True)
     assert "error" not in res, res
@@ -264,15 +264,14 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
     assert report.get("final_state") in ("nan", "positive_infinity", "negative_infinity")
 
 
-def test_the_launch_record_the_worker_reads_carries_the_seed_and_the_hoisted_training_keys(
+def test_the_launch_record_the_worker_reads_carries_the_seed_and_the_training_keys(
         tmp_path: Path, monkeypatch, recorded_children) -> None:
     """The writer is the real launch_training, driven the same way the tests above drive it
     (training_tools_launch over _canonical_dataset/_detection_config, Popen and TensorBoard
     stubbed by recorded_children so no subprocess actually spawns). The reader is the same read
     the training child performs: tcip_store.read(launch_config_key(output_dir)), the call
-    subprocess_worker.run() makes, not a second parse of config.json. normalize_train_config
-    (schemas.py) hoists every key set under config["training"] onto the top level when the top
-    level doesn't already have it, and run_registry.draw_seed_if_unset draws a seed into
+    subprocess_worker.run() makes, not a second parse of config.json. The trainer's keys sit at
+    the config's top level, and run_registry.draw_seed_if_unset draws a seed into
     config["seed"] before the record is written, so the document the worker reads must carry
     both, plus the model_contract launch_training records and the resolved experiment_id: a
     document only the writer's own test has seen is one the worker's read could silently
@@ -292,10 +291,8 @@ def test_the_launch_record_the_worker_reads_carries_the_seed_and_the_hoisted_tra
     assert isinstance(launch_config["seed"], int)
     assert isinstance(launch_config["model_contract"], dict)
     assert launch_config["experiment_id"] == res["experiment_id"]
-    # "device" is set only under config["training"] in _detection_config; normalize_train_config
-    # hoists it to the top level, which is what this checks actually happened.
-    assert launch_config["training"]["device"] == "cpu"
     assert launch_config["device"] == "cpu"
+    assert "training" not in launch_config
 
 
 def training_tools_launch(config: dict, output_dir: str) -> dict:

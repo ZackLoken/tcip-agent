@@ -2,26 +2,28 @@
 
 Used by ``training_tools.preflight_config`` to surface type/structure errors. The
 runtime trainer still reads the raw config dict; these schemas are validation-only.
+
+A training config has one shape: every key ``generic_trainer.train()`` reads (``batch_size``,
+``stages``, ``mixed_precision``, ``device``, ``seed``, ``evaluation``, ...) sits at the top level
+of the config, beside ``model_source`` and ``data``. There is no nested ``training`` section and
+no precedence rule between placements: a config carrying a ``training`` key is refused by name,
+since a key under it would otherwise be read by nothing and the run would train at the
+trainer's defaults in silence.
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 
 class StageSpec(BaseModel):
-    # A stage is a progressive-unfreeze step. The trainer reads ``freeze_to`` and ``epochs``;
-    # the optimizer LR comes from the top-level ``optimizer`` block, not per stage. extra is
-    # allowed, so a config carrying a per-stage ``lr`` validates and the value is ignored.
+    """One progressive-unfreeze step: the trainer reads ``freeze_to`` and ``epochs``, while the
+    learning rate comes from the top-level ``optimizer`` block, never per stage. Extra keys are
+    allowed, so a config carrying a per-stage ``lr`` validates and the value is ignored."""
+
     model_config = ConfigDict(extra="allow")
     epochs: int
     freeze_to: int | None = None
-
-
-class TrainingSection(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    batch_size: int = 2
-    stages: list[StageSpec] | None = None
 
 
 class ImageStatsWindow(BaseModel):
@@ -54,8 +56,10 @@ class ImageStatsSampling(BaseModel):
 
 
 class ModelSourceSchema(BaseModel):
-    # extra="forbid": a misspelled key here is dropped silently by every reader; refuse
-    # it by name instead of building at the builder's own defaults.
+    """The importable-builder reference. ``extra="forbid"``: a misspelled key here is dropped
+    silently by every reader, so it is refused by name instead of building at the builder's
+    own defaults."""
+
     model_config = ConfigDict(extra="forbid")
     builder: str | None = None
     builder_kwargs: dict | None = None
@@ -65,73 +69,37 @@ class ModelSourceSchema(BaseModel):
     image_stats_sampling: ImageStatsSampling | None = None
 
 
+NESTED_TRAINING_SECTION_REFUSAL = (
+    "'training' is not a config section: every key the trainer reads (batch_size, stages, "
+    "mixed_precision, device, seed, evaluation, ...) sits at the top level of the config, "
+    "beside model_source and data. Move the keys under 'training' up one level."
+)
+
+
 class TrainConfigSchema(BaseModel):
+    """The one training config shape: trainer keys at the top level, no nested section."""
+
     model_config = ConfigDict(extra="allow", protected_namespaces=())
     model_source: ModelSourceSchema | None = None
     data: dict | None = None
-    training: TrainingSection | None = None
+    batch_size: int = 2
+    stages: list[StageSpec] | None = None
+    evaluation: dict | None = None
 
-
-def normalize_train_config(config: dict) -> dict:
-    """Canonicalize a training config for ``generic_trainer.train()``.
-
-    Hoist the ``training.*`` section onto the top level. The validated/GUI schema nests
-    ``stages`` / ``mixed_precision`` / ``batch_size`` / … under ``training``, but ``train()``
-    reads them from the top level of ``run.config``, so without this a GUI-launched run
-    silently trains the default single stage instead of the configured schedule.
-
-    Top-level wins: a key already present at the top level is never overwritten by the
-    nested value: the HPO objective writes tuned params (lr, schedule) flat, and those must
-    survive. The ``training`` section is left in place for the validated schema and the
-    experiment-record snapshot. Shallow copy: nested dicts are shared, so callers must not
-    mutate them in place after normalizing.
-    """
-    cfg = dict(config)
-    training = cfg.get("training")
-    if isinstance(training, dict):
-        for key, value in training.items():
-            cfg.setdefault(key, value)  # top-level wins
-    return cfg
-
-
-_NO_TOP_LEVEL_EVALUATION = object()
-
-
-def evaluation_section(config: dict) -> dict:
-    """The ``evaluation`` block that governs a run, read the one way every caller agrees on.
-
-    A config may carry ``evaluation`` at the top level, nested under ``training.evaluation``, or
-    both. Same precedence as ``normalize_train_config``'s hoist: a present top-level key wins,
-    whatever its own value, and ``training.evaluation`` is honoured only when the top level
-    carries no ``evaluation`` key at all. Read directly off ``config``, never through
-    ``normalize_train_config(config).get(...)``: that helper's ``dict(config)`` copy is a
-    CPython C-level copy that bypasses a dict-subclass's own ``__getitem__``/``get`` overrides,
-    so a caller reading through the copy (an HPO trial's access-tracking config, in particular)
-    would never see its own top-level ``evaluation`` read recorded. The trainer,
-    ``preflight_config`` and the sweep's direction resolution all call this rather than each
-    choosing between the two placements on its own.
-
-    When a block is present (top-level or nested) and not itself falsy, the returned block is
-    the caller's own object, never copied, when ``config`` is a plain dict; when ``config`` is a
-    dict subclass whose ``get`` wraps a nested read (an HPO trial's access-tracking config), the
-    returned block is that subclass's own wrapped view of the nested dict, installed back onto
-    ``config`` on first read, so a write through it is visible on ``config`` from then on, the
-    same as the plain-dict case. When no block is present, or the present block is falsy (an
-    empty dict), the function answers a fresh ``{}`` instead: a write through that returned
-    block reaches nothing, top-level or nested alike.
-    """
-    top = config.get("evaluation", _NO_TOP_LEVEL_EVALUATION)
-    if top is not _NO_TOP_LEVEL_EVALUATION:
-        return top or {}
-    training = config.get("training") or {}
-    return training.get("evaluation") or {}
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_nested_training_section(cls, values: object) -> object:
+        if isinstance(values, dict) and "training" in values:
+            raise ValueError(NESTED_TRAINING_SECTION_REFUSAL)
+        return values
 
 
 def validate_train_config_schema(config: dict) -> list[str]:
     """Validate a training config against the pydantic schema; return issue strings.
 
-    Catches type/structure errors (e.g. ``batch_size="big"``, a stage missing ``epochs``).
-    Does not enforce ``model_source`` presence (``preflight_config`` keeps its own check).
+    Catches type/structure errors (e.g. ``batch_size="big"``, a stage missing ``epochs``, a
+    nested ``training`` section). Does not enforce ``model_source`` presence
+    (``preflight_config`` keeps its own check).
     """
     issues: list[str] = []
     try:
@@ -140,5 +108,7 @@ def validate_train_config_schema(config: dict) -> list[str]:
         for err in e.errors():
             loc = ".".join(str(x) for x in err.get("loc", ()))
             msg = err.get("msg", "invalid")
+            if err.get("type") == "value_error":
+                msg = str(err.get("ctx", {}).get("error", msg))
             issues.append(f"{loc}: {msg}" if loc else msg)
     return issues

@@ -89,11 +89,10 @@ def draw_seed_if_unset(config: dict) -> None:
 
     Never start an unseeded run. Called by ``launch_training`` before the experiment record is
     written (so the record's snapshot and a pristine reuse's config refresh both carry the seed
-    the run actually trains with) and by the HPO trial dispatch on its own tracking config
-    object, before that trial's own ``create_run``, so a swept ``seed`` still reads as consumed by
-    the trainer.
+    the run actually trains with) and by the HPO trial dispatch on its own trial config, before
+    that trial's own ``create_run``.
     """
-    if config.get("seed", config.get("training", {}).get("seed")) is None:
+    if config.get("seed") is None:
         config["seed"] = random.SystemRandom().randrange(2**31)
         logger.info("no seed configured; drew seed=%d.", config["seed"])
 

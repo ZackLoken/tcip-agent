@@ -38,13 +38,17 @@ def test_run_hyperparameter_search_threads_storage_path_and_writes_result(tmp_pa
 def test_run_hyperparameter_search_resolves_direction_from_the_top_level_evaluation_block(
     tmp_path, real_hpo_base_config, monkeypatch
 ):
-    """A base config carrying both placements must resolve the sweep's mode from the
-    top-level ``evaluation`` block, the same one the trainer actually trains on."""
+    """The sweep's mode comes from the config's one ``evaluation`` block, the same one the
+    trainer trains on; a nested ``training`` placement is refused at the door by name."""
     import tcip_mcp.tools.training_tools as tt
 
     cfg = dict(real_hpo_base_config)
     cfg["evaluation"] = {"selection_metric": "f1"}  # higher-is-better -> mode "max"
-    cfg["training"] = {"evaluation": {"selection_metric": "loss"}}  # would resolve "min"
+
+    nested = {**cfg, "training": {"evaluation": {"selection_metric": "loss"}}}
+    refused = tt.run_hyperparameter_search(base_config=nested, n_trials=1, output_dir=str(tmp_path))
+    assert "error" in refused
+    assert any("'training' is not a config section" in issue for issue in refused["issues"])
 
     captured: dict = {}
 

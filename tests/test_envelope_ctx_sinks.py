@@ -235,13 +235,14 @@ def test_calibration_keeps_an_experiment_the_caller_named(tmp_path, monkeypatch)
     assert seen["experiment_id"] == "expOther"
 
 
-def test_evaluation_section_reads_the_same_precedence_the_stock_trainer_does(tmp_path):
-    """A bespoke ``train(ctx)`` loop reading its own ``trait``/``selection_metric`` must see the
-    same block the stock trainer and preflight agree on: a top-level ``evaluation`` wins over
-    ``training.evaluation``."""
-    config = {**CONFIG, "evaluation": {"selection_metric": "f1"},
-              "training": {"evaluation": {"selection_metric": "loss"}}}
+def test_evaluation_section_reads_the_top_level_block_the_stock_trainer_reads(tmp_path):
+    """A bespoke ``train(ctx)`` loop reading its own ``trait``/``selection_metric`` sees the one
+    top-level ``evaluation`` block the stock trainer and preflight read, and an empty mapping
+    when the config carries none."""
+    config = {**CONFIG, "evaluation": {"selection_metric": "f1"}}
     run = create_run(config, str(tmp_path / "out"), id="auto-run-98")
     ctx = TrainContext(run=run, train_loader=None, experiment_id=None)
-
     assert ctx.evaluation_section() == {"selection_metric": "f1"}
+
+    bare = create_run(dict(CONFIG), str(tmp_path / "out2"), id="auto-run-99")
+    assert TrainContext(run=bare, train_loader=None, experiment_id=None).evaluation_section() == {}

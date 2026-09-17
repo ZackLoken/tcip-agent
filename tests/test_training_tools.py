@@ -1946,8 +1946,6 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_cancelled_with_records_
 
     images_dir, csv_path = write_regression_dataset(
         tmp_path, intensities=[0.1, 0.3, 0.5, 0.7], values=[0.2, 0.6, 1.0, 1.4])
-    labels_dir = tmp_path / "unused_labels"
-    labels_dir.mkdir()
     base_config = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
                          "task": "regression", "in_chans": 3},

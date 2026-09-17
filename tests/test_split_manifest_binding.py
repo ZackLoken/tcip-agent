@@ -1271,7 +1271,7 @@ def _preflight_config(root: Path, manifest_dir: Path, date: str, **overrides) ->
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": data_cfg, "training": {"batch_size": 2},
+        "data": data_cfg, "batch_size": 2,
     }
 
 
@@ -1351,7 +1351,7 @@ def test_hpo_trial_snapshot_carries_the_manifest_binding(tmp_path: Path, monkeyp
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": _run_data_cfg(root, out, DATES[0]),
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
 
     def fake_train(run, train_loader, val_loader, task="detection",

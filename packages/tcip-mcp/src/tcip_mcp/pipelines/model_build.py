@@ -400,7 +400,7 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
         "missing": missing,
         "snapshot_errors": snapshot_errors,
         "env": capture_env(),
-        "seed": config.get("seed", config.get("training", {}).get("seed")),
+        "seed": config.get("seed"),
     }
     store.replace(snapshot_manifest_key(exp_dir), manifest)
     return manifest

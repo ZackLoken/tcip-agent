@@ -86,7 +86,7 @@ def test_preflight_accepts_dataset_source_without_image_dirs(tmp_path: Path):
                          "builder_kwargs": {"gt_boxes_wh": [(10, 10)], "num_classes": 1},
                          "task": "grape_bunch_count"},
         "data": {"dataset_source": DATASET_SOURCE, "task": "grape_bunch_count"},
-        "training": {"batch_size": 1},
+        "batch_size": 1,
     }
     # No images_dir/labels_dir: the bespoke builder owns loading, so those are not required.
     result = preflight_config(config, smoke=False)

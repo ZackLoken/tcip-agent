@@ -243,7 +243,6 @@ def _prepare_run_context(experiment_id: str, output_dir: str, resume_from: str,
     model_source = config.get(MODEL_SOURCE_KEY, {})
     # setdefault, not get: the geometry stamp below mutates this dict and must land in config.
     data_cfg = config.setdefault("data", {})
-    train_cfg = config.get("training", {})
     # Task drives collate + measurement routing: the bespoke model_source declares it, falling
     # back to the data section.
     task = model_source.get("task") or data_cfg.get("task", "detection")
@@ -284,8 +283,8 @@ def _prepare_run_context(experiment_id: str, output_dir: str, resume_from: str,
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from torch.utils.data import DataLoader
 
-    batch_size = train_cfg.get("batch_size", 2)
-    num_workers = train_cfg.get("num_workers", 0)
+    batch_size = config.get("batch_size", 2)
+    num_workers = config.get("num_workers", 0)
     # Seeds the loader's shuffle/worker RNG from the run's own seed and scales each worker's
     # own GDAL cache share by num_workers.
     loader_kwargs = seeded_loader_kwargs(config.get("seed"), num_workers=num_workers)

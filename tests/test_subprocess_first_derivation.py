@@ -89,8 +89,8 @@ def test_first_derivation_through_the_real_subprocess_records_the_kind_and_its_a
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "leaf",
                  "val_images_dir": str(val_images), "val_labels_dir": str(val_labels)},
         "evaluation": {"trait": "leaf"},
-        "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-                     "mixed_precision": False, "device": "cpu"},
+        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
+                     "mixed_precision": False, "device": "cpu",
     }
     res = training_tools.launch_training(cfg, str(tmp_path / "out"))
     assert "error" not in res, res
