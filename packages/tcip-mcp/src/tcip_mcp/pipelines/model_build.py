@@ -10,7 +10,9 @@ its inference output must be something the platform's library scorers can consum
 
     {"builder": "my_module:build_net",     # required, 'module:function' (or 'module.function')
      "builder_kwargs": {...},              # optional, passed to the builder
-     "source_files": [...],                # optional, provenance (snapshot_model_source copies these)
+     "source_files": [...],                # optional: the builder's own files; their directories
+                                           # join sys.path before the import (import_source_builder)
+                                           # and snapshot_model_source copies them as provenance
      "task": "detection",                  # optional, measurement/eval routing
      "in_chans": 3}                        # optional, channel-compat check
 
@@ -66,6 +68,62 @@ def _import_dotted(target: object) -> Any:
         return getattr(module, attr)
     except AttributeError as exc:
         raise ValueError(f"Builder {attr!r} not found in module {mod_name!r}.") from exc
+
+
+def _import_root(file: Path, module: str) -> Path | None:
+    """The directory ``module`` imports from when ``file`` is that module's own source, or
+    ``None`` when ``file`` is not it.
+
+    ``mypkg.model`` at ``project/mypkg/model.py`` (or a package ``mypkg`` at
+    ``project/mypkg/__init__.py``) imports from ``project``: one directory up per dotted component,
+    matched against the file's own path so an unrelated file of the same stem is never taken for it.
+    """
+    parts = tuple(module.split("."))
+    module_path = file.parent if file.name == "__init__.py" else file.with_suffix("")
+    if module_path.parts[-len(parts):] != parts:
+        return None
+    return module_path.parents[len(parts) - 1]
+
+
+def _make_source_files_importable(source: dict) -> None:
+    """Put the import root of the builder's own module on ``sys.path``, ahead of everything else,
+    when that module is one of ``source``'s ``source_files``.
+
+    The root is resolved from the dotted ``builder`` and the file's path (:func:`_import_root`), so
+    a packaged builder (``mypkg.model:build`` at ``project/mypkg/model.py``) imports from
+    ``project`` as a top-level one (``model:build`` at ``project/model.py``) does. The one place a
+    bespoke source's own directory enters the import path: the same ``sys.path`` feeds
+    :func:`child_pythonpath`, so the training subprocess, a Ray trial worker and an inference load
+    in another process all inherit the entry without each finding the directory again. A source
+    whose files do not hold the builder's module changes nothing, and a root already on the path is
+    not added twice.
+    """
+    import sys
+
+    builder = source.get("builder")
+    if not isinstance(builder, str) or not builder:
+        return
+    module, _attr = _split_dotted(builder)
+    if not module:
+        return
+    for file in source.get("source_files") or []:
+        root = _import_root(Path(file).resolve(), module)
+        if root is not None and str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+
+
+def import_source_builder(source: dict) -> Any:
+    """Resolve a ``model_source`` or ``dataset_source`` mapping's ``builder`` to the callable,
+    making its own ``source_files`` importable first.
+
+    The one import site for a bespoke builder: preflight, the model build and the dataset build
+    all call this, so a builder that lives outside the interpreter's search path (an agent's
+    own project directory) imports here, in the training child and in the Ray worker alike.
+    """
+    if not isinstance(source, dict):
+        raise ValueError("a builder source must be a dict carrying 'builder'")
+    _make_source_files_importable(source)
+    return _import_dotted(source.get("builder"))
 
 
 def child_pythonpath() -> str:
@@ -126,8 +184,7 @@ def build_from_model_source(model_source: dict) -> Any:
     """
     if not isinstance(model_source, dict):
         raise ValueError("model_source must be a dict")
-    builder = model_source.get("builder")
-    fn = _import_dotted(builder)
+    fn = import_source_builder(model_source)
     kwargs = model_source.get("builder_kwargs") or {}
     if not isinstance(kwargs, dict):
         raise ValueError("model_source.builder_kwargs must be a dict")

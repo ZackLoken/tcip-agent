@@ -388,9 +388,9 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     elif not isinstance(model_source, dict) or not model_source.get("builder"):
         issues.append("model_source must be a dict with a 'builder' (module:function)")
     else:
-        from tcip_mcp.pipelines.model_build import _import_dotted
+        from tcip_mcp.pipelines.model_build import import_source_builder
         try:
-            _import_dotted(model_source["builder"])
+            import_source_builder(model_source)
         except Exception as exc:
             issues.append(f"model_source.builder not importable: {exc}")
 
@@ -420,9 +420,9 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
         if not isinstance(dataset_source, dict) or not dataset_source.get("builder"):
             issues.append("data.dataset_source must be a dict with a 'builder' (module:function)")
         else:
-            from tcip_mcp.pipelines.model_build import _import_dotted
+            from tcip_mcp.pipelines.model_build import import_source_builder
             try:
-                _import_dotted(dataset_source["builder"])
+                import_source_builder(dataset_source)
             except Exception as exc:
                 issues.append(f"data.dataset_source.builder not importable: {exc}")
     else:
