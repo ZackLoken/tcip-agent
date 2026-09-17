@@ -552,9 +552,8 @@ def train(
     - ``batch_size`` (int), only as a fallback when ``train_loader`` itself has no ``.batch_size``
       (the DataLoader's own batch size, set at construction, is the primary source).
     - ``seed`` (int | None), ``deterministic`` (bool, default False), RNG seeding before model
-      build; also under ``training.seed``/``training.deterministic``. ``create_run`` already draws
-      and records a seed when none is configured, so ``seed`` is never actually ``None`` here in
-      practice.
+      build. ``create_run`` already draws and records a seed when none is configured, so
+      ``seed`` is never actually ``None`` here in practice.
     - ``mixed_precision`` (bool, default True), AMP, only when ``device`` is cuda.
     - ``stages`` (list of ``{freeze_to, epochs}``; a per-stage ``lr`` is accepted but ignored,
       see ``optimizer`` below), default a single 10-epoch full-unfreeze stage.
@@ -571,13 +570,11 @@ def train(
     - ``early_stopping`` (``{enabled, patience, min_delta}``, default enabled-if-val_loader,
       patience 7, min_delta 1e-4).
     - ``evaluation`` (``{trait, selection_metric, conf_threshold, iou_threshold, iou_type,
-      max_dets, score_weights}``, all optional), read through ``schemas.evaluation_section``
-      rather than a plain ``config.get``: a top-level ``evaluation`` block wins over
-      ``training.evaluation``, which is honoured only when no top-level block exists at all.
-      Every other ``training.*`` key above still relies on the launch path's hoist
-      (``normalize_train_config``) landing it at the top level before this function ever reads
-      it. ``trait`` and ``selection_metric`` drive ``resolve_selection_metric``; the rest pass
-      through to ``_validate``/``evaluate``.
+      max_dets, score_weights}``, all optional). ``trait`` and ``selection_metric`` drive
+      ``resolve_selection_metric``; the rest pass through to ``_validate``/``evaluate``.
+
+    Every key sits at the top level of the config; there is no nested ``training`` section and
+    ``preflight_config`` refuses one by name.
     """
     config = run.config
     run.status = "running"
@@ -608,10 +605,9 @@ def train(
         device = torch.device(config.get("device", "cuda" if torch.cuda.is_available() else "cpu"))
 
         # Seed before model build so pretrained=False init + shuffle are reproducible.
-        seed = config.get("seed", config.get("training", {}).get("seed"))
+        seed = config.get("seed")
         if seed is not None:
-            set_seed(int(seed), deterministic=config.get(
-                "deterministic", config.get("training", {}).get("deterministic", False)))
+            set_seed(int(seed), deterministic=config.get("deterministic", False))
 
         model = build_model(config)
         model.to(device)
@@ -633,8 +629,7 @@ def train(
         physical_batch = getattr(train_loader, "batch_size", None) or config.get("batch_size") or 1
         pending_snapshot = None   # best optimizer state from the previous stage
         prev_trainable = None     # trainable param count of the previous stage
-        from tcip_mcp.pipelines.schemas import evaluation_section
-        eval_cfg = evaluation_section(config)  # metric / selection params, top level wins
+        eval_cfg = config.get("evaluation") or {}
         trait = eval_cfg.get("trait")
         selection_metric = resolve_selection_metric(
             task, trait, eval_cfg.get("selection_metric"), has_val_loader=val_loader is not None)

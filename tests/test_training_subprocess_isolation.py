@@ -235,8 +235,8 @@ def test_launch_training_child_receives_resolved_experiment_id(tmp_path, monkeyp
                              "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
                              "task": "detection"},
             "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud"},
-            "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-                         "mixed_precision": False, "device": "cpu"},
+            "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
+                         "mixed_precision": False, "device": "cpu",
             "experiment_id": experiment_id,
         }
 
@@ -601,9 +601,6 @@ def test_gpu_pinning_skipped_when_device_explicit(monkeypatch):
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
 
     env = training_tools._child_env_for_launch({"device": "cuda:1"})
-    assert "CUDA_VISIBLE_DEVICES" not in env
-
-    env = training_tools._child_env_for_launch({"training": {"device": "cuda:0"}})
     assert "CUDA_VISIBLE_DEVICES" not in env
 
 

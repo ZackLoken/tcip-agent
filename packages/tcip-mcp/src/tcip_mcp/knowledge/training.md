@@ -62,14 +62,14 @@ evaluation:
 `training_source` for a custom `train(ctx)` loop); see how you build the model and import
 the plain blocks in `pipeline-design/SKILL.md`; don't re-derive it here.
 
-The example below is representative, not exhaustive; `training` is an open dict, and
+The example below is representative, not exhaustive; the config is an open dict, and
 `generic_trainer.train()`'s own docstring is the canonical, always-current list of every key it
 reads (device/seed/deterministic/mixed_precision/stages/optimizer/scheduler/lr_scaling/
 stage_warmup_epochs/enforce_monotonic_unfreeze/gradient_accumulation_steps/
 checkpoint_every_n_epochs/early_stopping). Read that docstring rather than assuming this
-example is complete. `evaluation` is not a member of `training`: it is accepted at the config's
-top level or nested under `training.evaluation`, a present top-level block always winning, read
-the same way everywhere through `schemas.evaluation_section`.
+example is complete. Every one of those keys, `evaluation` included, sits at the top level of
+the config beside `model_source` and `data`. There is no `training` section: a config that
+nests keys under one is refused by `preflight_config` by name, since nothing would read them.
 
 ```python
 config = {
@@ -85,14 +85,12 @@ config = {
         "labels_dir": "data/labels/detect",
         "task": "detection"
     },
-    "training": {
-        "batch_size": 4,
-        "stages": [...],
-        "mixed_precision": True,
-        "device": "cuda",
-        "seed": 42,             # optional, reproducible init/shuffle when set
-        "deterministic": False  # optional, cuDNN deterministic algorithms (slower)
-    },
+    "batch_size": 4,
+    "stages": [...],
+    "mixed_precision": True,
+    "device": "cuda",
+    "seed": 42,             # optional, reproducible init/shuffle when set
+    "deterministic": False,  # optional, cuDNN deterministic algorithms (slower)
     "augmentation": {
         "horizontal_flip": 0.5,
         "random_crop": {"min_scale": 0.8}

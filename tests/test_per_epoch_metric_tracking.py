@@ -87,8 +87,8 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "leaf",
                  "val_images_dir": str(val_images), "val_labels_dir": str(val_labels)},
-        "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 2}],
-                     "mixed_precision": False, "device": "cpu"},
+        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 2}],
+                     "mixed_precision": False, "device": "cpu",
     }
     trial_dir = tmp_path / "trial_x"
     reported: list[float] = []

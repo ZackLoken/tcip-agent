@@ -171,8 +171,8 @@ def _detection_cfg(images_dir, labels_dir, experiment_id: str) -> dict:
                          "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud"},
-        "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-                     "mixed_precision": False, "device": "cpu"},
+        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
+                     "mixed_precision": False, "device": "cpu",
         "experiment_id": experiment_id,
     }
 

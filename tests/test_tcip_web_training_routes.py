@@ -427,15 +427,13 @@ def test_relaunch_route_launches_a_pristine_config_as_its_own_first_run(
 
     images_dir, csv_path = write_regression_dataset(
         tmp_path, intensities=[0.0, 1.0], values=[0.1, 0.9])
-    labels_dir = tmp_path / "unused_labels"
-    labels_dir.mkdir()
     cfg = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
                          "task": "regression", "in_chans": 3},
-        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path), "labels_dir": str(labels_dir)},
-        "training": {"batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
+        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path)},
+        "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
-                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}},
+                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
     create_experiment("exp-pristine-relaunch", cfg)
 
@@ -493,8 +491,8 @@ def test_relaunch_route_stamps_the_run_as_launched_through_this_app(
                          "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud"},
-        "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-                     "mixed_precision": False, "device": "cpu"},
+        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
+                     "mixed_precision": False, "device": "cpu",
     }
     create_experiment("exp-gui-relaunch", cfg)
 
@@ -518,15 +516,13 @@ def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
 
     images_dir, csv_path = write_regression_dataset(
         tmp_path, intensities=[0.0, 1.0], values=[0.1, 0.9])
-    labels_dir = tmp_path / "unused_labels"
-    labels_dir.mkdir()
     cfg = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
                          "task": "regression", "in_chans": 3},
-        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path), "labels_dir": str(labels_dir)},
-        "training": {"batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
+        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path)},
+        "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
-                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}},
+                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
     from tcip_mcp.tools.training_tools import launch_training
 
@@ -567,15 +563,13 @@ def test_list_runs_route_names_the_run_s_selection_metric(
 
     images_dir, csv_path = write_regression_dataset(
         tmp_path, intensities=[0.0, 1.0], values=[0.1, 0.9])
-    labels_dir = tmp_path / "unused_labels"
-    labels_dir.mkdir()
     cfg = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
                          "task": "regression", "in_chans": 3},
-        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path), "labels_dir": str(labels_dir)},
-        "training": {"batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
+        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path)},
+        "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
-                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}},
+                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
     result = launch_training(cfg, str(tmp_path / "out"))
     assert "error" not in result, result

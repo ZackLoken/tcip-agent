@@ -36,7 +36,7 @@ def _write_launch_config(tmp_path: Path, out: Path) -> dict:
                          "task": "detection"},
         "data": {"images_dir": str(tmp_path / "images"), "labels_dir": str(tmp_path / "labels"),
                  "subject": "shoot"},
-        "training": {"batch_size": 1},
+        "batch_size": 1,
     }
     ts.replace(ttools.launch_config_key(out), config)
     return config

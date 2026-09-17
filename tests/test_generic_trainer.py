@@ -66,13 +66,6 @@ def test_draw_seed_if_unset_keeps_explicit_top_level_seed():
     assert config["seed"] == 123
 
 
-def test_draw_seed_if_unset_keeps_training_section_seed():
-    config = {"model_source": {}, "training": {"seed": 7}}
-    draw_seed_if_unset(config)
-    assert "seed" not in config  # no competing top-level override drawn
-    assert config["training"]["seed"] == 7
-
-
 def test_draw_seed_if_unset_drawn_seeds_are_independent():
     seeds = set()
     for _ in range(8):

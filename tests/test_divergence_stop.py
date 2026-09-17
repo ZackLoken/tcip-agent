@@ -145,16 +145,14 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(tmp_path, mon
 
     images_dir, csv_path = write_regression_dataset(
         tmp_path, intensities=[0.0, 0.0, 0.0, 0.0], values=[0.1, 0.2, 0.3, 0.4])
-    labels_dir = tmp_path / "unused_labels"  # required by the unconditional directory check, unread
-    labels_dir.mkdir()
 
     cfg = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_pixel_sum_divide_model",
                          "task": "regression", "in_chans": 3},
-        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path), "labels_dir": str(labels_dir)},
-        "training": {"batch_size": 4, "stages": [{"freeze_to": 0, "epochs": 5}],
+        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path)},
+        "batch_size": 4, "stages": [{"freeze_to": 0, "epochs": 5}],
                      "mixed_precision": False, "device": "cpu",
-                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}},
+                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
     res = launch_training(cfg, str(tmp_path / "out"))
     assert "error" not in res, res

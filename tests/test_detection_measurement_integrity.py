@@ -636,8 +636,8 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
                  "val_images_dir": str(val_images), "val_labels_dir": str(val_labels),
                  "tiling": {"enabled": True}},  # no tile_size -> effective default must be persisted
-        "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-                     "mixed_precision": False, "device": "cpu"},
+        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
+                     "mixed_precision": False, "device": "cpu",
     }
     res = training_tools.launch_training(cfg, str(tmp_path / "out"))
     assert res["pid"] != os.getpid()  # a different OS process, not this one

@@ -41,9 +41,9 @@ def _bespoke_config(images_dir: Path, labels_dir: Path, *, subject: str = SUBJEC
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                  "subject": subject},
-        "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
+        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
-                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}},
+                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
 
 
