@@ -381,6 +381,8 @@ class PhenologyPayload(BaseModel):
     # server-side from each bucket's own recorded id_map, never a client-supplied one.
     predictions_by_date: dict[str, str]
     trait: str
+    # The population: the plant ids this measurement is for, one row each, never every mapped plot.
+    plants: list[str] = Field(min_length=1)
     # Show unvalidated numbers on screen rather than refusing outright, so a breeder sees what
     # they have instead of a dead end. A display choice, never an acknowledgement.
     show_unvalidated: bool = False
@@ -516,9 +518,9 @@ def _measure_phenology(
     two can never be read from different projects, and the precondition runs before anything else
     this door does: a breeder must not see a curve on screen that Download would then refuse.
     ``payload`` is either ``PhenologyPayload`` (the screen route) or ``ExportCsvPayload`` (the
-    export route); only the four fields read below (``project_root``, ``mapping_name``,
-    ``predictions_by_date``, ``trait``) are shared between them, so neither's own escape field is
-    read off it here. ``acknowledgement`` is a real act only the export route ever builds; the
+    export route); only the five fields read below (``project_root``, ``mapping_name``,
+    ``predictions_by_date``, ``trait``, ``plants``) are shared between them, so neither's own
+    escape field is read off it here. ``acknowledgement`` is a real act only the export route ever builds; the
     screen route's own ``show_unvalidated`` display choice never reaches this call; it decides
     only whether that route's caller reads the gate's refusal or the flagged measurement.
     """
@@ -581,10 +583,10 @@ def _measure_phenology(
     try:
         plants = phenology.per_plant_phenology(
             mapping_raw, predictions_by_date,
-            positive_value=spec.positive_value, spec=spec,
+            positive_value=spec.positive_value, spec=spec, plants=payload.plants,
         )
     except (UnreadableLabelDocument, StampScopeUnstated, ClassifiedRecordRefused,
-            StoreError) as exc:
+            StoreError, phenology.EmptyPopulation) as exc:
         raise HTTPException(400, str(exc)) from exc
     positive_class_id, _msg = phenology.resolve_positive_class_id(spec, predictions_by_date)
     return _PhenologyMeasurement(
@@ -756,6 +758,8 @@ class ExportCsvPayload(BaseModel):
     mapping_name: str
     predictions_by_date: dict[str, str]
     trait: str
+    # The population: the plant ids this delivery is for, one row each, never every mapped plot.
+    plants: list[str] = Field(min_length=1)
     # Which server computation to export: a choice of producer, never a claim about what the rows
     # mean or whether they are valid. Picking the "wrong" one yields a correctly-gated CSV.
     payload: Literal["curves", "milestones"]

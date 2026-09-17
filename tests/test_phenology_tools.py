@@ -37,6 +37,8 @@ from tests._binding_fixtures import write_bound_sidecar
 # seed_bud_operationalization writes the spec plus the confirmed crossing record this root needs.
 pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
 
+from tests._population import mapped_plants
+
 
 def _plant_csv(path: Path) -> None:
     path.write_text(
@@ -273,7 +275,7 @@ def test_deliver_phenology_milestones_delivers_when_both_validated(tmp_path: Pat
 
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -313,7 +315,7 @@ def test_deliver_phenology_milestones_derives_one_conf_from_two_stamps_with_no_c
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name,
+        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )
@@ -342,7 +344,7 @@ def test_deliver_phenology_milestones_joins_confs_from_dates_calibrated_apart(tm
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name,
+        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )
@@ -374,7 +376,7 @@ def test_deliver_phenology_milestones_joins_confs_in_dates_delivered_order_not_t
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name,
+        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-03-09": str(d2), "2026-02-11": str(d1)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )
@@ -406,7 +408,7 @@ def test_deliver_phenology_milestones_blanks_a_bucket_with_no_numeric_conf_in_th
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name,
+        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )
@@ -438,7 +440,7 @@ def test_deliver_phenology_milestones_reports_an_unreadable_prediction_by_name(t
 
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -489,7 +491,7 @@ def test_deliver_phenology_milestones_re_reads_the_registry_at_the_second_check(
 
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -520,7 +522,7 @@ def test_deliver_phenology_milestones_floors_a_count_stamp_earned_for_a_differen
 
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -554,7 +556,7 @@ def test_deliver_phenology_milestones_reports_n_images_unattributed_when_never_a
 
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1)},
         output_csv_path=str(out_csv),
     )
@@ -590,7 +592,7 @@ def test_deliver_phenology_milestones_rejects_classifier_stamp_from_unrelated_ru
 
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(other_trait_dir)],
@@ -625,7 +627,7 @@ def test_deliver_phenology_milestones_rejects_classifier_stamp_with_no_trait_rec
 
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -652,7 +654,7 @@ def test_deliver_phenology_milestones_refuses_unvalidated_classifier(tmp_path: P
     out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
     )
@@ -701,7 +703,7 @@ def _deliver_via_writer(
     stated = check_operationalization(spec, record, STATE_CROSSING_DATES)
     result = phenology.per_plant_phenology(
         mapping_build.rows(), predictions_by_date,
-        positive_value=spec.positive_value, spec=spec)
+        positive_value=spec.positive_value, spec=spec, plants=["P1"])
 
     return phenology.write_phenology_csv(
         "test", result["rows"], Path(output_csv_path), spec, flags=flags,
@@ -761,7 +763,7 @@ def test_deliver_phenology_milestones_refuses_asymmetric_validation(tmp_path: Pa
     out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -827,7 +829,7 @@ def test_deliver_phenology_milestones_refuses_a_fabricated_tile_size(tmp_path: P
     geometry and no explicit caller override, must refuse here even though the classifier and the
     conf beside it are both genuinely validated."""
     args = _tile_gate_fixture(tmp_path, _tiled("false"))
-    res = deliver_phenology_milestones(**args)
+    res = deliver_phenology_milestones(**args, plants=["P1"])
     assert "error" in res
     assert res["tile_size_validated"] == "false"
     assert res["operating_point_validated"] == "held_out_annotations"  # conf is not what refused
@@ -838,7 +840,7 @@ def test_deliver_phenology_milestones_delivers_when_the_tile_scale_has_a_real_ba
     """The rail must admit valid work: a tile edge derived from the checkpoint's own persisted
     training geometry delivers cleanly."""
     args = _tile_gate_fixture(tmp_path, _tiled("persisted_training_geometry", 224))
-    res = deliver_phenology_milestones(**args)
+    res = deliver_phenology_milestones(**args, plants=["P1"])
     assert "error" not in res, res
     assert res["tile_size_validated"] == "persisted_training_geometry"
     assert Path(args["output_csv_path"]).exists()
@@ -849,7 +851,7 @@ def test_deliver_phenology_milestones_never_gates_an_untiled_delivery_on_tile_si
     refusal over a dimension that was never operative."""
     args = _tile_gate_fixture(tmp_path, {"value": None, "requires_validation": False,
                                          "validation_kind": None, "validated_against": None})
-    res = deliver_phenology_milestones(**args)
+    res = deliver_phenology_milestones(**args, plants=["P1"])
     assert "error" not in res, res
     assert res["tile_size_validated"] is None
     assert Path(args["output_csv_path"]).exists()
@@ -908,7 +910,7 @@ def test_deliver_phenology_milestones_refuses_unclassified_predictions(tmp_path:
 
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1)},
         output_csv_path=str(out_csv),
     )
@@ -920,7 +922,7 @@ def test_deliver_phenology_milestones_refuses_unclassified_predictions(tmp_path:
 def test_deliver_phenology_milestones_missing_mapping(tmp_path: Path) -> None:
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name="nope",
+        mapping_name="nope", plants=mapped_plants("nope"),
         predictions_by_date={},
         output_csv_path=str(tmp_path / "out.csv"),
     )
@@ -931,7 +933,7 @@ def test_deliver_phenology_milestones_missing_mapping(tmp_path: Path) -> None:
 def test_deliver_phenology_milestones_unknown_trait_refuses(tmp_path: Path) -> None:
     res = deliver_phenology_milestones(
         trait="not-a-real-trait",
-        mapping_name="nope",
+        mapping_name="nope", plants=mapped_plants("nope"),
         predictions_by_date={},
         output_csv_path=str(tmp_path / "out.csv"),
     )
@@ -2203,7 +2205,7 @@ def test_deliver_phenology_milestones_names_the_record_and_producer_a_bound_buck
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name,
+        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )
@@ -2271,7 +2273,7 @@ def test_deliver_phenology_milestones_records_what_verification_found_in_the_dat
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name,
+        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )

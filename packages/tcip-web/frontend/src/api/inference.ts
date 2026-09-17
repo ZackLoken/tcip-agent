@@ -144,6 +144,9 @@ export interface PhenologyRequest {
   mapping_name: string;
   predictions_by_date: Record<string, string>;
   trait: string;
+  // The population: the plant ids this measurement is for, one row each. Never every mapped
+  // plot, which is whatever the plant CSVs listed.
+  plants: string[];
   // Show unvalidated numbers on screen instead of refusing. A display choice, never an
   // acknowledgement: it never applies to a CSV, which has its own export request shape.
   show_unvalidated?: boolean;
@@ -155,13 +158,14 @@ export interface AcknowledgementRequest {
   reason: string;
 }
 
-/** The export door's own request shape: it shares the four fields PhenologyRequest also carries
+/** The export door's own request shape: it shares the five fields PhenologyRequest also carries
  *  but does not inherit it (no show_unvalidated, a display-only choice this door never honors). */
 export interface ExportCsvRequest {
   project_root: string;
   mapping_name: string;
   predictions_by_date: Record<string, string>;
   trait: string;
+  plants: string[];
   payload: "curves" | "milestones";
   filename?: string;
   user?: string;

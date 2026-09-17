@@ -27,6 +27,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 TOOLS_DIR = REPO_ROOT / "packages" / "tcip-mcp" / "src" / "tcip_mcp" / "tools"
 TRAITS_MODULE = REPO_ROOT / "packages" / "tcip-mcp" / "src" / "tcip_mcp" / "traits.py"
 
+from tests._population import mapped_plants
+
 
 def _author(root: Path, trait: str = "bud_opening_e2e", **overrides: object) -> dict:
     fields: dict[str, object] = dict(
@@ -482,7 +484,7 @@ def test_a_trait_authored_and_confirmed_through_this_surface_delivers_end_to_end
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name,
+        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )

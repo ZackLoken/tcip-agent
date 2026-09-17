@@ -138,7 +138,8 @@ def _currant_bloom_fixture(
     # The Results doors serve the project the GUI has open, the one this evidence belongs to.
     store.open_project(tmp_path.resolve())
     return {"project_root": str(tmp_path), "mapping_name": mapping_name,
-            "predictions_by_date": preds, "trait": "currant_bloom"}
+            "predictions_by_date": preds, "trait": "currant_bloom",
+            "plants": sorted({a["plot_name"] for assigns in mapping.values() for a in assigns})}
 
 
 def _export(client: TestClient, body: dict, payload: str = "milestones", **extra):

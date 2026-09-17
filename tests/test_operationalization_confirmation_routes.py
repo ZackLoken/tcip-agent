@@ -461,6 +461,7 @@ def test_a_project_root_outside_the_allowed_roots_is_refused_at_every_results_do
         "mapping_name": "mapping",
         "predictions_by_date": {},
         "trait": fx.CROSSING_TRAIT,
+        "plants": ["P1"],
     }
     assert client.post(
         "/api/results/phenology_measurement", json=phenology_body).status_code == 403
@@ -495,6 +496,7 @@ def test_a_delivery_door_still_runs_for_a_project_root_the_guard_admits(
             "mapping_name": "mapping",
             "predictions_by_date": {},
             "trait": fx.CROSSING_TRAIT,
+            "plants": ["P1"],
         },
     )
 

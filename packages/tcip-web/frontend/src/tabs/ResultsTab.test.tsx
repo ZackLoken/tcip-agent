@@ -114,6 +114,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     expect(selects[0].value).toBe("baseline");
     expect(selects[1]).toBeDisabled();
 
+    fireEvent.change(screen.getByLabelText(/plants to measure/i), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
     await waitFor(() => expect(measurementSpy).toHaveBeenCalled());
     // The dir is the one the tree response supplied for that (date, model), not a path the tab
@@ -176,6 +177,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     fireEvent.change(screen.getByTitle("Model whose predictions to use for this date"), {
       target: { value: "" },
     });
+    fireEvent.change(screen.getByLabelText(/plants to measure/i), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
     await waitFor(() => expect(measurementSpy).toHaveBeenCalled());
     expect(measurementSpy.mock.calls[0][0].predictions_by_date).toEqual({});
@@ -260,6 +262,7 @@ describe("ResultsTab evidence gate", () => {
     render(<ResultsTab />);
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText(/plants to measure/i), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
   }
 
@@ -463,6 +466,7 @@ describe("ResultsTab onset table validity marker", () => {
     // computing, or the compute click races the fetch and refuses (no trait resolved yet).
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText(/plants to measure/i), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
     await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
   }
@@ -807,6 +811,7 @@ describe("ResultsTab operationalization records", () => {
 
     render(<ResultsTab />);
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText(/plants to measure/i), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
 
     expect(
@@ -884,6 +889,7 @@ describe("ResultsTab operationalization records", () => {
 
     render(<ResultsTab />);
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText(/plants to measure/i), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
     await waitFor(() => expect(screen.getByRole("button", { name: /curves csv/i })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /curves csv/i }));

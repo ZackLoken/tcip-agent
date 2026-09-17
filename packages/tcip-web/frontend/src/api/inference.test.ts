@@ -42,6 +42,7 @@ describe("downloadCsv refusal decoding", () => {
     mapping_name: "valley",
     predictions_by_date: {},
     trait: "stage_50per_date",
+    plants: ["PLOT-01"],
     payload: "curves" as const,
     filename: "x.csv",
   };

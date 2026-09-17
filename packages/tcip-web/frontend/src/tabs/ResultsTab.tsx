@@ -346,6 +346,13 @@ export function ResultsTab() {
   const [labelProblem, setLabelProblem] = useState<string | null>(null);
   // The model picked per date; "" means "skip this date" (dropped before compute()).
   const [dateModel, setDateModel] = useState<Record<string, string>>({});
+  // The population, typed by the breeder: one plant id per line or comma. The mapping names
+  // every plot its plant CSVs carry, which is never the same list, so nothing fills this in.
+  const [plantsText, setPlantsText] = useState("");
+  const plants = plantsText
+    .split(/[\n,]/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
 
   // Plant-mapping build inputs.
   const [plantRegistry, setPlantRegistry] = useState("");
@@ -751,6 +758,10 @@ export function ResultsTab() {
       setError(traitError ?? "Pick a trait before computing.");
       return;
     }
+    if (plants.length === 0) {
+      setError("Name the plants to measure (one plant id per line) before computing.");
+      return;
+    }
     setLoading(true);
     setError(null);
     setOperationalizationRefusal(null);
@@ -767,6 +778,7 @@ export function ResultsTab() {
         mapping_name: mappingName,
         predictions_by_date: predsMap,
         trait,
+        plants,
         show_unvalidated: showUnvalidated,
       };
       setLastRequest(request);
@@ -821,6 +833,7 @@ export function ResultsTab() {
         mapping_name: lastRequest.mapping_name,
         predictions_by_date: lastRequest.predictions_by_date,
         trait: lastRequest.trait,
+        plants: lastRequest.plants,
         payload,
         filename,
         user: useStore.getState().user || undefined,
@@ -1422,6 +1435,17 @@ export function ResultsTab() {
                 )}
               </div>
               <div className="flex flex-col gap-2">
+                <label className="tcip-label" htmlFor="phenology-plants">
+                  Plants to measure (one id per line)
+                </label>
+                <textarea
+                  id="phenology-plants"
+                  className="tcip-input text-[11px] font-mono h-20"
+                  value={plantsText}
+                  onChange={(e) => setPlantsText(e.target.value)}
+                  placeholder={"PLOT-01\nPLOT-02"}
+                  title="The plant ids this measurement delivers, one row each; the mapping's own plot list is not the population"
+                />
                 <p className="text-[11px] text-tcip-muted">
                   The positive-state fraction is the share of a plant's detected objects that are in
                   the trait's positive state. That state is a class from the validated classifier,

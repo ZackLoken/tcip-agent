@@ -719,6 +719,7 @@ def deliver_phenology_milestones(
     mapping_name: str,
     predictions_by_date: dict[str, str],
     output_csv_path: str,
+    plants: list[str],
     classifier_pred_dirs: list[str] | None = None,
 ) -> dict:
     """Per-plant phenology milestones from classified predictions + a plant mapping.
@@ -750,6 +751,11 @@ def deliver_phenology_milestones(
         output_csv_path: Where to write the delivered per-plant CSV (e.g.
             ``<phenology_prefix>_phenology.csv``). A relative path resolves against the
             platform state root, never the server process's cwd.
+        plants: The delivery's population, the plant ids (the mapping's ``plot_name`` values)
+            this delivery is for: the CSV carries exactly one row per id, in this order, and a
+            plant the mapping never covers ships as a row with no observed dates. Required and
+            never defaulted: a mapping names every plot in its plant CSVs, which is not the
+            population, so an empty list refuses.
         classifier_pred_dirs: Bucket(s) carrying the trait's classifier-validity stamp
             (``classifier_operating_point.json``, written by ``calibrate_classifier_operating_point``)
 , reconciled from disk, never trusted from a caller-asserted string. ``None``
@@ -832,10 +838,10 @@ def deliver_phenology_milestones(
 
     try:
         result = phenology.per_plant_phenology(
-            mapping, predictions_by_date, positive_value=pos, spec=spec,
+            mapping, predictions_by_date, positive_value=pos, spec=spec, plants=plants,
         )
     except (UnreadableLabelDocument, StampScopeUnstated, ClassifiedRecordRefused,
-            StoreError) as exc:
+            StoreError, phenology.EmptyPopulation) as exc:
         return {"error": str(exc), "n_plants": 0}
     rows = result["rows"]
 
@@ -933,8 +939,11 @@ def deliver_phenology_milestones(
         }
 
     # What the sidecars assert about the producer, corroborated by the writer against the verified
-    # bindings.
-    producer = _resolve_producer_identity(predictions_by_date)
+    # bindings; dates produced by different checkpoints refuse here, before anything is written.
+    try:
+        producer = _resolve_producer_identity(predictions_by_date)
+    except ProducerDiffersAcrossDates as exc:
+        return {"error": str(exc), "n_plants": len(rows)}
 
     # A confirmation withdrawn or a field moved while this ran refuses here, with nothing written.
     # The registry is re-read too, not reused from the first check, to catch a racing registry edit.
@@ -984,4 +993,5 @@ def deliver_phenology_milestones(
         "columns": phenology.phenology_csv_columns(spec),
         "captures_unverified": verified["captures_unverified"],
         "plant_csvs_unverified": verified["plant_csvs_unverified"],
+        "plants": [r["plant_id"] for r in rows],
     }

@@ -17,6 +17,8 @@ from tests._binding_fixtures import register_plant_registry_for
 from tests.test_plant_mapping_binding import DATES, _dataset, _init, _validate_buckets, _write_scene
 from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
+from tests._population import mapped_plants
+
 
 def _cited_mapping(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, dict[str, str]]:
     """A mapping built, delivered from (so a delivery event cites its digest), and the plant CSV
@@ -33,7 +35,7 @@ def _cited_mapping(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str
     out_csv = tmp_path / "out.csv"
     _validate_buckets(preds_by_date, dataset_root)
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
     return str(images_root), preds_by_date
@@ -103,7 +105,7 @@ def test_a_cited_rebuild_with_supersede_archives_the_old_record_and_keeps_it_rea
     # The delivery event's own citation still resolves to the archived record's own content.
     out_csv2 = tmp_path / "out2.csv"
     res2 = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv2), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res2, res2
 

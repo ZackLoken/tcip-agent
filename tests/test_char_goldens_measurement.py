@@ -48,6 +48,8 @@ from tests._dense_op_fixtures import good_cal_holdout  # noqa: E402
 # seed_bud_operationalization writes the spec plus the confirmed crossing record this root needs.
 pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
 
+from tests._population import mapped_plants
+
 
 # ── shared fixture helpers ────────────────────────────────────────────────
 
@@ -226,7 +228,7 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
     }
     res = PH.per_plant_phenology(
         mapping, {"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        positive_value="open", spec=BUD_OPENING)
+        positive_value="open", spec=BUD_OPENING, plants=["P1"])
 
     # Both buckets are fully classified, so the fraction is produced and delivered.
     assert res["positive_class_assessed"] is True
@@ -693,7 +695,7 @@ def test_golden_deliver_phenology_milestones_refuses_without_opening_class(tmp_p
     out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
     )
@@ -708,7 +710,7 @@ def test_golden_deliver_phenology_milestones_requires_both_validated_flags(tmp_p
     out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
     )
@@ -725,7 +727,7 @@ def test_golden_deliver_phenology_milestones_refuses_on_a_present_but_unvalidate
     out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
     )
@@ -744,7 +746,7 @@ def test_golden_deliver_phenology_milestones_delivers_when_both_validated(tmp_pa
     out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
         trait="bud_opening",
-        mapping_name=mapping_name,
+        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
