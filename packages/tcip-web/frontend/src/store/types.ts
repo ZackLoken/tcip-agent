@@ -1,9 +1,7 @@
 /**
  * GuiState's active_tab/dataset/view/mode/active_subject/review fields mirror state.py's
  * GuiState by hand (TabName and Mode instead derive from the generated GuiVocabulary
- * interface), with one deliberate exception: pred_reference, a frozen gui_snapshot v1
- * resident the browser has no consumer for and does not carry. The label schema below
- * mirrors routes/{annotate,review,classes}.py.
+ * interface). The label schema below mirrors routes/{annotate,review,classes}.py.
  */
 
 import type { ActionPayload, GuiVocabulary } from "@/api/types.generated";
