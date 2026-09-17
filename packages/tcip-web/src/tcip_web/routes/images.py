@@ -578,7 +578,14 @@ def serve_image(
 
     band_tokens = _parse_band_tokens(bands) if bands is not None else None
     composite_requested = bands is not None or isinstance(source, BandGroupRef)
-    probed = probe_channels(source)
+    try:
+        probed = probe_channels(source)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # A truncated or otherwise unreadable file fails its header probe here, before any
+        # raster is opened: the request's own fault, answered as one.
+        raise HTTPException(400, f"could not open this image: {exc}") from exc
     open_channels = (
         probed if composite_requested
         else raster_source.image_route_channel_count(source, probed)
