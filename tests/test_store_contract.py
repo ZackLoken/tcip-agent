@@ -2264,7 +2264,7 @@ REGISTERED = {
         lambda root: training_tools.study_result_key(STUDY), f".tcip/hpo/{STUDY}.json",
         pin=_pin_platform_root, root_of=lambda root: training_tools.hpo_root()),
     "hpo_trial_config": Registered(
-        {"training": {"batch_size": 4}, "trial_params": {"lr": 0.01}, "unconsumed_params": []},
+        {"batch_size": 4, "trial_params": {"lr": 0.01}, "seed": 7},
         lambda root: training_tools.trial_config_key(training_tools.sweep_dir(STUDY), TRIAL_DIR),
         f".tcip/hpo/{STUDY}/{TRIAL_DIR}/resolved_config.json", pin=_pin_platform_root,
         root_of=lambda root: training_tools.sweep_dir(STUDY)),

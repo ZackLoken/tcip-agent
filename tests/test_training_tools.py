@@ -32,42 +32,49 @@ def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
         # launch_training's own default stage shape: freeze_to + epochs, no lr.
-        "training": {"batch_size": 2,
-                     "stages": [{"freeze_to": -1, "epochs": 5}, {"freeze_to": 2, "epochs": 10}]},
+        "batch_size": 2,
+        "stages": [{"freeze_to": -1, "epochs": 5}, {"freeze_to": 2, "epochs": 10}],
     }
     r = preflight_config(cfg)
     assert r["valid"] is True, r["issues"]
 
     # 'epochs' is still required per provided stage.
-    cfg["training"]["stages"] = [{"freeze_to": 0}]
+    cfg["stages"] = [{"freeze_to": 0}]
     r2 = preflight_config(cfg)
     assert any("Stage 0 missing 'epochs'" in i for i in r2["issues"])
 
     # No stages at all is fine: launch_training supplies its own default schedule.
-    del cfg["training"]["stages"]
+    del cfg["stages"]
     assert preflight_config(cfg)["valid"] is True
 
 
-def test_preflight_config_refuses_a_misspelled_model_source_key_nested_under_training():
-    """preflight_config reads model_source off normalize_train_config's hoisted view, so the
-    schema it validates must be the same view: a model_source nested under training (TrainingSection
-    is extra="allow") is otherwise never typed by ModelSourceSchema (extra="forbid") and a
-    misspelling like bulider_kwargs reaches the trainer instead of being refused by name."""
+def test_preflight_config_refuses_a_nested_training_section_by_name(tmp_path):
+    """The config has one placement: a ``training`` section is refused naming the move, since
+    every key under it would be read by nothing and the run would train at the trainer's own
+    defaults in silence."""
     from tcip_mcp.tools.training_tools import preflight_config
 
-    cfg = {"training": {"model_source": {
-        "builder": "tests.bespoke_models:build_bespoke_detection",
-        "bulider_kwargs": {"num_classes": 1}, "task": "detection",
-    }}}
-    r = preflight_config(cfg)
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "labels"
+    imgs.mkdir()
+    lbls.mkdir()
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+    }
+    nested_keys = {"batch_size": 2, "stages": [{"freeze_to": -1, "epochs": 5}]}
+    r = preflight_config({**cfg, "training": nested_keys})
     assert r["valid"] is False
-    assert any("bulider_kwargs" in i for i in r["issues"]), r["issues"]
+    assert any("'training' is not a config section" in i for i in r["issues"]), r["issues"]
+
+    assert preflight_config({**cfg, **nested_keys})["valid"] is True
 
 
 def test_preflight_config_types_a_non_dict_data_section_instead_of_raising():
     from tcip_mcp.tools.training_tools import preflight_config
 
-    r = preflight_config({"training": {"data": "x"}})
+    r = preflight_config({"data": "x"})
     assert r["valid"] is False
     assert any("'data' must be a dict" in i for i in r["issues"]), r["issues"]
 
@@ -102,7 +109,7 @@ def _detection_smoke_cfg(builder: str, tmp_path: Path) -> dict:
                                             "detector": "fcos"},
                          "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
 
 
@@ -177,15 +184,15 @@ def test_preflight_config_warns_on_ignored_per_stage_lr(tmp_path):
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
-        "training": {"batch_size": 2,
-                     "stages": [{"freeze_to": -1, "epochs": 5, "lr": 1e-3}]},
+        "batch_size": 2,
+        "stages": [{"freeze_to": -1, "epochs": 5, "lr": 1e-3}],
     }
     r = preflight_config(cfg)
     assert r["valid"] is True  # a per-stage lr is ignored, not rejected (StageSpec extra="allow")
     assert any("stages[0].lr is set but ignored" in w for w in r["warnings"])
 
     # No per-stage lr -> no warning.
-    cfg["training"]["stages"] = [{"freeze_to": -1, "epochs": 5}]
+    cfg["stages"] = [{"freeze_to": -1, "epochs": 5}]
     assert preflight_config(cfg)["warnings"] == []
 
 
@@ -215,7 +222,7 @@ def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
     r = preflight_config(cfg)
     assert r["valid"] is True  # informational only, never gating
@@ -249,7 +256,7 @@ def test_preflight_config_warns_of_a_negative_the_label_file_now_contradicts(tmp
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
     r = preflight_config(cfg)
     assert r["valid"] is True  # informational only, never gating
@@ -275,7 +282,7 @@ def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
     assert preflight_config(cfg)["warnings"] == []
 
@@ -308,7 +315,7 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(tmp_pa
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
     r = preflight_config(cfg)
     assert r["valid"] is False
@@ -347,7 +354,7 @@ def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(tm
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud",
                  "val_images_dir": str(val_imgs), "val_labels_dir": str(val_lbls)},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
     r = preflight_config(cfg)
     assert r["valid"] is False
@@ -381,7 +388,7 @@ def test_preflight_config_blocks_an_unreadable_label_in_val_labels_dir(tmp_path)
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud",
                  "val_images_dir": str(val_imgs), "val_labels_dir": str(val_lbls)},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
     r = preflight_config(cfg)
     assert r["valid"] is False
@@ -400,7 +407,7 @@ def test_preflight_config_training_source_shape_and_importability(tmp_path):
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
 
     # A dict is rejected.
@@ -421,28 +428,6 @@ def test_preflight_config_training_source_shape_and_importability(tmp_path):
     assert preflight_config(base_cfg)["valid"] is True
 
 
-def test_preflight_config_catches_a_training_source_nested_only_under_training(tmp_path):
-    """training_source can be nested under training (TrainingSection allows extra keys there),
-    and normalize_train_config hoists it onto the top level for the trainer to read; preflight
-    must validate the same hoisted view, not only a top-level training_source, or an
-    unimportable nested one would pass structural validation and only fail once the run starts."""
-    pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import preflight_config
-
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "labels"
-    imgs.mkdir()
-    lbls.mkdir()
-    cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
-        "training": {"batch_size": 2, "training_source": "nonexistent_module:train"},
-    }
-    r = preflight_config(cfg)
-    assert any("training_source not importable" in i for i in r["issues"])
-
-
 # --------------------------------------------------------------------------
 # preflight_config's selection_metric coherence: reject a comparability-only
 # metric for a center-match trait at validation time, not mid-run.
@@ -456,121 +441,32 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
     lbls = tmp_path / "labels"
     imgs.mkdir()
     lbls.mkdir()
-    base_cfg: dict[str, dict[str, object]] = {
+    base_cfg: dict[str, object] = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
 
     # A comparability-only metric for a center-match trait is rejected.
     cfg = dict(base_cfg)
-    cfg["training"] = dict(cfg["training"], evaluation={"trait": "bud_opening", "selection_metric": "map50"})
+    cfg["evaluation"] = {"trait": "bud_opening", "selection_metric": "map50"}
     r = preflight_config(cfg)
     assert any("comparability-only" in i for i in r["issues"])
 
     # A governing metric for the same trait is fine.
-    cfg["training"] = dict(cfg["training"], evaluation={"trait": "bud_opening", "selection_metric": "f1"})
+    cfg["evaluation"] = {"trait": "bud_opening", "selection_metric": "f1"}
     assert preflight_config(cfg)["valid"] is True
 
     # No trait -> no coherence gate, even for a comparability metric.
-    cfg["training"] = dict(cfg["training"], evaluation={"selection_metric": "map50"})
+    cfg["evaluation"] = {"selection_metric": "map50"}
     assert preflight_config(cfg)["valid"] is True
 
     # An undeclared direction is caught here even with no trait at all: it would otherwise
     # surface only as a failed run once resolve_selection_metric runs mid-training.
-    cfg["training"] = dict(cfg["training"], evaluation={"selection_metric": "not_a_real_metric"})
+    cfg["evaluation"] = {"selection_metric": "not_a_real_metric"}
     r = preflight_config(cfg)
     assert any("no declared ranking direction" in i for i in r["issues"])
-
-
-def test_preflight_config_reads_the_top_level_evaluation_block(tmp_path):
-    """A config carrying both a top-level and a nested ``training.evaluation`` block with
-    different ``selection_metric`` values must validate against the top-level one, since that
-    is the block ``normalize_train_config`` hoists to the top and the trainer actually trains
-    on."""
-    pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import preflight_config
-
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "labels"
-    imgs.mkdir()
-    lbls.mkdir()
-    cfg: dict[str, object] = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
-        "training": {"batch_size": 2, "evaluation": {"selection_metric": "not_a_real_metric"}},
-        "evaluation": {"selection_metric": "f1"},
-    }
-    r = preflight_config(cfg)
-    assert r["valid"] is True
-    assert not any("no declared ranking direction" in i for i in r["issues"])
-
-
-def test_preflight_config_precedence_also_refuses_on_the_top_level_block(tmp_path):
-    """Coverage of the chosen precedence's other side: with the placements swapped, the
-    top-level block's undeclared metric is what preflight refuses on, not the nested one."""
-    pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import preflight_config
-
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "labels"
-    imgs.mkdir()
-    lbls.mkdir()
-    cfg: dict[str, object] = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
-        "training": {"batch_size": 2, "evaluation": {"selection_metric": "f1"}},
-        "evaluation": {"selection_metric": "not_a_real_metric"},
-    }
-    r = preflight_config(cfg)
-    assert any("not_a_real_metric" in i and "no declared ranking direction" in i
-                for i in r["issues"])
-
-
-def test_preflight_config_refuses_a_top_level_stages_entry_missing_epochs(tmp_path):
-    """A top-level ``stages`` entry wins over ``training.stages``, the same precedence
-    ``train()`` reads under; a top-level stage missing 'epochs' must be refused here, not only
-    mid-run, even beside an otherwise-valid nested ``training.stages``."""
-    pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import preflight_config
-
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "labels"
-    imgs.mkdir()
-    lbls.mkdir()
-    cfg: dict[str, object] = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
-        "training": {"batch_size": 2, "stages": [{"epochs": 5}]},
-        "stages": [{"freeze_to": 0}],
-    }
-    r = preflight_config(cfg)
-    assert any("Stage 0 missing 'epochs'" in i for i in r["issues"])
-
-
-def test_preflight_config_accepts_a_nested_only_stages_config(tmp_path):
-    """Coverage of the precedence's other side: no top-level ``stages`` entry, so the
-    normalized config falls back to ``training.stages``, and a valid nested schedule still
-    passes."""
-    pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import preflight_config
-
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "labels"
-    imgs.mkdir()
-    lbls.mkdir()
-    cfg: dict[str, object] = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
-        "training": {"batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 5}]},
-    }
-    r = preflight_config(cfg)
-    assert r["valid"] is True
 
 
 def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(tmp_path):
@@ -588,7 +484,7 @@ def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(tmp_p
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
         "evaluation": "not_a_mapping",
     }
     r = preflight_config(cfg)
@@ -604,7 +500,7 @@ def test_a_config_naming_an_unregistered_trait_still_lists(tmp_path, monkeypatch
 
     run = create_run(
         {"model_source": {"builder": "x:y", "task": "detection"}, "data": {},
-         "training": {"evaluation": {"trait": "no_such_trait_here"}}},
+         "evaluation": {"trait": "no_such_trait_here"}},
         str(tmp_path / "out"), id="auto-run-unregistered-trait",
     )
 
@@ -646,7 +542,7 @@ def test_preflight_reserve_calibration_fraction_wrong_task_flags_issue(tmp_path)
                          "builder_kwargs": {"num_classes": 1}, "task": "classification"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                  "split": {"reserve_calibration_fraction": 0.15}},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
     r = preflight_config(cfg)
     assert any("reserve_calibration_fraction" in i and "has no effect" in i for i in r["issues"])
@@ -668,7 +564,7 @@ def test_preflight_reserve_calibration_fraction_multi_stem_flags_issue(tmp_path)
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                  "tiling": {"enabled": True, "tile_size": 32},
                  "split": {"reserve_calibration_fraction": 0.15}},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
     r = preflight_config(cfg)
     assert any("reserve_calibration_fraction" in i and "multi-stem" in i for i in r["issues"])
@@ -687,7 +583,7 @@ def test_preflight_reserve_calibration_fraction_infeasible_layout_refuses_under_
                  # Nothing left for a real train fraction at this mosaic size.
                  "split": {"val_ratio": 0.45, "test_ratio": 0.45, "seed": 1,
                           "reserve_calibration_fraction": 0.3}},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
     r = preflight_config(cfg, smoke=True)
     assert any("reserve_calibration_fraction" in i for i in r["issues"]), r["issues"]
@@ -713,7 +609,7 @@ def test_preflight_reserve_calibration_fraction_reports_an_unreadable_label_by_n
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                           "reserve_calibration_fraction": 0.15}},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
     r = preflight_config(cfg, smoke=True)
     assert any(str(bad) in i for i in r["issues"]), r["issues"]
@@ -734,7 +630,7 @@ def test_preflight_reserve_calibration_fraction_admits_a_feasible_layout(tmp_pat
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                           "reserve_calibration_fraction": 0.15}},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
     r = preflight_config(cfg, smoke=True)
     assert not any("reserve_calibration_fraction" in i for i in r["issues"]), r["issues"]
@@ -776,7 +672,7 @@ def test_apply_hpo_params_preserves_base_config_stages():
 
     custom_stages = [{"freeze_to": -1, "epochs": 2}, {"freeze_to": 0, "epochs": 8}]
     base = {"model_source": {"builder": "x:y", "task": "detection"},
-            "training": {"stages": custom_stages}}
+            "stages": custom_stages}
     out = _apply_hpo_params(base, {"lr": 3e-3})
     assert out["stages"] == custom_stages
 
@@ -806,15 +702,14 @@ def test_apply_hpo_params_derives_backbone_ratio_not_frozen():
 
 def test_apply_hpo_params_unrecognized_key_reaches_top_level():
     """A swept key outside the known optimizer/batch/weight_decay set must land at the top level
-    of the resolved config (where train() reads it), not nested under "training" after
-    normalize_train_config's hoist already ran, since nesting there would leave it silently
-    unreachable."""
+    of the resolved config, the one placement train() reads, never nested under "training",
+    which the config schema refuses."""
     from tcip_mcp.tools.training_tools import _apply_hpo_params
 
     base = {"model_source": {"builder": "x:y", "task": "detection"}}
     out = _apply_hpo_params(base, {"momentum": 0.9})
     assert out["momentum"] == 0.9
-    assert "momentum" not in out.get("training", {})
+    assert "training" not in out
 
 
 def test_apply_hpo_params_dotted_key_reaches_nested_field():
@@ -871,47 +766,6 @@ def test_preflight_points_covers_every_categorical_choice_and_both_numeric_bound
 # The trial runs directly (no Ray) so the training machinery can be stubbed.
 # --------------------------------------------------------------------------
 
-# _AccessTrackingConfig's own wrapper is installed back onto the key it was read from, so the
-# tracker holds a live view of the tree, not a copy of it.
-
-def test_access_tracking_config_write_through_a_nested_read_is_visible_on_the_root():
-    """A write through a value __getitem__/get returned for a nested key lands on the same
-    tree the root holds, not a throwaway copy."""
-    from tcip_mcp.tools.training_tools import _AccessTrackingConfig
-
-    config = _AccessTrackingConfig({"model_source": {"builder_kwargs": {"width": 4}}})
-    config["model_source"]["builder_kwargs"]["width"] = 8
-
-    assert config["model_source"]["builder_kwargs"]["width"] == 8
-
-
-def test_access_tracking_config_setdefault_on_a_nested_block_records_the_dotted_key():
-    """setdefault on a nested block records its own dotted key and answers the installed
-    wrapper, so a later leaf read off it is recorded under the leaf's own dotted path."""
-    from tcip_mcp.tools.training_tools import _AccessTrackingConfig
-
-    config = _AccessTrackingConfig({})
-    data_cfg = config.setdefault("data", {})
-    split_cfg = data_cfg.setdefault("split", {})
-    split_cfg.get("seed", 42)
-
-    assert "data" in config.accessed
-    assert "data.split" in config.accessed
-    assert "data.split.seed" in config.accessed
-
-
-def test_access_tracking_config_a_second_read_of_the_same_key_answers_the_same_object():
-    """The wrapper _wrap builds for a nested key is installed back onto the root, so a second
-    read of that key answers the identical object, never a freshly rebuilt copy."""
-    from tcip_mcp.tools.training_tools import _AccessTrackingConfig
-
-    config = _AccessTrackingConfig({"model_source": {"task": "detection"}})
-    first = config["model_source"]
-    second = config["model_source"]
-
-    assert first is second
-
-
 class _FakeDataset:
     def __len__(self):
         return 4
@@ -931,7 +785,7 @@ def _detection_base() -> dict:
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": "imgs", "labels_dir": "lbls"},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
 
 
@@ -1038,7 +892,7 @@ def test_run_hpo_trial_reports_the_highest_value_for_a_higher_is_better_metric(m
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
                          "builder_kwargs": {"num_classes": 2}, "task": "classification"},
         "data": {"images_dir": "imgs"},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
         "evaluation": {"selection_metric": "accuracy"},
     }
     reported: list = []
@@ -1059,7 +913,7 @@ def test_a_trial_with_no_metric_never_outranks_a_real_one_under_a_maximize_direc
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
                          "builder_kwargs": {"num_classes": 2}, "task": "classification"},
         "data": {"images_dir": "imgs"},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
         "evaluation": {"selection_metric": "accuracy"},
     }
 
@@ -1106,7 +960,7 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
                          "builder_kwargs": {"num_classes": 2}, "task": "classification"},
         "data": {"images_dir": "imgs"},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
         "augmentation": {"horizontal_flip": 0.5},
     }
     _run_hpo_trial({"lr": 3e-4}, [].append, base, str(tmp_path / "trial_0"))
@@ -1148,12 +1002,11 @@ def _fake_auto_train_val_reading_seed_like_split_construction(task, data_cfg, tr
     return ds, ds, None
 
 
-def test_run_hpo_trial_dotted_seed_axis_is_marked_consumed_by_a_realistic_split_read(
+def test_run_hpo_trial_dotted_seed_axis_reaches_the_resolved_config_snapshot(
     monkeypatch, tmp_path,
 ):
-    """data.split.seed (item 8's swept axis) must be marked consumed once a training body reads
-    it the exact way split_construction.py's own auto_train_val does, off the tracked view, not
-    off a plain dict merged never routes any reader through."""
+    """data.split.seed, the split_draws grid axis, lands in the trial's own resolved-config
+    snapshot at the nested field auto_train_val reads it from."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
 
@@ -1171,7 +1024,7 @@ def test_run_hpo_trial_dotted_seed_axis_is_marked_consumed_by_a_realistic_split_
     _run_hpo_trial({"data.split.seed": 7}, [].append, _detection_base(), str(trial_dir))
 
     resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert resolved["unconsumed_params"] == []
+    assert resolved["data"]["split"]["seed"] == 7
 
 
 def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_snapshot(
@@ -1202,15 +1055,13 @@ def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_
     assert resolved["data"]["tiling"]["tile_size"] == 224
 
 
-def test_run_hpo_trial_producer_fed_data_split_seed_is_unconsumed_over_the_single_source_spatial_path(
+def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spatial_path(
     monkeypatch, tmp_path,
 ):
     """The producer path: a real one-source tiled dataset through the real, unstubbed
     auto_train_val. Its single-source spatial-strip branch places every strip by declared order
-    alone and reads no seed at all, so a trial that sweeps data.split.seed over this path
-    genuinely never consumes it: unconsumed_params names it, a fact the training-body-access
-    tracker reports honestly rather than masking, while the resolved-config snapshot still
-    carries the real spatial_manifest and tiling auto_train_val wrote."""
+    alone, and the resolved-config snapshot carries the real spatial_manifest and tiling
+    auto_train_val wrote, with no seed inside the manifest it never read one for."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
@@ -1223,7 +1074,7 @@ def test_run_hpo_trial_producer_fed_data_split_seed_is_unconsumed_over_the_singl
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
                  "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  "split": {"val_ratio": 0.25, "test_ratio": 0.1}},
-        "training": {"batch_size": 2},
+        "batch_size": 2,
     }
 
     def fake_train(run, train_loader, val_loader, task="detection",
@@ -1243,31 +1094,9 @@ def test_run_hpo_trial_producer_fed_data_split_seed_is_unconsumed_over_the_singl
     _run_hpo_trial({"data.split.seed": 3}, [].append, base, str(trial_dir))
 
     resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert "data.split.seed" in resolved["unconsumed_params"]
     assert resolved["data"]["split"]["spatial_manifest"]
     assert "seed" not in resolved["data"]["split"]["spatial_manifest"]
     assert resolved["data"]["tiling"]["tile_size"] == 128
-
-
-def test_run_hpo_trial_writes_resolved_config_with_unconsumed_params(monkeypatch, tmp_path):
-    """A swept key the training body never reads is surfaced by observation, not
-    gated by a whitelist. resolved_config.json records which swept keys went unconsumed."""
-    pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
-
-    def fake_train(run, train_loader, val_loader, task="detection",
-                   epoch_callback=None, resume_from=""):
-        run.config.get("lr")  # a known key, consumed, but "totally_bogus_key" never read
-        run.best_metric = 1.0
-        run.status = "completed"
-        return run
-
-    _patch_hpo_trial_machinery(monkeypatch, fake_train)
-    trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"lr": 3e-4, "totally_bogus_key": 5}, [].append, _detection_base(), str(trial_dir))
-
-    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert resolved["unconsumed_params"] == ["totally_bogus_key"]
 
 
 def test_run_hpo_trial_resolved_config_records_seed_actually_trained_under(monkeypatch, tmp_path):
@@ -1293,183 +1122,6 @@ def test_run_hpo_trial_resolved_config_records_seed_actually_trained_under(monke
     resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
     assert resolved["seed"] is not None
     assert resolved["seed"] == captured["seed"]
-
-
-def _bespoke_hpo_agent_train(ctx):
-    """Module-level (dotted-import-able) bespoke train(ctx) that reads its own swept key."""
-    ctx.config.get("custom_axis")  # the bespoke loop reads its own swept key
-    ctx.run.status = "completed"
-    ctx.run.best_metric = 1.0
-
-
-def test_run_hpo_trial_bespoke_custom_key_not_falsely_flagged_unconsumed(monkeypatch, tmp_path):
-    """A bespoke training_source reading its own swept custom key must not be
-    falsely flagged unconsumed merely because generic_trainer.train() doesn't know it:
-    tracking is genuine runtime access, not a static comparison against train()'s key list."""
-    pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
-
-    from tcip_mcp.pipelines.data import split_construction as sc
-    monkeypatch.setattr(sc, "auto_train_val",
-                        lambda task, data_cfg, transforms: (_FakeDataset(), _FakeDataset(), None))
-    import torch.utils.data as tud
-    monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
-    from tcip_mcp.pipelines.data import samplers
-    monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)
-
-    base = {"model_source": {"builder": "x:y", "task": "detection"},
-            "training_source": f"{__name__}:_bespoke_hpo_agent_train"}
-    trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"custom_axis": 42}, [].append, base, str(trial_dir))
-
-    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert resolved["unconsumed_params"] == []
-
-
-def test_run_hpo_trial_swept_dotted_evaluation_leaf_reached_via_get_is_not_reported_unconsumed(
-    monkeypatch, tmp_path,
-):
-    """A swept dotted ``evaluation.<leaf>`` axis, on a leaf the trial's own preamble never reads
-    (the preamble reads ``evaluation`` on every trial, and ``evaluation.trait`` and
-    ``evaluation.selection_metric`` whenever the merged config carries a truthy evaluation
-    block, before dispatch), is marked consumed only by the training body's own read: the fake body's
-    ``evaluation_section(run.config).get(...)`` is the read that consumes it here. A literal
-    top-level ``evaluation`` sweep (a dict value under that key) cannot guard this at all: the
-    preamble's own ``evaluation_section(tracked_config)`` call marks the bare ``evaluation`` key
-    read on every trial no matter what the body does, so that key is never reported unconsumed
-    regardless of body behavior; only a dotted leaf outside the three the preamble itself reads
-    can distinguish a body that reads it from one that does not."""
-    pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
-    from tcip_mcp.pipelines.schemas import evaluation_section
-
-    def fake_train(run, train_loader, val_loader, task="detection",
-                   epoch_callback=None, resume_from=""):
-        evaluation_section(run.config).get("confidence_floor")  # the read that consumes it
-        run.best_metric = 1.0
-        run.status = "completed"
-        return run
-
-    _patch_hpo_trial_machinery(monkeypatch, fake_train)
-    trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"lr": 3e-4, "evaluation.confidence_floor": 0.3}, [].append,
-                   _detection_base(), str(trial_dir))
-
-    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert "evaluation.confidence_floor" not in resolved["unconsumed_params"]
-
-
-def test_run_hpo_trial_swept_dotted_evaluation_leaf_reached_via_getitem_is_not_reported_unconsumed(
-    monkeypatch, tmp_path,
-):
-    """A dotted swept key (``evaluation.loss_weighting``, a leaf the preamble never reads) is
-    applied by ``_apply_hpo_params`` into the nested ``evaluation`` field it names, never as a
-    literal top-level key. It counts as consumed once its own leaf is read off that nested
-    block, here through ``__getitem__`` rather than ``get`` (the wrapper's other tracked read
-    path), not merely because the ancestor block was touched by the preamble's own
-    ``evaluation_section`` call."""
-    pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
-    from tcip_mcp.pipelines.schemas import evaluation_section
-
-    def fake_train(run, train_loader, val_loader, task="detection",
-                   epoch_callback=None, resume_from=""):
-        evaluation_section(run.config)["loss_weighting"]  # __getitem__, not get
-        run.best_metric = 1.0
-        run.status = "completed"
-        return run
-
-    _patch_hpo_trial_machinery(monkeypatch, fake_train)
-    trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"lr": 3e-4, "evaluation.loss_weighting": 0.7}, [].append,
-                   _detection_base(), str(trial_dir))
-
-    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert "evaluation.loss_weighting" not in resolved["unconsumed_params"]
-
-
-def test_run_hpo_trial_swept_dotted_evaluation_leaf_read_through_a_dict_copy_is_reported_unconsumed(
-    monkeypatch, tmp_path,
-):
-    """Coverage of ``_AccessTrackingConfig``'s own documented limitation, not a regression guard:
-    a C-level ``dict()`` copy of the evaluation block bypasses the wrapper's ``get`` override, so
-    a leaf read only through that copy is invisible to the tracker even though
-    ``evaluation_section(run.config)`` itself returned the tracked wrapper. The two tests above
-    read the leaf straight off that wrapper and are not reported unconsumed; this one takes an
-    extra ``dict()`` copy of the returned block before reading the leaf, and is."""
-    pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
-    from tcip_mcp.pipelines.schemas import evaluation_section
-
-    def fake_train(run, train_loader, val_loader, task="detection",
-                   epoch_callback=None, resume_from=""):
-        dict(evaluation_section(run.config)).get("copied_leaf")  # a C-level copy of the block
-        run.best_metric = 1.0
-        run.status = "completed"
-        return run
-
-    _patch_hpo_trial_machinery(monkeypatch, fake_train)
-    trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"lr": 3e-4, "evaluation.copied_leaf": 0.9}, [].append,
-                   _detection_base(), str(trial_dir))
-
-    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert resolved["unconsumed_params"] == ["evaluation.copied_leaf"]
-
-
-def test_run_hpo_trial_swept_dotted_leaf_under_a_read_block_is_still_reported_unconsumed(
-    monkeypatch, tmp_path,
-):
-    """A misspelled or otherwise-unread leaf under a block that IS read (``evaluation_section``
-    reads the whole ``evaluation`` dict but never drills into this particular key on it) is
-    reported by its own dotted name: reading the ancestor block is not the same fact as reading
-    the leaf itself."""
-    pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
-    from tcip_mcp.pipelines.schemas import evaluation_section
-
-    def fake_train(run, train_loader, val_loader, task="detection",
-                   epoch_callback=None, resume_from=""):
-        evaluation_section(run.config)  # reads the block, never this specific leaf on it
-        run.best_metric = 1.0
-        run.status = "completed"
-        return run
-
-    _patch_hpo_trial_machinery(monkeypatch, fake_train)
-    trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"lr": 3e-4, "evaluation.bogus_leaf": "typo"}, [].append,
-                   _detection_base(), str(trial_dir))
-
-    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert resolved["unconsumed_params"] == ["evaluation.bogus_leaf"]
-
-
-def test_run_hpo_trial_swept_dotted_key_whose_segment_is_unread_is_reported_unconsumed(
-    monkeypatch, tmp_path,
-):
-    """A dotted swept key still counts as unconsumed when nothing reads even its own top-level
-    segment, the plainest case: no ancestor of the leaf is ever touched at all, by the preamble
-    or by the fake body. ``model_source`` cannot carry this case: the preamble itself reads
-    ``model_source`` and ``model_source.task`` before dispatch, on every trial; a bespoke
-    top-level block name nothing in the trial ever references is what distinguishes this from
-    the test above it, where the ancestor block is read but the leaf on it is not."""
-    pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
-
-    def fake_train(run, train_loader, val_loader, task="detection",
-                   epoch_callback=None, resume_from=""):
-        run.config.get("lr")  # a known key, consumed; "custom_untouched_block" is never read
-        run.best_metric = 1.0
-        run.status = "completed"
-        return run
-
-    _patch_hpo_trial_machinery(monkeypatch, fake_train)
-    trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"lr": 3e-4, "custom_untouched_block.width": 32}, [].append,
-                   _detection_base(), str(trial_dir))
-
-    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert resolved["unconsumed_params"] == ["custom_untouched_block.width"]
 
 
 def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(tmp_path):
@@ -1949,10 +1601,10 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_cancelled_with_records_
     base_config = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
                          "task": "regression", "in_chans": 3},
-        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path), "labels_dir": str(labels_dir)},
-        "training": {"batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 5}],
+        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path)},
+        "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 5}],
                      "mixed_precision": False, "device": "cpu",
-                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}},
+                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
     trial_dir = tmp_path / "sweep" / "trial_cancel01"
     trial_dir.mkdir(parents=True)

@@ -589,7 +589,7 @@ describe("TuningTab selection change", () => {
         ? Promise.resolve({
             sweep_id: "hpo-a",
             trials: [
-              { trial_id: "trial_a1", has_metrics: false, params: {}, unconsumed_params: [] },
+              { trial_id: "trial_a1", has_metrics: false, params: {} },
             ],
           })
         : new Promise(() => {}),
@@ -866,7 +866,6 @@ describe("TuningTab sweep summary line", () => {
           trial_id: "trial_1",
           has_metrics: true,
           params: { weight_decay: 0.0016999999 },
-          unconsumed_params: [],
         },
       ],
     });

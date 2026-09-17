@@ -49,7 +49,6 @@ export interface SweepTrial {
   trial_id: string;
   has_metrics: boolean;
   params: Record<string, unknown>;
-  unconsumed_params: string[];
 }
 
 /** One split_draws point's own summary over its draws (training_tools.group_split_draws's own

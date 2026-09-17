@@ -84,7 +84,7 @@ def _write_trial(sweep: Path, trial_id: str, *, metrics: list[dict] | None = Non
     trial.mkdir(parents=True, exist_ok=True)
     if params is not None:
         tcip_store.replace(trial_config_key(sweep, trial.name),
-                           {"training": {}, "trial_params": params, "unconsumed_params": []})
+                           {"trial_params": params})
     if metrics is not None:
         for row in metrics:
             tcip_store.append(trial_metrics_key(sweep, trial.name), row)
@@ -105,8 +105,8 @@ def test_get_sweep_404(client: TestClient) -> None:
 
 def test_relaunch_creates_sweep_then_listed(client: TestClient, hpo_root) -> None:
     _write_sweep(hpo_root, "hpo_seed00001",
-                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
-                 param_space={"training.batch_size": [2, 4]})
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, },
+                 param_space={"batch_size": [2, 4]})
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_seed00001"})
     assert resp.status_code == 200
@@ -129,8 +129,8 @@ def test_no_sweep_worker_outlives_the_wait_seam(client: TestClient, hpo_root) ->
     from tcip_web.routes import tuning
 
     _write_sweep(hpo_root, "hpo_seed00002",
-                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
-                 param_space={"training.batch_size": [2, 4]})
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, },
+                 param_space={"batch_size": [2, 4]})
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_seed00002"})
     assert resp.status_code == 200
@@ -698,8 +698,8 @@ def test_a_launched_sweep_stays_reachable_after_the_backend_repins(
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     _write_sweep(hpo_root, "hpo_seed00003",
-                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
-                 param_space={"training.batch_size": [2, 4]})
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, },
+                 param_space={"batch_size": [2, 4]})
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_seed00003"})
     assert resp.status_code == 200
@@ -746,7 +746,7 @@ def test_a_web_launched_sweep_runs_only_the_routes_own_tensorboard(
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
     _write_sweep(hpo_root, "hpo_seed00004", base_config=real_hpo_base_config,
-                 param_space={"training.batch_size": [2, 4]})
+                 param_space={"batch_size": [2, 4]})
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_seed00004"})
     assert resp.status_code == 200
@@ -768,7 +768,7 @@ def test_the_launch_route_is_not_registered(client: TestClient, hpo_root) -> Non
     param_space."""
     resp = client.post(
         "/api/tuning/launch",
-        json={"base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+        json={"base_config": {"model_source": {"builder": "x:y"}, "data": {}, },
               "param_space": {}, "n_trials": 1, "output_dir": "",
               "search_alg": "random", "scheduler": "asha"},
     )
@@ -797,7 +797,7 @@ def test_relaunch_route_409s_naming_a_field_missing_from_the_manifest_rather_tha
 
     manifest = {
         "study_name": "hpo_partial001", "status": "running", "n_trials": 2,
-        "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+        "base_config": {"model_source": {"builder": "x:y"}, "data": {}, },
         "param_space": {}, "search_alg": "random", "grace_period": 5, "reduction_factor": 3,
         "max_concurrent": 1, "warm_start": False, "baseline_params": None,
         "resources_per_trial": None,
@@ -824,7 +824,7 @@ def test_relaunch_route_409s_for_a_manifest_naming_a_caller_split_seed_axis_at_o
         return {"study_name": kwargs["study_name"]}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
-    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, }
     _write_sweep(hpo_root, "hpo_seedaxis409", base_config=base_config,
                  param_space={"data.split.seed": {"type": "categorical", "choices": [1, 2]}})
 
@@ -845,7 +845,7 @@ def test_manifest_with_a_seed_axis_and_no_split_draws_is_not_relaunchable_on_bot
     from tcip_web.routes import tuning
 
     seed_space = {"data.split.seed": {"type": "categorical", "choices": [1, 2]}}
-    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, }
 
     def fake_run_hyperparameter_search(*, study_name, **kwargs):
         import tcip_store
@@ -899,13 +899,13 @@ def test_relaunch_reads_the_source_manifest_under_the_sweeps_own_launch_root(
             sweep_manifest_key(study_name),
             {"study_name": study_name, "status": "completed", "n_trials": 1,
              **_RELAUNCH_FIELD_DEFAULTS,
-             "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}},
+             "base_config": {"model_source": {"builder": "x:y"}, "data": {}, }},
         )
         return {"study_name": study_name}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     _write_sweep(hpo_root, "hpo_launchroot1",
-                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, })
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_launchroot1"})
     assert resp.status_code == 200
@@ -938,7 +938,7 @@ def test_relaunch_ignores_any_path_the_manifest_itself_carries(
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     elsewhere = tmp_path / "elsewhere"
     _write_sweep(hpo_root, "hpo_path0001",
-                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, },
                  sweep_dir=str(elsewhere))
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_path0001"})
@@ -961,7 +961,7 @@ def test_relaunch_replays_every_manifest_field_run_hyperparameter_search_was_giv
         return {"study_name": kwargs["study_name"]}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
-    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, }
     _write_sweep(hpo_root, "hpo_fields001", base_config=base_config,
                  param_space={"lr": {"type": "loguniform", "low": 1e-6, "high": 1e-1}},
                  n_trials=7, search_alg="bayesopt", scheduler="median",
@@ -1004,7 +1004,7 @@ def test_relaunch_of_a_manifest_predating_split_draws_still_relaunches(
         return {"study_name": kwargs["study_name"]}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
-    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, }
     _write_sweep(hpo_root, "hpo_predraws01", base_config=base_config)
 
     import tcip_store
@@ -1034,7 +1034,7 @@ def test_relaunch_passes_through_a_manifests_own_split_draws(
         return {"study_name": kwargs["study_name"]}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
-    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, }
     _write_sweep(hpo_root, "hpo_draws001", base_config=base_config,
                  split_draws=3, split_draw_seeds=[1, 2, 3])
 
@@ -1061,7 +1061,7 @@ def test_relaunch_passes_a_manifests_unreadable_trial_budget_through_to_the_tool
         return {"study_name": kwargs["study_name"]}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
-    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, }
     _write_sweep(hpo_root, "hpo_budget001", base_config=base_config, trial_budget="nine")
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_budget001"})
@@ -1086,7 +1086,7 @@ def test_relaunch_coerces_a_manifests_numeric_string_split_draws(
         return {"study_name": kwargs["study_name"]}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
-    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, }
     _write_sweep(hpo_root, "hpo_drawsstr01", base_config=base_config, split_draws="2")
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_drawsstr01"})
@@ -1114,7 +1114,7 @@ def test_relaunch_route_409s_for_a_manifest_whose_split_draws_is_not_a_draw_coun
         return {"study_name": kwargs["study_name"]}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
-    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, }
     _write_sweep(hpo_root, study, base_config=base_config, split_draws=value)
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": study})
@@ -1135,7 +1135,7 @@ def test_relaunch_records_the_source_study_as_relaunched_from_on_the_new_manifes
                      "study_name": kw["study_name"]},
     )
     _write_sweep(hpo_root, "hpo_relsrc001", base_config=real_hpo_base_config,
-                param_space={"training.batch_size": [2, 4]})
+                param_space={"batch_size": [2, 4]})
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_relsrc001"})
     assert resp.status_code == 200
@@ -1168,7 +1168,7 @@ def test_relaunch_records_the_source_manifests_own_study_name_not_the_requests(
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
 
-    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, }
     source_manifest = {
         "study_name": "hpo_source_actual1", "status": "completed", "n_trials": 1,
         "base_config": base_config, **_RELAUNCH_FIELD_DEFAULTS,
@@ -1220,7 +1220,7 @@ def test_relaunch_of_an_older_manifest_missing_relaunched_from_still_succeeds(
 
     assert "relaunched_from" not in _RELAUNCH_FIELDS
     _write_sweep(hpo_root, "hpo_old_relaunch1",
-                base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+                base_config={"model_source": {"builder": "x:y"}, "data": {}, })
 
     import tcip_store
     from tcip_mcp.tools.training_tools import sweep_manifest_key
@@ -1247,7 +1247,7 @@ def test_cancel_route_writes_the_sweep_and_run_level_sentinels(client: TestClien
     from tcip_mcp.tools.training_tools import SWEEP_CANCEL_SENTINEL
 
     sweep = _write_sweep(hpo_root, "hpo_cancel01",
-                         base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+                         base_config={"model_source": {"builder": "x:y"}, "data": {}, })
     trial = _write_trial(sweep, "aaa_00000")  # no resolved config written: still "running"
 
     resp = client.post("/api/tuning/sweeps/hpo_cancel01/cancel", json={})
@@ -1281,7 +1281,7 @@ def test_cancel_reaches_a_relaunch_before_run_hyperparameter_search_writes_its_o
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     _write_sweep(hpo_root, "hpo_precancel1",
-                base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+                base_config={"model_source": {"builder": "x:y"}, "data": {}, })
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_precancel1"})
     assert resp.status_code == 200
@@ -1371,7 +1371,7 @@ def test_relaunch_refused_at_preflight_reads_failed_not_interrupted(
     and the sweep detail must read failed with the refusal's own words, not the interrupted an
     empty, heartbeat-less manifest would otherwise derive to."""
     _write_sweep(hpo_root, "hpo_refused001",
-                base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+                base_config={"model_source": {"builder": "x:y"}, "data": {}, })
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_refused001"})
     assert resp.status_code == 200
@@ -1408,13 +1408,13 @@ def test_manifest_fields_agree_between_a_live_and_a_disk_row(
                     **_RELAUNCH_FIELD_DEFAULTS,
                     "search_alg": "random", "scheduler": "asha",
                     "param_space": {"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
-                    "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}}
+                    "base_config": {"model_source": {"builder": "x:y"}, "data": {}, }}
         tcip_store.replace(sweep_manifest_key(study_name), manifest)
         return {"study_name": study_name}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     _write_sweep(hpo_root, "hpo_agree001", n_trials=3,
-                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, },
                  search_alg="random", scheduler="asha",
                  param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}})
 
@@ -1471,7 +1471,7 @@ def test_manifest_fields_reports_relaunchable_for_a_manifest_recording_split_dra
 
     manifest = {
         "n_trials": 1, **_RELAUNCH_FIELD_DEFAULTS,
-        "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+        "base_config": {"model_source": {"builder": "x:y"}, "data": {}, },
         "split_draws": 0,
     }
     fields = _manifest_fields(manifest)
@@ -1534,7 +1534,7 @@ def test_list_sweeps_serves_a_manifest_with_an_infinite_split_draws_value_beside
 
     tcip_store.bind(FileBackend())
     _write_sweep(hpo_root, "hpo_healthy_beside_inf",
-                base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+                base_config={"model_source": {"builder": "x:y"}, "data": {}, },
                 split_draws=2)
 
     key = sweep_manifest_key("hpo_infinite_draws")
@@ -1583,7 +1583,7 @@ def test_list_sweeps_on_the_sqlite_backend_never_sees_a_loose_manifest_beside_th
     from tcip_mcp.tools.training_tools import sweep_manifest_key
 
     _write_sweep(hpo_root, "hpo_healthy_sqlite",
-                base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+                base_config={"model_source": {"builder": "x:y"}, "data": {}, })
 
     key = sweep_manifest_key("hpo_loose_manifest")
     path = FileBackend().path_for(key)
@@ -1591,7 +1591,7 @@ def test_list_sweeps_on_the_sqlite_backend_never_sees_a_loose_manifest_beside_th
     manifest = {
         "study_name": "hpo_loose_manifest", "status": "completed", "n_trials": 1,
         **_RELAUNCH_FIELD_DEFAULTS,
-        "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+        "base_config": {"model_source": {"builder": "x:y"}, "data": {}, },
     }
     path.write_text(json.dumps(manifest), encoding="utf-8")
 
@@ -1635,13 +1635,13 @@ def test_persisted_summary_carries_no_manifest_field(
             sweep_manifest_key(study_name),
             {"study_name": study_name, "status": "completed", "n_trials": 1,
              **_RELAUNCH_FIELD_DEFAULTS,
-             "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}},
+             "base_config": {"model_source": {"builder": "x:y"}, "data": {}, }},
         )
         return {"study_name": study_name}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     _write_sweep(hpo_root, "hpo_persist001",
-                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, })
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_persist001"})
     assert resp.status_code == 200
@@ -1668,13 +1668,13 @@ def test_get_sweep_live_branch_carries_no_manifest_field(
             sweep_manifest_key(study_name),
             {"study_name": study_name, "status": "completed", "n_trials": 1,
              **_RELAUNCH_FIELD_DEFAULTS,
-             "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}},
+             "base_config": {"model_source": {"builder": "x:y"}, "data": {}, }},
         )
         return {"study_name": study_name}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     _write_sweep(hpo_root, "hpo_nomanifest1",
-                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, })
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_nomanifest1"})
     sweep_id = resp.json()["sweep_id"]
@@ -1700,14 +1700,14 @@ def test_get_sweep_live_branch_exposes_relaunched_from_top_level(
             sweep_manifest_key(study_name),
             {"study_name": study_name, "status": "completed", "n_trials": 1,
              **_RELAUNCH_FIELD_DEFAULTS,
-             "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+             "base_config": {"model_source": {"builder": "x:y"}, "data": {}, },
              "relaunched_from": "hpo_relsrc_top1"},
         )
         return {"study_name": study_name}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     _write_sweep(hpo_root, "hpo_relsrc_top1",
-                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, })
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_relsrc_top1"})
     sweep_id = resp.json()["sweep_id"]
@@ -1722,7 +1722,7 @@ def test_get_sweep_disk_branch_exposes_relaunched_from_top_level(client, hpo_roo
     """The disk get_sweep branch projects relaunched_from at the top level too, beside the
     raw manifest that already carries it nested."""
     _write_sweep(hpo_root, "hpo_disk_relsrc1",
-                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, },
                  relaunched_from="hpo_disk_source0")
 
     body = client.get("/api/tuning/sweeps/hpo_disk_relsrc1").json()
