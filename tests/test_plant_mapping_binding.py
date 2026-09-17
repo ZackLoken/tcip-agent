@@ -126,9 +126,11 @@ def _validate_buckets(
     from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
     from tests._binding_fixtures import write_bound_sidecar
 
+    # One producing run behind every date: a series is one measurement by one producer, and a
+    # delivery whose dates name different producers refuses on that ground alone.
+    producing_experiment_id = "exp-producer"
     for date, bucket_str in preds_by_date.items():
         bucket = Path(bucket_str)
-        producing_experiment_id = f"exp-producer-{date}"
         write_bound_sidecar(
             bucket, {
                 "id_map": _ID_MAP, "validated": True, "trait": trait,

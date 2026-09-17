@@ -2165,9 +2165,12 @@ def delivered_provenance(
     and is empty unless every bucket read is bound, since one cell cannot name a record for buckets
     that have none. ``producer_model_sha256`` and ``producing_experiment_id`` are corroborated
     through :func:`corroborated_producer`, preferring the identity the verified records carry over
-    the identity the stamps assert. An ``operating_point_validated`` named in ``columns`` passes
-    through whatever ``asserted`` carried for it, unchanged; :func:`delivered_tail` is what
-    actually stamps that column from the gate.
+    the identity the stamps assert. Bound buckets whose verified records name different producers
+    raise ``ValueError``: one delivery is one measurement by one producer, so the cell never
+    falls back to an asserted name or a placeholder for a spliced set. An
+    ``operating_point_validated`` named in ``columns`` passes through whatever ``asserted``
+    carried for it, unchanged; :func:`delivered_tail` is what actually stamps that column from
+    the gate.
     """
     values = dict(asserted or {})
     bound = bool(bindings) and all(b.ok and b.claimed for b in bindings.values())
@@ -2175,7 +2178,13 @@ def delivered_provenance(
         {f"{b.experiment_id}:{b.record_digest}" for b in bindings.values()})) if bound else ""
 
     identities = {(b.checkpoint_sha256, b.producing_experiment_id) for b in bindings.values()}
-    if bound and len(identities) == 1:
+    if bound and len(identities) > 1:
+        raise ValueError(
+            "the delivered buckets were produced by more than one checkpoint or run: "
+            f"{ {d: (b.checkpoint_sha256, b.producing_experiment_id) for d, b in bindings.items()} }. "
+            "One delivery names one producer; deliver the buckets one producer covers."
+        )
+    if bound:
         checkpoint, producing_experiment_id = next(iter(identities))
     else:
         checkpoint = values.get("producer_model_sha256")
