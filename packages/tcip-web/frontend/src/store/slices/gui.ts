@@ -174,12 +174,8 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
       };
     }),
 
-  mergeSnapshot: (rawIncoming, version, generation, epoch) =>
+  mergeSnapshot: (incoming, version, generation, epoch) =>
     set((s) => {
-      // pred_reference is gui_snapshot's frozen-format resident (state.py's GuiState); drop it here.
-      const { pred_reference: _predReference, ...incoming } = rawIncoming as GuiState & {
-        pred_reference?: unknown;
-      };
       // A moved epoch is a restarted backend's own replay: accepted regardless of version, since
       // its lower-numbered first snapshot would otherwise drop as a stale one.
       const epochChanged = epoch != null && epoch !== s.wsEpoch;
