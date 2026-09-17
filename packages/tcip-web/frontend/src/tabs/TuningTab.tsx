@@ -414,12 +414,6 @@ export function TuningTab() {
                     {JSON.stringify(selectedTrial.params, null, 2)}
                   </pre>
                 )}
-                {selectedTrial.unconsumed_params.length > 0 && (
-                  <div className="mt-1 text-[11px] text-tcip-fp">
-                    Swept but not read by the training config:{" "}
-                    {selectedTrial.unconsumed_params.join(", ")}
-                  </div>
-                )}
               </div>
               <div>
                 <div className="tcip-heading mb-1">Metrics</div>

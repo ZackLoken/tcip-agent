@@ -1535,89 +1535,6 @@ def inspect_compute_resources() -> dict:
     return {"cpu": cpu, "memory": memory, "gpus": gpus, "active_training_runs": active}
 
 
-# Keys _apply_hpo_params gives purpose-built handling (routed into nested optimizer/
-# training structures train() reads unconditionally), tracking them by their own top-level
-# name would be meaningless. Only the "else"-routed passthrough keys (the actual risk case:
-# a swept axis that lands somewhere no consumer reads) are checked against consumption.
-_HPO_KNOWN_KEYS = {"lr", "batch_size", "weight_decay"}
-
-
-class _AccessTrackingConfig(dict):
-    """Dict subclass recording which dotted paths are ever read via ``__getitem__``/``get``/
-    ``__contains__``/``setdefault``, installed on ``run.config`` for one HPO trial's dispatch, so
-    ``unconsumed_params`` reflects genuine runtime access (did anything read this key during
-    this trial), not a static comparison against ``train()``'s known key list, which would
-    falsely flag a bespoke ``training_source``'s own legitimate custom sweep key.
-
-    A nested dict value returned by ``__getitem__``/``get``/``setdefault`` is wrapped the same
-    way, sharing this instance's own ``accessed`` set under its own dotted prefix, and installed
-    back onto the key it was read from, so every later read of that key answers the identical
-    wrapper: ``ctx.config["model_source"]["builder_kwargs"]["width"]`` records ``"model_source"``,
-    ``"model_source.builder_kwargs"`` and ``"model_source.builder_kwargs.width"`` in one read, a
-    misspelled leaf under an otherwise-read block is reported by its own dotted name rather than
-    being hidden behind the block it lives in, and a write through that nested read
-    (``cfg["model_source"]["builder_kwargs"]["width"] = 8``) lands on the same tree ``cfg`` itself
-    holds, not a throwaway copy. A value already wrapped by an earlier read is answered untouched
-    on a later one, carrying the ``accessed`` set and the dotted prefix it was built with; since
-    ``_wrap`` is the only code that installs a wrapper into a tracked tree, every wrapper such a
-    read meets shares this instance's ``accessed`` set under its own key's prefix.
-
-    Real, stated limitations (never gates the run, warn-only, so a false positive costs a log
-    line, not a failed trial): a C-level copy (``dict(cfg)``, ``**cfg``) bypasses the overrides
-    entirely, since this class doesn't override ``__iter__`` and CPython's dict-merge and
-    dict-construction paths read a dict subclass's own storage directly rather than through
-    ``__getitem__``/``get`` whenever that's true. The copy's keys are read untracked (nothing it
-    reads afterward is recorded in ``accessed``), and its values are exactly whatever this
-    instance currently holds at copy time, this class's own installed wrappers included when a
-    key was wrapped before the copy was taken: that is why ``{**tracked_config}`` carries the
-    stamped data block into a persisted snapshot, and why the store this snapshot is written
-    through must accept dict subclasses as values. Whole-dict iteration
-    (``.items()``/``.values()``/``.keys()``) isn't tracked per key either, for the same reason.
-    A reference to a nested dict taken before the tracker's first read of that key (the
-    ``merged`` dict ``_apply_hpo_params`` returned, for one, before anything here has wrapped
-    it) diverges from the tracked tree from that first read on: the old reference still points
-    at the pre-wrap plain dict, while ``cfg`` now holds the wrapper in its place. The tracked
-    tree, reached off ``cfg`` itself (or a value ``cfg`` already returned), is the one to read
-    and to persist.
-    """
-
-    def __init__(self, *args: Any, _prefix: str = "", _accessed: set[str] | None = None,
-                **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self._prefix = _prefix
-        self.accessed: set[str] = set() if _accessed is None else _accessed
-
-    def _dotted(self, key: Any) -> str:
-        return f"{self._prefix}.{key}" if self._prefix else str(key)
-
-    def _wrap(self, key: Any, value: Any) -> Any:
-        if isinstance(value, dict) and not isinstance(value, _AccessTrackingConfig):
-            wrapped = _AccessTrackingConfig(value, _prefix=self._dotted(key), _accessed=self.accessed)
-            dict.__setitem__(self, key, wrapped)
-            return wrapped
-        return value
-
-    def __getitem__(self, key: Any) -> Any:
-        self.accessed.add(self._dotted(key))
-        return self._wrap(key, super().__getitem__(key))
-
-    def get(self, key: Any, default: Any = None) -> Any:
-        self.accessed.add(self._dotted(key))
-        if not dict.__contains__(self, key):
-            return default
-        return self._wrap(key, super().__getitem__(key))
-
-    def setdefault(self, key: Any, default: Any = None) -> Any:
-        self.accessed.add(self._dotted(key))
-        if not dict.__contains__(self, key):
-            dict.__setitem__(self, key, default)
-        return self._wrap(key, dict.__getitem__(self, key))
-
-    def __contains__(self, key: Any) -> bool:
-        self.accessed.add(self._dotted(key))
-        return super().__contains__(key)
-
-
 def hpo_root(output_dir: str = "", *, root: Path | str | None = None) -> Path:
     """Where HPO sweeps live: ``output_dir`` when the caller named one, else ``.tcip/hpo``
     under ``root`` (default: the platform state root). A relative ``output_dir`` resolves
@@ -1976,7 +1893,7 @@ def read_sweep_from_disk(sweep_id: str, *, root: Path | str | None = None) -> di
     study result's own fields onto a completed sweep's result is :func:`enrich_with_study_result`'s
     own separate question, so a caller that only wants the manifest and trials never pays for a
     study-result read it does not need. ``trials`` is one entry per ``trial_<id>`` directory
-    under the sweep's own root: its resolved params, unconsumed params, and whether it has
+    under the sweep's own root: its resolved params and whether it has
     logged any metrics yet (:func:`log_holds_anything`).
 
     This is the one reader ``routes.tuning``'s disk-only paths and ``monitor_training(sweep_id=)``
@@ -2017,7 +1934,6 @@ def read_sweep_from_disk(sweep_id: str, *, root: Path | str | None = None) -> di
                 "trial_id": d.name[len(_TRIAL_DIR_PREFIX):],
                 "has_metrics": log_holds_anything(page),
                 "params": resolved.get("trial_params") or {},
-                "unconsumed_params": resolved.get("unconsumed_params") or [],
             })
 
     return {
@@ -2052,10 +1968,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
     ``base_config`` actually runs under that loop here too, not always the stock trainer, or the
     selected hyperparameters won't transfer.
     """
-    merged = _apply_hpo_params(base_config, config)
-    # Track which top-level keys the trial reads, so an unconsumed swept param is caught by
-    # observation, never off merged: this tree, not merged, is what the trial actually reads.
-    tracked_config = _AccessTrackingConfig(merged)
+    trial_config = _apply_hpo_params(base_config, config)
 
     from tcip_mcp.pipelines.training.envelope import TrainContext, dispatch_train_body
     from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
@@ -2068,16 +1981,14 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
-    from tcip_mcp.pipelines.schemas import evaluation_section
     from torch.utils.data import DataLoader
 
-    model_source = tracked_config.get(MODEL_SOURCE_KEY)
+    model_source = trial_config.get(MODEL_SOURCE_KEY)
     # setdefault, not get: creates "data" if base_config omitted it, and the geometry stamp
-    # below mutates the wrapped tree the resolved-config snapshot is spread from below.
-    data_cfg = tracked_config.setdefault("data", {})
-    train_cfg = tracked_config.get("training", {})
+    # below mutates the tree the resolved-config snapshot is spread from below.
+    data_cfg = trial_config.setdefault("data", {})
     task = (model_source.get("task") if model_source else None) or data_cfg.get("task", "detection")
-    eval_cfg = evaluation_section(tracked_config)
+    eval_cfg = trial_config.get("evaluation") or {}
     try:
         higher_is_better = HIGHER_IS_BETTER_BY_METRIC[resolve_selection_metric(
             task, eval_cfg.get("trait"), eval_cfg.get("selection_metric"))]
@@ -2097,10 +2008,10 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         report(losing_side)
         return
 
-    draw_seed_if_unset(tracked_config)  # marks a swept "seed" consumed, same as any other read
+    draw_seed_if_unset(trial_config)
     # An id no tool takes, unique across concurrent sweeps where a directory basename is not.
     trial_id = str(Path(trial_dir).resolve())
-    run = create_run(tracked_config, trial_dir, id=trial_id, origin="hpo_trial")  # off the Training tab
+    run = create_run(trial_config, trial_dir, id=trial_id, origin="hpo_trial")  # off the Training tab
 
     # The best value this trial has actually reported, in the resolved direction; call_report is
     # what every reporting path below goes through, so this is the one place that tracks it.
@@ -2114,7 +2025,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
 
     try:
         transforms = None
-        aug_cfg = tracked_config.get("augmentation", {})
+        aug_cfg = trial_config.get("augmentation", {})
         if aug_cfg:
             from tcip_mcp.pipelines.data.augmentations import build_augmentation
             transforms = build_augmentation(aug_cfg)
@@ -2124,11 +2035,11 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         # Stamped before training so a pruned/failed trial's resolved-config snapshot still
         # records the geometry the trial actually trained on.
         stamp_effective_data_geometry(data_cfg, train_ds)
-        batch_size = train_cfg.get("batch_size", config.get("batch_size", 4))
-        num_workers = train_cfg.get("num_workers", 0)
+        batch_size = trial_config.get("batch_size", 4)
+        num_workers = trial_config.get("num_workers", 0)
         # Built after the loader context is known: a sampler whose read order depends on the
         # worker regime and batching consumes both.
-        sampler = build_sampler(tracked_config.get("sampler", "random"), train_ds,
+        sampler = build_sampler(trial_config.get("sampler", "random"), train_ds,
                                 num_workers=num_workers, batch_size=batch_size)
         # run.config's seed is draw_seed_if_unset-resolved; read off run.config, not merged, so
         # the loader is seeded with the value actually used.
@@ -2167,27 +2078,15 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         logger.warning("HPO trial failed: %s", e)
         report(losing_side)
     finally:
-        # Surface any swept param no consumer touched (warn-only); a dotted key is consumed only
-        # by its own full dotted path being read, never by an ancestor block being read.
-        swept = set(config.keys()) - _HPO_KNOWN_KEYS
-        unconsumed = sorted(key for key in swept if key not in tracked_config.accessed)
         try:
             # trial_params is the sampled point itself, the only record of which axes this
             # sweep actually varied (the config as sampled cannot say that).
             trial_path = Path(trial_dir)
-            # run.config is tracked_config itself; read seed explicitly to also cover a nested
-            # training.seed the top-level spread below wouldn't reach.
-            seed = run.config.get("seed", run.config.get("training", {}).get("seed"))
             store.replace(trial_config_key(trial_path.parent, trial_path.name),
-                          {**tracked_config, "trial_params": dict(config),
-                           "unconsumed_params": unconsumed, "seed": seed})
+                          {**trial_config, "trial_params": dict(config),
+                           "seed": run.config.get("seed")})
         except (OSError, StoreError):
             logger.warning("could not persist the resolved config for %s", trial_dir, exc_info=True)
-        if unconsumed:
-            logger.warning(
-                "HPO trial %s: swept params %s were never read by the training body, check "
-                "_apply_hpo_params' routing, or (for a bespoke training_source) confirm the "
-                "loop actually reads them from ctx.config.", trial_dir, unconsumed)
 
 
 @mcp.tool()
