@@ -468,28 +468,25 @@ def delivered_golden(body: dict, produced_at: bytes) -> bytes:
     constant can hold is ``validation_record``: a record's digest covers the buckets at their
     absolute dataset root, which is this run's own temporary directory. It is read from the
     buckets' own stamps, so the golden still compares the delivered cell against the records the
-    stamps name rather than against whatever the delivery put there. ``plant_mapping_sha256`` and
-    ``captures_unverified`` are likewise read from the mapping itself, for the same reason: the
-    fixture's own dataset carries no ``images/`` tree, so every one of the mapping's dates is
-    unverified, in the mapping's own date order. ``dates_delivered`` is the same date set (this
-    fixture's delivery always covers every one of the mapping's own dates); ``images_unattributed``
-    is 0, since every assignment the fixture writes carries a ``plot_name``, and
-    ``plant_attribution`` is ``MappingBuild``'s own constant, ``"image"``.
+    stamps name rather than against whatever the delivery put there. ``plant_mapping_sha256`` is
+    likewise read from the mapping itself, for the same reason. ``dates_delivered`` is the
+    mapping's own date set (this fixture's delivery always covers every one of the mapping's own
+    dates); ``images_unattributed`` is 0, since every assignment the fixture writes carries a
+    ``plot_name``, and ``plant_attribution`` is ``MappingBuild``'s own constant, ``"image"``.
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping as pm
 
     build = pm.load_mapping(Path(body["project_root"]), body["mapping_name"])
     assert build is not None
     mapping_sha = build.record_sha256.encode()
-    captures_unverified = ";".join(build.dates).encode()
-    dates_delivered = captures_unverified
+    dates_delivered = ";".join(build.dates).encode()
 
     record = _expected_validation_record(body).encode()
     sha = producer_checkpoint_sha256("exp-1").encode()
     row = (b",2,2,0,0,2026-02-24,2026-02-12,2026-02-18,2026-02-24,interpolated,interpolated,"
            b"interpolated,interpolated,true,0.4,held_out_annotations,held_out_annotations,,"
            + sha + b",exp-1," + produced_at + b"," + record + b"," + mapping_sha + b","
-           + captures_unverified + b",," + dates_delivered + b",0,image,,\r\n")
+           + dates_delivered + b",0,image,,\r\n")
     return (
         b"plant_id,accession,n_dates,n_observed_dates,n_dates_unclassified,n_dates_missing_images,"
         b"bud_majority_date,bud_05per_date,bud_50per_date,bud_95per_date,"
@@ -498,7 +495,7 @@ def delivered_golden(body: dict, produced_at: bytes) -> bytes:
         b"operating_point_validated,positive_state_classifier_validated,unvalidated_dimensions,"
         b"producer_model_sha256,"
         b"producing_experiment_id,produced_at,validation_record,plant_mapping_sha256,"
-        b"captures_unverified,plant_csvs_unverified,dates_delivered,images_unattributed,"
+        b"dates_delivered,images_unattributed,"
         b"plant_attribution,acknowledged_by,acknowledgement_reason\r\n"
         + b"PLANT_A,AccA" + row
         + b"PLANT_B,AccB" + row

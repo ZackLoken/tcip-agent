@@ -671,14 +671,13 @@ def test_exported_milestone_csv_carries_the_canonical_schema_and_its_provenance(
     assert cells["producing_experiment_id"] == "exp-1"
     assert cells["producer_model_sha256"] == producer_checkpoint_sha256("exp-1")
     assert cells["validation_record"] == _expected_validation_record(body)
-    # Legitimately blank here: no plant CSV to check, nothing floored, and nothing acknowledged
-    # on a fully-validated delivery; captures_unverified is not, since this fixture has no images/.
-    exempt = {"plant_csvs_unverified", "unvalidated_dimensions", "acknowledged_by",
-              "acknowledgement_reason"}
+    # Legitimately blank here: nothing floored and nothing acknowledged on a fully-validated
+    # delivery. What the mapping could not verify travels on the delivery event, never per row.
+    exempt = {"unvalidated_dimensions", "acknowledged_by", "acknowledgement_reason"}
     assert [c for c, v in cells.items() if v == "" and c not in exempt] == []
-    assert cells["plant_csvs_unverified"] == ""
     assert cells["unvalidated_dimensions"] == ""
-    assert cells["captures_unverified"] != ""
+    assert "captures_unverified" not in cells
+    assert "plant_csvs_unverified" not in cells
 
 
 def test_curve_and_milestone_projections_share_one_measurement(
@@ -1023,8 +1022,8 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
     provenance = ["operating_point_conf", "operating_point_validated",
                   "positive_state_classifier_validated", "unvalidated_dimensions",
                   "producer_model_sha256", "producing_experiment_id", "produced_at",
-                  "validation_record", "plant_mapping_sha256", "captures_unverified",
-                  "plant_csvs_unverified", "dates_delivered", "images_unattributed",
+                  "validation_record", "plant_mapping_sha256",
+                  "dates_delivered", "images_unattributed",
                   "plant_attribution", "acknowledged_by", "acknowledgement_reason"]
     body = _phenology_fixture(tmp_path, validated=True)
     resp = client.post("/api/results/export_csv",
@@ -1033,8 +1032,7 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
     header = resp.text.splitlines()[0].split(",")
     assert header[-len(provenance):] == provenance
     cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
-    blank_ok = ("plant_csvs_unverified", "unvalidated_dimensions", "acknowledged_by",
-                "acknowledgement_reason")
+    blank_ok = ("unvalidated_dimensions", "acknowledged_by", "acknowledgement_reason")
     for col in provenance:
         if col in blank_ok:
             continue  # legitimately empty here: nothing to check, nothing floored, nothing acknowledged

@@ -155,11 +155,9 @@ PROVENANCE_COLUMNS = [
     "produced_at",
     # Which experiment and row answered for the buckets' claims, empty when any read bucket is unbound.
     "validation_record",
-    # The plant mapping this delivery attributed detections through, and what verify_mapping_inputs
-    # could not check at delivery time (each a ";"-joined list, empty when nothing was unverified).
+    # The plant mapping this delivery attributed detections through. What verify_mapping_inputs
+    # could not check travels once, on the delivery event, never repeated on every row.
     "plant_mapping_sha256",
-    "captures_unverified",
-    "plant_csvs_unverified",
     # The delivered dates and this delivery's own unattributed-capture count scoped to them
     # (never the mapping's own n_dates_missing_images span), plus the attribution granularity.
     "dates_delivered",
@@ -664,10 +662,10 @@ def _write_phenology_delivery(
     as ``delivery_events_schema.PlantMappingDisclosure`` declares and produced by the caller's own
     ``MappingBuild.delivery_disclosure``. Required, never defaulted: a phenology delivery always
     reads a mapping, so there is no legitimate case with nothing to thread through. Its
-    ``captures_unverified``/``plant_csvs_unverified``/``dates_delivered`` fill the CSV's own
-    columns (``";"``-joined, empty when nothing was unverified), ``images_unattributed`` and
+    ``dates_delivered`` fills the CSV's own column (``";"``-joined), ``images_unattributed`` and
     ``plant_attribution`` fill theirs directly, and the whole dict travels to the delivery event
-    unchanged.
+    unchanged; the event is where what the delivery could not verify
+    (``captures_unverified``/``plant_csvs_unverified``) is recorded, once, never on every row.
 
     ``document_reconciliations`` and ``dimension_reconciliations`` are the same two mappings
     ``record_delivery_binding_event`` takes, threaded straight through to it; this writer derives
@@ -734,8 +732,6 @@ def _write_phenology_delivery(
          "operating_point_conf": _operating_point_conf_cell(
              plant_mapping["dates_delivered"], predictions_by_date, operating_point_confs),
          "plant_mapping_sha256": plant_mapping["record_sha256"],
-         "captures_unverified": ";".join(plant_mapping["captures_unverified"]),
-         "plant_csvs_unverified": ";".join(plant_mapping["plant_csvs_unverified"]),
          "dates_delivered": ";".join(plant_mapping["dates_delivered"]),
          "images_unattributed": plant_mapping["images_unattributed"],
          "plant_attribution": plant_mapping["plant_attribution"]},
