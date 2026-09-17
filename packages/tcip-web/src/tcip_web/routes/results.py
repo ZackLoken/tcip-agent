@@ -820,9 +820,12 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
 
     _still_stated(measurement, payload.trait)
-    from tcip_mcp.tools.phenology_tools import _resolve_producer_identity
+    from tcip_mcp.tools.phenology_tools import ProducerDiffersAcrossDates, _resolve_producer_identity
 
-    producer = _resolve_producer_identity(measurement.predictions_by_date)
+    try:
+        producer = _resolve_producer_identity(measurement.predictions_by_date)
+    except ProducerDiffersAcrossDates as exc:
+        raise HTTPException(400, str(exc)) from exc
     # The browser download lands wherever the breeder's browser puts it; the delivery itself
     # belongs to the project, so the same bytes are written to <project>/results_export/, audited.
     saved_path = measurement.project_root / "results_export" / Path(filename).name

@@ -254,32 +254,46 @@ def _resolve_positive_class_id(trait_name: str, predictions_by_date: dict[str, s
     return phenology.resolve_positive_class_id(get_trait(trait_name), predictions_by_date)
 
 
+class ProducerDiffersAcrossDates(ValueError):
+    """The dates of one phenology series were produced by more than one checkpoint or run.
+
+    A curve spliced from two models is not one measurement, so the delivery refuses rather
+    than naming one producer for all of it or collapsing the set to a placeholder string.
+    """
+
+
 def _resolve_producer_identity(predictions_by_date: dict[str, str]) -> dict:
     """Collect producing-model identity from each date's ``operating_point.json`` sidecar.
 
-    A single producer across dates carries through; differing producers collapse to ``"multiple"``
-    so a curve spliced from two models is not silently attributed to one. Best-effort, a missing
-    sidecar contributes nothing rather than failing the delivery.
+    The one producer every delivered date shares carries through; dates whose sidecars name
+    different checkpoints or runs raise :class:`ProducerDiffersAcrossDates` naming each date's
+    own producer. A missing sidecar contributes nothing rather than failing the delivery.
     """
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
-    shas: set[str] = set()
-    exps: set[str] = set()
-    for pred_dir in predictions_by_date.values():
+    shas: dict[str, str] = {}
+    exps: dict[str, str] = {}
+    for date, pred_dir in predictions_by_date.items():
         data = read_operating_point_sidecar(pred_dir)
         if not data:
             continue
         if data.get("checkpoint_sha256"):
-            shas.add(str(data["checkpoint_sha256"]))
+            shas[date] = str(data["checkpoint_sha256"])
         if data.get("experiment_id"):
-            exps.add(str(data["experiment_id"]))
+            exps[date] = str(data["experiment_id"])
 
-    def _one(vals: set[str]) -> str | None:
-        if not vals:
-            return None
-        return next(iter(vals)) if len(vals) == 1 else "multiple"
+    def _one(label: str, by_date: dict[str, str]) -> str | None:
+        values = set(by_date.values())
+        if len(values) > 1:
+            raise ProducerDiffersAcrossDates(
+                f"the delivered dates were produced by more than one {label}: "
+                f"{dict(sorted(by_date.items()))}. A phenology series is one measurement by one "
+                "producer; deliver the dates one producer covers, or re-run inference so every "
+                "date's bucket names the same one."
+            )
+        return next(iter(values)) if values else None
 
-    return {"sha256": _one(shas), "experiment_id": _one(exps)}
+    return {"sha256": _one("checkpoint", shas), "experiment_id": _one("run", exps)}
 
 
 def _greedy_match(gt: list, preds: list, gt_boxes: list, pred_boxes: list, *,
