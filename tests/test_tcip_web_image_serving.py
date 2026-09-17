@@ -825,3 +825,20 @@ def test_the_budget_derives_once_per_process_from_free_space(tmp_path: Path, mon
 
     monkeypatch.setattr(shutil, "disk_usage", _no_more_reads)
     assert images_route._cache_byte_budget(tmp_path) == first
+
+
+def test_a_file_that_fails_its_header_probe_answers_400_and_a_readable_one_still_serves(
+        client: TestClient, tmp_path: Path):
+    """A truncated capture is the request's own fault, so the route names it at 400 instead of
+    letting the probe raise past the handler as a 500. The readable half is the same route over a
+    real frame, so the refusal cannot be a route that refuses everything."""
+    truncated = tmp_path / "truncated.jpg"
+    truncated.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01")
+
+    refused = client.get("/api/images", params={"path": str(truncated)})
+    assert refused.status_code == 400, refused.text
+    assert "could not open this image" in refused.json()["detail"]
+
+    readable = tmp_path / "readable.jpg"
+    Image.fromarray(np.full((16, 20, 3), 90, dtype=np.uint8)).save(readable)
+    assert client.get("/api/images", params={"path": str(readable)}).status_code == 200
