@@ -202,7 +202,7 @@ def test_phenology_measurement_records_no_delivery_event_for_an_unclassified_loo
     tmp_path: Path,
 ) -> None:
     """Looking at a number on screen is not delivering it: phenology_measurement records no
-    delivery event either way, only an audit line, since nothing here shipped an artifact."""
+    delivery event and no audit line either way, since nothing here changed any state."""
     from fastapi.testclient import TestClient
 
     from tcip_mcp.audit import audit_log_key
@@ -215,13 +215,13 @@ def test_phenology_measurement_records_no_delivery_event_for_an_unclassified_loo
 
     unclassified = _phenology_fixture(
         tmp_path, validated=True, fractions=(0.0,), id_map={"bud": 0}, detections=2)
+    before = list(ts.read_log(audit_log_key(tmp_path)).records)
     resp = client.post("/api/results/phenology_measurement", json=unclassified)
     assert resp.status_code == 200, resp.text
     assert resp.json()["positive_class_assessed"] is False
 
     assert _delivery_event_records(tmp_path.resolve()) == []
-    audit = ts.read_log(audit_log_key(tmp_path)).records
-    assert any(e["tool"] == "results.phenology_measurement" for e in audit)
+    assert list(ts.read_log(audit_log_key(tmp_path)).records) == before
 
 
 def test_record_delivery_binding_event_reports_a_failed_store_write_without_raising(
@@ -451,7 +451,7 @@ def test_phenology_measurement_records_no_delivery_event_for_an_assessed_look(
     tmp_path: Path,
 ) -> None:
     """The parity counterpart: a run that did assess the positive class still records no delivery
-    event, only the same audit line, since a look on screen never becomes a shipped artifact."""
+    event and no audit line, since a look on screen never becomes a shipped artifact."""
     from fastapi.testclient import TestClient
 
     from tcip_mcp.audit import audit_log_key
@@ -463,10 +463,10 @@ def test_phenology_measurement_records_no_delivery_event_for_an_assessed_look(
     client = TestClient(app, base_url="http://127.0.0.1")
 
     assessed = _phenology_fixture(tmp_path, validated=True, detections=100)
+    before = list(ts.read_log(audit_log_key(tmp_path)).records)
     resp = client.post("/api/results/phenology_measurement", json=assessed)
     assert resp.status_code == 200, resp.text
     assert resp.json()["positive_class_assessed"] is True
 
     assert _delivery_event_records(tmp_path.resolve()) == []
-    audit = ts.read_log(audit_log_key(tmp_path)).records
-    assert any(e["tool"] == "results.phenology_measurement" for e in audit)
+    assert list(ts.read_log(audit_log_key(tmp_path)).records) == before

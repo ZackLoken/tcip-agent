@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
+from tcip_mcp.server import mcp
 
 
 @mcp.tool()
@@ -38,7 +38,6 @@ def create_experiment(
 
 
 @mcp.tool()
-@audited
 def get_experiment(
     experiment_id: str, view: str = "full",
     metrics_limit: int | None = None, metrics_offset: int = 0,
@@ -80,7 +79,6 @@ def get_experiment(
 
 
 @mcp.tool()
-@audited
 def list_experiments(launched_only: bool = False) -> dict:
     """Enumerate every experiment the store holds a status record for.
 

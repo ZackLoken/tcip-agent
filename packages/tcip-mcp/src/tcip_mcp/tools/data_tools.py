@@ -527,7 +527,6 @@ def _scan_dataset(root: str) -> dict:
     }
 
 
-@audited
 def scan_dataset(folder_path: str) -> dict:
     """Scan a folder for images, labels, and predictions.
 

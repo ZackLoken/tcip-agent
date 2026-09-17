@@ -301,7 +301,6 @@ def report_friction(
 
 
 @mcp.tool()
-@audited
 def load_project_memory(
     kind: str,
     project_path: str = "",
@@ -379,7 +378,6 @@ def _parse_audit_bound(label: str, value: str, *, end_of_day: bool = False) -> d
 
 
 @mcp.tool()
-@audited
 def read_audit_log(
     scope: str | None = None,
     *,
@@ -429,8 +427,8 @@ def read_audit_log(
     own narrow question: the plant-mapping receipt scan (``pipelines.postprocessing.plant_mapping._scan_receipts``)
     and the refused-experiment-mutation index (``experiments._index_refused_mutations``) each
     keep their own targeted read, since a general-purpose page here would make them re-filter a
-    result shaped for something else. Like every MCP tool this call is itself ``@audited``, so a
-    read of the record is on the record too, the same as ``load_project_memory``.
+    result shaped for something else. A read of the record leaves no line on it: the log holds
+    mutations only, the same as ``load_project_memory`` and every other read-only door.
 
     Args:
         scope: Dataset root, project root, a path under either, or ``None`` for the platform log.
@@ -438,7 +436,7 @@ def read_audit_log(
         since: Only entries whose own timestamp is at or after this ISO-8601 string.
         until: Only entries whose own timestamp is at or before this ISO-8601 string; a
             date-only string means the end of that day.
-        status: Exact status filter, e.g. 'ok', 'error', 'exception'.
+        status: Exact status filter, 'ok' or 'exception'.
         limit: Maximum entries to return (default 200), newest first.
     """
     from tcip_mcp.audit import audit_log_key, dataset_scope_of

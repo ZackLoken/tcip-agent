@@ -222,12 +222,10 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
     assert len(door_rows) == 1, page.records
     assert door_rows[0]["verified_buckets"][str(pred_dir)]["verified"] is True
 
+    # One platform line per call: the refusal and the delivery each returned, so both read ok.
     platform_page = tcip_store.read_log(audit_log_key())
-    platform_rows = [
-        r for r in platform_page.records
-        if r["tool"] == "deliver_per_plant_csv" and r["status"] == "ok"
-    ]
-    assert len(platform_rows) == 1, platform_page.records
+    platform_rows = [r for r in platform_page.records if r["tool"] == "deliver_per_plant_csv"]
+    assert [r["status"] for r in platform_rows] == ["ok", "ok"], platform_page.records
 
     from tcip_mcp.pipelines.resolution import DELIVERY_EVENTS_STORE, delivery_events_scope
 

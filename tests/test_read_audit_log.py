@@ -53,12 +53,16 @@ def test_read_audit_log_filters_by_tool_and_status_newest_first(
 
     result = read_audit_log(scope=str(dataset_root), tool="write_subject_registry", status="ok")
     assert "error" not in result, result
-    assert result["count"] == 2
-    assert [e["status"] for e in result["entries"]] == ["ok", "ok"]
-    # Newest first: the second successful call's own timestamp sorts ahead of the first's.
-    assert result["entries"][0]["timestamp"] >= result["entries"][1]["timestamp"]
+    # Every call returned, the refused one included: a refusal is the body's own answer, and
+    # its line reads ok like any other return; only a raised body reads exception.
+    assert result["count"] == 3
+    assert [e["status"] for e in result["entries"]] == ["ok", "ok", "ok"]
+    # Newest first: the last call's own timestamp sorts ahead of the first's.
+    assert result["entries"][0]["timestamp"] >= result["entries"][-1]["timestamp"]
     assert result["scope_resolved"] == str(dataset_root.resolve())
-    assert result["skipped"] == 1  # the one status="error" entry, filtered out
+    assert result["skipped"] == 0
+    assert read_audit_log(scope=str(dataset_root), tool="write_subject_registry",
+                          status="exception")["count"] == 0
 
 
 def test_read_audit_log_limit_states_what_it_truncated(
@@ -78,17 +82,17 @@ def test_read_audit_log_limit_states_what_it_truncated(
 def test_read_audit_log_platform_default_scope_excludes_dataset_scoped_entries(
     platform_root: Path, dataset_root: Path,
 ) -> None:
-    from tcip_mcp.tools.data_tools import scan_dataset
     from tcip_mcp.tools.annotation_tools import write_subject_registry
+    from tcip_mcp.tools.meta_tools import report_friction
 
     write_subject_registry(str(dataset_root), subjects=_subjects())
-    scan_dataset(str(dataset_root))
+    report_friction(str(dataset_root), "unexpected_behavior", "a platform-scoped mutation")
 
-    platform_result = read_audit_log(tool="scan_dataset")
+    platform_result = read_audit_log(tool="report_friction")
     assert platform_result["count"] == 1
     assert platform_result["scope_resolved"] == str(platform_root.resolve())
 
-    dataset_result = read_audit_log(scope=str(dataset_root), tool="scan_dataset")
+    dataset_result = read_audit_log(scope=str(dataset_root), tool="report_friction")
     assert dataset_result["count"] == 0
 
 

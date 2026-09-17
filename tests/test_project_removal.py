@@ -1643,7 +1643,7 @@ def test_the_archive_refuses_inside_the_door_and_leaves_the_target_untouched(cli
     # the calling process's platform root, never the target's.
     open_lines = _audit_lines(open_project)
     assert open_lines[-1]["tool"] == "archive_project"
-    assert open_lines[-1]["status"] == "error"
+    assert open_lines[-1]["status"] == "ok"
 
 
 def test_an_unwritten_route_line_answers_409_naming_the_marker_already_written(

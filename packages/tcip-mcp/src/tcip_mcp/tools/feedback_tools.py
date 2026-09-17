@@ -391,7 +391,6 @@ def _prepare_queue_sources(
 
 
 @mcp.tool()
-@audited
 def prioritize_review_queue(
     checkpoint_path: str,
     images_dir: str,

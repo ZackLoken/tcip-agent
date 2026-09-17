@@ -46,9 +46,11 @@ src/tcip_mcp/
   audit.py, project_status.py, web_client.py
 ```
 
-Every MCP tool in `tools/` is decorated `@mcp.tool()` + `@audited`, except `serve_domain_knowledge`,
-whose `@mcp.tool(description=...)` composes its client-visible description from the knowledge
-corpus at import time rather than leaving it as the bare docstring. A door demoted from tool
+Every MCP tool in `tools/` is decorated `@mcp.tool()`, and every one that changes state is also
+`@audited`; a read-only tool (a status poll, a listing, a document served back) carries no
+`@audited`, so the audit log records mutations and nothing else. `serve_domain_knowledge`'s
+`@mcp.tool(description=...)` composes its client-visible description from the knowledge corpus
+at import time rather than leaving it as the bare docstring. A mutating door demoted from tool
 status (run only through its own `tcip` subcommand) keeps `@audited` without registering.
 Run `python tools/list_tools.py` for the current tool list/count; never hardcode a count in a
 doc or comment.
@@ -67,8 +69,8 @@ doc or comment.
   directory, never in this repository. A standing operator capability is a console-command door in
   `cli/`. Add a tool only for an audit seam, long-running infrastructure, or domain knowledge the
   agent lacks that a console command can't carry.
-- State mutations route through `@audited` doors only: the MCP tools and the console-command doors
-  demoted from them; the record is `audit_log`, one store addressed by `audit.audit_log_key` under
+- State mutations route through `@audited` doors only: the mutating MCP tools and the
+  console-command doors demoted from them; the record is `audit_log`, one store addressed by `audit.audit_log_key` under
   three kinds of root (the platform's own, a dataset's own, a project's own), held by whichever
   backend the process bound, that other code (including scripts) must not write around. `audit.py`
   decides where an entry goes and what a failed append means: the decorator raises
