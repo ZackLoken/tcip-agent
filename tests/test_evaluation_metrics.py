@@ -55,13 +55,19 @@ pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 # --------------------------------------------------------------------------
 
 def test_composite_objective_matches_reference():
-    assert compute_composite_objective(-1.0, 0.9, 0.9) == 1e6        # val_loss <= 0
-    assert compute_composite_objective(2.0, 0.0, 0.0) == 1e6         # degenerate prune
     expected = 0.45 * 2.0 + 0.35 * 0.5 * 10 + 0.20 * 0.6 * 10        # 3.85
     assert compute_composite_objective(2.0, 0.5, 0.4) == pytest.approx(expected, abs=1e-9)
-    # NaN coerces: val_loss -> inf branch, f1/map50 -> 0 -> degenerate sentinel.
-    assert compute_composite_objective(float("nan"), float("nan"), float("nan")) == 1e6
     assert DEFAULT_SCORE_WEIGHTS == {"loss": 0.45, "f1": 0.35, "map50": 0.20}
+
+
+def test_composite_objective_has_no_score_for_a_degenerate_epoch():
+    """A non-positive or non-finite loss, or both quality terms at zero, is an epoch with no
+    useful score: the objective is None, which a metrics row carries as null and the selection
+    comparison treats as never improving, never a large number a chart would plot as a value."""
+    assert compute_composite_objective(-1.0, 0.9, 0.9) is None
+    assert compute_composite_objective(2.0, 0.0, 0.0) is None
+    assert compute_composite_objective(float("nan"), float("nan"), float("nan")) is None
+    assert compute_composite_objective(float("inf"), 0.5, 0.5) is None
 
 
 # --------------------------------------------------------------------------
@@ -993,8 +999,13 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
     last = run.metrics_history[-1]
     for k in ("val_loss", "val_precision", "val_recall", "val_f1", "val_map50", "val_map", "val_objective"):
         assert k in last, f"missing {k}"
-    assert (tmp_path / "out" / "model_best.pt").is_file()
-    assert run.best_metric == pytest.approx(last["val_objective"])
+    # An untrained toy detector finds nothing on four images: the epoch has no useful score, so
+    # no epoch is ever a best and the run completes on its final weights alone.
+    assert last["val_objective"] is None
+    assert math.isnan(last["selection"])
+    assert not (tmp_path / "out" / "model_best.pt").is_file()
+    assert (tmp_path / "out" / "model_final.pt").is_file()
+    assert run.best_metric == math.inf
 
 
 def test_train_center_match_trait_records_governing_criterion(tmp_path):
