@@ -693,12 +693,21 @@ class SemanticSegDataset(BaseImageDataset):
         self.masks_dir = Path(masks_dir)
         self.transforms = transforms
         self._num_classes = num_classes
-        # A sample needs a mask. Unlike detection there is no unconfirmed-empty case: an
-        # all-background mask is an explicit annotation, so existence is the whole rail here.
-        # Serving an image with no mask would train it as entirely background, a fabricated
-        # negative by another route.
-        mask_stems = {p.stem for p in self.masks_dir.iterdir()} if self.masks_dir.is_dir() else set()
+        # A sample needs a mask, and a mask is exactly ``<stem>.png`` in masks_dir: an
+        # all-background mask is an explicit annotation, so the file's existence is the rail.
+        entries = list(self.masks_dir.iterdir()) if self.masks_dir.is_dir() else []
+        mask_stems = {p.stem for p in entries if p.suffix.lower() == ".png"}
         candidates = stems or sorted(image_name_map(self.images_dir))
+        unreadable = sorted(
+            p.name for p in entries
+            if p.suffix.lower() != ".png" and p.stem in candidates and p.stem not in mask_stems
+        )
+        if unreadable:
+            raise ValueError(
+                f"{self.masks_dir} holds {unreadable} beside an image of the same stem, and a "
+                f"mask is read only as <stem>.png; nothing here reads another format, and "
+                f"training the image without its mask would train it as entirely background."
+            )
         self.stems = [s for s in candidates if s in mask_stems]
         self.sample_counts = {"annotated": len(self.stems),
                               "skipped_unannotated": len(candidates) - len(self.stems)}
@@ -720,11 +729,9 @@ class SemanticSegDataset(BaseImageDataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self.stems[idx]
         img = self._open_image(stem)
-        w, h = self._image_size(img)
-        mask_path = self.masks_dir / f"{stem}.png"
-        # load_image EXIF-orients so the mask shares the image's upright frame (no-op for a
-        # plain PNG mask; matters only if a mask ever carries EXIF orientation).
-        mask = np.array(load_image(mask_path, 1)) if mask_path.exists() else np.zeros((h, w), dtype=np.int64)
+        # The constructor admitted this stem on the strength of this exact file; a mask gone
+        # since raises from the read rather than training the image as background.
+        mask = np.array(load_image(self.masks_dir / f"{stem}.png", 1))
         # Key matches the SemanticSegHead loss contract.
         target = {"masks": torch.tensor(mask, dtype=torch.int64)}
         return self._finalize(img, target)
