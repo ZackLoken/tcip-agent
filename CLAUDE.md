@@ -110,6 +110,15 @@ for general techniques only, never for a per-trait pipeline; the endpoint is a t
 - A test that guards a fix is observed failing without the fix. Say when you have seen it fail and
   say when you have not. Every admits-valid-work test constructs its input through the platform's
   own producer.
+- Before changing how a shared fact is spelled, produced or read, enumerate every producer of it
+  and every reader of it, and state that list before the change rather than after. The rule that
+  covers deleting something shared covers changing one: a convention changed at the site that
+  named the defect and not at its siblings leaves the fact spelled two ways, and a producer and a
+  reader spelling one key differently is a rail that answers no leak where there is one.
+- A shared fact ships an agreement test: two producers' own records compared against each other,
+  not each against a fixture. Guard tests cannot stand in for it. A guard test proves the site it
+  guards, so a suite of them stays green over exactly this defect, which is how it survives to be
+  found by a reader instead of by the suite.
 - Gates before reporting a change done: `ruff check packages tests tools`, `mypy`, and the change's
   own test files. Run the full suite on both storage backends when you touch the store seam or a
   reader's contract. Never report a gate before its slowest part finishes; green means no detected
