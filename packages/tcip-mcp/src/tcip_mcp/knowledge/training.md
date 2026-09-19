@@ -168,55 +168,55 @@ run_hyperparameter_search(base_config=config, n_trials=20, search_alg="optuna", 
   a relaunch alike, and the Tuning relaunch route passes the record's own `trial_budget` through,
   so a relaunch whose recount no longer fits the recorded budget is refused rather than replayed.
 
-## Dataset Splits
+## Dataset Selections
 
-Use `draw_splits` to create train/val/calibration splits: `draw_splits` has no `test_ratio`
+Use `draw_splits` to draw a train/val/calibration selection: `draw_splits` has no `test_ratio`
 parameter at all, no launch path honours a held-out test list (a separate, within-image
 mechanism, `reserve_calibration_fraction` on the spatial_strip route, not this one). Writing a
-manifest (`output_path` given, or `materialize=True`) requires `subject`: the members are drawn
-through the same admission a training run uses, over the given subject (and `attribute`, if the
-run is attribute-scoped). `calibration_ratio` is a third side, held out from both training and
+selection (`output_path` given) requires `subject`: the samples are drawn through the same
+admission a training run uses, over the given subject (and `attribute`, if the run is
+attribute-scoped). `calibration_ratio` is a third side, held out from both training and
 checkpoint selection: it draws no loader, so `evaluate_model` and delivery calibration read it as
 their reference universe instead of the run's own `val`, keeping the checkpoint's own selection
 side out of the number that later validates it.
-- A stats-only call (neither `output_path` nor `materialize`) defaults to `train_ratio=0.8`,
-  `val_ratio=0.2`, `calibration_ratio=0.0`; leakage-free (sibling tiles of one source image stay
-  in the same split). A manifest write has no default for any of the three and refuses a zero
-  one, naming it: state all three ratios explicitly
+- A selection lists, per sample, the image source, the label document, a group key and a side.
+  Every capture date the dataset holds enters one selection, so a trait needing examples from two
+  dates trains in place: no derived folder, no copied imagery, and two dates holding a same-named
+  image are two samples rather than one
+- A stats-only call (no `output_path`) defaults to `train_ratio=0.8`, `val_ratio=0.2`,
+  `calibration_ratio=0.0`; leakage-free (sibling tiles of one source image stay in the same
+  split). Writing a selection has no default for any of the three and refuses a zero one, naming
+  it: state all three ratios explicitly
 - The draw refuses, before any write, when the tree holds fewer foreground groups of `subject`
   than the requested sides need at minimum, counted for the draw's own subject regardless of
   `stratify_foreground`
 - `stratify_foreground=True` (default) balances splits by each source's foreground annotation
   count, not per-class distribution; the minimum-foreground floor above sees real foreground
   either way
-- `materialize=True` also lays out a `{train,val,calibration}/{images,labels}/` tree; the labels
-  inside are the platform's own per-image JSON, not YOLO's `.txt` format; refused when the drawn
-  membership spans more than one capture date
 - Reproducible with random seed
 
-A run names the manifest it should train against with `data.split.manifest_dir` (the
-`manifest_dir` `draw_splits` returned): detection and instance_seg only, subject and attribute
-must match the manifest's, and it conflicts with `val_images_dir`, `coco_json`/
-`label_format='coco'`, and a drawn split's own parameters (`group_by`, `group_key_map`,
-`val_ratio`, `seed`, `stratify_foreground`, `test_ratio`, `reserve_calibration_fraction`). The
-run's own admission binds only the manifest's `train`/`val` members; its `calibration` members are
-placed on neither loader whether or not the run currently admits them. The run's `split.json` then
-records the bound membership plus a `manifest_binding` block (counts, including
-`calibration_bound`/`calibration_unadmitted`, and two content hashes, never a second copy of the
-member lists).
+A run names the selection it should train against with `data.split.selection_dir` (the
+`selection_dir` `draw_splits` returned): detection and instance_seg only. The selection states
+its own subject, attribute and class-id map, and the run reads them from it rather than restating
+them; `selection_dir` conflicts with `val_images_dir`, `coco_json`/`label_format='coco'`, and a
+drawn split's own parameters (`group_by`, `group_key_map`, `val_ratio`, `seed`,
+`stratify_foreground`, `test_ratio`, `reserve_calibration_fraction`). The loaders read the
+selection's `train` and `val` samples as recorded, admitting nothing afresh; its `calibration`
+samples build neither loader. The run's `split.json` then records the bound membership plus a
+`selection_binding` block (counts and the directories the members live under, never a second copy
+of the sample list).
 
-`data.split.redraw_within_manifest: true` beside `manifest_dir` and `seed` admits `seed` (the one
-conflict key it lifts) and redraws train and val fresh inside the manifest's own train-plus-val
-members for the run's date, at that seed, instead of binding the manifest's recorded partition;
-`calibration` stays untouched and is never redrawn. A starved side (too few foreground groups
-under the manifest's own grouping to give both train and val one) refuses by name rather than
-retrying or degrading. `run_hyperparameter_search` with `split_draws` above 1 on a manifest-bound `base_config`
-sets this flag on its own copy, so a sweep's seed grid redraws inside the manifest instead of
-every trial training on its one recorded partition; `freeze_split_manifest` still refuses a
-bound run, redrawn or not, naming the reproduction for a redrawn one (bind a later run to the
-same manifest with the same seed and the flag, with the labels this run's own `split.json`
-recorded unchanged, since the redraw reads per-stem annotation counts at run time) rather than a
-fresh freeze.
+`data.split.redraw_within_selection: true` beside `selection_dir` and `seed` admits `seed` (the
+one conflict key it lifts) and redraws train and val fresh inside the selection's own
+train-plus-val samples, at that seed, instead of binding the recorded partition; `calibration`
+stays untouched and is never redrawn. A starved side (too few foreground groups among those
+samples to give both train and val one) refuses by name rather than retrying or degrading.
+`run_hyperparameter_search` with `split_draws` above 1 on a selection-bound `base_config` sets
+this flag on its own copy, so a sweep's seed grid redraws inside the selection instead of every
+trial training on its one recorded partition; `freeze_selection` still refuses a bound run,
+redrawn or not, naming the reproduction for a redrawn one (bind a later run to the same selection
+with the same seed and the flag, with the labels this run's own `split.json` recorded unchanged,
+since the redraw reads per-stem annotation counts at run time) rather than a fresh freeze.
 
 Feeding review-corrected labels back into training? `materialize_review_dataset` (see the
 `annotation` skill) builds the curated dataset from review verdicts before you split/train.

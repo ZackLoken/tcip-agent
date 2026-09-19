@@ -609,7 +609,7 @@ export function TuningTab() {
                   ? `${s.n_trials} trial${s.n_trials === 1 ? "" : "s"} planned${
                       s.split_draws != null && s.split_draws > 1
                         ? `, ${s.split_draws} draws each${
-                            s.redraws_within_manifest ? " inside the bound manifest" : ""
+                            s.redraws_within_selection ? " inside the bound selection" : ""
                           }`
                         : ""
                     }`

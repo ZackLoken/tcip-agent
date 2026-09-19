@@ -169,7 +169,7 @@ def _selection_movement_sentence(gate_evidence: dict) -> str:
     list is empty or absent (a run with no ``label_digests`` block, or nothing moved).
 
     Never a ``_FAILURE_MESSAGES`` entry: a moved label is disclosed, not a floor. This surface
-    names no manifest and holds no labels directory of its own, so ``manifest_redrawn`` and
+    names no manifest and holds no labels directory of its own, so ``selection_redrawn`` and
     ``labels_moved_run_to_now`` are always ``null`` here and earn no sentence of their own.
     """
     moved = (gate_evidence.get("selection_disjointness") or {}).get("calibration_labels_moved")
@@ -455,7 +455,7 @@ def resolve_operating_point_from_review(
     staged_conf_floor: float | None = None,
     experiment_id_ambiguous: bool = False,
     subject: str | None = None,
-    calibration_date: str | None = None,
+    calibration_labels_dir: str | None = None,
 ) -> ResolvedBundle:
     """Resolve the count operating point from review verdicts (the review-confirmation reference).
 
@@ -497,7 +497,7 @@ def resolve_operating_point_from_review(
     ``resolve_locked_cal_holdout_split`` raises ``ValueError`` when the lock references a stem no
     longer among the reviewed images, or when its lock file is corrupt, this
     propagates to the caller rather than crashing later on a missing dict lookup. This function
-    takes no split manifest: the universe here is the breeder's own confirmations, which a split
+    takes no selection: the universe here is the breeder's own confirmations, which a split
     manifest has no say over.
 
     ``experiment_id_ambiguous`` is true when the caller's own buckets named more than one
@@ -510,11 +510,11 @@ def resolve_operating_point_from_review(
     ``subject`` (default ``None``) is forwarded to :func:`review_to_records`, see there: the
     object identity a zero-verdict image's own coverage claim is judged against.
 
-    ``calibration_date`` is the caller's own fact, never derived here (the reviewed bucket's date,
-    when the caller can name one): forwarded to ``resolve_operating_point``'s selection-disjointness
-    check, which is applicable only when the checkpoint named by ``experiment_id`` carries a
-    ``manifest_binding``, since this function takes no split manifest of its own, the universe
-    here is the breeder's own confirmations.
+    ``calibration_labels_dir`` is the caller's own fact, never derived here (the directory the
+    reviewed bucket's own labels live in, when the caller can name one): forwarded to
+    ``resolve_operating_point``'s selection-disjointness check, which is applicable only when the
+    checkpoint named by ``experiment_id`` carries a ``selection_binding``, since this function
+    reads no selection of its own, the universe here is the breeder's own confirmations.
     """
     from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
     from tcip_mcp.pipelines.operating_point import (
@@ -543,7 +543,7 @@ def resolve_operating_point_from_review(
         validated_reference=VALIDATED_REVIEW_CONFIRMED,
         experiment_id=experiment_id, staged_conf_floor=staged_conf_floor,
         adjudication_covered=lambda r: bool(r.get("adjudication_covered")),
-        calibration_date=calibration_date,
+        calibration_labels_dir=calibration_labels_dir,
     )
     attach_split_policy_provenance(bundle, locked)
     conf = bundle.params.get("conf")

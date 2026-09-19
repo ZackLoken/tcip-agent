@@ -160,23 +160,22 @@ class TestE2EPipeline:
         assert "f1" in dataset_eval
 
         # ── Step 10: Split dataset ───────────────────────────────────
-        import tcip_store as ts
-        from tcip_mcp.tools.data_tools import split_manifest_key
+        from tcip_mcp.pipelines.data.selection import read_selection
 
         split_dir = tmp_path / "splits"
-        split_result = draw_splits(root, output_path=str(split_dir), materialize=True,
+        split_result = draw_splits(root, output_path=str(split_dir),
                                    subject="bud", train_ratio=0.5, val_ratio=0.25,
                                    calibration_ratio=0.25)
         assert split_result["total_stems"] == 5
-        manifest = ts.read(split_manifest_key(split_dir))
-        assert manifest["splits"]["train"]
-        assert manifest["splits"]["val"]
+        drawn = read_selection(split_dir)
+        assert drawn.on("train")
+        assert drawn.on("val")
         assert sum(split_result["splits"].values()) == 5
 
-        # Verify split membership content
-        train_data = manifest["splits"]["train"]
-        assert isinstance(train_data, list)
-        assert len(train_data) > 0
+        # Every sample names its own image and label file; nothing was copied.
+        for sample in drawn.samples:
+            assert Path(sample.source).is_file()
+            assert Path(sample.ground_truth).is_file()
 
         # ── Step 11: Export project as ZIP ───────────────────────────
         from tcip_store.file_backend import database_file

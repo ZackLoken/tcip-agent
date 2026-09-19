@@ -87,8 +87,8 @@ register_store(
 def annotation_record_key(directory: str | Path, stem: str) -> Key:
     """One image's per-image JSON document, addressed by the directory that holds it.
 
-    The generic form, for a tree no layout resolver describes (a materialized split's
-    ``labels/``, an export bucket) and for a caller using this package on its own. A caller that
+    The generic form, for a tree no layout resolver describes (a curated dataset's ``labels/``,
+    an export bucket) and for a caller using this package on its own. A caller that
     holds a dataset root mints a layout-aware key from its own resolver instead and hands that to
     :func:`write_annotations`; both address the same file and take the same lock, since the lock
     is the file's, not the store name's.

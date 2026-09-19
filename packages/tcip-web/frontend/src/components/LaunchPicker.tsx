@@ -4,7 +4,7 @@
  * remains reachable from both. Training passes real rows (its configs) and Tuning passes none
  * (a sweep from a config that has never been swept is the agent's own path); the composer row
  * is always present and always last. A training-config row also carries its own nested "Data"
- * choice ("As recorded" or a listed partition), submitted with Start as the split manifest
+ * choice ("As recorded" or a listed partition), submitted with Start as the selection
  * directory the server itself offered, never a path this component resolves.
  */
 
@@ -13,9 +13,9 @@ import { useId, useState, type ReactNode } from "react";
 import { StructuredRefusalError } from "@/api/http";
 
 export interface DataChoice {
-  /** The split manifest directory this choice binds to; the string Start submits unchanged. */
-  manifestDir: string;
-  /** Draw seed, grouping and per-side member counts under the config's own date. */
+  /** The selection directory this choice binds to; the string Start submits unchanged. */
+  selectionDir: string;
+  /** Draw seed, grouping and per-side sample counts. */
   label: ReactNode;
   disabled?: boolean;
   /** Shown under a disabled choice: the compatibility reason, or an unreadable record's text. */
@@ -26,11 +26,11 @@ export interface DataChoice {
 }
 
 export interface DataPicker {
-  /** "As recorded"'s own case line, read from the snapshot: bound to a manifest, or drawn. */
+  /** "As recorded"'s own case line, read from the snapshot: bound to a selection, or drawn. */
   asRecordedLine: string;
   asRecordedDisabled?: boolean;
   asRecordedReason?: string;
-  /** One entry per offered or refused candidate manifest; empty when none was found. */
+  /** One entry per offered or refused candidate selection; empty when none was found. */
   choices: DataChoice[];
   /** Shown in place of the choices when none were found. */
   absenceMessage: string;
@@ -51,9 +51,9 @@ export interface LaunchPickerRow {
   /** Set only when the per-row Data-choices fetch itself failed: shown as text on the row
    * rather than swallowed into a Data section with no control. */
   dataError?: string;
-  /** Starts the run/sweep this row names, with the chosen manifest directory or null for "As
+  /** Starts the run/sweep this row names, with the chosen selection directory or null for "As
    * recorded". Rejects with the backend's refusal on failure. */
-  onStart: (splitManifestDir: string | null) => Promise<void>;
+  onStart: (selectionDir: string | null) => Promise<void>;
 }
 
 interface Refusal {
@@ -153,7 +153,7 @@ export function LaunchPicker({
                 const selectedChoice = row.data
                   ? selectedDataDir === null
                     ? { disabled: row.data.asRecordedDisabled, reason: row.data.asRecordedReason }
-                    : row.data.choices.find((c) => c.manifestDir === selectedDataDir)
+                    : row.data.choices.find((c) => c.selectionDir === selectedDataDir)
                   : undefined;
                 const startBlocked = Boolean(selectedChoice?.disabled);
                 const dataStillLoading = Boolean(row.dataLoading);
@@ -227,14 +227,14 @@ export function LaunchPicker({
                                     negatives under the labels&apos; date.
                                   </li>
                                   {row.data.choices.map((choice) => (
-                                    <li key={choice.manifestDir}>
+                                    <li key={choice.selectionDir}>
                                       <label className="flex items-start gap-1 text-[10px]">
                                         <input
                                           type="radio"
                                           name={`data-${row.key}`}
-                                          checked={selectedDataDir === choice.manifestDir}
+                                          checked={selectedDataDir === choice.selectionDir}
                                           disabled={choice.disabled}
-                                          onChange={() => setSelectedDataDir(choice.manifestDir)}
+                                          onChange={() => setSelectedDataDir(choice.selectionDir)}
                                         />
                                         <span>
                                           {choice.label}
@@ -247,7 +247,7 @@ export function LaunchPicker({
                                             )}
                                           {choice.disabled &&
                                             choice.reason &&
-                                            choice.manifestDir !== selectedDataDir && (
+                                            choice.selectionDir !== selectedDataDir && (
                                               <span className="block text-tcip-fp">
                                                 {choice.reason}
                                               </span>

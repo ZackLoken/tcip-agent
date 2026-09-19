@@ -168,8 +168,8 @@ def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
 
 def test_authored_frame_raises_on_a_corrupt_label_rather_than_reading_as_no_frame(tmp_path):
     """authored_frame's json branch reads through the one label reader
-    (splits.image_extent_from_labels), so a present, unreadable label raises rather than
-    silently disabling the tiled dataset's frame-mismatch check for that stem."""
+    (splits.label_document_extent), so a present, unreadable label raises rather than
+    silently disabling the tiled dataset's frame-mismatch check for that sample."""
     import pytest
     from tcip_annotation.json_io import UnreadableLabelDocument
 
@@ -180,7 +180,7 @@ def test_authored_frame_raises_on_a_corrupt_label_rather_than_reading_as_no_fram
     (labels_dir / "a.json").write_bytes(b"{not json")
 
     with pytest.raises(UnreadableLabelDocument):
-        authored_frame("a", labels_dir, "json")
+        authored_frame(labels_dir / "a.json", "json")
 
 
 def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):

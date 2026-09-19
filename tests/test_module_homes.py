@@ -79,8 +79,8 @@ def _assert_one_home(
     roots: "tuple[Path, ...] | None" = None,
 ) -> None:
     """``roots`` scopes the "defined nowhere else" scan; defaults to :func:`_package_roots`
-    (tcip_mcp + tcip_annotation) for the training-layer moves this file started with. A move
-    confined to tcip_web (the batch's own routes reshape) passes ``roots=(_web_src_root(),)``."""
+    (tcip_mcp + tcip_annotation), which covers a move within the training layer. A move confined
+    to tcip_web passes ``roots=(_web_src_root(),)``."""
     assert old_path.is_file(), f"{old_path} does not exist"
     assert new_path.is_file(), f"{new_path} does not exist"
 
@@ -108,12 +108,12 @@ def _assert_one_home(
 
 def test_split_construction_functions_have_one_home():
     """``auto_train_val``, ``spatial_single_source_split``, ``dataset_identity``,
-    ``persist_split_manifest``, ``checked_label_format``, ``build_full_admitted_dataset`` and
+    ``persist_run_partition``, ``checked_label_format``, ``build_full_admitted_dataset`` and
     ``spatial_split_raster_identity`` moved out of ``training_tools.py`` into
     ``pipelines/data/split_construction.py`` (beside ``splits.py``), public and unaliased."""
     _assert_one_home(
         {"auto_train_val", "spatial_single_source_split", "dataset_identity",
-         "persist_split_manifest", "checked_label_format", "build_full_admitted_dataset",
+         "persist_run_partition", "checked_label_format", "build_full_admitted_dataset",
          "spatial_split_raster_identity"},
         _module_path("tools/training_tools.py"),
         _module_path("pipelines/data/split_construction.py"),

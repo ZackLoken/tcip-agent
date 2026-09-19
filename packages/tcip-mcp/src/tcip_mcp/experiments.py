@@ -354,7 +354,7 @@ class ExperimentTerminal(RuntimeError):
     cancelled stays resumable and is never terminal here). Raised by :func:`refuse_if_terminal`;
     a caller that reports refusal as a return value (``log_metrics``, ``record_artifact``) catches
     it and maps it to that value, a caller for whom the lost write is itself a run failure (the
-    training worker's provenance patches, the split manifest) lets it propagate uncaught.
+    training worker's provenance patches, the run's partition) lets it propagate uncaught.
     """
 
 
@@ -409,7 +409,7 @@ def audit_refusal_reraising(experiment_id: str, op: str, detail: dict[str, Any],
 
     For every caller that lets an :class:`ExperimentTerminal` propagate rather than report it as
     a return value (``subprocess_worker.py``'s two provenance patches, ``training_tools.py``'s
-    split-manifest write). Those callers sit under an outer ``except Exception`` that would
+    partition write). Those callers sit under an outer ``except Exception`` that would
     swallow an :class:`~tcip_mcp.audit.AuditEntryNotWritten` raised on its own, together with
     the refusal it was recording, so a failed append is chained onto ``refusal`` (``raise refusal
     from audit_exc``) instead: the refusal always reaches the caller and the append failure
@@ -1087,8 +1087,8 @@ run), or ``null`` for ``resolve_scale``, whose gate has no training run to check
 
 ``selection_disjointness`` is the same two facts plus ``applicable``/``reason``: whether the
 checkpoint's own selection side (its ``split.json``'s ``val``) was also checked disjoint from the
-reference, applicable only when the calibration named a split manifest or the checkpoint carries
-a ``manifest_binding``, ``null`` for ``resolve_scale``.
+reference, applicable only when the calibration named a selection or the checkpoint carries
+a ``selection_binding``, ``null`` for ``resolve_scale``.
 """
 
 
@@ -1668,27 +1668,28 @@ def _index_refused_mutations(experiment_ids: list[str]) -> dict[str, list[dict[s
 
 
 def _split_summary(experiment_id: str) -> dict[str, Any]:
-    """The partition column for one experiment: :func:`read_split_manifest_checked` reduced to
+    """The partition column for one experiment: :func:`read_run_partition_checked` reduced to
     the four states a comparison names. ``{"case": "error", "error": ...}`` for a record that
     exists but will not decode; ``{"case": "none"}`` for a run that never wrote one;
-    ``{"case": "bound", "manifest_dir": ..., "seed": ..., "redrawn_within_manifest": bool}`` for
-    a run bound to a named split manifest (``split.json``'s own ``manifest_binding``), the flag
-    read from ``split.json``'s own top-level ``redrawn_within_manifest`` so a manifest bound at
-    seed 42 and a redraw inside that same manifest at seed 42 never compare as the same data;
+    ``{"case": "bound", "selection_dir": ..., "seed": ..., "redrawn_within_selection": bool}`` for
+    a run bound to a named selection (``split.json``'s own ``selection_binding``), the flag
+    read from ``split.json``'s own top-level ``redrawn_within_selection`` so a selection bound at
+    seed 42 and a redraw inside that same selection at seed 42 never compare as the same data;
     ``{"case": "drawn", "seed": ...}`` otherwise.
     """
-    manifest, decode_error = read_split_manifest_checked(experiment_id)
+    partition, decode_error = read_run_partition_checked(experiment_id)
     if decode_error is not None:
         return {"case": "error", "error": decode_error}
-    if not manifest:
+    if not partition:
         return {"case": "none"}
-    binding = manifest.get("manifest_binding")
-    if isinstance(binding, dict) and binding.get("manifest_dir"):
+    binding = partition.get("selection_binding")
+    if isinstance(binding, dict) and binding.get("selection_dir"):
         return {
-            "case": "bound", "manifest_dir": binding["manifest_dir"], "seed": manifest.get("seed"),
-            "redrawn_within_manifest": bool(manifest.get("redrawn_within_manifest")),
+            "case": "bound", "selection_dir": binding["selection_dir"],
+            "seed": partition.get("seed"),
+            "redrawn_within_selection": bool(partition.get("redrawn_within_selection")),
         }
-    return {"case": "drawn", "seed": manifest.get("seed")}
+    return {"case": "drawn", "seed": partition.get("seed")}
 
 
 def _index_registry_entries(
@@ -1885,10 +1886,10 @@ def get_experiment_lineage(experiment_id: str) -> dict[str, Any]:
     return {"experiment_id": experiment_id, "lineage": lineage}
 
 
-def read_split_manifest_checked(
+def read_run_partition_checked(
     experiment_id: str, *, root: Path | str | None = None,
 ) -> tuple[dict[str, Any], str | None]:
-    """The run's persisted split manifest, and the decode failure behind an unreadable one.
+    """The run's persisted partition, and the decode failure behind an unreadable one.
 
     Returns ``(manifest, decode_error)``. ``manifest`` is ``{}`` with ``decode_error`` ``None``
     for a run that never wrote one: nothing to say. A record that exists but will not decode also
@@ -1907,14 +1908,14 @@ def read_split_manifest_checked(
     return (manifest if isinstance(manifest, dict) else {}), None
 
 
-def read_split_manifest(experiment_id: str) -> dict[str, Any]:
-    """The run's persisted split manifest, or ``{}`` when it was never written or could not be
+def read_run_partition(experiment_id: str) -> dict[str, Any]:
+    """The run's persisted partition, or ``{}`` when it was never written or could not be
     decoded.
 
     Folds a decode failure onto the same ``{}`` an absent record answers: every consumer here
     already treats a corrupt manifest the way it treats a missing one, and none needs the two
-    told apart. :func:`read_split_manifest_checked` is the one reader that keeps them apart, for
+    told apart. :func:`read_run_partition_checked` is the one reader that keeps them apart, for
     a caller that must not guess membership from a manifest that no longer exists.
     """
-    manifest, _ = read_split_manifest_checked(experiment_id)
+    manifest, _ = read_run_partition_checked(experiment_id)
     return manifest

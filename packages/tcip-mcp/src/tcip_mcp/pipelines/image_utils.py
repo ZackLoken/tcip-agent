@@ -188,6 +188,42 @@ def resolve_image_source(images_dir: str | Path, stem: str) -> "Path | BandGroup
     return src
 
 
+def resolve_source_path(source: str | Path) -> "Path | BandGroupRef":
+    """The logical image one recorded source path names, for a reader holding the path itself
+    rather than a directory and a stem.
+
+    A ``.bandgroup`` path resolves to the grouped capture it stands for, checked for its sibling
+    bands the way :func:`resolve_image_source` checks one it found by scanning, so a stale
+    manifest raises :class:`BandGroupIncomplete` here rather than as a bare decode error inside a
+    stacking loop. Any other path is the image itself, refused by name when it is not on disk: a
+    selection naming a source that has moved is not the same fact as a directory that no longer
+    lists it.
+    """
+    path = Path(source)
+    if path.suffix.lower() != MANIFEST_EXT:
+        if not path.exists():
+            raise FileNotFoundError(f"No image at the recorded source path: {path}")
+        return path
+    if not path.is_file():
+        raise FileNotFoundError(f"No band group manifest at the recorded source path: {path}")
+    ref = read_band_group_manifest(path)
+    missing = [name for name, p in ref.bands.items() if not p.is_file()]
+    if missing:
+        raise BandGroupIncomplete(
+            f"band group {ref.stem!r} ({path}) references missing band(s) {sorted(missing)}: "
+            "delete the manifest to let a later detection pass re-group the surviving siblings, "
+            "or restore the missing file(s)."
+        )
+    return ref
+
+
+def source_path_of(source: "Path | BandGroupRef") -> str:
+    """The path a selection records this logical image under: a grouped capture's own
+    ``.bandgroup`` manifest, a plain image's own file. The inverse
+    :func:`resolve_source_path` reads back."""
+    return str(source.manifest_path if isinstance(source, BandGroupRef) else source)
+
+
 def logical_image_name(source: "Path | BandGroupRef") -> str:
     """The name a by-name reader (an image-status bucket, a COCO ``file_name``) resolves this
     logical image under: a :class:`BandGroupRef`'s own ``.bandgroup`` manifest name, since that
@@ -215,8 +251,8 @@ def flat_image_key(images_dir: str | Path, filename: str) -> Key:
     """One placed image's bytes, addressed by the flat directory it was materialized into.
 
     A directory-rooted, one-part blob key sibling to ``annotation_record_key`` and
-    ``band_group_manifest_key``'s own shape, for a curated dataset's or a materialized split's
-    ``images/`` tree, which holds every placed band and plain image directly with no further
+    ``band_group_manifest_key``'s own shape, for a curated dataset's ``images/`` tree, which
+    holds every placed band and plain image directly with no further
     layout claim. This is a different tree from ``image_key``'s dated ingest layout, not a
     second address for the same one: an ingested capture and a placed copy of it are two
     distinct stores that may legally coexist over one file, since the file backend locks the
@@ -237,8 +273,8 @@ def place_logical_image(
 
     A :class:`BandGroupRef` places every sibling band it names plus its own ``.bandgroup``
     manifest: the manifest alone resolves to nothing once its siblings are absent, so a caller
-    materializing a band-grouped capture (a curated review tree, a train/val split) must place
-    the whole group, never the manifest by itself. A plain path places just that one file.
+    materializing a band-grouped capture (a curated review tree) must place the whole group,
+    never the manifest by itself. A plain path places just that one file.
 
     ``dest_dir`` is absolutized once, here, at entry: the bands and plain images route through
     the caller's own ``dest_key`` (already absolute, since ``flat_image_key`` absolutizes its own

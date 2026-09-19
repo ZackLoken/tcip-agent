@@ -791,7 +791,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
         "model_path", "task", "model_sha256", "experiment_id", "iou_type",
         "iou_threshold", "conf_threshold", "max_dets", "tiled", "eval_regime",
     }
-    test_only_fields = {"split_manifest_dir", "evaluated_stem_count"}
+    test_only_fields = {"selection_dir", "evaluated_stem_count"}
     full_frame_only_fields = {
         "tile_size", "tile_size_source", "overlap", "overlap_source", "scored_images",
         "sample_counts", "n_excluded_incomplete_attribute", "contradicted_negatives",
@@ -816,7 +816,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     checkpoint = load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
     test_out = tmp_path / "test_eval"
     run_test_evaluation(checkpoint, None, "cpu", "detection", str(test_out),
-                        split_manifest_dir=str(tmp_path / "manifest"), evaluated_stem_count=3)
+                        selection_dir=str(tmp_path / "manifest"), evaluated_stem_count=3)
     test_result = ts.read(evaluation_results_key(test_out))
 
     images_dir = tmp_path / "ff_images"

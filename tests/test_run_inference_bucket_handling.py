@@ -118,9 +118,9 @@ def test_resolve_writable_bucket_for_pins_both_canonical_shapes_suggestion_strin
     assert "verdict_count" not in dated_refusal
 
 
-def test_run_inference_forwards_split_manifest_dir_to_the_verified_pass(tmp_path, monkeypatch):
+def test_run_inference_forwards_selection_dir_to_the_verified_pass(tmp_path, monkeypatch):
     """A manifest-restricted calibration's evidence can only earn a validation record through
-    this door if the door actually forwards split_manifest_dir to the verified pass."""
+    this door if the door actually forwards selection_dir to the verified pass."""
     import tcip_mcp.tools.inference_tools as itools
 
     captured = {}
@@ -133,12 +133,12 @@ def test_run_inference_forwards_split_manifest_dir_to_the_verified_pass(tmp_path
 
     itools.run_inference(
         _ckpt(tmp_path), images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
-        calibration_labels_dir=str(tmp_path), split_manifest_dir=str(tmp_path / "m"))
+        calibration_labels_dir=str(tmp_path), selection_dir=str(tmp_path / "m"))
 
-    assert captured.get("split_manifest_dir") == str(tmp_path / "m")
+    assert captured.get("selection_dir") == str(tmp_path / "m")
 
 
-def test_run_inference_refuses_split_manifest_dir_with_raster_path(tmp_path):
+def test_run_inference_refuses_selection_dir_with_raster_path(tmp_path):
     """The raster regime draws no split-manifest universe (block calibration validates against
     the mosaic's own reserved regions instead), so a caller-given manifest is refused by name
     rather than silently dropped before it ever reaches the raster pass."""
@@ -146,14 +146,14 @@ def test_run_inference_refuses_split_manifest_dir_with_raster_path(tmp_path):
 
     result = run_inference(
         _ckpt(tmp_path), output_dir=str(tmp_path / "out"),
-        raster_path=str(tmp_path / "mosaic.tif"), split_manifest_dir=str(tmp_path / "m"))
+        raster_path=str(tmp_path / "mosaic.tif"), selection_dir=str(tmp_path / "m"))
 
-    assert "error" in result and "split_manifest_dir" in result["error"]
+    assert "error" in result and "selection_dir" in result["error"]
 
 
-def test_deliver_per_image_counts_forwards_split_manifest_dir_to_run_inference(tmp_path, monkeypatch):
+def test_deliver_per_image_counts_forwards_selection_dir_to_run_inference(tmp_path, monkeypatch):
     """A manifest-restricted calibration's evidence can only earn a validation record through
-    this door if the door actually forwards split_manifest_dir to run_inference."""
+    this door if the door actually forwards selection_dir to run_inference."""
     import tcip_mcp.tools.inference_tools as itools
 
     captured = {}
@@ -173,9 +173,9 @@ def test_deliver_per_image_counts_forwards_split_manifest_dir_to_run_inference(t
 
     itools.deliver_per_image_counts(
         _ckpt(tmp_path), str(tmp_path), str(tmp_path / "out.csv"), trait="some_trait",
-        split_manifest_dir=str(tmp_path / "m"))
+        selection_dir=str(tmp_path / "m"))
 
-    assert captured.get("split_manifest_dir") == str(tmp_path / "m")
+    assert captured.get("selection_dir") == str(tmp_path / "m")
 
 
 def _fake_predictor(monkeypatch):

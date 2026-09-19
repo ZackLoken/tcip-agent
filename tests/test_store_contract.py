@@ -46,12 +46,11 @@ from tcip_mcp import (
 )
 from tcip_mcp.pipelines import image_utils, model_build, resolution
 from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
-from tcip_mcp.pipelines.data import band_groups, splits
+from tcip_mcp.pipelines.data import band_groups, selection, splits
 from tcip_mcp.pipelines.feedback import materialize
 from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.pipelines.training import eval_runners, generic_trainer, hpo
 from tcip_mcp.tools import (
-    data_tools,
     inference_tools,
     meta_tools,
     project_tools,
@@ -1977,19 +1976,27 @@ def _construct_via_scratch_backend(build: Callable[[Path], dict]) -> dict:
         ts.unbind()
 
 
-def _real_split_manifest() -> dict:
-    """The shape ``data_tools.compose_split_manifest`` writes today, called for real into a
-    throwaway directory so this golden cannot drift from the writer silently."""
-    return _construct_via_scratch_backend(lambda scratch: data_tools.compose_split_manifest(
-        scratch, seed=42, group_by="stem_prefix", dataset_fingerprint="7ac1",
-        subject="bud", attribute=None, id_map={"bud": 0},
-        members={"2026-03-04": {"labels_root": "ü/annotations", "images_root": "ü/images",
-                                 "dataset_hash": "9f2c",
-                                 "label_digests": {"a_1": "7f3a1b9c2d4e5f60"}}},
-        splits={"train": ["a_1"], "val": [], "calibration": []},
-        admission_counts={"a_1": 1}, calibration_foreground_groups_by_date={},
-        realized_ratios={"train": 1.0, "val": 0.0, "calibration": 0.0},
-    ))
+def _real_selection() -> dict:
+    """The shape ``selection.write_selection`` writes today, called for real into a throwaway
+    directory so this golden cannot drift from the writer silently."""
+    from tcip_mcp.pipelines.data.selection import (
+        Sample, Selection, selection_document, write_selection,
+    )
+
+    return _construct_via_scratch_backend(lambda scratch: selection_document(write_selection(
+        scratch,
+        Selection(
+            samples=(
+                Sample(source="ü/images/2026-03-04/a_1.jpg",
+                       ground_truth="ü/annotations/2026-03-04/a_1.json",
+                       group="a", side="train", confirmation_bucket="bud/2026-03-04",
+                       ground_truth_digest="7f3a1b9c2d4e5f60"),
+            ),
+            subject="bud", attribute=None, id_map={"bud": 0}, seed=42,
+            group_by="stem", dataset_fingerprint="7ac1", admission_counts={"annotated": 1},
+            realized_ratios={"train": 1.0, "val": 0.0, "calibration": 0.0},
+        ),
+    )))
 
 
 def _real_cal_holdout_lock() -> dict:
@@ -2114,11 +2121,11 @@ REGISTERED = {
         f".tcip/experiments/{EXPERIMENT}/env.json", pin=_pin_platform_root,
         root_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_split": Registered(
-        # every key split_construction.persist_split_manifest always writes, not only the three
+        # every key split_construction.persist_run_partition always writes, not only the three
         # a drawn run happens to vary
         {"train": ["img_001"], "val": ["img_002"], "seed": 42, "dataset_hash": "9f2c1b0a4d6e8f31",
          "dataset_id": "a1", "dataset_fingerprint": "7ac1", "group_by": "stem_prefix",
-         "date": "2026-03-04"},
+         "labels_dirs": ["ü/annotations/2026-03-04"]},
         lambda root: experiments.split_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/split.json", pin=_pin_platform_root,
         root_of=lambda root: Path(experiments.experiments_scope())),
@@ -2285,10 +2292,10 @@ REGISTERED = {
         {"requested_at": "20260304T120000Z", "requested_by": "user:ü",
          "old_name": "bud_orchard_valley", "new_name": "bud_orchard_ridge"},
         workspace.pending_rename_key, ".tcip/pending_rename.json"),
-    "split_manifest": Registered(
-        _real_split_manifest(),
-        lambda root: data_tools.split_manifest_key(_split_dir(root)),
-        "splits/split_manifest.json", root_of=_split_dir),
+    "selection": Registered(
+        _real_selection(),
+        lambda root: selection.selection_key(_split_dir(root)),
+        "splits/selection.json", root_of=_split_dir),
     "curated_manifest": Registered(
         {"created": "2026-03-04T00:00:00+00:00", "subject": "bud", "subjects": ["bud"],
          "images": [{"image": "ü_2.jpg", "status": "hard_negative", "n_boxes": 0,

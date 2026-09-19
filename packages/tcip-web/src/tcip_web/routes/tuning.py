@@ -78,10 +78,10 @@ def _manifest_fields(manifest: dict) -> dict:
     happens to render as JSON ``null`` through this route's own ``-> dict`` response handling
     rather than raising, but nothing here should depend on that route-specific accident, and the
     unread raw value left ``relaunchable`` true for a manifest the coercion, computed straight
-    off it, could name invalid. ``redraws_within_manifest``
-    reads the recorded ``base_config``'s own ``data.split.redraw_within_manifest``, ``False``
-    for a manifest carrying none (predating the flag, or a config that never set it): the
-    header's draws line names the bound manifest as what each draw redraws inside only then.
+    off it, could name invalid. ``redraws_within_selection``
+    reads the recorded ``base_config``'s own ``data.split.redraw_within_selection``, ``False``
+    for a manifest carrying none (a config that never set it): the header's draws line names the
+    bound selection as what each draw redraws inside only then.
 
     An empty ``manifest`` (no manifest exists yet, or one predating a caller's own launch) is
     never relaunchable, but carries no reason either: the pre-manifest window and every refused
@@ -93,7 +93,7 @@ def _manifest_fields(manifest: dict) -> dict:
         return {
             "n_trials": None, "search_alg": None, "scheduler": None, "param_space_keys": [],
             "relaunchable": False, "reason": None, "cancel_requested": False,
-            "relaunched_from": None, "split_draws": None, "redraws_within_manifest": False,
+            "relaunched_from": None, "split_draws": None, "redraws_within_selection": False,
         }
     from tcip_mcp.tools.training_tools import coerce_split_draws
 
@@ -115,7 +115,7 @@ def _manifest_fields(manifest: dict) -> dict:
         "cancel_requested": bool(manifest.get("cancel_requested")),
         "relaunched_from": manifest.get("relaunched_from"),
         "split_draws": coerce_split_draws(manifest["split_draws"]) if "split_draws" in manifest else None,
-        "redraws_within_manifest": bool(base_split.get("redraw_within_manifest")),
+        "redraws_within_selection": bool(base_split.get("redraw_within_selection")),
     }
 
 

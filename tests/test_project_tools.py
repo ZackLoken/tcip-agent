@@ -509,13 +509,13 @@ def test_store_bootstrap_project_roots_admits_a_bare_fingerprint_registry_entry(
     assert (str(dataset.resolve()), ROOT) in roots
 
 
-def test_project_roots_names_a_run_output_dir_a_split_manifest_and_a_prediction_bucket(
+def test_project_roots_names_a_run_output_dir_a_selection_and_a_prediction_bucket(
     tmp_path: Path, monkeypatch,
 ):
     """project_roots reaches every layout a project's own records name it under, not only the
-    registered dataset roots: an experiment's own recorded run output directory, the split
-    manifest a run bound to (its split.json's manifest_binding.manifest_dir), and a prediction
-    bucket under a registered dataset's own predictions/ tree."""
+    registered dataset roots: an experiment's own recorded run output directory, the selection
+    a run bound to (its split.json's selection_binding.selection_dir), and a prediction bucket
+    under a registered dataset's own predictions/ tree."""
     from types import SimpleNamespace
 
     from tcip_store.layout_claims import PREDICTION_BUCKET, RUN, SPLITS
@@ -523,7 +523,7 @@ def test_project_roots_names_a_run_output_dir_a_split_manifest_and_a_prediction_
     from tcip_mcp.store_catalogue import project_roots
     from tcip_mcp import experiments
     from tcip_mcp.dataset_layout import prediction_dir
-    from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
 
     project = tmp_path / "project"
     dataset = tmp_path / "dataset"
@@ -542,9 +542,9 @@ def test_project_roots_names_a_run_output_dir_a_split_manifest_and_a_prediction_
 
     split_dir = tmp_path / "splits" / "frozen-exp-1"
     split_dir.mkdir(parents=True)
-    persist_split_manifest(
+    persist_run_partition(
         "exp-1", SimpleNamespace(stems=["a"]), SimpleNamespace(stems=["b"]),
-        {"labels_dir": "", "split": {"manifest_binding": {"manifest_dir": str(split_dir)}}},
+        {"labels_dir": "", "split": {"selection_binding": {"selection_dir": str(split_dir)}}},
     )
 
     bucket = prediction_dir(dataset, "modelA", "2-11-26")

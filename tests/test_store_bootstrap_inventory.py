@@ -16,6 +16,7 @@ of near misses the row must reject.
 from __future__ import annotations
 
 import ast
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -72,7 +73,14 @@ def test_the_bootstrap_imports_exactly_the_stores_the_contract_suite_names():
 
 def test_every_record_and_log_store_has_exactly_one_claim_row_and_no_row_is_orphaned():
     """A store with no row is invisible to the rail, so its files read as absent under a
-    database; a row for a store nothing declares claims files no store would ever adopt."""
+    database; a row for a store nothing declares claims files no store would ever adopt.
+
+    ``bootstrapped_stores`` answers the process-global registry, and a suite that imports an
+    owning module anywhere registers its store for every test after it, so this states the
+    property of a session rather than of the catalogue's own imports.
+    :func:`test_the_catalogue_registers_every_store_the_claim_table_speaks_for` is the one that
+    answers for a fresh process, which is the state ``export-store`` and the freeze manifest run in.
+    """
     assert set(PLATFORM_CLAIMS) == _stores_owed_a_claim()
 
 
@@ -210,6 +218,55 @@ assert "job_registry" in stores, stores
 assert "annotation_stats" in stores, stores
 print(tcip_mcp.__file__)
 """
+
+
+_CATALOGUE_AGAINST_CLAIMS = """\
+import json
+
+import tcip_mcp
+from tcip_store import get_descriptor
+from tcip_store.layout_claims import platform_claim_stores
+from tcip_mcp.store_catalogue import bootstrapped_stores
+
+registered = bootstrapped_stores()
+record_and_log = {n for n in registered if get_descriptor(n).kind in ("record", "log")}
+claimed = platform_claim_stores()
+print(json.dumps({
+    "tcip_mcp": tcip_mcp.__file__,
+    "claimed_but_unregistered": sorted(claimed - record_and_log),
+    "registered_but_unclaimed": sorted(record_and_log - claimed),
+}))
+"""
+
+
+def test_the_catalogue_registers_every_store_the_claim_table_speaks_for():
+    """In a process that imports nothing but the catalogue, the claim table and the catalogue
+    name one set of stores.
+
+    The direction this exists for is claim row to catalogue. The claim table is what the conform
+    rail answers from without importing any owning module, so a row whose store the catalogue
+    never registers means the rail speaks for files that ``export-store``, ``adopt-store`` and
+    ``generate_frozen_manifest`` cannot see: a record kind declared frozen, sitting outside the
+    shipped freeze commitment, with the manifest check agreeing with the gap. The other direction
+    already refuses at the point of use, where :func:`~tcip_store.layout_claims.claim_of` raises
+    naming the declaration the store owes, so it is asserted here only because it is free.
+
+    A fresh child, not this process: ``bootstrapped_stores`` reads the process-global registry,
+    and any import of an owning module anywhere in the suite hides a missing catalogue import
+    from every in-session check. The child prints the ``tcip_mcp`` it imported so a run whose
+    environment resolves an installed copy elsewhere fails here rather than proving the fact
+    about another tree.
+    """
+    result = subprocess.run(
+        [sys.executable, "-c", _CATALOGUE_AGAINST_CLAIMS],
+        capture_output=True, text=True, timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    answered = json.loads(result.stdout)
+    imported = Path(answered["tcip_mcp"]).resolve()
+    assert Path(__file__).resolve().parents[1] / "packages" in imported.parents, imported
+    assert answered["claimed_but_unregistered"] == []
+    assert answered["registered_but_unclaimed"] == []
 
 
 def test_the_catalogue_reaches_every_web_owned_store_without_importing_tcip_web():

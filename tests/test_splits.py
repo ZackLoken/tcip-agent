@@ -117,7 +117,7 @@ def test_refuse_insufficient_foreground_groups_names_the_sides_and_the_shortfall
 
 
 def test_refuse_insufficient_foreground_groups_remedy_names_no_ratio_escape():
-    """The remedy names annotating or confirming more foreground; a manifest write requires
+    """The remedy names annotating or confirming more foreground; writing a selection requires
     every side's ratio non-zero, so no side can be dropped by zeroing its ratio."""
     from tcip_mcp.pipelines.data.splits import refuse_insufficient_foreground_groups
 
@@ -128,22 +128,29 @@ def test_refuse_insufficient_foreground_groups_remedy_names_no_ratio_escape():
     assert "annotate or confirm more foreground groups" in message
 
 
-def test_calibration_universe_from_manifest_floor_remedy_names_ratio_and_date():
-    """The composed refusal ends with a redraw remedy naming a larger calibration ratio or more
-    foreground groups on the date, never the whole directory: a manifest write refuses a zero
-    calibration_ratio by name, so that fallback names an action no caller can take."""
-    from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest
+def test_selection_calibration_universe_floor_remedy_names_the_ratio_and_the_directory(tmp_path):
+    """The composed refusal ends with a remedy naming a larger calibration ratio or more
+    foreground groups under the labels directory, never the whole directory scan: writing a
+    selection refuses a zero calibration_ratio by name, so that fallback names an action no
+    caller can take."""
+    from tcip_mcp.pipelines.data.selection import Sample, Selection
+    from tcip_mcp.pipelines.data.splits import selection_calibration_universe
 
-    manifest = {
-        "splits": {"train": ["d1/a"], "val": ["d1/b"], "calibration": ["d1/c"]},
-        "group_by": "stem",
-    }
+    labels_dir = tmp_path / "annotations"
+    labels_dir.mkdir()
+    selection = Selection(samples=tuple(
+        Sample(source=str(tmp_path / "images" / f"{stem}.jpg"),
+               ground_truth=str(labels_dir / f"{stem}.json"), group=stem, side=side,
+               confirmation_bucket="leaf/2026-03-01")
+        for stem, side in (("a", "train"), ("b", "val"), ("c", "calibration"))
+    ))
+
     with pytest.raises(ValueError) as exc_info:
-        calibration_universe_from_manifest(manifest, "d1", {"c"}, foreground_stems=set())
+        selection_calibration_universe(selection, labels_dir, {"c"}, foreground_stems=set())
     message = str(exc_info.value)
     assert "whole directory" not in message
     assert "calibration_ratio" in message
-    assert "'d1'" in message
+    assert str(labels_dir) in message
 
 
 def test_group_split_no_foreground_fallback():
@@ -432,7 +439,7 @@ def test_image_extent_from_labels(tmp_path):
     assert image_extent_from_labels(labels_dir, "missing") is None
 
 
-# -- manifest_scope_issues / normalize_scope -------------------------------------
+# -- scope normalization ---------------------------------------------------------
 
 
 def _leaf_dataset(root, *, date: str | None):
@@ -458,85 +465,20 @@ def _leaf_dataset(root, *, date: str | None):
     return images_dir, labels_dir
 
 
-def _draw_leaf_manifest(root, out, *, date: str | None):
-    from tcip_mcp.tools.data_tools import draw_splits, split_manifest_key
+def test_count_label_lines_reads_an_empty_attribute_as_unset(tmp_path):
+    """A caller passing a checkpoint's stamped ``attribute=""`` means "no attribute", so every
+    record of the subject counts; reading it as a key no annotation carries would score every
+    stem zero and starve the minimum-foreground pass."""
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.pipelines.data.splits import count_label_lines
 
-    result = draw_splits(str(root), output_path=str(out), subject="leaf", seed=1,
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
-    assert "error" not in result, result
-    return ts.read(split_manifest_key(out))
+    labels_dir = tmp_path / "annotations"
+    labels_dir.mkdir()
+    json_io.write_annotations(
+        labels_dir / "a.json", [Annotation(subject="leaf", geometry=BBox(1, 1, 5, 5))], 32, 32)
 
+    assert count_label_lines(labels_dir, "a", subject="leaf", attribute="") == 1
+    assert count_label_lines(labels_dir, "a", subject="", attribute="") == 1
+    assert count_label_lines(labels_dir, "a", subject="leaf", attribute="condition") == 0
 
-def test_normalize_scope_maps_empty_string_to_none():
-    from tcip_mcp.pipelines.data.splits import normalize_scope
-
-    assert normalize_scope("", "") == (None, None)
-    assert normalize_scope("leaf", "") == ("leaf", None)
-    assert normalize_scope(None, "condition") == (None, "condition")
-
-
-def test_manifest_scope_issues_reports_every_objection_together(tmp_path):
-    from tcip_mcp.pipelines.data.splits import manifest_scope_issues
-
-    root = tmp_path / "ds"
-    date = "2-11-26"
-    _leaf_dataset(root, date=date)
-    manifest = _draw_leaf_manifest(root, tmp_path / "m", date=date)
-
-    issues, narrowing = manifest_scope_issues(
-        manifest, subject="other", attribute=None, date=date, images_dir=None,
-        label="data.images_dir",
-    )
-
-    assert any("subject" in i for i in issues)
-    assert any("images_dir" in i for i in issues)
-    assert len(issues) >= 2
-    assert narrowing is not None
-
-
-def test_manifest_scope_issues_names_the_manifest_directory_when_given(tmp_path):
-    from tcip_mcp.pipelines.data.splits import manifest_scope_issues
-
-    root = tmp_path / "ds"
-    date = "2-11-26"
-    _leaf_dataset(root, date=date)
-    out = tmp_path / "m"
-    manifest = _draw_leaf_manifest(root, out, date=date)
-
-    unnamed, _ = manifest_scope_issues(
-        manifest, subject="leaf", attribute=None, date="2099-01-01", images_dir=None,
-        label="data.images_dir",
-    )
-    assert any(i.startswith("the split manifest holds no members") for i in unnamed)
-    assert any("Regenerate the split over this date" in i for i in unnamed)
-
-    named, _ = manifest_scope_issues(
-        manifest, subject="leaf", attribute=None, date="2099-01-01", images_dir=None,
-        label="data.images_dir", manifest_dir=str(out),
-    )
-    assert any(i.startswith(f"split manifest at {str(out)!r} holds no members") for i in named)
-
-
-def test_manifest_scope_issues_admits_a_draw_splits_manifest_dated_and_flat(tmp_path):
-    from tcip_mcp.pipelines.data.splits import manifest_scope_issues
-
-    dated_root = tmp_path / "dated"
-    date = "2-11-26"
-    dated_images, _ = _leaf_dataset(dated_root, date=date)
-    dated_manifest = _draw_leaf_manifest(dated_root, tmp_path / "m-dated", date=date)
-    issues, narrowing = manifest_scope_issues(
-        dated_manifest, subject="leaf", attribute=None, date=date,
-        images_dir=str(dated_images), label="data.images_dir",
-    )
-    assert issues == []
-    assert narrowing is not None
-
-    flat_root = tmp_path / "flat"
-    flat_images, _ = _leaf_dataset(flat_root, date=None)
-    flat_manifest = _draw_leaf_manifest(flat_root, tmp_path / "m-flat", date=None)
-    issues, narrowing = manifest_scope_issues(
-        flat_manifest, subject="leaf", attribute=None, date=None,
-        images_dir=str(flat_images), label="data.images_dir",
-    )
-    assert issues == []
-    assert narrowing is not None

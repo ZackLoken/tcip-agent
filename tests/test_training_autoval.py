@@ -64,10 +64,13 @@ def test_auto_train_val_detection_splits(tmp_path: Path):
         "auto_val": True,
         "split": {"val_ratio": 0.4, "seed": 1},
     }
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     assert set(train_ds.stems).isdisjoint(set(val_ds.stems))
-    assert sorted(train_ds.stems + val_ds.stems) == sorted(all_stems)
+    # The loaders index by each sample's own source, so a drawn run and a bound one key alike;
+    # the run's recorded partition is what names members as bare stems.
+    assert sorted(Path(s).stem for s in train_ds.stems + val_ds.stems) == sorted(all_stems)
+    assert sorted(partition["train"] + partition["val"]) == sorted(all_stems)
     assert val_ds.transforms is None
 
 
@@ -375,8 +378,39 @@ def test_auto_train_val_degenerate_group_retries_at_stem_level(tmp_path: Path):
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     assert set(train_ds.stems).isdisjoint(set(val_ds.stems))
-    assert sorted(train_ds.stems + val_ds.stems) == sorted(stems)
+    assert sorted(Path(s).stem for s in train_ds.stems + val_ds.stems) == sorted(stems)
     assert data_cfg["split"]["resolved_group_by"] == "stem"
+
+
+def test_auto_train_val_trains_on_the_coco_document_the_config_names(tmp_path: Path):
+    """A config naming its own assembled COCO states where this run's targets come from. The
+    drawn split reads the per-image sidecars beside a registry, so it is not a split this run may
+    draw: the membership is the COCO's own images, never every sidecar in the labels directory."""
+    import json
+
+    images_dir, labels_dir, all_stems = _detection_dataset(tmp_path / "ds")
+    named = sorted(all_stems)[:4]
+    coco = {
+        "images": [{"id": i, "file_name": f"{stem}.png", "width": IMG, "height": IMG}
+                   for i, stem in enumerate(named)],
+        "annotations": [{"id": i, "image_id": i, "category_id": 0, "iscrowd": 0,
+                         "bbox": [19.2, 19.2, 25.6, 25.6], "area": 655.36}
+                        for i, _stem in enumerate(named)],
+        "categories": [{"id": 0, "name": "bud"}],
+    }
+    coco_path = tmp_path / "assembled.json"
+    coco_path.write_text(json.dumps(coco), encoding="utf-8")
+
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                "subject": "bud", "auto_val": True, "coco_json": str(coco_path),
+                "label_format": "coco",
+                "split": {"val_ratio": 0.5, "seed": 1}}
+    train_ds, val_ds, _partition = auto_train_val("detection", data_cfg, None)
+
+    assert val_ds is not None
+    trained = {Path(s).stem for s in list(train_ds.stems) + list(val_ds.stems)}
+    assert trained == set(named)
+    assert trained != set(all_stems)
 
 
 def test_auto_train_val_explicit_group_key_map_not_overridden_by_retry(tmp_path: Path):

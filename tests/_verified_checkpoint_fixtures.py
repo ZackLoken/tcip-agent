@@ -86,7 +86,7 @@ def run_inference_verified(checkpoint_path: str, **overrides: Any):
         "group_by": None, "group_key_map": None,
         "split_seed": door_defaults["split_seed"].default,
         "split_holdout_ratio": door_defaults["split_holdout_ratio"].default,
-        "split_manifest_dir": None,
+        "selection_dir": None,
     }
     kwargs.update(overrides)
     return _run_inference_verified(checkpoint, **kwargs)

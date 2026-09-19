@@ -68,23 +68,21 @@ def _load_or_refuse(checkpoint_path: str, project_path: str):
 def _resolve_calibration_ids(
     checkpoint, images_dir: Path, *, project_path: str | None = None,
 ) -> tuple[set[str] | None, str | None]:
-    """The bound run's calibration-side member stems, confirmed to be ``images_dir``'s own date,
-    or the reason none could be resolved. Returns ``(calibration_stems, marks_unresolved)``.
+    """The bound run's calibration-side member stems whose own image sits in ``images_dir``, or
+    the reason none could be resolved. Returns ``(calibration_stems, marks_unresolved)``.
 
     ``calibration_stems`` is ``None`` with ``marks_unresolved`` also ``None`` for an unbound run:
     no registry-entry ``experiment_id`` at all (``checkpoint.producer``), or an experiment
-    recorded but never bound to a split manifest (its ``split.json`` carries no
-    ``manifest_binding``). There is nothing to mark and nothing to say about it. A bound run's own
-    split record that cannot be read, or whose named manifest can no longer be read, gets
+    recorded but never bound to a selection (its ``split.json`` carries no
+    ``selection_binding``). There is nothing to mark and nothing to say about it. A bound run's own
+    split record that cannot be read, or whose named selection can no longer be read, gets
     ``calibration_stems=None`` with ``marks_unresolved`` naming why, never a guess at membership.
 
-    A bound run's calibration side is scoped to the one capture date it bound to, never the whole
-    manifest (which may span other dates the run was never bound against): the same shared scope
-    check every manifest consumer shares (:func:`~tcip_mcp.pipelines.data.splits.
-    require_manifest_scope`), the one :func:`~tcip_mcp.pipelines.data.splits.bind_manifest_stems`
-    also calls when it computes ``calibration_bound``. Membership then turns on whether
-    ``images_dir`` is the exact directory the manifest recorded as that date's ``images_root``; an
-    absent recorded root refuses here the same way it refuses everywhere else this check runs.
+    Membership turns on each calibration sample's own recorded source: a sample whose image sits
+    in ``images_dir`` is one of this queue's candidates, a sample from another directory the
+    selection also spans is not. There is no date to compare and no recorded root to confirm: a
+    selection names each sample's own path, so the directory a queue is drawn over answers the
+    question directly.
     """
     experiment_id = checkpoint.producer
     if not experiment_id:
@@ -92,52 +90,40 @@ def _resolve_calibration_ids(
     from tcip_mcp.project_paths import platform_state_root
 
     root = project_path or str(platform_state_root())
-    from tcip_mcp.experiments import read_split_manifest_checked
+    from tcip_mcp.experiments import read_run_partition_checked
 
-    split, decode_error = read_split_manifest_checked(experiment_id, root=root)
+    split, decode_error = read_run_partition_checked(experiment_id, root=root)
     if decode_error is not None:
         return None, (
             f"this run's split record could not be read to mark the queue's calibration-side "
             f"candidates: {decode_error}"
         )
-    manifest_binding = split.get("manifest_binding")
-    if not manifest_binding:
+    selection_binding = split.get("selection_binding")
+    if not selection_binding:
         return None, None
-    manifest_dir = manifest_binding.get("manifest_dir")
-    date = manifest_binding.get("date")
-    from tcip_mcp.tools.data_tools import read_split_manifest_dir
+    selection_dir = selection_binding.get("selection_dir")
+    from tcip_mcp.pipelines.data.selection import read_selection
 
     try:
-        manifest = read_split_manifest_dir(manifest_dir)
+        selection = read_selection(selection_dir)
     except ValueError as exc:
         return None, (
-            f"this run is bound to split manifest {manifest_dir!r}, but it could not be read to "
-            f"mark the queue's calibration-side candidates: {exc}"
+            f"this run is bound to the selection at {selection_dir!r}, but it could not be read "
+            f"to mark the queue's calibration-side candidates: {exc}"
         )
-    from tcip_mcp.pipelines.data.splits import member_identity_parts, require_manifest_scope
-
-    try:
-        narrowing = require_manifest_scope(
-            manifest, manifest_dir=manifest_dir, subject=manifest_binding.get("subject"),
-            attribute=manifest_binding.get("attribute"), date=date, images_dir=images_dir,
-            label="images_dir",
-        )
-    except ValueError as exc:
-        return None, (
-            f"images_dir={str(images_dir)!r} could not be confirmed against the bound run's "
-            f"split manifest for date {date!r} to mark the queue's calibration-side candidates: "
-            f"{exc}"
-        )
-    return {member_identity_parts(i)[1] for i in narrowing.calibration_ids}, None
+    here = Path(images_dir).resolve()
+    return {
+        Path(s.source).stem for s in selection.on("calibration")
+        if Path(s.source).parent.resolve() == here
+    }, None
 
 
 def _calibration_marks(candidates: list, calibration_stems: set[str]) -> list[bool]:
     """``calibration_member`` for each of ``candidates``, in order: True iff its stem is one of
-    the bound date's calibration-side members.
+    the bound selection's calibration-side samples under this queue's own images directory.
 
-    Only meaningful once the caller (:func:`_resolve_calibration_ids`) has already confirmed
-    ``images_dir`` identifies with the manifest's own recorded root for that date, so every
-    candidate drawn from it already belongs to that date; membership then turns on the stem alone.
+    Only meaningful once the caller (:func:`_resolve_calibration_ids`) has narrowed those samples
+    to the directory the candidates are drawn from, so membership then turns on the stem alone.
     """
     from tcip_mcp.pipelines.image_utils import stem_of
 
@@ -410,21 +396,18 @@ def prioritize_review_queue(
     confident set for a caller to accept as ground truth rather than writing anything itself; that
     is a different, more consequential capability kept as its own door.
 
-    When ``checkpoint_path`` names a registry entry produced by a run bound to a split manifest
-    (``manifest_binding`` on that run's ``split.json``), each ``queue`` entry carries
-    ``calibration_member: bool``, matched against the bound date's own ``splits.calibration``
-    members only, never the whole manifest (which may span other dates the run was never bound
-    against): reviewing that image edits a label inside the bound run's own calibration universe,
-    which a later validation of that run would then read as moved. Membership is decided by
-    matching ``images_dir`` against the bound date's own recorded ``images_root``, by filesystem
-    identity, never by guessing a date from ``images_dir``'s path shape: when they identify, a
-    candidate is a member iff its stem is one of that date's calibration members; when they do
-    not, no candidate under ``images_dir`` can be a member of a different root's date, and the
-    response says so under ``marks_unresolved`` rather than mark confident Falses. An unbound run
-    (no registry producer, or a producer whose run was never bound to a manifest) carries no mark
-    on any entry and no reason: there is nothing to mark. A bound run whose own split record, or
-    whose named manifest, can no longer be read carries no mark either, but the response states
-    why under ``marks_unresolved``, never a guess.
+    When ``checkpoint_path`` names a registry entry produced by a run bound to a selection
+    (``selection_binding`` on that run's ``split.json``), each ``queue`` entry carries
+    ``calibration_member: bool``, matched against the selection's calibration samples whose own
+    source sits in ``images_dir``: reviewing that image edits a label inside the bound run's own
+    calibration universe, which a later validation of that run would then read as moved. A
+    selection names each sample's own path, so membership is read off those paths rather than
+    guessed from a date; a calibration sample the selection holds under another directory is not
+    a candidate here and is not marked. An unbound run (no registry producer, or a producer whose
+    run was never bound to a selection) carries no mark on any entry and no reason: there is
+    nothing to mark. A bound run whose own split record, or whose named selection, can no longer
+    be read carries no mark either, but the response states why under ``marks_unresolved``, never
+    a guess.
 
     Args:
         checkpoint_path: Trained model checkpoint (drives scoring).

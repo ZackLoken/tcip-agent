@@ -311,7 +311,7 @@ def test_autoresolve_json_labels_no_ops_without_an_images_dir(tmp_path):
         {"images": [{"id": 1, "file_name": "img0.jpg"}], "annotations": [], "categories": []}))
 
     kwargs = {"labels_dir": str(labels), "images_dir": ""}
-    _autoresolve_json_labels(kwargs, subject=BUD, attribute=None, id_map={BUD: 0}, date=None)
+    _autoresolve_json_labels(kwargs, subject=BUD, attribute=None, id_map={BUD: 0})
     assert "coco_data" not in kwargs and "label_format" not in kwargs
 
 
@@ -700,86 +700,6 @@ def test_a_derived_tree_without_negatives_does_not_refuse(tmp_path):
                           recorded_by="user:breeder")
 
     assert confirmed_negative_names(labels, subject=None, date=None) == set()
-
-
-def test_split_tree_carries_its_confirmed_negatives(tmp_path):
-    """draw_splits(materialize=True) emits {train,val,test}/labels, which cannot name its subject,
-    so it must carry the confirmations rather than inherit them by accident."""
-    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
-    from tcip_mcp.tools.data_tools import draw_splits
-
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
-    _make_images(images, [f"i{n:02d}" for n in range(10)])
-    for n in range(10):
-        stem = f"i{n:02d}"
-        boxes = [] if n % 2 else [_box(4, 4, 12, 12)]
-        json_io.write_annotations(labels / f"{stem}.json", boxes, 100, 100, keep_empty=True)
-    record_image_statuses(tmp_path, status_bucket("bud", None),
-                          {f"i{n:02d}.jpg": "negative" for n in range(1, 10, 2)},
-                          recorded_by="user:breeder")
-
-    out = tmp_path / "splits"
-    draw_splits(str(tmp_path), output_path=str(out), materialize=True, subject="bud",
-               train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
-
-    carried = set()
-    for split in ("train", "val", "calibration"):
-        d = out / split / "labels"
-        if d.is_dir():
-            carried |= confirmed_negative_names(d, subject="bud", date=None)
-    assert carried, "the split tree lost every human-confirmed negative"
-
-
-def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
-    """A split's carried negatives must get their own subjects.json + digest stamp too; without it
-    quarantine can never fire on a split tree."""
-    import tcip_store as ts
-    from tcip_mcp import subject_registry
-    from tcip_mcp.subject_registry import write_registry
-    from tcip_mcp.dataset_layout import image_status_digest_key
-    from tcip_mcp.tools.data_tools import draw_splits
-
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
-    registry = SubjectRegistry(subjects=(
-        Subject(name="bud", attributes=(
-            Attribute(name="opening", type="categorical", values=("closed", "open")),
-        )),
-    ))
-    write_registry(tmp_path / "subjects.json", registry)
-    expected_digest = subject_registry.attribute_schema_digest(registry, "bud")
-
-    _make_images(images, [f"i{n:02d}" for n in range(10)])
-    for n in range(10):
-        stem = f"i{n:02d}"
-        boxes = [] if n % 2 else [_box(4, 4, 12, 12)]
-        json_io.write_annotations(labels / f"{stem}.json", boxes, 100, 100, keep_empty=True)
-    neg_names = {f"i{n:02d}.jpg" for n in range(1, 10, 2)}
-    record_image_statuses(tmp_path, status_bucket("bud", None),
-                          dict.fromkeys(neg_names, "negative"), recorded_by="user:breeder")
-    stamp_image_status_digests(tmp_path, status_bucket("bud", None), neg_names, expected_digest)
-
-    out = tmp_path / "splits"
-    draw_splits(str(tmp_path), output_path=str(out), materialize=True, subject="bud",
-               train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
-
-    found = False
-    for split in ("train", "val", "calibration"):
-        split_root = out / split
-        digest_key = image_status_digest_key(split_root)
-        if not ts.exists(digest_key):
-            continue
-        stamps = ts.read(digest_key).get(status_bucket("bud", None), {})
-        carried_here = set(stamps) & neg_names
-        if carried_here:
-            assert (split_root / "subjects.json").is_file()
-            assert all(stamps[n] == expected_digest for n in carried_here)
-            found = True
-    assert found, "no split carried both a negative and its schema stamp"
-
 
 def test_quarantined_negative_reads_the_same_reason_on_both_label_paths(tmp_path):
     """The COCO-assembly branch of ``trainable_stems`` must check quarantine for an image

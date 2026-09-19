@@ -631,15 +631,17 @@ def dataset_hash_and_label_digests(
     return h.hexdigest()[:16], per_stem
 
 
-def manifest_digest(manifest: dict) -> str:
-    """The one digest a split-manifest record earns: sha256 over ``RECORD_JSON.encode(manifest)``.
+def selection_digest(selection: Any) -> str:
+    """The one digest a selection earns: sha256 over the document it is written as.
 
-    Called at bind time (``split_construction.persist_split_manifest``, stamping ``split.json``'s
-    ``label_digests.manifest_sha256``) and at calibration time (``inference_tools``'s
-    ``split_manifest_sha256``, and the operator script that passes the same fact) so the two
-    sides that must agree on a manifest's identity can never spell the digest differently.
+    Called at bind time (``split_construction``, stamping ``split.json``'s
+    ``label_digests.selection_sha256``) and at calibration time (``inference_tools``'s
+    ``selection_sha256``, and the operator script that passes the same fact) so the two sides that
+    must agree on a selection's identity can never spell the digest differently.
     """
-    return hashlib.sha256(RECORD_JSON.encode(manifest)).hexdigest()
+    from tcip_mcp.pipelines.data.selection import selection_document
+
+    return hashlib.sha256(RECORD_JSON.encode(selection_document(selection))).hexdigest()
 
 
 def csv_dataset_hash(csv_path: str | Path) -> str:
@@ -1263,7 +1265,7 @@ def _sidecar_reference(
 
 _LABEL_MOVEMENT_KEYS: tuple[str, ...] = (
     "labels_moved_draw_to_run", "labels_moved_run_to_now", "calibration_labels_moved",
-    "manifest_redrawn", "calibration_labels_dir",
+    "selection_redrawn", "calibration_labels_dir",
 )
 """The five keys :func:`resolver_selection_disjointness` copies onto an applicable row beside
 the leak fields: presence is required there, their value is not gated on (a moved label is
@@ -1381,7 +1383,7 @@ hash for itself, except ``stated_values``, which holds what another primitive al
 split lock's identity, a review reference's hash and image count) and this one cannot recompute.
 ``label_stems`` is ``label_dirs``' narrower sibling: a directory hashed over a named subset of its
 stems (``{role: {"path": dir, "stems": [...]}}``) rather than whole, for a calibration restricted
-to a split manifest's calibration side, where the whole directory was never what the reference
+to a selection's calibration side, where the whole directory was never what the reference
 swept."""
 
 _UNCOMPARED = object()
@@ -1474,7 +1476,7 @@ def resolver_selection_disjointness(result: Any, document: str) -> dict | None:
         "labels_moved_draw_to_run": sd.get("labels_moved_draw_to_run"),
         "labels_moved_run_to_now": sd.get("labels_moved_run_to_now"),
         "calibration_labels_moved": sd.get("calibration_labels_moved"),
-        "manifest_redrawn": sd.get("manifest_redrawn"),
+        "selection_redrawn": sd.get("selection_redrawn"),
         "calibration_labels_dir": sd.get("calibration_labels_dir"),
     }
 
@@ -1873,9 +1875,9 @@ def verify_stamp_binding(
     for the count and scale documents, every bucket being read is in the covered set at its
     dataset-relative key with the content (or imagery) identity it was earned over, recomputed now.
     ``images_dir`` is required to reach that last check for ``resolve_scale`` and unused otherwise.
-    When the reference identity carries a ``split_manifest_dir``, the row must also carry a
+    When the reference identity carries a ``selection_dir``, the row must also carry a
     ``selection_disjointness`` that is either not-applicable (with a reason) or checked with no
-    leak; a manifest-scoped reference earned before that field existed, or earned against a
+    leak; a selection-scoped reference earned before that field existed, or earned against a
     checkpoint whose own run is unknown, floors here rather than reading as cleared.
 
     Verification is per stamp file, not per parameter. One failed check floors every dimension that
@@ -1965,9 +1967,9 @@ def verify_stamp_binding(
             f"for: the stamp's {', '.join(_CLAIM_KEYS[document])} disagree with the values the gate "
             "was run over. Re-calibrate to earn a record for the values being delivered.", **known)
 
-    row_split_manifest_dir = (row.get("reference_identity") or {}).get(
-        "stated_values", {}).get("split_manifest_dir")
-    if row_split_manifest_dir is not None:
+    row_selection_dir = (row.get("reference_identity") or {}).get(
+        "stated_values", {}).get("selection_dir")
+    if row_selection_dir is not None:
         sd = row.get("selection_disjointness")
         sd_applicable = isinstance(sd, dict) and sd.get("applicable") is True
         sd_ok = isinstance(sd, dict) and (
@@ -1978,11 +1980,11 @@ def verify_stamp_binding(
         )
         if not sd_ok:
             return floored(
-                f"{document}.json at {bucket!r} claims a validated reference under split "
-                f"manifest {row_split_manifest_dir!r}, and record {record_digest!r} carries no "
+                f"{document}.json at {bucket!r} claims a validated reference under the selection "
+                f"at {row_selection_dir!r}, and record {record_digest!r} carries no "
                 "selection_disjointness check that is either not-applicable (with a reason) or "
                 "checked with no leak and the label-movement keys sealed. Calibrate again under "
-                "the manifest's calibration side with a checkpoint whose run is on record.",
+                "the selection's calibration side with a checkpoint whose run is on record.",
                 **known)
 
     if document in ("operating_point", "resolve_scale"):

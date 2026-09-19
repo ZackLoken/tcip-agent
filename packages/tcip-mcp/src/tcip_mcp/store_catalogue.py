@@ -37,7 +37,7 @@ from tcip_mcp import (  # noqa: F401
     workspace,
 )
 from tcip_mcp.pipelines import model_build, resolution  # noqa: F401
-from tcip_mcp.pipelines.data import band_groups, splits  # noqa: F401
+from tcip_mcp.pipelines.data import band_groups, selection, splits  # noqa: F401
 from tcip_mcp.pipelines.feedback import materialize  # noqa: F401
 from tcip_mcp.pipelines.postprocessing import plant_mapping  # noqa: F401
 from tcip_mcp.pipelines.training import eval_runners, generic_trainer, hpo  # noqa: F401
@@ -89,7 +89,7 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
     Every root here comes from a record the project itself holds, or from walking a directory a
     record already named, never from a directory guessed with no record behind it: the
     registered dataset roots from the project's own registry, an HPO sweep's directory found
-    under the project's own recorded HPO root, and a run's output directory, split-manifest
+    under the project's own recorded HPO root, and a run's output directory, selection
     binding, curated-dataset artifact and prediction-bucket lineage from that run's own
     ``experiments/<id>/`` members. Reads through
     :func:`~tcip_mcp.tools.project_tools.read_datasets_raw`, never
@@ -125,12 +125,12 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
     output directory has since been moved or deleted is skipped the same way, its record read
     without complaint but not turned into a root ``adopt-store`` would otherwise recreate.
 
-    ``SPLITS``: each experiment's own ``split.json["manifest_binding"]["manifest_dir"]``
+    ``SPLITS``: each experiment's own ``split.json["selection_binding"]["selection_dir"]``
     (:mod:`tcip_mcp.pipelines.data.split_construction`'s own field, persisted by
-    ``persist_split_manifest``), present only for a run bound to an existing split manifest
-    rather than one that drew its own. A manifest ``draw_splits``/``freeze_split_manifest``
+    ``persist_run_partition``), present only for a run bound to an existing selection rather than
+    one that drew its own. A selection ``draw_splits``/``freeze_selection``
     (:mod:`tcip_mcp.tools.data_tools`) wrote but that no run has ever bound to is out of reach:
-    nothing in the project's own records names it. A bound manifest directory that no longer
+    nothing in the project's own records names it. A bound selection directory that no longer
     exists is skipped the same way as a moved run output directory.
 
     ``CURATED``: each experiment's own ``artifacts.json["curated_dataset"]["path"]``
@@ -175,10 +175,10 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
             _add_if_dir(roots, seen, Path(output_dir).absolute(), RUN)
 
         split_doc = experiments.read_member(experiments.split_key(exp_id, root=root), {})
-        binding = split_doc.get("manifest_binding") if isinstance(split_doc, dict) else None
-        manifest_dir = binding.get("manifest_dir") if isinstance(binding, dict) else None
-        if manifest_dir:
-            _add_if_dir(roots, seen, Path(manifest_dir).absolute(), SPLITS)
+        binding = split_doc.get("selection_binding") if isinstance(split_doc, dict) else None
+        selection_dir = binding.get("selection_dir") if isinstance(binding, dict) else None
+        if selection_dir:
+            _add_if_dir(roots, seen, Path(selection_dir).absolute(), SPLITS)
 
         artifacts = experiments.read_member(experiments.artifacts_key(exp_id, root=root), {})
         curated = artifacts.get("curated_dataset") if isinstance(artifacts, dict) else None

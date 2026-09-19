@@ -14,21 +14,21 @@ CSV parser), ``OrthomosaicGeoreference.pixel_to_wgs84`` (GeoTIFF pixel -> WGS84)
 ``_nearest_plant`` (GPS nearest-neighbour match). It then hands the resulting ``{identity:
 group_key}`` map to ``draw_splits(group_key_map=...)``, which already refuses loudly (via
 ``resolve_group_key_fn``) if the map doesn't cover every member it needs. ``identity`` is
-``<date>/<stem>`` (:func:`~tcip_mcp.pipelines.data.splits.member_identity`, the same identity
-``draw_splits`` keys its own members by), since a stem is unique only within one capture date.
+``<date>/<stem>`` (the same identity ``draw_splits`` keys its own draw by), since a stem is
+unique only within one capture date.
 
-``--subject`` is required: ``draw_splits`` draws its members through the platform's own
-per-subject admission and refuses to write a manifest without one.
+``--subject`` is required: ``draw_splits`` draws its samples through the platform's own
+per-subject admission and refuses to write a selection without one.
 
 Usage:
     tcip plant-aware-group-splits <dataset_root> --plant-csv <plants.csv> \
         [--plant-csv <more_plants.csv> ...] --subject <subject> [--attribute <attribute>] \
         --train-ratio <ratio> --val-ratio <ratio> --calibration-ratio <ratio> [--seed 42] \
-        [--tolerance-m 5.0] [--output-path <dir>] [--materialize] [--no-copy]
+        [--tolerance-m 5.0] [--output-path <dir>]
 
 ``--train-ratio``, ``--val-ratio`` and ``--calibration-ratio`` all have no default and are
-required: the three must sum to 1.0, and a manifest write (``--output-path`` or
-``--materialize``) additionally refuses any of them being zero, by name.
+required: the three must sum to 1.0, and a selection write (``--output-path``) additionally
+refuses any of them being zero, by name.
 """
 
 from __future__ import annotations
@@ -144,18 +144,15 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                               "1.0. No default.")
     parser.add_argument("--calibration-ratio", type=float, required=True,
                          help="Fraction held out as the calibration universe; the three ratios "
-                              "must sum to 1.0. No default. A manifest write (--output-path or "
-                              "--materialize) refuses a zero ratio on any of the three, naming it.")
+                              "must sum to 1.0. No default. A selection write (--output-path) "
+                              "refuses a zero ratio on any of the three, naming it.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--tolerance-m", type=float, default=None,
                          help="Max GPS distance (m) to the nearest plant. Defaults to "
                               "grid_pitch_m(plants)/6, the same derivation build_mapping/"
                               "assign_detections_to_plants already use.")
-    parser.add_argument("--output-path", default=None, help="Where draw_splits writes manifests.")
-    parser.add_argument("--materialize", action="store_true",
-                         help="Also lay out a {train,val,calibration}/{images,labels}/ tree.")
-    parser.add_argument("--no-copy", action="store_true",
-                         help="Symlink instead of copy when materializing.")
+    parser.add_argument("--output-path", default=None,
+                         help="Where draw_splits writes the selection.")
     parser.add_argument("--subject", required=True,
                          help="The object class draw_splits draws its members for and the "
                               "confirmed negatives are keyed under.")
@@ -207,8 +204,6 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         seed=args.seed,
         group_key_map=group_key_map,
         output_path=args.output_path,
-        materialize=args.materialize,
-        copy_files=not args.no_copy,
         subject=args.subject,
         attribute=args.attribute,
     )

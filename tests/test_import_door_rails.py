@@ -448,18 +448,19 @@ def _annotated_dataset(root: Path, n: int) -> None:
 def test_a_splits_root_nested_under_a_curated_root_archives_and_round_trips(tmp_path):
     """The producer chain the skills document: a curated dataset (materialize_review_dataset's
     own output shape, a curated_manifest.json at its root) sits under a project, and draw_splits
-    partitions it in place with no output_path, landing split_manifest.json under the curated
-    root rather than beside it. The cross-anchor constraint must admit that nesting rather than
-    refusing the whole project."""
+    partitions it in place, landing selection.json under the curated root rather than beside it.
+    The cross-anchor constraint must admit that nesting rather than refusing the whole
+    project."""
+    from tcip_mcp.pipelines.data.selection import selection_key
     from tcip_mcp.pipelines.feedback.materialize import curated_manifest_key
-    from tcip_mcp.tools.data_tools import draw_splits, split_manifest_key
+    from tcip_mcp.tools.data_tools import draw_splits
 
     project = tmp_path / "project"
     curated = project / "curated"
     _annotated_dataset(curated, 4)
     ts.replace(curated_manifest_key(curated), {"source": "review verdicts"}, expect=ts.Version.ABSENT)
 
-    splits_result = draw_splits(str(curated), subject="bud", materialize=True,
+    splits_result = draw_splits(str(curated), subject="bud", output_path=str(curated / "splits"),
                                  train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in splits_result, splits_result
 
@@ -471,7 +472,7 @@ def test_a_splits_root_nested_under_a_curated_root_archives_and_round_trips(tmp_
     imported = import_project(str(zip_path), str(dest))
     assert "error" not in imported, imported
     assert (dest / "curated" / "curated_manifest.json").is_file()
-    assert ts.read(split_manifest_key(dest / "curated" / "splits"))["subject"] == "bud"
+    assert ts.read(selection_key(dest / "curated" / "splits"))["subject"] == "bud"
 
 
 def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, monkeypatch):
@@ -486,7 +487,8 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.experiments import config_key, create_experiment, log_metrics, metrics_key, status_key
     from tcip_mcp.operationalization import PER_IMAGE_COUNT, resolve_trait_and_record
-    from tcip_mcp.tools.data_tools import draw_splits, split_manifest_key
+    from tcip_mcp.pipelines.data.selection import selection_key
+    from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.project_tools import (
         dataset_entry_path, initialize_project, read_datasets, register_dataset,
     )
@@ -572,5 +574,5 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
         assert trial_dirs
         assert ts.read(tt.trial_config_key(dest / ".tcip" / "hpo" / study, trial_dirs[0].name))
 
-        manifest = ts.read(split_manifest_key(dest / "splits_out"))
-        assert manifest["subject"] == "bud"
+        selection = ts.read(selection_key(dest / "splits_out"))
+        assert selection["subject"] == "bud"

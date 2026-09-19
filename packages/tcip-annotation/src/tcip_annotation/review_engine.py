@@ -215,7 +215,7 @@ def label_baseline_key(label_dir: str | Path, stem: str) -> Key:
     """One label file's pristine copy, beside the directory the original lives in.
 
     The generic placement, because the directory is whatever the caller was handed (a dataset's
-    ``annotations/<date>/``, a materialized split's ``labels/``) and this package resolves no
+    ``annotations/<date>/``, a curated dataset's ``labels/``) and this package resolves no
     layout of its own.
     """
     return Key(LABEL_BASELINES_STORE, str(Path(label_dir).absolute()), (str(stem),))

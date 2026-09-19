@@ -260,7 +260,7 @@ def test_same_length_replacement_with_restored_timestamp_floors(tmp_path):
     assert _count_validity(pred_dir)["validated"] == "false"
 
 
-def test_a_row_stating_split_manifest_dir_with_no_selection_disjointness_floors(tmp_path):
+def test_a_row_stating_selection_dir_with_no_selection_disjointness_floors(tmp_path):
     """A row a writer other than this platform produced, or one sealed before the field existed,
     states a manifest but carries no selection_disjointness at all: the door floors it by name,
     never reads a missing check as a passing one."""
@@ -268,7 +268,7 @@ def test_a_row_stating_split_manifest_dir_with_no_selection_disjointness_floors(
     pred_dir = _bucket(root)
     write_bound_sidecar(
         pred_dir, _count_stamp(), dataset_root=root,
-        reference_identity={"stated_values": {"split_manifest_dir": "some/manifest"}},
+        reference_identity={"stated_values": {"selection_dir": "some/manifest"}},
         selection_disjointness=None,
     )
 
@@ -279,7 +279,7 @@ def test_a_row_stating_split_manifest_dir_with_no_selection_disjointness_floors(
     assert not _delivers(validity)
 
 
-def test_a_row_stating_split_manifest_dir_with_an_unchecked_selection_disjointness_floors(
+def test_a_row_stating_selection_dir_with_an_unchecked_selection_disjointness_floors(
     tmp_path,
 ):
     """A row that states a manifest with a selection_disjointness present but neither
@@ -289,7 +289,7 @@ def test_a_row_stating_split_manifest_dir_with_an_unchecked_selection_disjointne
     pred_dir = _bucket(root)
     write_bound_sidecar(
         pred_dir, _count_stamp(), dataset_root=root,
-        reference_identity={"stated_values": {"split_manifest_dir": "some/manifest"}},
+        reference_identity={"stated_values": {"selection_dir": "some/manifest"}},
         selection_disjointness={"applicable": True, "reason": "no record to check against",
                                 "checked": False, "group_check": None},
     )
@@ -299,7 +299,7 @@ def test_a_row_stating_split_manifest_dir_with_an_unchecked_selection_disjointne
     assert "selection_disjointness" in validity["binding_notes"][str(pred_dir)]
 
 
-def test_a_row_stating_split_manifest_dir_with_a_checked_no_leak_selection_disjointness_delivers(
+def test_a_row_stating_selection_dir_with_a_checked_no_leak_selection_disjointness_delivers(
     tmp_path,
 ):
     """The admits-valid-work half: a row whose selection_disjointness is checked with no leak
@@ -308,18 +308,18 @@ def test_a_row_stating_split_manifest_dir_with_a_checked_no_leak_selection_disjo
     pred_dir = _bucket(root)
     write_bound_sidecar(
         pred_dir, _count_stamp(), dataset_root=root,
-        reference_identity={"stated_values": {"split_manifest_dir": "some/manifest"}},
+        reference_identity={"stated_values": {"selection_dir": "some/manifest"}},
         selection_disjointness={"applicable": True, "reason": None, "checked": True,
                                 "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
                                 "group_check": "performed", "labels_moved_draw_to_run": None,
                                 "labels_moved_run_to_now": None, "calibration_labels_moved": None,
-                                "manifest_redrawn": None, "calibration_labels_dir": None},
+                                "selection_redrawn": None, "calibration_labels_dir": None},
     )
 
     assert _count_validity(pred_dir)["validated"] == "held_out_annotations"
 
 
-def test_a_row_stating_split_manifest_dir_with_a_leaking_selection_disjointness_floors(tmp_path):
+def test_a_row_stating_selection_dir_with_a_leaking_selection_disjointness_floors(tmp_path):
     """A row that reports checked=True but names a leaked group still floors: "checked with no
     leak" is enforced from the row's own leak fields, not read off the pass/fail booleans alone.
     The five label-movement keys are present (null), the shape a genuinely checked row carries,
@@ -329,12 +329,12 @@ def test_a_row_stating_split_manifest_dir_with_a_leaking_selection_disjointness_
     pred_dir = _bucket(root)
     write_bound_sidecar(
         pred_dir, _count_stamp(), dataset_root=root,
-        reference_identity={"stated_values": {"split_manifest_dir": "some/manifest"}},
+        reference_identity={"stated_values": {"selection_dir": "some/manifest"}},
         selection_disjointness={"applicable": True, "reason": None, "checked": True,
                                 "unresolvable": False, "leaked_groups": ["g1"],
                                 "leaked_stems": [], "group_check": "performed",
                                 "labels_moved_draw_to_run": None, "labels_moved_run_to_now": None,
-                                "calibration_labels_moved": None, "manifest_redrawn": None,
+                                "calibration_labels_moved": None, "selection_redrawn": None,
                                 "calibration_labels_dir": None},
     )
 
@@ -343,7 +343,7 @@ def test_a_row_stating_split_manifest_dir_with_a_leaking_selection_disjointness_
     assert "selection_disjointness" in validity["binding_notes"][str(pred_dir)]
 
 
-def test_a_row_stating_split_manifest_dir_missing_the_label_movement_keys_floors(tmp_path):
+def test_a_row_stating_selection_dir_missing_the_label_movement_keys_floors(tmp_path):
     """A row that is otherwise checked with no leak still floors when it carries none of the
     five label-movement keys: those keys have to answer the question (present, null admitted),
     not merely be absent, the same rule the unchecked-shape test above proves for checked."""
@@ -351,7 +351,7 @@ def test_a_row_stating_split_manifest_dir_missing_the_label_movement_keys_floors
     pred_dir = _bucket(root)
     write_bound_sidecar(
         pred_dir, _count_stamp(), dataset_root=root,
-        reference_identity={"stated_values": {"split_manifest_dir": "some/manifest"}},
+        reference_identity={"stated_values": {"selection_dir": "some/manifest"}},
         selection_disjointness={"applicable": True, "reason": None, "checked": True,
                                 "unresolvable": False, "leaked_groups": [],
                                 "leaked_stems": [], "group_check": "performed"},

@@ -300,8 +300,8 @@ def annotation_date(path: str | Path) -> Optional[str]:
 
 
 #: The top-level segments under a dataset root; a path under any of them locates the root.
-#: ``labels`` covers a split-materialized tree (``draw_splits(materialize=True)`` writes
-#: ``{split}/labels/*.json`` rather than ``annotations/``) so the same locator resolves both shapes.
+#: ``labels`` covers a curated tree whose label documents sit there rather than under
+#: ``annotations/``, so the same locator resolves both shapes.
 _DATASET_SEGMENTS = ("annotations", "predictions", "images", "labels")
 
 
@@ -492,7 +492,7 @@ def image_status_path(dataset_root: str | Path) -> Path:
     Sibling of ``subjects_path``/``dataset_identity_path``: a Complete is a fact about the dataset's
     content (what actually trains), so it travels with the dataset rather than living in whichever
     project's private ``.tcip/`` happens to be an ancestor. The single locator every writer
-    (the GUI's review flow, ``materialize_dataset``, ``draw_splits``) and every reader
+    (the GUI's review flow, ``materialize_dataset``) and every reader
     (``confirmed_negative_names``, ``tcip doctor``) must call; never reconstruct this path locally.
     """
     return _entry_path(_STATE_DOC, dataset_root, _IMAGE_STATUS_PARTS)
@@ -1019,8 +1019,8 @@ def replace_image_status_store(
 ) -> None:
     """Write the whole confirmed-negative store for a dataset this call is producing.
 
-    For a materializer that is authoring an output dataset's negatives outright (a split tree, a
-    curated review dataset): what it writes is the complete set for that output, so a leftover
+    For a materializer that is authoring an output dataset's negatives outright (a curated
+    review dataset): what it writes is the complete set for that output, so a leftover
     entry from an earlier materialization into the same directory must not survive as a negative
     nobody re-derived.
 
@@ -1208,7 +1208,7 @@ def label_filename(stem: str, fmt: str = "json") -> str:
     """The file name one image's label or prediction record is written under.
 
     The rule an image stem becomes a record name by, stated once: a consumer holding a directory
-    this module did not hand it (a materialized split's ``labels/``) still asks here for the name
+    this module did not hand it (a curated dataset's ``labels/``) still asks here for the name
     rather than re-asserting the extension.
     """
     return f"{stem}{label_ext(fmt)}"

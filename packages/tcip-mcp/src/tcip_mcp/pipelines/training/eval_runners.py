@@ -97,7 +97,7 @@ def run_test_evaluation(
     conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,  # report at the ship point
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
     tiling: dict | None = None, trait: str | None = None,
-    split_manifest_dir: str | None = None, evaluated_stem_count: int | None = None,
+    selection_dir: str | None = None, evaluated_stem_count: int | None = None,
 ) -> dict:
     """Evaluate ``loader`` against ``checkpoint``, write ``test_results.json``.
 
@@ -109,11 +109,10 @@ def run_test_evaluation(
     matches the training-run val mAP), not the delivery regime, the stamp keeps the two from being
     silently conflated. See ``run_full_frame_evaluation`` for a delivery-grade metric.
 
-    ``split_manifest_dir``/``evaluated_stem_count`` are the caller's own record of a manifest the
-    loader was narrowed to (``evaluate_model``'s own binding, resolved before the loader was
-    built, refusing rather than calling here when the loader admitted fewer stems than the
-    universe the manifest drew): recorded verbatim when given, absent otherwise, never
-    re-derived here.
+    ``selection_dir``/``evaluated_stem_count`` are the caller's own record of the selection the
+    loader was narrowed to and how many of its samples the loader indexed (``evaluate_model``'s
+    own binding, resolved and re-admitted before the loader was built): recorded verbatim when
+    given, absent otherwise, never re-derived here.
     """
     from tcip_mcp.pipelines.model_build import STATE_DICT_KEY, build_model
     from tcip_mcp.pipelines.training.evaluation import effective_iou_type, evaluate
@@ -137,8 +136,8 @@ def run_test_evaluation(
         "eval_regime": "tile-level" if tiled else "full-frame-single-pass",
     }
     extra = dict(metrics)
-    if split_manifest_dir is not None:
-        extra["split_manifest_dir"] = split_manifest_dir
+    if selection_dir is not None:
+        extra["selection_dir"] = selection_dir
         extra["evaluated_stem_count"] = evaluated_stem_count
     result = write_evaluation_result(output_dir, common, extra)
     result["results_path"] = str(evaluation_results_path(output_dir))

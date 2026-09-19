@@ -84,14 +84,14 @@ def test_an_ordinary_experiment_payload_is_still_written_by_every_entry_point(tm
     assert record["lineage"]["predictions"] == "predictions/live"
 
 
-def test_a_split_manifest_is_read_from_the_store_the_experiment_module_resolves(
+def test_a_run_partition_is_read_from_the_store_the_experiment_module_resolves(
     tmp_path, monkeypatch
 ):
     """One resolver for the experiment store, so a rebound store is not read from two places.
 
     A consumer that rebuilds ``<platform root>/.tcip/experiments`` of its own reads the
     default location even when the store itself has been moved, and then reports a run whose
-    manifest exists as having no recorded training membership at all: a disjointness check
+    partition exists as having no recorded training membership at all: a disjointness check
     that silently cannot answer.
     """
     from tcip_store import store

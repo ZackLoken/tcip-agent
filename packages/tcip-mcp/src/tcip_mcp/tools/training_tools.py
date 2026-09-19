@@ -83,25 +83,25 @@ def _resolve_launched_by() -> dict[str, Any]:
         return {"launcher": "agent", **agent_identity.audit_fields()}
     return {"launcher": "process"}
 
-_SPLIT_MANIFEST_CONFLICT_KEYS = (
+_SELECTION_CONFLICT_KEYS = (
     "group_by", "group_key_map", "val_ratio", "seed", "stratify_foreground",
     "test_ratio", "reserve_calibration_fraction",
 )
 
 
-def _split_manifest_drawn_conflicts(data_cfg: dict, split_cfg: dict) -> list[str]:
-    """Every top-level key ``data.split.manifest_dir`` conflicts with beside
-    ``data.val_images_dir`` (checked separately, its own refusal): a document a manifest never
+def _split_selection_drawn_conflicts(data_cfg: dict, split_cfg: dict) -> list[str]:
+    """Every top-level key ``data.split.selection_dir`` conflicts with beside
+    ``data.val_images_dir`` (checked separately, its own refusal): a document a selection never
     read (``coco_json``/``label_format='coco'``), or a drawn split's own parameters
-    (:data:`_SPLIT_MANIFEST_CONFLICT_KEYS`). ``seed`` is admitted, not a conflict, only when
-    ``data.split.redraw_within_manifest`` is true (:func:`_redraw_flag_issue` covers the flag's
+    (:data:`_SELECTION_CONFLICT_KEYS`). ``seed`` is admitted, not a conflict, only when
+    ``data.split.redraw_within_selection`` is true (:func:`_redraw_flag_issue` covers the flag's
     own remaining requirement, that a redraw states a seed at all): a seed left over from a
-    forked or drawn config still conflicts by name otherwise. Shared by
-    ``preflight_config`` and :func:`~tcip_mcp.pipelines.data.split_construction.auto_train_val`'s
-    manifest branch, so the two report the identical set for one config.
+    forked or drawn config still conflicts by name otherwise. Shared by ``preflight_config`` and
+    :func:`~tcip_mcp.pipelines.data.split_construction.auto_train_val`'s selection branch, so the
+    two report the identical set for one config.
     """
-    keys: tuple[str, ...] = _SPLIT_MANIFEST_CONFLICT_KEYS
-    if split_cfg.get("redraw_within_manifest"):
+    keys: tuple[str, ...] = _SELECTION_CONFLICT_KEYS
+    if split_cfg.get("redraw_within_selection"):
         keys = tuple(k for k in keys if k != "seed")
     conflicts = [k for k in keys if split_cfg.get(k) is not None]
     if data_cfg.get("coco_json"):
@@ -112,17 +112,18 @@ def _split_manifest_drawn_conflicts(data_cfg: dict, split_cfg: dict) -> list[str
 
 
 def _redraw_flag_issue(split_cfg: dict) -> str | None:
-    """The one objection ``data.split.redraw_within_manifest`` raises that
-    :func:`_split_manifest_drawn_conflicts` cannot: the flag set true with no ``seed`` beside
-    it, the redraw's own required pairing (a seed states which partition inside the manifest's
-    train-plus-val members the redraw draws; the redraw states its own seed here rather than
-    inheriting one, since ``run_hyperparameter_search``'s own default of 42 for a bound ``base_config``
-    (:func:`_base_config_for_split_draws`) is that caller's own choice, not a fallback this
-    function reaches for). ``None`` when the flag is unset, false, or paired with a seed.
+    """The one objection ``data.split.redraw_within_selection`` raises that
+    :func:`_split_selection_drawn_conflicts` cannot: the flag set true with no ``seed`` beside
+    it, the redraw's own required pairing (a seed states which partition inside the selection's
+    train-plus-val samples the redraw draws; the redraw states its own seed here rather than
+    inheriting one, since ``run_hyperparameter_search``'s own default of 42 for a bound
+    ``base_config`` (:func:`_base_config_for_split_draws`) is that caller's own choice, not a
+    fallback this function reaches for). ``None`` when the flag is unset, false, or paired with a
+    seed.
     """
-    if split_cfg.get("redraw_within_manifest") and split_cfg.get("seed") is None:
+    if split_cfg.get("redraw_within_selection") and split_cfg.get("seed") is None:
         return (
-            "data.split.redraw_within_manifest=true requires data.split.seed: the seed the "
+            "data.split.redraw_within_selection=true requires data.split.seed: the seed the "
             "redraw draws train and val at."
         )
     return None
@@ -139,11 +140,16 @@ def _data_dir_issues(data_cfg: dict, task: str) -> list[str]:
     listing both call, so a relaunch whose recorded directories moved shows the same words
     before Start that ``launch_training`` would refuse it with. A no-op for a bespoke
     ``data.dataset_source`` config: the known-loader presence check does not apply when the
-    agent's own builder owns loading.
+    agent's own builder owns loading. A no-op for a config bound to a selection too: each
+    sample names its own source and label path, so the run reads no directory to discover
+    membership in, and the selection's own reader states what is missing.
     """
     from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
 
     if data_cfg.get(DATASET_SOURCE_KEY) is not None:
+        return []
+    split_cfg = data_cfg.get("split")
+    if isinstance(split_cfg, dict) and split_cfg.get("selection_dir"):
         return []
     issues: list[str] = []
     kwargs = _dataset_source_kwargs(task, data_cfg)
@@ -164,19 +170,18 @@ def _data_dir_issues(data_cfg: dict, task: str) -> list[str]:
     return issues
 
 
-def _manifest_dir_conflicts(config: dict) -> tuple[list[str], bool]:
-    """Every objection a ``data.split.manifest_dir`` binding raises from ``config``'s own
-    fields alone, computed without reading any manifest: the ``data.val_images_dir`` conflict,
-    the drawn-split key conflicts (:data:`_SPLIT_MANIFEST_CONFLICT_KEYS`), a
-    ``redraw_within_manifest`` flag with no seed beside it (:func:`_redraw_flag_issue`), and the
-    task check (only detection and instance_seg admit through the ``trainable_stems`` draw a
-    manifest is drawn through). ``preflight_config`` and :func:`manifest_compatibility` both
-    compute these before attempting to read a manifest at all, so a moved or absent manifest
-    never suppresses an objection the config alone already carries.
+def _selection_dir_conflicts(config: dict) -> tuple[list[str], bool]:
+    """Every objection a ``data.split.selection_dir`` binding raises from ``config``'s own fields
+    alone, computed without reading any selection: the ``data.val_images_dir`` conflict, the
+    drawn-split key conflicts (:data:`_SELECTION_CONFLICT_KEYS`), a ``redraw_within_selection``
+    flag with no seed beside it (:func:`_redraw_flag_issue`), and the task check (only detection
+    and instance_seg read the per-image label documents a selection's samples name).
+    ``preflight_config`` and :func:`selection_compatibility` both compute these before attempting
+    to read a selection at all, so a moved or absent selection never suppresses an objection the
+    config alone already carries.
 
-    Returns ``(issues, task_binds)``; when the task cannot bind a manifest at all, checking a
-    manifest's subject, date or images root against it would name nothing new, so the caller
-    stops there.
+    Returns ``(issues, task_binds)``; when the task cannot bind a selection at all, reading one to
+    check its sides would name nothing new, so the caller stops there.
     """
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
@@ -189,150 +194,134 @@ def _manifest_dir_conflicts(config: dict) -> tuple[list[str], bool]:
     issues: list[str] = []
     if data_cfg.get("val_images_dir"):
         issues.append(
-            "data.split.manifest_dir conflicts with data.val_images_dir: two membership "
+            "data.split.selection_dir conflicts with data.val_images_dir: two membership "
             "sources for one run's validation split."
         )
-    conflicts = _split_manifest_drawn_conflicts(data_cfg, split_cfg)
+    conflicts = _split_selection_drawn_conflicts(data_cfg, split_cfg)
     if conflicts:
         issues.append(
-            f"data.split.manifest_dir conflicts with {conflicts}: a recorded partition and "
+            f"data.split.selection_dir conflicts with {conflicts}: a recorded partition and "
             "a drawn split's own parameters/source cannot both govern one run."
         )
     flag_issue = _redraw_flag_issue(split_cfg)
     if flag_issue:
         issues.append(flag_issue)
 
-    task_for_manifest = (model_source.get("task") if isinstance(model_source, dict) else None) \
+    task_for_selection = (model_source.get("task") if isinstance(model_source, dict) else None) \
         or data_cfg.get("task", "detection")
-    if task_for_manifest not in ("detection", "instance_seg"):
+    if task_for_selection not in ("detection", "instance_seg"):
         issues.append(
-            f"data.split.manifest_dir names a split manifest, and only detection and "
-            f"instance_seg admit through the trainable_stems draw a manifest is drawn "
-            f"through; task={task_for_manifest!r} cannot bind to one."
+            f"data.split.selection_dir names a selection, and only detection and instance_seg "
+            f"read the per-image label documents a selection's samples name; "
+            f"task={task_for_selection!r} cannot bind to one."
         )
         return issues, False
     return issues, True
 
 
-def _manifest_dependent_issues(config: dict, manifest: dict, manifest_dir: str) -> list[str]:
-    """Every objection that needs the manifest itself, read at ``manifest_dir``, to answer: the
-    shared scope check every manifest consumer shares (:func:`~tcip_mcp.pipelines.data.splits.
-    manifest_scope_issues`: subject/attribute agreement, the members block under the run's own
-    date, its images root, the images root not having moved) plus the sides narrowed to that date
-    not being empty (:func:`~tcip_mcp.pipelines.data.splits.empty_side_issue`), run first, then
-    the run's own ``data.date`` disagreeing with its ``data.labels_dir``'s date, appended after
-    rather than returned alone: a config wrong on both never hides the scope issue behind the
-    date one. Called only once :func:`_manifest_dir_conflicts`'s task check has passed and the
-    manifest has been read successfully; :func:`manifest_compatibility` composes both for a
-    caller with one manifest in hand, and ``preflight_config`` calls this directly so a failed
-    read never hides the other check's issues.
+def _selection_dependent_issues(
+    selection, selection_dir: str, data_cfg: dict | None = None,
+) -> list[str]:
+    """Every objection that needs the selection itself, read at ``selection_dir``, to answer.
+
+    A selection states its own subject, attribute and class map, and each of its samples states
+    its own source and ground truth, so a bound run reads its scope off the selection rather than
+    restating it. What remains: the selection names a subject to admit under; its train and val
+    sides are both populated, since a run needs both loaders; and, when ``data_cfg`` is given, the
+    config states no scope of its own that disagrees with the selection's, the refusal the bind
+    itself raises (:func:`~tcip_mcp.pipelines.data.split_construction.
+    _refuse_scope_disagreement`, called here rather than restated, so a launch cannot fail on a
+    disagreement this never named). Called only once :func:`_selection_dir_conflicts`' task check
+    has passed and the selection has been read successfully; :func:`selection_compatibility`
+    composes both for a caller with one selection in hand, and ``preflight_config`` calls this
+    directly so a failed read never hides the other check's issues.
     """
-    from tcip_mcp.dataset_layout import annotation_date
-    from tcip_mcp.pipelines.data.splits import empty_side_issue, manifest_scope_issues
-    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
+    from tcip_mcp.pipelines.data.split_construction import _refuse_scope_disagreement
 
-    model_source = config.get(MODEL_SOURCE_KEY)
-    data_cfg_raw = config.get("data")
-    data_cfg: dict = data_cfg_raw if isinstance(data_cfg_raw, dict) else {}
-    task_for_manifest = (model_source.get("task") if isinstance(model_source, dict) else None) \
-        or data_cfg.get("task", "detection")
-
-    norm_src = _dataset_source_kwargs(task_for_manifest, data_cfg)
-    subject, attribute = norm_src.get("subject"), norm_src.get("attribute")
-
-    labels_dir = data_cfg.get("labels_dir", "")
-    run_date = annotation_date(labels_dir)
-
-    issues, narrowing = manifest_scope_issues(
-        manifest, subject=subject, attribute=attribute, date=run_date,
-        images_dir=data_cfg.get("images_dir"), label="data.images_dir",
-        manifest_dir=manifest_dir,
-    )
-    if narrowing is not None:
-        issues.extend(empty_side_issue(narrowing, run_date))
-
-    declared_date = data_cfg.get("date")
-    if declared_date is not None and declared_date != run_date:
+    issues: list[str] = []
+    if data_cfg is not None:
+        try:
+            _refuse_scope_disagreement(data_cfg, selection, selection_dir)
+        except ValueError as exc:
+            issues.append(str(exc))
+    if not selection.subject:
         issues.append(
-            f"data.date={declared_date!r} disagrees with the date "
-            f"data.labels_dir={labels_dir!r} is under ({run_date!r}); a split "
-            "manifest binds under one date, so the negative confirmations and the "
-            "manifest must be read under the same one."
+            f"the selection at {selection_dir} records no subject: a run reads the subject it "
+            "admits under off the selection, and one drawn without a subject names no class "
+            "space to train over."
+        )
+    counts = selection.counts()
+    if not counts["train"] or not counts["val"]:
+        issues.append(
+            f"the selection at {selection_dir} leaves an empty side (train={counts['train']}, "
+            f"val={counts['val']}); a run needs both."
         )
     return issues
 
 
-def _redraw_starvation_issues(config: dict, manifest: dict, manifest_dir: str) -> list[str]:
-    """Whether ``data.split.redraw_within_manifest`` on ``config`` would starve a side, checked
-    over ``manifest`` before any run starts: the manifest's own train-plus-val identities for
-    this run's date, resolved through its recorded grouping
-    (:func:`~tcip_mcp.pipelines.data.splits.manifest_redraw_universe`), named by
+def _redraw_starvation_issues(config: dict, selection, selection_dir: str) -> list[str]:
+    """Whether ``data.split.redraw_within_selection`` on ``config`` would starve a side, checked
+    over ``selection`` before any run starts: its own train-plus-val samples, grouped by the keys
+    the draw recorded on them, named by
     :func:`~tcip_mcp.pipelines.data.splits.redraw_starved_issue` when fewer than two foreground
-    groups result, over the same subject- and attribute-scoped per-stem annotation counts the
-    child's own redraw counts at run time. An unrecognized ``group_by`` or an incomplete
-    ``group_key_map`` surfaces here too, the redraw's own by-name refusal for that case, phrased
-    under ``data.split`` like the drawn path's own group-policy check above.
+    groups result, over the same subject- and attribute-scoped per-sample annotation counts the
+    child's own redraw counts at run time.
     """
-    from tcip_mcp.dataset_layout import annotation_date
-    from tcip_mcp.pipelines.data.splits import (
-        count_label_lines, manifest_redraw_universe, redraw_starved_issue,
-    )
+    from pathlib import Path as _Path
 
-    data_cfg = config.get("data") or {}
-    split_cfg = data_cfg.get("split") or {}
-    run_date = annotation_date(data_cfg.get("labels_dir", ""))
-    try:
-        stems, group_key_fn = manifest_redraw_universe(manifest, run_date)
-    except ValueError as exc:
-        return [f"data.split.redraw_within_manifest: {exc}"]
-    labels_dir = data_cfg.get("labels_dir", "")
-    subject, attribute = data_cfg.get("subject"), data_cfg.get("attribute")
-    foreground_counts = {
-        s: count_label_lines(labels_dir, s, subject=subject, attribute=attribute) for s in stems
-    }
+    from tcip_mcp.pipelines.data.splits import count_label_lines, redraw_starved_issue
+
+    split_cfg = (config.get("data") or {}).get("split") or {}
+    pool = selection.on("train") + selection.on("val")
+    foreground = [
+        s.group for s in pool
+        if count_label_lines(_Path(s.ground_truth).parent, _Path(s.ground_truth).stem,
+                             subject=selection.subject, attribute=selection.attribute) > 0
+    ]
     starved = redraw_starved_issue(
-        stems, group_key_fn, foreground_counts=foreground_counts, manifest_dir=manifest_dir,
-        date=run_date, seed=split_cfg.get("seed"), group_by=manifest.get("group_by"),
+        [s.group for s in pool], foreground,
+        selection_dir=selection_dir, seed=split_cfg.get("seed"),
     )
     return [starved] if starved else []
 
 
-def manifest_compatibility(config: dict, manifest: dict, manifest_dir: str) -> list[str]:
-    """Every objection a launch binding ``config`` to ``manifest`` (read at ``manifest_dir``)
+def selection_compatibility(config: dict, selection, selection_dir: str) -> list[str]:
+    """Every objection a launch binding ``config`` to ``selection`` (read at ``selection_dir``)
     would raise, checked ahead of that launch rather than only inside it.
 
-    Composes :func:`_manifest_dir_conflicts` (config-only, computed before any manifest read)
-    with :func:`_manifest_dependent_issues` (needs the manifest in hand): between them, the
-    shared checks every other manifest consumer already carries,
-    :func:`~tcip_mcp.pipelines.data.splits.refuse_if_images_root_moved` (which the training
-    child, both inference entry points and calibration also call) and
-    :func:`_split_manifest_drawn_conflicts`, plus the subject, attribute, date and empty-side
-    comparisons. ``preflight_config`` calls
-    both directly, in the same order, so a manifest read failure never suppresses the
-    config-only issues; the data picker's :func:`list_split_choices` calls this one composed
-    function per candidate manifest, before Start, over a manifest it also read itself. Never
-    calls :func:`preflight_config`: that function imports the config's builder and scans its
-    labels, a cost neither caller here means to pay for a compatibility read.
+    Composes :func:`_selection_dir_conflicts` (config-only, computed before any read) with
+    :func:`_selection_dependent_issues` (needs the selection in hand). ``preflight_config`` calls
+    both directly, in the same order, so a read failure never suppresses the config-only issues;
+    the data picker's :func:`list_split_choices` calls this one composed function per candidate
+    selection, before Start, over a selection it also read itself. Never calls
+    :func:`preflight_config`: that function imports the config's builder and scans its labels, a
+    cost neither caller here means to pay for a compatibility read.
     """
-    issues, task_binds = _manifest_dir_conflicts(config)
+    issues, task_binds = _selection_dir_conflicts(config)
     if not task_binds:
         return issues
-    issues.extend(_manifest_dependent_issues(config, manifest, manifest_dir))
+    data_cfg = config.get("data")
+    issues.extend(_selection_dependent_issues(
+        selection, selection_dir, data_cfg if isinstance(data_cfg, dict) else None))
     return issues
 
 
-def candidate_config_with_manifest(config: dict, manifest_dir: str) -> dict:
-    """The launch config choosing ``manifest_dir`` over ``config``'s own "As recorded" data
-    section would build: ``data.split`` replaced wholesale by ``{"manifest_dir": manifest_dir}``
-    with any ``data.val_images_dir`` dropped, since a chosen partition supplies its own
-    validation source. The one implementation the data picker's own compatibility check
+def candidate_config_with_selection(config: dict, selection_dir: str) -> dict:
+    """The launch config choosing ``selection_dir`` over ``config``'s own "As recorded" data
+    section would build: ``data.split`` replaced wholesale by ``{"selection_dir": selection_dir}``,
+    with ``data.val_images_dir`` dropped, since a chosen partition supplies its own validation
+    source, and the recorded class scope (``subject``, ``attribute``, ``id_map``) dropped too,
+    since a bound run reads its scope off the selection. Keeping the previous scope would make
+    choosing a partition drawn for another subject refuse at the bind for a disagreement the
+    breeder never stated. The one implementation the data picker's own compatibility check
     (:func:`list_split_choices`) and the relaunch route's launch build both call, so an offer is
     exactly what would launch.
     """
     data_cfg_raw = config.get("data")
     data_cfg: dict = {**data_cfg_raw} if isinstance(data_cfg_raw, dict) else {}
-    data_cfg.pop("val_images_dir", None)
-    data_cfg["split"] = {"manifest_dir": manifest_dir}
+    for stale in ("val_images_dir", "subject", "attribute", "id_map"):
+        data_cfg.pop(stale, None)
+    data_cfg["split"] = {"selection_dir": selection_dir}
     return {**config, "data": data_cfg}
 
 # Lazy imports of heavy dependencies inside tool functions to keep server startup fast.
@@ -526,35 +515,41 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 issues.append(f"a .bandgroup manifest under {images_dir} could not be read: {exc}")
                 stems = []
             if stems:
-                from tcip_mcp.pipelines.data.splits import resolve_group_key_fn
+                from tcip_mcp.pipelines.data.label_queries import admission_date
+                from tcip_mcp.pipelines.data.splits import recorded_group_key_fn
                 try:
-                    resolve_group_key_fn(split_cfg_dict.get("group_by", "tile_prefix"), stems,
-                                         group_key_map=split_cfg_dict.get("group_key_map"))
+                    # Through the producers' own derivation, over the capture date they admit
+                    # under: resolving a second spelling here refuses the map the draw requires.
+                    recorded_group_key_fn(
+                        split_cfg_dict.get("group_by", "tile_prefix"),
+                        date=admission_date(data_cfg_dict.get("labels_dir", "")), stems=stems,
+                        group_key_map=split_cfg_dict.get("group_key_map"))
                 except ValueError as exc:
                     issues.append(f"data.split: {exc}")
 
-    # Config-only issues fire before the read, so a moved or absent manifest never hides them;
-    # bind_manifest_stems itself never runs here, only what the two halves can answer without it.
-    manifest_dir = split_cfg_dict.get("manifest_dir")
-    if manifest_dir:
-        from tcip_mcp.tools.data_tools import read_split_manifest_dir
+    # Config-only issues fire before the read, so a moved or absent selection never hides them.
+    selection_dir = split_cfg_dict.get("selection_dir")
+    if selection_dir:
+        from tcip_mcp.pipelines.data.selection import read_selection
 
-        conflict_issues, task_binds = _manifest_dir_conflicts(config)
+        conflict_issues, task_binds = _selection_dir_conflicts(config)
         issues.extend(conflict_issues)
         if task_binds:
             try:
-                manifest = read_split_manifest_dir(manifest_dir)
+                selection = read_selection(selection_dir)
             except ValueError as exc:
                 issues.append(str(exc))
             else:
-                issues.extend(_manifest_dependent_issues(config, manifest, manifest_dir))
-                if split_cfg_dict.get("redraw_within_manifest"):
+                issues.extend(_selection_dependent_issues(
+                    selection, selection_dir, data_cfg_dict))
+                if split_cfg_dict.get("redraw_within_selection"):
                     warnings.append(
-                        "data.split.redraw_within_manifest=true: this run redraws train and "
-                        "val inside the split manifest's own members for this date and seed; "
-                        "the manifest's calibration side stays untouched."
+                        "data.split.redraw_within_selection=true: this run redraws train and "
+                        "val inside the selection's own train and val samples at this seed; "
+                        "the selection's calibration side stays untouched."
                     )
-                    issues.extend(_redraw_starvation_issues(config, manifest, manifest_dir))
+                    issues.extend(
+                        _redraw_starvation_issues(config, selection, selection_dir))
 
     # Four-way spatial split feasibility (reserve_calibration_fraction, opt-in): must refuse by
     # name when infeasible, not silently degrade to no validation (see the helper's own docstring).
@@ -579,10 +574,13 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             contradicted_negatives: set[str] = set()
             from tcip_annotation.json_io import UnreadableLabelDocument
             try:
-                from tcip_mcp.pipelines.data.label_queries import trainable_stems
+                from tcip_mcp.pipelines.data.label_queries import (
+                    admission_date, trainable_stems,
+                )
                 stems, sample_counts = trainable_stems(
                     labels_dir, images_dir, subject=data_cfg.get("subject"),
-                    date=data_cfg.get("date"), contradicted_out=contradicted_negatives)
+                    date=admission_date(labels_dir),
+                    contradicted_out=contradicted_negatives)
             except UnreadableLabelDocument as exc:
                 stems, sample_counts = [], {}
                 # A run over this labels_dir fails on the same file, so this blocks, not warns.
@@ -1269,7 +1267,7 @@ def list_launchable_configs() -> list[dict]:
 
 
 def split_dir_identity(path: str) -> str:
-    """The normalized identity of a split-manifest directory: case-folded, symlinks resolved
+    """The normalized identity of a selection directory: case-folded, symlinks resolved
     (``os.path.normcase(str(Path(path).resolve()))``), so two differently spelled, cased or
     symlinked paths to the same directory compare equal. Shared by ``list_split_choices``
     (excluding a config's own binding from its candidates, deduping the rest) and the relaunch
@@ -1281,54 +1279,55 @@ def split_dir_identity(path: str) -> str:
 
 def list_split_choices(experiment_id: str) -> dict:
     """Every choice this config's own "Data" control offers a relaunch of ``experiment_id``: its
-    stored data section as recorded, and every split manifest directory this project's own bound
-    runs or the dataset's own ``splits`` directory hold, each compatibility-checked the identical
-    way a launch itself would check it.
+    stored data section as recorded, and every selection directory this project's own bound runs
+    or the dataset's own ``splits`` directory hold, each compatibility-checked the identical way a
+    launch itself would check it.
 
     Not agent-facing (not an ``@mcp.tool()``): a plain reader, importable by the agent's own
     scripts, wrapped by ``GET /api/training/configs/{experiment_id}/splits``. Never calls
     ``preflight_config`` (a demoted function that imports the picked config's builder and scans
-    its labels): every check here is :func:`manifest_compatibility` over a manifest this reader read
-    itself, through :func:`~tcip_mcp.tools.data_tools.read_split_manifest_dir_checked`, no second
-    presence test anywhere. A candidate manifest is checked against the config
-    :func:`candidate_config_with_manifest` builds (``data.split`` replaced wholesale,
+    its labels): every check here is :func:`selection_compatibility` over a selection this reader
+    read itself, through :func:`~tcip_mcp.pipelines.data.selection.read_selection_checked`, no
+    second presence test anywhere. A candidate selection is checked against the config
+    :func:`candidate_config_with_selection` builds (``data.split`` replaced wholesale,
     ``val_images_dir`` dropped), the identical shape the launch route builds, so an offer is
     exactly what would launch; "As recorded" is checked against the stored config unchanged
     (plus the directory-presence issues :func:`preflight_config` would raise, so a snapshot
     whose recorded directories moved shows the same words before Start that a launch would
     refuse it with).
 
-    The listing is thin: the manifest directories other enumerable experiment configs in this
+    The listing is thin: the selection directories other enumerable experiment configs in this
     project bound to (the picked config's own excluded, since it is "As recorded"), plus, when
     ``dataset_root_of(data.images_dir)`` resolves, that root's ``splits`` directory (offered only
-    when something is actually recorded there directly, the ``draw_splits`` default materializes
-    it, it does not always exist) and every directory one level under it holding a manifest
-    (where ``freeze_split_manifest`` writes a frozen run's own drawn partition). The own-binding
-    exclusion and the candidate dedupe compare each directory by :func:`split_dir_identity`
-    (folding both case and symlinks), so a differently spelled, cased or symlinked path to the
-    identical directory is never offered as if it were a second one.
+    when something is actually recorded there directly, the ``draw_splits`` default writes it, it
+    does not always exist) and every directory one level under it holding a selection (where
+    ``freeze_selection`` writes a frozen run's own drawn partition). The own-binding exclusion and
+    the candidate dedupe compare each directory by :func:`split_dir_identity` (folding both case
+    and symlinks), so a differently spelled, cased or symlinked path to the identical directory is
+    never offered as if it were a second one.
 
     Returns ``{"error": ...}`` for an unknown ``experiment_id`` (the route's own 404). Otherwise:
     ``{"as_recorded": {"case": "bound"|"drawn", "line": str, "compatible": bool,
-    "reason": str | None}, "manifests": [{"manifest_dir": str, "enabled": bool,
+    "reason": str | None}, "selections": [{"selection_dir": str, "enabled": bool,
     "reason": str | None, "seed": int | None, "group_by": str | None, "train": int, "val": int,
-    "calibration": int, "other_dates": int, "replaced_split_keys": list[str],
-    "origin": dict | None}, ...]}``. ``origin`` is the manifest's own ``{"experiment_id",
-    "frozen_at"}`` for a frozen manifest, ``None`` for a drawn one.
-    ``replaced_split_keys`` names every recorded ``data.split`` key other than ``manifest_dir``
-    choosing any offered partition drops, exactly what :func:`candidate_config_with_manifest`
+    "calibration": int, "replaced_split_keys": list[str], "origin": dict | None}, ...]}``.
+    ``origin`` is the selection's own ``{"experiment_id", "frozen_at"}`` for a frozen selection,
+    ``None`` for a drawn one. The counts are the selection's whole sides, not a narrowing: a
+    selection spans whatever capture dates its draw admitted, and every sample of it trains.
+    ``replaced_split_keys`` names every recorded ``data.split`` key other than ``selection_dir``
+    choosing any offered partition drops, exactly what :func:`candidate_config_with_selection`
     replaces wholesale, read from the stored config once and carried on every entry: the same
     set for every candidate, since it describes what the config's own recorded policy holds, not
     what a given candidate carries. The config a candidate launches never carries a seed
-    (:func:`candidate_config_with_manifest` replaces ``data.split`` outright), so this listing
+    (:func:`candidate_config_with_selection` replaces ``data.split`` outright), so this listing
     says nothing about a redraw either; that is the launched config's own concern.
-    A config naming no ``data.images_dir`` or ``data.labels_dir`` answers only ``as_recorded``
-    (``manifests`` always empty; there is nothing to narrow a candidate manifest's counts to).
+    A bound config anchors the search for sibling selections at its own selection's first sample
+    source; an unbound one at ``data.images_dir``. With neither readable, the answer carries only
+    ``as_recorded`` (``selections`` empty; there is no dataset root to look for candidates under).
     """
-    from tcip_mcp.dataset_layout import annotation_date, dataset_root_of
+    from tcip_mcp.dataset_layout import dataset_root_of
     from tcip_mcp.experiments import config_key, experiment_exists, experiment_ids_with_status, read_member
-    from tcip_mcp.pipelines.data.splits import narrow_manifest_to_date
-    from tcip_mcp.tools.data_tools import read_split_manifest_dir_checked
+    from tcip_mcp.pipelines.data.selection import read_selection_checked
 
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
@@ -1338,22 +1337,23 @@ def list_split_choices(experiment_id: str) -> dict:
     data_cfg = data_cfg if isinstance(data_cfg, dict) else {}
     split_cfg = data_cfg.get("split")
     split_cfg = split_cfg if isinstance(split_cfg, dict) else {}
-    own_manifest_dir = split_cfg.get("manifest_dir")
+    own_selection_dir = split_cfg.get("selection_dir")
     replaced_split_keys = sorted(
-        k for k, v in split_cfg.items() if k != "manifest_dir" and v is not None
+        k for k, v in split_cfg.items() if k != "selection_dir" and v is not None
     )
 
-    if own_manifest_dir:
+    own_selection = None
+    if own_selection_dir:
         as_recorded = {"case": "bound", "line": "on the partition it bound",
                        "compatible": True, "reason": None}
-        own_manifest, own_error = read_split_manifest_dir_checked(own_manifest_dir)
-        if own_manifest is None:
+        own_selection, own_error = read_selection_checked(own_selection_dir)
+        if own_selection is None:
             as_recorded["compatible"] = False
             as_recorded["reason"] = own_error or (
-                f"no split manifest recorded under {own_manifest_dir}; run draw_splits first."
+                f"no selection recorded under {own_selection_dir}; run draw_splits first."
             )
         else:
-            own_issues = manifest_compatibility(config, own_manifest, own_manifest_dir)
+            own_issues = selection_compatibility(config, own_selection, own_selection_dir)
             if own_issues:
                 as_recorded["compatible"] = False
                 as_recorded["reason"] = "; ".join(own_issues)
@@ -1374,16 +1374,21 @@ def list_split_choices(experiment_id: str) -> dict:
             combined_reason.insert(0, str(prior_reason))
         as_recorded["reason"] = "; ".join(combined_reason)
 
-    images_dir, labels_dir = data_cfg.get("images_dir"), data_cfg.get("labels_dir")
-    if not images_dir or not labels_dir:
-        return {"as_recorded": as_recorded, "manifests": []}
+    # A bound config names no directories, so its own selection's first sample source anchors
+    # the sibling search the way an unbound config's images_dir does.
+    if own_selection is not None and own_selection.samples:
+        root_anchor = str(Path(own_selection.samples[0].source).parent)
+    elif data_cfg.get("images_dir") and data_cfg.get("labels_dir"):
+        root_anchor = str(data_cfg["images_dir"])
+    else:
+        return {"as_recorded": as_recorded, "selections": []}
 
-    own_norm = split_dir_identity(own_manifest_dir) if own_manifest_dir else None
+    own_norm = split_dir_identity(own_selection_dir) if own_selection_dir else None
     candidate_dirs: list[str] = []
     seen: set[str] = set()
     for other_id in experiment_ids_with_status():
         if other_id == experiment_id:
-            # Its own manifest_dir is already own_manifest_dir, read once above; re-reading its
+            # Its own selection_dir is already own_selection_dir, read once above; re-reading its
             # config here to derive the identical fact a second time is work this listing skips.
             continue
         other_config = read_member(config_key(other_id), {})
@@ -1393,7 +1398,7 @@ def list_split_choices(experiment_id: str) -> dict:
         other_data = other_data if isinstance(other_data, dict) else {}
         other_split = other_data.get("split")
         other_split = other_split if isinstance(other_split, dict) else {}
-        candidate = other_split.get("manifest_dir")
+        candidate = other_split.get("selection_dir")
         if not candidate:
             continue
         candidate_norm = split_dir_identity(candidate)
@@ -1401,14 +1406,14 @@ def list_split_choices(experiment_id: str) -> dict:
             continue
         seen.add(candidate_norm)
         candidate_dirs.append(candidate)
-    dataset_root = dataset_root_of(images_dir)
+    dataset_root = dataset_root_of(root_anchor)
     if dataset_root is not None:
         default_dir = str(dataset_root / "splits")
         default_norm = split_dir_identity(default_dir)
         if default_norm != own_norm and default_norm not in seen:
             seen.add(default_norm)
             candidate_dirs.append(default_dir)
-        # One level down: where freeze_split_manifest writes a frozen run's own partition.
+        # One level down: where freeze_selection writes a frozen run's own partition.
         splits_dir = Path(default_dir)
         if splits_dir.is_dir():
             for sub in sorted(p for p in splits_dir.iterdir() if p.is_dir()):
@@ -1418,28 +1423,26 @@ def list_split_choices(experiment_id: str) -> dict:
                 seen.add(sub_norm)
                 candidate_dirs.append(str(sub))
 
-    run_date = annotation_date(labels_dir)
-    manifests: list[dict] = []
+    selections: list[dict] = []
     for candidate_dir in candidate_dirs:
-        manifest, error_text = read_split_manifest_dir_checked(candidate_dir)
-        if manifest is None:
+        selection, error_text = read_selection_checked(candidate_dir)
+        if selection is None:
             if error_text is None:
                 continue  # nothing recorded there; not a real candidate
-            manifests.append({
-                "manifest_dir": candidate_dir, "enabled": False, "reason": error_text,
+            selections.append({
+                "selection_dir": candidate_dir, "enabled": False, "reason": error_text,
                 "seed": None, "group_by": None, "train": 0, "val": 0, "calibration": 0,
-                "other_dates": 0, "replaced_split_keys": replaced_split_keys, "origin": None,
+                "replaced_split_keys": replaced_split_keys, "origin": None,
             })
             continue
-        candidate_config = candidate_config_with_manifest(config, candidate_dir)
-        issues = manifest_compatibility(candidate_config, manifest, candidate_dir)
-        narrowing = narrow_manifest_to_date(manifest, run_date)
+        candidate_config = candidate_config_with_selection(config, candidate_dir)
+        issues = selection_compatibility(candidate_config, selection, candidate_dir)
+        counts = selection.counts()
         entry: dict = {
-            "manifest_dir": candidate_dir, "seed": manifest.get("seed"),
-            "group_by": manifest.get("group_by"), "train": len(narrowing.train_ids),
-            "val": len(narrowing.val_ids), "calibration": len(narrowing.calibration_ids),
-            "other_dates": narrowing.other_dates, "replaced_split_keys": replaced_split_keys,
-            "origin": manifest.get("origin"),
+            "selection_dir": candidate_dir, "seed": selection.seed,
+            "group_by": selection.group_by, "train": counts["train"],
+            "val": counts["val"], "calibration": counts["calibration"],
+            "replaced_split_keys": replaced_split_keys, "origin": selection.origin,
         }
         if issues:
             entry["enabled"] = False
@@ -1447,9 +1450,9 @@ def list_split_choices(experiment_id: str) -> dict:
         else:
             entry["enabled"] = True
             entry["reason"] = None
-        manifests.append(entry)
+        selections.append(entry)
 
-    return {"as_recorded": as_recorded, "manifests": manifests}
+    return {"as_recorded": as_recorded, "selections": selections}
 
 
 @mcp.tool()
@@ -2228,15 +2231,14 @@ def run_hyperparameter_search(
             every strip by declared order alone, so no draw would hold a different partition out
             and the report's split sensitivity would be training-seed noise, not a split's.
             ``base_config`` bound to
-            a split manifest is admitted, not refused: its own copy gains
-            ``data.split.redraw_within_manifest: true``, defaulting ``data.split.seed`` to 42
+            a selection is admitted, not refused: its own copy gains
+            ``data.split.redraw_within_selection: true``, defaulting ``data.split.seed`` to 42
             when the bound config carries none, the same default an unset-seed drawn config
-            uses, so every trial redraws train and val inside the manifest's own train-plus-val
-            members at its own seed, calibration untouched, rather than training every trial on
-            the manifest's one recorded partition; refused before minting when the manifest's
-            own train-plus-val members for the base config's date resolve to fewer than two
-            foreground groups (a redraw could only starve a side). Otherwise refused, before
-            minting the sweep, when
+            uses, so every trial redraws train and val inside the selection's own train-plus-val
+            samples at its own seed, calibration untouched, rather than training every trial on
+            the selection's one recorded partition; refused before minting when those samples
+            resolve to fewer than two foreground groups (a redraw could only starve a side).
+            Otherwise refused, before minting the sweep, when
             ``base_config`` names ``data.val_images_dir`` (nothing to redraw), ``data.auto_val``
             is off or ``task`` sits outside the drawn path's own tasks, ``search_alg`` is not a
             native one (``random``/``grid``/``variant_generator``: only the native generator
@@ -2736,21 +2738,21 @@ def _selection_metric_axis_conflict(
 
 
 def _base_config_for_split_draws(base_config: dict, split_draws: int) -> dict:
-    """``base_config`` as ``run_hyperparameter_search`` mints the sweep from: unchanged unless ``split_draws`` is
-    above 1 and the config is bound to a split manifest, in which case a copy carries
-    ``data.split.redraw_within_manifest: true`` (defaulting ``data.split.seed`` to 42 when
-    absent, the same default every unset-seed config draws from), so every trial redraws train
-    and val inside the manifest's own members instead of running on its one recorded partition.
-    A caller who already set the flag (and a seed) by hand gets the same copy back in
+    """``base_config`` as ``run_hyperparameter_search`` mints the sweep from: unchanged unless
+    ``split_draws`` is above 1 and the config is bound to a selection, in which case a copy
+    carries ``data.split.redraw_within_selection: true`` (defaulting ``data.split.seed`` to 42
+    when absent, the same default every unset-seed config draws from), so every trial redraws
+    train and val inside the selection's own samples instead of running on its one recorded
+    partition. A caller who already set the flag (and a seed) by hand gets the same copy back in
     substance: an already-true flag or an already-set seed is left as it is.
     """
     if split_draws <= 1:
         return base_config
     data_cfg = base_config.get("data") or {}
     split_cfg = data_cfg.get("split") or {}
-    if not split_cfg.get("manifest_dir"):
+    if not split_cfg.get("selection_dir"):
         return base_config
-    new_split = {**split_cfg, "redraw_within_manifest": True}
+    new_split = {**split_cfg, "redraw_within_selection": True}
     new_split.setdefault("seed", 42)
     return {**base_config, "data": {**data_cfg, "split": new_split}}
 
@@ -2859,13 +2861,13 @@ def _split_draws_refusal(
     axis at one draw is its sibling's own refusal, not this one's: see
     :func:`caller_split_seed_refusal`.
 
-    ``base_config`` bound to a split manifest is admitted rather than refused: ``run_hyperparameter_search`` has
-    already set ``data.split.redraw_within_manifest`` on its own copy
-    (:func:`_base_config_for_split_draws`) before this call, so every trial redraws train and
-    val inside the manifest's own train-plus-val members instead of running on its one recorded
-    partition. A bound config reads neither ``val_images_dir`` nor ``auto_val`` (the manifest
-    branch binds ahead of both), so those two legs are skipped for it; in their place, the
-    manifest's own distinct-groups check runs once here so a sweep whose every trial would
+    ``base_config`` bound to a selection is admitted rather than refused:
+    ``run_hyperparameter_search`` has already set ``data.split.redraw_within_selection`` on its
+    own copy (:func:`_base_config_for_split_draws`) before this call, so every trial redraws train
+    and val inside the selection's own train-plus-val samples instead of running on its one
+    recorded partition. A bound config reads neither ``val_images_dir`` nor ``auto_val`` (the
+    selection branch binds ahead of both), so those two legs are skipped for it; in their place,
+    the selection's own foreground-groups check runs once here so a sweep whose every trial would
     starve a side is refused before minting rather than after every trial fails the same way.
 
     An unbound config gets its own last leg (:func:`_unbound_single_source_spatial_issue`): a
@@ -2881,7 +2883,7 @@ def _split_draws_refusal(
 
     data_cfg = base_config.get("data") or {}
     split_cfg = data_cfg.get("split") or {}
-    bound = bool(split_cfg.get("manifest_dir"))
+    bound = bool(split_cfg.get("selection_dir"))
     if not bound:
         if data_cfg.get("val_images_dir"):
             return ("split_draws redraws the split, and base_config names data.val_images_dir: "
@@ -2930,37 +2932,21 @@ def _split_draws_refusal(
 
 def _bound_redraw_starvation_issue(data_cfg: dict, split_cfg: dict) -> str | None:
     """Whether ``run_hyperparameter_search``'s ``split_draws`` minting a redraw sweep over a bound
-    ``base_config``'s manifest would starve every trial the identical way: the manifest's own
-    foreground-groups check (:func:`~tcip_mcp.pipelines.data.splits.manifest_redraw_universe`,
-    :func:`~tcip_mcp.pipelines.data.splits.redraw_starved_issue`), the same one
-    ``preflight_config`` runs for one config, run once here over the sweep's shared manifest and
-    date. ``None`` when the manifest reads and holds enough foreground groups.
+    ``base_config``'s selection would starve every trial the identical way: the selection's own
+    foreground-groups check (:func:`_redraw_starvation_issues`, the same one ``preflight_config``
+    runs for one config), run once here over the sweep's shared selection. ``None`` when the
+    selection reads and holds enough foreground groups.
     """
-    from tcip_mcp.dataset_layout import annotation_date
-    from tcip_mcp.pipelines.data.splits import (
-        count_label_lines, manifest_redraw_universe, redraw_starved_issue,
-    )
-    from tcip_mcp.tools.data_tools import read_split_manifest_dir
+    from tcip_mcp.pipelines.data.selection import read_selection
 
-    manifest_dir = split_cfg["manifest_dir"]
+    selection_dir = split_cfg["selection_dir"]
     try:
-        manifest = read_split_manifest_dir(manifest_dir)
+        selection = read_selection(selection_dir)
     except ValueError as exc:
         return f"split_draws: {exc}"
-    date = annotation_date(data_cfg.get("labels_dir", ""))
-    try:
-        stems, group_key_fn = manifest_redraw_universe(manifest, date)
-    except ValueError as exc:
-        return f"split_draws: {exc}"
-    labels_dir = data_cfg.get("labels_dir", "")
-    subject, attribute = data_cfg.get("subject"), data_cfg.get("attribute")
-    foreground_counts = {
-        s: count_label_lines(labels_dir, s, subject=subject, attribute=attribute) for s in stems
-    }
-    return redraw_starved_issue(
-        stems, group_key_fn, foreground_counts=foreground_counts, manifest_dir=manifest_dir,
-        date=date, seed=split_cfg.get("seed"), group_by=manifest.get("group_by"),
-    )
+    issues = _redraw_starvation_issues(
+        {"data": {**data_cfg, "split": split_cfg}}, selection, selection_dir)
+    return issues[0] if issues else None
 
 
 def _unbound_single_source_spatial_issue(task: str, data_cfg: dict, split_draws: int) -> str | None:
@@ -3016,7 +3002,7 @@ def _unbound_single_source_spatial_issue(task: str, data_cfg: dict, split_draws:
         "data.split.seed, or trains with no validation, or fails on a reserved calibration "
         "fraction; in every case no draw holds a different partition out and the spread would be "
         "training-seed noise. Run at split_draws=1, or sweep a dataset with two or more admitted "
-        "sources or a config bound to a split manifest."
+        "sources or a config bound to a selection."
     )
 
 
@@ -3043,9 +3029,9 @@ _SEED_AXIS_REMEDY = (
     "spread; drop data.split.seed from param_space and pass split_draws=<n> (with "
     "split_draw_seeds for chosen, distinct seeds), which pairs every seed with every point and "
     "picks the best by mean over draws. The paired path's own conditions apply, bound and "
-    "unbound alike: a config bound to a split manifest redraws train and val inside the "
-    "manifest's own members (the manifest must be readable, name a usable group_by, and "
-    "resolve at least two foreground groups for the config's date); an unbound config names no "
+    "unbound alike: a config bound to a selection redraws train and val inside the selection's "
+    "own train and val samples (the selection must be readable and resolve at least two "
+    "foreground groups across them); an unbound config names no "
     "data.val_images_dir and keeps auto_val on; the task is one with drawn splits; search_alg "
     "is one the native generator builds (random, grid, variant_generator, or unset); scheduler "
     "prunes nothing (none, fifo, or unset); split_draw_seeds is one per draw and distinct; no "
@@ -3057,7 +3043,7 @@ _SEED_AXIS_REMEDY = (
     "seed belongs in "
     "base_config's own data.split.seed: the drawn path's partition depends on it, and the "
     "single-source spatial path's, a config with "
-    "data.val_images_dir's, or a manifest-bound config's without redraw_within_manifest never "
+    "data.val_images_dir's, or a selection-bound config's without redraw_within_selection never "
     "does (the spatial path still records the config's value on the split record, a different "
     "fact, not claimed here)."
 )
@@ -3324,16 +3310,17 @@ def _dataset_source_kwargs(task: str, data_cfg: dict) -> dict:
     One definition shared by the training path and the preflight smoke, so the batch the contract
     is proved against is built from the same keys as the batch the run will train on.
 
-    ``data.date`` is the capture date the run's confirmed negatives were recorded under, threaded
-    so the build reads the bucket the GUI wrote instead of one taken from the labels path. A run
-    over ``annotations/<date>/`` sets it; a tree that carries no date leaves it unset.
+    No capture date rides here. Which human-confirmation bucket admitted a sample is a per-sample
+    fact the producer states on it (``directory_samples``), never a scalar on the run: one date
+    per config is the one-date-per-run limit, and a run whose samples span three dates answers
+    from three buckets. A directory build resolves the one bucket that directory carries through
+    ``label_queries.admission_date``, the declared inverse of the ``annotations/<date>/`` layout.
     """
     from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
 
     if task in ("detection", "instance_seg"):
         kw = {"images_dir": data_cfg.get("images_dir", ""),
-              "labels_dir": data_cfg.get("labels_dir", ""),
-              "date": data_cfg.get("date")}
+              "labels_dir": data_cfg.get("labels_dir", "")}
         # The run's subject (and optional attribute): required to read name-based labels and to
         # derive the single assign_class_ids map. Threaded so every train/val build uses one map.
         if data_cfg.get("subject"):
@@ -3476,7 +3463,7 @@ def evaluate_model(
     subject: str | None = None,
     attribute: str | None = None,
     date: str | None = None,
-    split_manifest_dir: str | None = None,
+    selection_dir: str | None = None,
 ) -> dict:
     """Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json.
 
@@ -3542,20 +3529,17 @@ def evaluate_model(
         date: The capture date this split's confirmed negatives were recorded under, the bucket
             key the delivery-grade path reads them by. A GT dir under ``annotations/<date>/``
             states that date; a split tree or a curated dataset carries none and leaves this
-            unset. Outside ``split_manifest_dir``, never recovered from ``labels_dir``; under it,
-            derived from ``labels_dir`` (``annotation_date``) the same way the manifest's own
-            universe is drawn, and a stated value that disagrees refuses, naming both, so the
-            negative confirmations and the calibration universe are always read under one date.
-        split_manifest_dir: Score the checkpoint over this split manifest's ``calibration``
-            members under ``labels_dir``'s own date instead of the whole directory: the same
-            subject/attribute/date/images-root checks the calibration door applies, refusing the
-            same way (detection/instance_seg only, and not combined with
-            ``use_tiled_inference``), except its own floor of one foreground group, since this
-            door draws no lock and halves nothing. ``test_results.json`` then records
-            ``split_manifest_dir`` and the evaluated stem count, the loader's own count, refused
-            by name (naming the difference and the remedy) when the loader admits fewer than the
-            universe the manifest drew, since the data moved under the manifest since the split
-            was drawn; omitted, the whole directory is scored.
+            unset. Never recovered from ``labels_dir``; a selection needs none, its samples having
+            been admitted under their own dates at the draw.
+        selection_dir: Score the checkpoint over this selection's ``calibration`` samples whose
+            label documents live under ``labels_dir`` instead of the whole directory, refusing by
+            name the way the calibration door does (detection/instance_seg only, and not combined
+            with ``use_tiled_inference``), except with its own floor of one foreground group,
+            since this door draws no lock and halves nothing. ``test_results.json`` then records
+            ``selection_dir`` and the evaluated stem count, the loader's own count, refused by
+            name (naming the difference and the remedy) when the loader admits fewer than the
+            universe the selection drew, since the data moved under the selection since the draw;
+            omitted, the whole directory is scored.
     """
     import torch
     from torch.utils.data import DataLoader
@@ -3605,36 +3589,32 @@ def evaluate_model(
     if attribute is None:
         attribute = run_data_cfg.get("attribute")
 
-    manifest_stems: list[str] | None = None
-    if split_manifest_dir is not None:
+    selection_stems: list[str] | None = None
+    selection_samples: dict[str, Any] = {}
+    selection_id_map: dict[str, int] | None = None
+    if selection_dir is not None:
         if task not in ("detection", "instance_seg"):
-            return {"error": f"split_manifest_dir names a split manifest, and only detection "
-                             f"and instance_seg admit through the trainable_stems draw a "
-                             f"manifest is drawn through; task={task!r} cannot bind to one."}
+            return {"error": f"selection_dir names a selection, and only detection and "
+                             f"instance_seg read the per-image label documents a selection's "
+                             f"samples name; task={task!r} cannot bind to one."}
         if use_tiled_inference:
-            return {"error": "split_manifest_dir is not combined with use_tiled_inference: that "
+            return {"error": "selection_dir is not combined with use_tiled_inference: that "
                              "delivery-grade path scans images_dir/labels_dir on its own, never "
-                             "narrowed to a manifest's stems."}
+                             "narrowed to a selection's samples."}
+        from tcip_mcp.pipelines.data.selection import read_selection
         from tcip_mcp.pipelines.data.splits import (
-            label_image_stems, resolve_manifest_calibration_universe,
+            label_image_stems, resolve_selection_calibration_universe,
         )
-        from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
-        manifest = read_split_manifest_dir(split_manifest_dir)
+        selection = read_selection(selection_dir)
         present, _ = label_image_stems(labels_dir, images_dir)
         try:
-            manifest_stems, _group_by, _group_key_map, _excluded, cal_date, subject, attribute = \
-                resolve_manifest_calibration_universe(
-                    manifest, split_manifest_dir, labels_dir, images_dir, subject, attribute,
-                    present, min_foreground_groups={"calibration": 1})
+            (selection_stems, _group_by, _group_key_map, _excluded, subject, attribute,
+             selection_samples) = resolve_selection_calibration_universe(
+                selection, labels_dir, present, min_foreground_groups={"calibration": 1})
         except ValueError as exc:
             return {"error": str(exc)}
-        if date is not None and date != cal_date:
-            return {"error": f"date={date!r} disagrees with the date labels_dir={labels_dir!r} "
-                             f"is under ({cal_date!r}); a split manifest binds under one date, "
-                             "so the negative confirmations and the calibration universe must be "
-                             "read under the same one."}
-        date = cal_date
+        selection_id_map = dict(selection.id_map) if selection.id_map else None
 
     # Delivery-grade full-frame path: conf_threshold/global_nms_iou/max_dets pass through exactly
     # as given, run_full_frame_evaluation resolves its own sentinels (a direct caller's record).
@@ -3668,29 +3648,51 @@ def evaluate_model(
     # doubles as the CSV path for the non-geometry tasks, the same
     # single "wherever this task's GT lives" slot it already serves for masks_dir/semantic_seg.
     data_cfg = {"images_dir": images_dir, "labels_dir": labels_dir, "masks_dir": labels_dir,
-                "csv_path": labels_dir, "subject": subject, "attribute": attribute, "date": date}
+                "csv_path": labels_dir, "subject": subject, "attribute": attribute}
     ds_kwargs = _dataset_source_kwargs(task, data_cfg)
-    if manifest_stems is not None:
-        ds_kwargs["stems"] = manifest_stems
+    universe: list[Any] = []
+    if selection_stems is not None:
+        from tcip_mcp.pipelines.data.label_queries import refuse_inadmissible_samples
+
+        universe = [selection_samples[s] for s in selection_stems]
+        # A sample-built loader indexes exactly what it is handed, so a label emptied since the
+        # draw measures as an image with no objects unless the admission refuses it here.
+        try:
+            refuse_inadmissible_samples(
+                universe, attribute=attribute or None, id_map=selection_id_map)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+    evaluated_stem_count = None
     try:
-        dataset = build_dataset(task, **ds_kwargs, tiling=tiling)
+        if selection_stems is not None:
+            # Built from the universe's own recorded samples, so the pixels measured are the ones
+            # the draw held out rather than whatever a same-named file holds today.
+            dataset = build_dataset(
+                task, samples=universe, subject=subject, attribute=attribute,
+                id_map=selection_id_map, tiling=tiling)
+        else:
+            dataset = build_dataset(task, **ds_kwargs, tiling=tiling)
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Failed to build dataset: {exc}"}
 
-    evaluated_stem_count = None
-    if manifest_stems is not None:
-        loader_stems = list(getattr(dataset, "stems", []) or [])
-        evaluated_stem_count = len(loader_stems)
-        if evaluated_stem_count < len(manifest_stems):
-            missing = sorted(set(manifest_stems) - set(loader_stems))
-            preview = missing[:10]
-            more = f" (+{len(missing) - 10} more)" if len(missing) > 10 else ""
-            return {"error": f"the split manifest's calibration universe for date {date!r} "
-                             f"holds {len(manifest_stems)} stem(s), but the loader admitted only "
-                             f"{evaluated_stem_count}: {preview}{more}. The data moved under the "
-                             "manifest since the split was drawn (a label emptied, a "
-                             "confirmation withdrawn); regenerate the split over the current "
-                             "data."}
+    if selection_stems is not None:
+        from tcip_mcp.pipelines.data.datasets import indexed_sample_keys
+
+        # Admission answers for the samples; this answers for the loader built from them, which
+        # tiling can leave naming no example at all for a held-out source.
+        retained = indexed_sample_keys(dataset)
+        dropped = sorted(s for s in selection_stems
+                         if selection_samples[s].identity not in retained)
+        if dropped:
+            return {"error": f"the selection's calibration universe under {labels_dir!r} holds "
+                             f"{len(selection_stems)} sample(s), and the loader indexes nothing "
+                             f"for {len(dropped)} of them ({dropped[:5]}). This run's tiling keeps "
+                             "no tile of those sources, so the measurement would be taken over "
+                             "part of the universe the draw held out and reported as the whole of "
+                             "it. Widen the tiling's keep regions, stop skipping empty tiles, or "
+                             "evaluate untiled."}
+        evaluated_stem_count = len(retained)
 
     loader = DataLoader(dataset, batch_size=4, collate_fn=task_collate(task))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -3701,6 +3703,6 @@ def evaluate_model(
         checkpoint, loader, device, task, str(Path(ckpt).parent),
         conf_threshold=applied_conf, iou_threshold=iou_threshold,
         iou_type=iou_type, max_dets=resolved_max_dets, tiling=tiling, trait=trait,
-        split_manifest_dir=split_manifest_dir,
+        selection_dir=selection_dir,
         evaluated_stem_count=evaluated_stem_count,
     )

@@ -254,7 +254,7 @@ describe("TuningTab sweep row actions", () => {
     expect(await screen.findByText(/4 trials planned, 3 draws each/)).toBeInTheDocument();
   });
 
-  it("names the bound manifest on the draws line when the base config redraws inside it", async () => {
+  it("names the bound selection on the draws line when the base config redraws inside it", async () => {
     vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
       sweeps: [
         sweep({
@@ -262,7 +262,7 @@ describe("TuningTab sweep row actions", () => {
           status: "running",
           n_trials: 4,
           split_draws: 2,
-          redraws_within_manifest: true,
+          redraws_within_selection: true,
         }),
       ],
     });
@@ -276,7 +276,7 @@ describe("TuningTab sweep row actions", () => {
     render(<TuningTab />);
     fireEvent.click(await screen.findByText("hpo-redraw-1"));
     expect(
-      await screen.findByText(/4 trials planned, 2 draws each inside the bound manifest/),
+      await screen.findByText(/4 trials planned, 2 draws each inside the bound selection/),
     ).toBeInTheDocument();
   });
 
