@@ -579,7 +579,7 @@ def test_resolver_selection_disjointness_reads_a_declared_documents_result():
         "applicable": True, "reason": None, "checked": True, "unresolvable": False,
         "leaked_groups": [], "leaked_stems": [], "group_check": "performed",
         "labels_moved_draw_to_run": None, "labels_moved_run_to_now": None,
-        "calibration_labels_moved": None, "manifest_redrawn": None,
+        "calibration_labels_moved": None, "selection_redrawn": None,
         "calibration_labels_dir": None}
 
 
@@ -596,7 +596,7 @@ def test_resolver_selection_disjointness_carries_the_leak_fields():
         "applicable": True, "reason": None, "checked": True, "unresolvable": False,
         "leaked_groups": ["g1"], "leaked_stems": ["s1"], "group_check": "performed",
         "labels_moved_draw_to_run": None, "labels_moved_run_to_now": None,
-        "calibration_labels_moved": None, "manifest_redrawn": None,
+        "calibration_labels_moved": None, "selection_redrawn": None,
         "calibration_labels_dir": None}
 
 

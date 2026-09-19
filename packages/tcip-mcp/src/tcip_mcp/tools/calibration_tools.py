@@ -31,7 +31,7 @@ def redraw_calibration_holdout(
     seed: int = 0,
     holdout_ratio: float = 0.5,
     reason: str = "",
-    split_manifest_dir: str | None = None,
+    selection_dir: str | None = None,
     subject: str | None = None,
     attribute: str | None = None,
 ) -> dict:
@@ -45,7 +45,7 @@ def redraw_calibration_holdout(
     ``redraw_history`` with its policy, seed, and the old and new split's content hashes, so a
     redraw-until-it-passes pattern is visible on review even though nothing here enforces that a
     reason differ from a prior one; the old and new split membership itself is recorded in the
-    dataset's own audit log alongside the reason (and, when given, ``split_manifest_dir``), not
+    dataset's own audit log alongside the reason (and, when given, ``selection_dir``), not
     in ``redraw_history``; the defense is a reviewable audit trail, not an automatic block.
 
     Provide either ``labels_dir`` (the identity is derived as ``dataset_hash(labels_dir)``, and
@@ -68,51 +68,48 @@ def redraw_calibration_holdout(
             whose image was deleted/renamed never enters the redraw's stem universe. Omitted ->
             every labeled stem is used regardless of whether an image still exists for it, for a
             caller that has no images directory to check against; required alongside
-            ``split_manifest_dir``, whose universe must be the same one a manifest-restricted
+            ``selection_dir``, whose universe must be the same one a selection-restricted
             calibration draws.
         identity_hash: The locked split's identity hash directly.
         group_by: New grouping policy, ``"tile_prefix"`` / ``"stem"`` (ignored if
             ``group_key_map`` is given). ``None`` (default) resolves to ``"tile_prefix"`` when
-            neither this nor a manifest was given; a value beside ``split_manifest_dir`` conflicts
-            with the manifest's own grouping policy and refuses, naming both.
+            neither this nor a selection was given; a value beside ``selection_dir`` conflicts
+            with the group keys the selection recorded and refuses, naming both.
         group_key_map: Explicit ``{stem: group_key}`` map covering every stem, overriding
-            ``group_by``. Conflicts with ``split_manifest_dir`` the same way ``group_by`` does.
+            ``group_by``. Conflicts with ``selection_dir`` the same way ``group_by`` does.
         seed: New split seed.
         holdout_ratio: New calibration/holdout fraction.
         reason: Required, non-empty justification for this redraw, recorded in the dataset's own
             audit log alongside the old and new split membership.
-        split_manifest_dir: Restrict the redraw's universe to one capture date's ``calibration``
-            side of a split manifest (``data_tools.read_split_manifest_dir``), the same
+        selection_dir: Restrict the redraw's universe to a selection's ``calibration`` samples
+            under ``labels_dir`` (``pipelines.data.selection.read_selection``), the same
             restriction ``run_inference`` applies, instead of every labelled stem with an image.
-            Requires ``labels_dir`` and ``subject``: the manifest's own subject/attribute must equal
-            ``subject``/``attribute``, the date ``labels_dir`` is under must be one the manifest
-            holds members under, and the manifest's ``images_root`` for that date must be
-            ``images_dir``, each refusing by name. The identity is
+            Requires ``labels_dir``, ``images_dir`` and ``subject``. The identity is
             ``dataset_hash(labels_dir, stems=universe)`` rather than the whole directory's hash,
-            so the redraw addresses the same lock a manifest-restricted calibration locked.
-        subject: The object class ``split_manifest_dir``'s admission was drawn for; required
+            so the redraw addresses the same lock a selection-restricted calibration locked.
+        subject: The object class ``selection_dir``'s admission was drawn for; required
             alongside it.
-        attribute: The attribute ``split_manifest_dir``'s admission was scoped to, when it was.
+        attribute: The attribute ``selection_dir``'s admission was scoped to, when it was.
     """
     if not reason or not reason.strip():
         return {"error": "reason is required (a non-empty justification) for a force_redraw"}
     if not labels_dir and not identity_hash:
         return {"error": "provide either labels_dir or identity_hash"}
-    if split_manifest_dir is not None:
+    if selection_dir is not None:
         if not labels_dir:
-            return {"error": "split_manifest_dir requires labels_dir: the universe is drawn "
-                             "from the manifest's held-out members under the labels' own date."}
+            return {"error": "selection_dir requires labels_dir: the universe is drawn "
+                             "from the selection's held-out samples under that directory."}
         if not subject:
-            return {"error": "split_manifest_dir requires subject: the manifest's own subject "
-                             "must be checked against the door's."}
+            return {"error": "selection_dir requires subject: the object class the redrawn "
+                             "universe's foreground is counted for."}
         if not images_dir:
-            return {"error": "split_manifest_dir requires images_dir: a labels-only universe "
+            return {"error": "selection_dir requires images_dir: a labels-only universe "
                              "can include a stem whose image is gone, a lock the redraw would "
-                             "address that no manifest-restricted calibration ever draws."}
+                             "address that no selection-restricted calibration ever draws."}
         if group_by is not None or group_key_map is not None:
-            return {"error": f"split_manifest_dir={split_manifest_dir!r} conflicts with "
-                             "group_by/group_key_map: the manifest's own grouping policy governs "
-                             "the redraw; pass neither beside it."}
+            return {"error": f"selection_dir={selection_dir!r} conflicts with "
+                             "group_by/group_key_map: the group keys the selection recorded "
+                             "govern the redraw; pass neither beside it."}
 
     from datetime import datetime, timezone
 
@@ -126,21 +123,18 @@ def redraw_calibration_holdout(
     )
     from tcip_mcp.pipelines.resolution import dataset_hash
 
-    manifest_stems: list[str] | None = None
-    if split_manifest_dir is not None:
-        from tcip_mcp.pipelines.data.splits import (
-            label_image_stems, resolve_manifest_calibration_universe,
-        )
-        from tcip_mcp.tools.data_tools import read_split_manifest_dir
+    selection_stems: list[str] | None = None
+    if selection_dir is not None:
+        from tcip_mcp.pipelines.data.selection import read_selection
+        from tcip_mcp.pipelines.data.splits import resolve_selection_calibration_universe
 
-        assert labels_dir is not None, "the split_manifest_dir refusal above requires it"
-        manifest = read_split_manifest_dir(split_manifest_dir)
+        assert labels_dir is not None, "the selection_dir refusal above requires it"
+        selection = read_selection(selection_dir)
         present, _ = label_image_stems(labels_dir, images_dir)
         try:
-            manifest_stems, group_by, group_key_map, _excluded, cal_date, subject, attribute = \
-                resolve_manifest_calibration_universe(
-                    manifest, split_manifest_dir, labels_dir, images_dir, subject, attribute,
-                    present)
+            (selection_stems, group_by, group_key_map, _excluded, subject, attribute,
+             _samples) = resolve_selection_calibration_universe(
+                selection, labels_dir, present)
         except ValueError as exc:
             return {"error": str(exc)}
 
@@ -157,7 +151,7 @@ def redraw_calibration_holdout(
         assert labels_dir is not None, "the earlier refusal above requires one of the two"
         # dataset_hash enumerates through prediction_documents and hashes each file's raw bytes;
         # it never parses one, so it cannot raise the named error the other reads here guard for.
-        identity_hash = dataset_hash(labels_dir, stems=manifest_stems)
+        identity_hash = dataset_hash(labels_dir, stems=selection_stems)
 
     try:
         old_lock = store.read(cal_holdout_lock_key(identity_hash, scope_root=scope_root),
@@ -171,10 +165,10 @@ def redraw_calibration_holdout(
     old_membership = ({"calibration": old_lock.get("calibration", []),
                        "holdout": old_lock.get("holdout", [])} if old_lock else None)
 
-    if manifest_stems is not None:
-        # Set only inside the split_manifest_dir branch above, which already required labels_dir.
-        assert labels_dir is not None, "manifest_stems is only set where labels_dir was required"
-        stems = manifest_stems
+    if selection_stems is not None:
+        # Set only inside the selection_dir branch above, which already required labels_dir.
+        assert labels_dir is not None, "selection_stems is only set where labels_dir was required"
+        stems = selection_stems
         try:
             annotation_counts = {
                 s: count_label_lines(labels_dir, s, subject=subject, attribute=attribute)
@@ -206,7 +200,7 @@ def redraw_calibration_holdout(
         group_by=(group_by or "tile_prefix"), group_key_map=group_key_map,
         holdout_ratio=holdout_ratio, seed=seed,
         force_redraw=True, timestamp=datetime.now(timezone.utc).isoformat(),
-        split_manifest_dir=split_manifest_dir,
+        selection_dir=selection_dir,
     )
     new_membership = {"calibration": new_lock["calibration"], "holdout": new_lock["holdout"]}
 
@@ -216,7 +210,7 @@ def redraw_calibration_holdout(
         "redraw_calibration_holdout_result",
         {"identity_hash": identity_hash, "group_by": group_by, "group_key_map": group_key_map,
          "seed": seed, "holdout_ratio": holdout_ratio, "reason": reason,
-         "split_manifest_dir": split_manifest_dir},
+         "selection_dir": selection_dir},
         scope=dataset_scope_of(str(scope_root)),
         old_membership=old_membership, new_membership=new_membership,
     )
@@ -289,8 +283,8 @@ def calibrate_scalar_operating_point(
     distinct from every other operating-point sidecar (see
     ``resolution.read_ordinal_operating_point_sidecar``/``read_regression_operating_point_sidecar``).
 
-    This door takes no split manifest: its universe is the CSV's own stems, and no split manifest
-    is drawn over a CSV-sourced scalar trait.
+    This door takes no selection: its universe is the CSV's own stems, and no selection is drawn
+    over a CSV-sourced scalar trait.
 
     A stamp that claims validation names the record it was earned from, the same two phases the
     classifier door goes through: ``resolution.open_validation`` runs the gate over the evidence,
@@ -473,7 +467,7 @@ def calibrate_count_operating_point(
     experiment_id: str | None = None,
     group_by: str | None = None,
     group_key_map: dict[str, str] | None = None,
-    split_manifest_dir: str | None = None,
+    selection_dir: str | None = None,
     val_ratio: float = 0.5,
     seed: int = 0,
     device: str | None = None,
@@ -549,8 +543,8 @@ def calibrate_count_operating_point(
             foreign/unregistered checkpoint) skips that check.
         group_by / group_key_map: The locked cal/holdout split's grouping policy; only the first
             call for this labels_dir's identity draws the split.
-        split_manifest_dir: Restrict the calibration universe to one capture date's calibration
-            side of a split manifest instead of every labeled stem; requires ``subject``, and
+        selection_dir: Restrict the calibration universe to a selection's calibration samples
+            under the labels directory instead of every labeled stem; requires ``subject``, and
             conflicts with ``group_by``/``group_key_map``.
         val_ratio / seed: The locked split's holdout fraction and seed; take effect only on the
             first draw for this labels_dir's identity.
@@ -637,7 +631,7 @@ def calibrate_count_operating_point(
             images_dir=images_dir, dataset_root=dataset_root,
             project_root=str(platform_state_root()), subject=subject, attribute=attribute,
             experiment_id=experiment_id, group_by=group_by, group_key_map=group_key_map,
-            split_manifest_dir=split_manifest_dir, val_ratio=val_ratio, seed=seed, device=device,
+            selection_dir=selection_dir, val_ratio=val_ratio, seed=seed, device=device,
         )
     except (ValueError, UnregisteredCheckpoint) as exc:
         return {"error": str(exc)}

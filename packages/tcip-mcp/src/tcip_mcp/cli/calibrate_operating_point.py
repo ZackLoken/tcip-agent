@@ -13,7 +13,7 @@ Usage:
         --labels-dir <labeled_dir> --images-dir <images_dir> \
         --dataset-root <dataset_root> --project-root <project_root> \
         [--experiment-id <id>] [--val-ratio 0.5] [--device cpu] [--subject <subject>] \
-        [--attribute <attribute>] [--split-manifest-dir <dir>]
+        [--attribute <attribute>] [--selection-dir <dir>]
 
 The checkpoint must be named by a registry entry under --project-root (register it with
 register_model first); this script refuses one it is not, naming the digest and the root.
@@ -57,23 +57,22 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                         help="Grouping policy for the cal/holdout split: 'tile_prefix' (strips a "
                              "trailing _<x>_<y> tile offset) or 'stem' (one group per image). "
                              "Ignored if --group-key-map is given. Omitted, resolves to "
-                             "'tile_prefix' when neither this nor --split-manifest-dir was given; "
-                             "conflicts with --split-manifest-dir, whose own grouping policy "
+                             "'tile_prefix' when neither this nor --selection-dir was given; "
+                             "conflicts with --selection-dir, whose own grouping policy "
                              "governs the locked draw instead.")
     parser.add_argument("--group-key-map", default=None,
                         help="Path to a JSON file mapping stem -> group key, overriding --group-by.")
     parser.add_argument("--subject", default=None,
                         help="The object class to read name-based labels for. Required with "
-                             "--split-manifest-dir; a run's own admission needs one too.")
+                             "--selection-dir; a run's own admission needs one too.")
     parser.add_argument("--attribute", default=None,
                         help="Scope the draw to instances already assessed for this attribute "
                              "of --subject.")
-    parser.add_argument("--split-manifest-dir", default=None,
-                        help="Restrict the calibration universe to one capture date's "
-                             "calibration side of a split manifest (draw_splits' output "
-                             "directory) instead of every labeled stem, the same restriction "
-                             "run_inference applies. Conflicts with --group-by/--group-key-map; "
-                             "requires --subject.")
+    parser.add_argument("--selection-dir", default=None,
+                        help="Restrict the calibration universe to a selection's own calibration "
+                             "side (draw_splits' output directory) instead of every labeled stem, "
+                             "the same restriction run_inference applies. Conflicts with "
+                             "--group-by/--group-key-map; requires --subject.")
     args = parser.parse_args(argv)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
@@ -97,7 +96,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
             images_dir=args.images_dir, dataset_root=args.dataset_root,
             project_root=args.project_root, subject=args.subject, attribute=args.attribute,
             experiment_id=args.experiment_id, group_by=args.group_by, group_key_map=group_key_map,
-            split_manifest_dir=args.split_manifest_dir, val_ratio=args.val_ratio, seed=args.seed,
+            selection_dir=args.selection_dir, val_ratio=args.val_ratio, seed=args.seed,
             device=args.device,
         )
     except (UnregisteredCheckpoint, CalibrationUsageError) as exc:

@@ -310,18 +310,20 @@ def test_materialize_dataset_dims_from_the_grouped_capture(tmp_path):
 # ── tools/data_tools.py: draw_splits(materialize=True) ───────────────────────────────────
 
 
-def test_draw_splits_materialize_resolves_a_grouped_capture(grouped_dataset):
-    """A materialized split places every sibling band a group names plus its manifest, not the
-    manifest alone: the manifest resolves to nothing once its siblings are absent."""
+def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(grouped_dataset):
+    """A drawn selection names a grouped capture by the manifest sitting beside its bands, and
+    that path resolves back to the whole group in place: the group's bands are read where they
+    were captured, never copied into a side's own directory."""
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.image_utils import resolve_image_source
+    from tcip_mcp.pipelines.data.selection import read_selection
+    from tcip_mcp.pipelines.image_utils import resolve_source_path
     from tcip_mcp.tools.data_tools import draw_splits
 
-    # The fixture's own two groups (capture_001, plain_002) need two more to clear a manifest
-    # write's foreground floor, added here rather than in the shared fixture.
+    # The fixture's own two groups (capture_001, plain_002) need two more to clear a draw's
+    # foreground floor, added here rather than in the shared fixture.
     images_dir = grouped_dataset / "images" / "2026-04-01"
     labels_dir = grouped_dataset / "annotations" / "2026-04-01"
     for stem in ("plain_003", "plain_004"):
@@ -332,16 +334,15 @@ def test_draw_splits_materialize_resolves_a_grouped_capture(grouped_dataset):
         )
 
     out = grouped_dataset / "splits"
-    result = draw_splits(str(grouped_dataset), output_path=str(out), materialize=True,
+    result = draw_splits(str(grouped_dataset), output_path=str(out),
                          subject="bud", train_ratio=0.5, val_ratio=0.25,
                          calibration_ratio=0.25)
     assert "error" not in result, result
 
-    split_dir = next(
-        out / s / "images" for s in ("train", "val", "calibration")
-        if (out / s / "images" / "capture_001.bandgroup").is_file()
-    )
-    resolved = resolve_image_source(split_dir, "capture_001")
+    drawn = read_selection(out)
+    grouped = next(s for s in drawn.samples if Path(s.source).stem == "capture_001")
+    assert Path(grouped.source).parent == images_dir  # read in place, never copied
+    resolved = resolve_source_path(grouped.source)
     assert isinstance(resolved, BandGroupRef)
     assert all(p.is_file() for p in resolved.bands.values())
 

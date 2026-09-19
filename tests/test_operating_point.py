@@ -389,41 +389,41 @@ def test_resolve_operating_point_cal_rects_switches_to_geometric_check(tmp_path,
 # --- Selection-disjointness: a checkpoint's own held-out (val) side, not its train side -----
 
 def _persist_run_split(experiment_id, tmp_path, *, date, train, val,
-                       group_by=None, manifest_dir=None):
+                       group_by=None, selection_dir=None):
     """A real ``split.json`` for one producing run, written through the platform's own
-    ``persist_split_manifest``, never composed by hand: ``train``/``val`` are bare stems under
+    ``persist_run_partition``, never composed by hand: ``train``/``val`` are bare stems under
     ``date``, ``group_by`` an already-resolved policy (``"external"``/``"spatial_strip"``/a named
-    strategy), and ``manifest_dir`` (when given) records the run as bound to that manifest."""
+    strategy), and ``selection_dir`` (when given) records the run as bound to that selection."""
     from types import SimpleNamespace
 
     from tcip_mcp.experiments import create_experiment, experiment_exists
-    from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
 
     if not experiment_exists(experiment_id):
         create_experiment(experiment_id, {})
     split_cfg: dict = {}
     if group_by is not None:
         split_cfg["resolved_group_by"] = group_by
-    if manifest_dir is not None:
-        split_cfg["manifest_binding"] = {"manifest_dir": manifest_dir}
+    if selection_dir is not None:
+        split_cfg["selection_binding"] = {"selection_dir": selection_dir}
     data_cfg = {"labels_dir": str(tmp_path / "annotations" / date), "split": split_cfg}
     train_ds = SimpleNamespace(stems=list(train))
     val_ds = SimpleNamespace(stems=list(val))
-    persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
+    persist_run_partition(experiment_id, train_ds, val_ds, data_cfg)
 
 
 def test_selection_disjointness_leaked_whole_directory_calibration_of_a_bound_checkpoint(
     tmp_path, monkeypatch,
 ):
     """A checkpoint bound to a manifest, calibrated over the whole labelled directory on its own
-    date (no split_manifest_dir stated for this particular calibration), still sweeps its own
+    date (no selection_dir stated for this particular calibration), still sweeps its own
     selection members and floors with the token: the check runs whenever the record carries a
-    manifest_binding, whether or not this calibration itself names one."""
+    selection_binding, whether or not this calibration itself names one."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     date = "2-11-26"
     _persist_run_split(
         "exp_sel_leak_whole", tmp_path, date=date, train=["z"], val=["c_0"],
-        group_by="tile_prefix", manifest_dir="some/manifest",
+        group_by="tile_prefix", selection_dir="some/selection",
     )
 
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -431,11 +431,14 @@ def test_selection_disjointness_leaked_whole_directory_calibration_of_a_bound_ch
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
         "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
-        staged_conf_floor=0.01, experiment_id="exp_sel_leak_whole", calibration_date=date,
+        staged_conf_floor=0.01, experiment_id="exp_sel_leak_whole",
+        calibration_labels_dir=str(tmp_path / "annotations" / date),
     )
     sd = b.get("conf").gate_evidence["selection_disjointness"]
     assert sd["applicable"] is True
-    assert sd["leaked_groups"] == ["c_0"]
+    # The leaked group carries the capture date its one recorded labels directory scopes it by,
+    # the key every producer of a recorded group key writes.
+    assert sd["leaked_groups"] == [f"{date}/c_0"]
     assert "selection_disjointness_leaked" in b.get("conf").gate_evidence["failures"]
     assert b.get("conf").validated_against == "false"
 
@@ -459,19 +462,25 @@ def test_selection_disjointness_leaked_manifest_calibration_of_a_self_drawn_chec
     b = resolve_operating_point(
         "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_leak_manifest",
-        split_manifest_dir="some/manifest", calibration_date=date,
+        selection_dir="some/selection",
+        calibration_labels_dir=str(tmp_path / "annotations" / date),
     )
     sd = b.get("conf").gate_evidence["selection_disjointness"]
     assert sd["applicable"] is True
-    assert sd["leaked_groups"] == ["c_0"]
+    assert sd["leaked_groups"] == [f"{date}/c_0"]
     assert "selection_disjointness_leaked" in b.get("conf").gate_evidence["failures"]
 
 
-def test_selection_disjointness_not_applicable_across_dates(tmp_path, monkeypatch):
+def test_selection_disjointness_not_applicable_under_another_labels_directory(
+    tmp_path, monkeypatch,
+):
+    """A bare stem names one image only within one label directory, so a calibration reading
+    another directory than the run's own members live under is not-applicable with that reason,
+    never a leak reported off two same-named files."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     _persist_run_split(
-        "exp_sel_other_date", tmp_path, date="2-11-26", train=["z"], val=["c_0", "h_0"],
-        manifest_dir="some/manifest",
+        "exp_sel_other_dir", tmp_path, date="2-11-26", train=["z"], val=["c_0", "h_0"],
+        selection_dir="some/selection",
     )
 
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -479,8 +488,9 @@ def test_selection_disjointness_not_applicable_across_dates(tmp_path, monkeypatc
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
         "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
-        staged_conf_floor=0.01, experiment_id="exp_sel_other_date",
-        split_manifest_dir="some/manifest", calibration_date="2-12-01",
+        staged_conf_floor=0.01, experiment_id="exp_sel_other_dir",
+        selection_dir="some/selection",
+        calibration_labels_dir=str(tmp_path / "annotations" / "2-12-01"),
     )
     sd = b.get("conf").gate_evidence["selection_disjointness"]
     assert sd["applicable"] is False and sd["reason"]
@@ -492,7 +502,7 @@ def test_selection_disjointness_not_applicable_on_a_spatial_record(tmp_path, mon
     date = "2-11-26"
     _persist_run_split(
         "exp_sel_spatial", tmp_path, date=date, train=["mosaic::strip_x_0"],
-        val=["mosaic::strip_x_1"], group_by="spatial_strip", manifest_dir="some/manifest",
+        val=["mosaic::strip_x_1"], group_by="spatial_strip", selection_dir="some/selection",
     )
 
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -501,7 +511,8 @@ def test_selection_disjointness_not_applicable_on_a_spatial_record(tmp_path, mon
     b = resolve_operating_point(
         "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_spatial",
-        split_manifest_dir="some/manifest", calibration_date=date,
+        selection_dir="some/selection",
+        calibration_labels_dir=str(tmp_path / "annotations" / date),
     )
     sd = b.get("conf").gate_evidence["selection_disjointness"]
     assert sd["applicable"] is False and sd["reason"]
@@ -509,14 +520,14 @@ def test_selection_disjointness_not_applicable_on_a_spatial_record(tmp_path, mon
 
 
 def test_selection_disjointness_not_applicable_on_an_external_val_record(tmp_path, monkeypatch):
-    """A run trained with an explicit val_images_dir and calibrated under a manifest validates,
-    the selection check not-applicable: the val came from a directory the record's date says
-    nothing about."""
+    """A run trained with an explicit val_images_dir and calibrated under a selection validates,
+    the selection check not-applicable: the val came from a directory the record's own members
+    say nothing about."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     date = "2-11-26"
     _persist_run_split(
         "exp_sel_external", tmp_path, date=date, train=["z"], val=["c_0", "h_0"],
-        group_by="external", manifest_dir="some/manifest",
+        group_by="external", selection_dir="some/selection",
     )
 
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -525,7 +536,8 @@ def test_selection_disjointness_not_applicable_on_an_external_val_record(tmp_pat
     b = resolve_operating_point(
         "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_external",
-        split_manifest_dir="some/manifest", calibration_date=date,
+        selection_dir="some/selection",
+        calibration_labels_dir=str(tmp_path / "annotations" / date),
     )
     sd = b.get("conf").gate_evidence["selection_disjointness"]
     assert sd["applicable"] is False and sd["reason"]
@@ -533,7 +545,7 @@ def test_selection_disjointness_not_applicable_on_an_external_val_record(tmp_pat
 
 
 def test_selection_disjointness_not_applicable_for_a_manifest_less_calibration(tmp_path, monkeypatch):
-    """A checkpoint that drew its own split, calibrated with no manifest named: the selection
+    """A checkpoint that drew its own split, calibrated with no selection named: the selection
     check is not-applicable and never blocks validation."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     date = "2-11-26"
@@ -553,23 +565,23 @@ def test_selection_disjointness_not_applicable_for_a_manifest_less_calibration(t
     assert b.get("conf").validated_against == "held_out_annotations"
 
 
-def test_selection_disjointness_not_applicable_for_a_flat_run_with_no_calibration_date(
+def test_selection_disjointness_not_applicable_when_the_caller_names_no_labels_directory(
     tmp_path, monkeypatch,
 ):
-    """calibration_date=None means the caller derived no date at all: never read as matching a
-    flat run's own record (also date-empty, the manifest's own key, not None), which would
-    wrongly run the check for real and could leak."""
+    """A bare stem means the same image only within one label directory, so a caller naming no
+    calibration labels directory leaves nothing to compare the run's own val members against:
+    the check says not applicable rather than matching stems across directories and passing."""
     from types import SimpleNamespace
 
     from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     create_experiment("exp_sel_flat_no_date", {})
     data_cfg = {"labels_dir": str(tmp_path / "annotations"),
                "split": {"resolved_group_by": "tile_prefix",
-                        "manifest_binding": {"manifest_dir": "some/manifest"}}}
-    persist_split_manifest(
+                        "selection_binding": {"selection_dir": "some/selection"}}}
+    persist_run_partition(
         "exp_sel_flat_no_date", SimpleNamespace(stems=["z"]), SimpleNamespace(stems=["c_0"]),
         data_cfg)
 
@@ -591,21 +603,20 @@ def test_selection_disjointness_not_applicable_for_a_flat_run_with_no_calibratio
 def test_selection_disjointness_applicable_when_a_flat_calibration_matches_a_flat_run(
     tmp_path, monkeypatch,
 ):
-    """A calibration that derives a date for a flat tree (the manifest's own empty key, not
-    ``None``) matches a flat run's own record the same way a dated one matches a dated record,
-    running the check for real."""
+    """A calibration reading a flat, undated labels directory matches a flat run's own record the
+    same way a dated one matches a dated record, running the check for real."""
     from types import SimpleNamespace
 
     from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.pipelines.data.splits import manifest_date_key
-    from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     create_experiment("exp_sel_flat_match", {})
-    data_cfg = {"labels_dir": str(tmp_path / "annotations"),
+    labels_dir = tmp_path / "annotations"
+    data_cfg = {"labels_dir": str(labels_dir),
                "split": {"resolved_group_by": "tile_prefix",
-                        "manifest_binding": {"manifest_dir": "some/manifest"}}}
-    persist_split_manifest(
+                        "selection_binding": {"selection_dir": "some/selection"}}}
+    persist_run_partition(
         "exp_sel_flat_match", SimpleNamespace(stems=["z"]), SimpleNamespace(stems=["c_0"]),
         data_cfg)
 
@@ -617,17 +628,17 @@ def test_selection_disjointness_applicable_when_a_flat_calibration_matches_a_fla
                   "bbox": [0.0, 0.0, 10.0, 10.0]}]
     result = resolve_classifier_operating_point(
         "bud_opening", calibration_items=cal_items, holdout_items=hold_items,
-        experiment_id="exp_sel_flat_match", calibration_date=manifest_date_key(None),
+        experiment_id="exp_sel_flat_match", calibration_labels_dir=str(labels_dir),
     )
     sd = result["gate_evidence"]["selection_disjointness"]
     assert sd["applicable"] is True and sd["checked"] is True
     assert sd["leaked_groups"] == ["c_0"]  # c_0 is on this run's own val
 
 
-def test_selection_disjointness_unresolvable_for_experiment_id_none_under_a_stated_manifest():
-    """A calibration that names a manifest but carries no experiment record to check the
+def test_selection_disjointness_unresolvable_for_experiment_id_none_under_a_stated_selection():
+    """A calibration that names a selection but carries no experiment record to check the
     selection side against is unresolvable, not merely not-applicable: the shape a foreign
-    checkpoint's train check allows through cannot be extended to a stated manifest, since a
+    checkpoint's train check allows through cannot be extended to a stated selection, since a
     number whose provenance cannot be checked is exactly what this refusal exists for."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
@@ -635,7 +646,7 @@ def test_selection_disjointness_unresolvable_for_experiment_id_none_under_a_stat
     b = resolve_operating_point(
         "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id=None,
-        split_manifest_dir="some/manifest", calibration_date="2-11-26",
+        selection_dir="some/selection", calibration_labels_dir="annotations/2-11-26",
     )
     sd = b.get("conf").gate_evidence["selection_disjointness"]
     assert sd["applicable"] is True and sd["unresolvable"] is True

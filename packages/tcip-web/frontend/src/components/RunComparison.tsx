@@ -56,7 +56,7 @@ function cellText(value: unknown): string {
 function splitLine(split: CompareSplit | undefined): string {
   if (!split) return UNRECORDED;
   if (split.case === "bound") {
-    return `bound to ${split.manifest_dir}${split.seed != null ? ` (seed ${split.seed})` : ""}`;
+    return `bound to ${split.selection_dir}${split.seed != null ? ` (seed ${split.seed})` : ""}`;
   }
   if (split.case === "drawn") return `drawn again (seed ${split.seed ?? UNRECORDED})`;
   if (split.case === "error") return `unreadable: ${split.error}`;

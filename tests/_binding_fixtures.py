@@ -24,7 +24,7 @@ picked per document since ``resolve_scale`` has no training run to check at all.
 
 _UNSTATED_SELECTION = object()
 """Default for ``selection_disjointness``: the same not-applicable shape a calibration naming no
-split manifest carries, picked per document since ``resolve_scale`` has no training run to check
+selection carries, picked per document since ``resolve_scale`` has no training run to check
 at all."""
 
 
@@ -126,7 +126,7 @@ def file_validation_record(
         td = train_disjointness
     if selection_disjointness is _UNSTATED_SELECTION:
         sd = None if document == "resolve_scale" else {
-            "applicable": False, "reason": "no split manifest named for this hand-filed record",
+            "applicable": False, "reason": "no selection named for this hand-filed record",
             "checked": False, "group_check": None,
         }
     else:

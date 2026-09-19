@@ -1211,7 +1211,7 @@ class PriorityQueueJob:
     status: str = "pending"  # pending | running | completed | failed
     error: Optional[str] = None
     # [{image, score, calibration_member?}], highest first; calibration_member is present only
-    # when the checkpoint's run was bound to a split manifest that could be read.
+    # when the checkpoint's run was bound to a selection that could be read.
     queue: list[dict] = field(default_factory=list)
     total_candidates: int = 0
     reviewed_skipped: int = 0

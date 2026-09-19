@@ -192,7 +192,7 @@ describe("LaunchPicker", () => {
                 absenceMessage: "unused",
                 choices: [
                   {
-                    manifestDir: "/data/splits",
+                    selectionDir: "/data/splits",
                     label: <span>seed 7 · tile_prefix · train 4 · val 2</span>,
                   },
                 ],
@@ -224,11 +224,11 @@ describe("LaunchPicker", () => {
                 absenceMessage: "unused",
                 choices: [
                   {
-                    manifestDir: "/data/other-subject-splits",
+                    selectionDir: "/data/other-subject-splits",
                     label: <span>/data/other-subject-splits</span>,
                     disabled: true,
                     reason:
-                      "split manifest was drawn for subject='bud', but this run is subject='leaf'",
+                      "the selection was drawn for subject='bud', but this run is subject='leaf'",
                   },
                 ],
               },
@@ -260,7 +260,7 @@ describe("LaunchPicker", () => {
                 asRecordedLine:
                   "draws its split again with seed 42 over the labels as they are now",
                 absenceMessage: "unused",
-                choices: [{ manifestDir: "/data/splits", label: <span>/data/splits</span> }],
+                choices: [{ selectionDir: "/data/splits", label: <span>/data/splits</span> }],
               },
             }),
           ],
@@ -290,7 +290,7 @@ describe("LaunchPicker", () => {
               data: {
                 asRecordedLine: "on the partition it bound",
                 absenceMessage: "unused",
-                choices: [{ manifestDir: "/data/splits", label: <span>/data/splits</span> }],
+                choices: [{ selectionDir: "/data/splits", label: <span>/data/splits</span> }],
               },
             }),
           ],
@@ -351,10 +351,10 @@ describe("LaunchPicker", () => {
                 absenceMessage: "unused",
                 choices: [
                   {
-                    manifestDir: "/data/other-subject-splits",
+                    selectionDir: "/data/other-subject-splits",
                     label: <span>/data/other-subject-splits</span>,
                     disabled: true,
-                    reason: "split manifest was drawn for subject='bud'",
+                    reason: "the selection was drawn for subject='bud'",
                   },
                 ],
               },
@@ -392,7 +392,7 @@ describe("LaunchPicker", () => {
               data: {
                 asRecordedLine: "on the partition it bound",
                 absenceMessage: "unused",
-                choices: [{ manifestDir: "/data/splits", label: <span>/data/splits</span> }],
+                choices: [{ selectionDir: "/data/splits", label: <span>/data/splits</span> }],
               },
             }),
           ],
@@ -482,7 +482,7 @@ describe("LaunchPicker", () => {
                 asRecordedDisabled: true,
                 asRecordedReason: "moved",
                 absenceMessage: "unused",
-                choices: [{ manifestDir: "/data/splits", label: <span>/data/splits</span> }],
+                choices: [{ selectionDir: "/data/splits", label: <span>/data/splits</span> }],
               },
             }),
           ],
@@ -512,7 +512,7 @@ describe("LaunchPicker", () => {
                 absenceMessage: "unused",
                 choices: [
                   {
-                    manifestDir: "/data/splits",
+                    selectionDir: "/data/splits",
                     label: <span>/data/splits</span>,
                     replacedSplitKeys: ["group_by", "seed"],
                   },

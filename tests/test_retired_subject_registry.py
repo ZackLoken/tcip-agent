@@ -297,45 +297,6 @@ def _splittable_dataset(root: Path) -> Path:
             [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9)) for _ in range(i + 1)], 64, 48)
     return root
 
-
-def test_draw_splits_refuses_naming_a_retired_document_at_a_split_destination_nothing_written(tmp_path):
-    from tcip_mcp.tools.data_tools import draw_splits
-
-    root = _splittable_dataset(tmp_path / "ds")
-    out = tmp_path / "splits"
-    (out / "train").mkdir(parents=True)
-    (out / "train" / "classes.json").write_bytes((root / "subjects.json").read_bytes())
-
-    result = draw_splits(
-        str(root), output_path=str(out), materialize=True, subject="bud",
-        train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=3,
-    )
-    assert "error" in result
-    assert "classes.json" in result["error"]
-    assert "remove that file by hand" in result["error"]
-    # Nothing written: no manifest, no materialized image/label tree.
-    assert not (out / "split_manifest.json").exists()
-    assert not (out / "train" / "images").exists()
-    assert not (out / "val").exists()
-
-
-def test_draw_splits_materializes_fine_with_no_registry_at_any_destination(tmp_path):
-    """The rail's other half: nothing retired at any destination, nothing to refuse."""
-    from tcip_mcp.tools.data_tools import draw_splits
-
-    root = _splittable_dataset(tmp_path / "ds")
-    out = tmp_path / "splits"
-    result = draw_splits(
-        str(root), output_path=str(out), materialize=True, subject="bud",
-        train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=3,
-    )
-    assert "error" not in result, result
-    assert (out / "train" / "images").is_dir() or (out / "val" / "images").is_dir()
-
-
-# ── dataset_scope_of still resolves the root ────────────────────────────────────────────────
-
-
 def test_dataset_scope_of_resolves_a_root_holding_only_the_retired_document(tmp_path):
     from tcip_mcp.audit import dataset_scope_of
 

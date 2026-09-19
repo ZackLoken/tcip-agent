@@ -91,7 +91,7 @@ describe("RunComparison data lines", () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(
       baseResult({
         experiments: [
-          { experiment_id: "exp-a", split: { case: "bound", manifest_dir: "splits/d1", seed: 7 } },
+          { experiment_id: "exp-a", split: { case: "bound", selection_dir: "splits/d1", seed: 7 } },
           { experiment_id: "exp-b", split: { case: "drawn", seed: 42 } },
         ],
       }),

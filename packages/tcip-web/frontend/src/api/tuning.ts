@@ -27,9 +27,9 @@ export interface Sweep {
    * for a manifest predating the field (read as 1, no draws, by run_hyperparameter_search's own
    * default) or for a recorded value that is not a draw count. */
   split_draws?: number | null;
-  /** Whether the recorded base_config redraws train/val inside a bound split manifest's own
-   * members, rather than sweeping seeds over a drawn split. */
-  redraws_within_manifest?: boolean;
+  /** Whether the recorded base_config redraws train/val inside a bound selection's own
+   * samples, rather than sweeping seeds over a drawn split. */
+  redraws_within_selection?: boolean;
   /** Whether run_hyperparameter_search has written this sweep's first manifest yet. False in the pre-manifest
    * window a relaunch opens (the route registers the job before it answers), so a caller keys
    * its not-yet-recorded state on this rather than on a 404 that window never produces. */

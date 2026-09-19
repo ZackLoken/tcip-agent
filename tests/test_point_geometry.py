@@ -173,8 +173,8 @@ def test_a_point_only_image_is_not_a_trainable_sample(tmp_path: Path) -> None:
     json_io.write_annotations(labels / "IMG_0002.json",
                               [Annotation(subject="bud", geometry=BOX)], 100, 80)
 
-    assert _label_record_state("IMG_0001", labels, "bud") == (True, False)
-    assert _label_record_state("IMG_0002", labels, "bud") == (True, True)
+    assert _label_record_state(labels / "IMG_0001.json", "bud") == (True, False)
+    assert _label_record_state(labels / "IMG_0002.json", "bud") == (True, True)
 
 
 # ── IoU matching ─────────────────────────────────────────────────────────────

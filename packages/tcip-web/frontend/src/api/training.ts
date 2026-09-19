@@ -76,8 +76,8 @@ export interface AsRecordedChoice {
   reason: string | null;
 }
 
-export interface SplitManifestChoice {
-  manifest_dir: string;
+export interface SelectionChoice {
+  selection_dir: string;
   enabled: boolean;
   reason: string | null;
   seed: number | null;
@@ -85,14 +85,13 @@ export interface SplitManifestChoice {
   train: number;
   val: number;
   calibration: number;
-  other_dates: number;
   /** The recorded data.split keys choosing this partition drops (seed, group_by, ...). */
   replaced_split_keys: string[];
 }
 
 export interface SplitChoices {
   as_recorded: AsRecordedChoice;
-  manifests: SplitManifestChoice[];
+  selections: SelectionChoice[];
 }
 
 /** One entry a comparison's own experiment registered, reduced to what leaves the backend. */
@@ -107,7 +106,7 @@ export interface CompareRegistryEntry {
  * pre-launch intent), reduced to the four states a comparison names. */
 export interface CompareSplit {
   case: "bound" | "drawn" | "none" | "error";
-  manifest_dir?: string;
+  selection_dir?: string;
   seed?: number | null;
   error?: string;
 }
@@ -179,10 +178,10 @@ export const trainingApi = {
   listSplitChoices: (experiment_id: string) =>
     getJson<SplitChoices>(ROUTES.getTrainingConfigsByExperimentIdSplits(experiment_id)),
 
-  relaunch: (experiment_id: string, split_manifest_dir?: string | null) =>
+  relaunch: (experiment_id: string, selection_dir?: string | null) =>
     postJson<{ experiment_id?: string; [k: string]: unknown }>(
       ROUTES.postTrainingRuns,
-      split_manifest_dir ? { experiment_id, split_manifest_dir } : { experiment_id },
+      selection_dir ? { experiment_id, selection_dir } : { experiment_id },
     ),
 
   listRuns: () => getJson<{ runs: TrainingRunSummary[] }>(ROUTES.getTrainingRuns),

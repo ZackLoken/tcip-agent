@@ -933,7 +933,7 @@ def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp
         "resolver": "resolve_operating_point", "inputs": inputs,
         "reference_inputs": {
             "label_stems": {"calibration": {"path": str(tmp_path), "stems": ["a"]}},
-            "stated_values": {"split_manifest_dir": str(tmp_path / "m")},
+            "stated_values": {"selection_dir": str(tmp_path / "m")},
         },
         "calibration_stems": ["a"],
     }
@@ -950,7 +950,7 @@ def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp
     r = run_inference_verified(
         str(ckpt), image_paths=[str(img_a), str(img_b)], images_dir=str(tmp_path), device="cpu",
         tile=False, trait="bud_opening", calibration_labels_dir=str(tmp_path),
-        split_manifest_dir=str(tmp_path / "m"))
+        selection_dir=str(tmp_path / "m"))
 
     assert r["cross_dataset_check"] == "same-labeled-set"
 
@@ -987,7 +987,7 @@ def test_manifest_calibration_firewall_hashes_the_universe(
         "resolver": "resolve_operating_point", "inputs": inputs,
         "reference_inputs": {
             "label_stems": {"calibration": {"path": str(tmp_path), "stems": universe}},
-            "stated_values": {"split_manifest_dir": str(tmp_path / "m")},
+            "stated_values": {"selection_dir": str(tmp_path / "m")},
         },
         "calibration_stems": universe,
     }
@@ -1004,7 +1004,7 @@ def test_manifest_calibration_firewall_hashes_the_universe(
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
 
-    kwargs = dict(calibration_labels_dir=str(tmp_path), split_manifest_dir=str(tmp_path / "m"))
+    kwargs = dict(calibration_labels_dir=str(tmp_path), selection_dir=str(tmp_path / "m"))
     if give_calibration_images_dir:
         kwargs["calibration_images_dir"] = str(tmp_path)
 
@@ -1037,7 +1037,7 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
         "resolver": "resolve_operating_point", "inputs": inputs,
         "reference_inputs": {
             "label_stems": {"calibration": {"path": str(tmp_path), "stems": ["a"]}},
-            "stated_values": {"split_manifest_dir": str(tmp_path / "m")},
+            "stated_values": {"selection_dir": str(tmp_path / "m")},
         },
         "calibration_stems": ["a"],
         "excluded": {"excluded_training_stems": ["b", "c"], "excluded_validation_stems": ["e"],
@@ -1055,7 +1055,7 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
     r = run_inference_verified(
         str(ckpt), image_paths=[str(img)], images_dir=str(tmp_path), device="cpu",
         tile=False, trait="bud_opening", calibration_labels_dir=str(tmp_path),
-        split_manifest_dir=str(tmp_path / "m"))
+        selection_dir=str(tmp_path / "m"))
 
     assert r["n_excluded_training_stems"] == 2
     assert r["n_excluded_validation_stems"] == 1

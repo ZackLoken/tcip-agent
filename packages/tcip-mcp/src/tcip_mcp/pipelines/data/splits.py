@@ -46,6 +46,7 @@ from tcip_store import (
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.data.selection import Sample, Selection
 
 logger = logging.getLogger(__name__)
 
@@ -93,11 +94,10 @@ def count_label_lines(
     record in the file counts regardless of subject (the whole-tree proxy a stats-only draw
     still uses); given ``subject``, only that subject's records count, further narrowed to those
     already assessed for ``attribute`` when one is given (an instance never assessed for it is
-    not yet a foreground fact for this scope). A manifest draw is subject-scoped, so it always
+    not yet a foreground fact for this scope). A selection's draw is subject-scoped, so it always
     states its own ``subject`` here: an unscoped count would read a group's annotations of some
-    other subject sharing the file as this draw's own foreground. ``subject``/``attribute`` are
-    normalized through :func:`normalize_scope` before either is read, the same rule every other
-    manifest-scope consumer applies, so a caller passing a checkpoint's stamped ``attribute=""``
+    other subject sharing the file as this draw's own foreground. An empty ``subject`` or
+    ``attribute`` reads as unset, so a caller passing a checkpoint's stamped ``attribute=""``
     counts against every record assessed or not (its real meaning, "no attribute") rather than
     scoring zero against a key no record ever carries.
 
@@ -108,7 +108,7 @@ def count_label_lines(
     from tcip_annotation import json_io
     from tcip_mcp.dataset_layout import label_filename
 
-    subject, attribute = normalize_scope(subject, attribute)
+    subject, attribute = subject or None, attribute or None
     jp = Path(labels_dir) / label_filename(stem)
     if not jp.is_file():
         return 0
@@ -121,29 +121,36 @@ def count_label_lines(
     )
 
 
-def image_extent_from_labels(labels_dir: str | Path, stem: str) -> tuple[int, int] | None:
-    """``(width, height)`` a stem's per-image label JSON records, or ``None`` when the file is
-    missing or carries no positive width/height.
+def label_document_extent(label_path: str | Path) -> tuple[int, int] | None:
+    """``(width, height)`` one per-image label JSON records, or ``None`` when the file is missing
+    or carries no positive width/height.
 
     The label file already carries the frame its boxes were authored against (the json_io
     schema's top-level ``width``/``height``), so a caller that needs an image's pixel extent for
     split geometry reads it here rather than decoding the image. This is the same field
     :class:`~tcip_mcp.pipelines.data.datasets.TiledDetectionDataset` treats as authoritative for
     its own authored-vs-decoded frame check, so a split derived from this extent and a tiled
-    dataset later built over the same stem agree on the frame by construction. A present,
+    dataset later built over the same sample agree on the frame by construction. A present,
     unreadable file raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than
     reading ``None``, the same distinction between "no extent" and "unreadable" every other reader
     keeps.
     """
     from tcip_annotation.json_io import load_label_document
-    from tcip_mcp.dataset_layout import label_filename
 
-    p = Path(labels_dir) / label_filename(stem)
+    p = Path(label_path)
     if not p.is_file():
         return None
     data = load_label_document(p)
     w, h = int(data.get("width", 0) or 0), int(data.get("height", 0) or 0)
     return (w, h) if w > 0 and h > 0 else None
+
+
+def image_extent_from_labels(labels_dir: str | Path, stem: str) -> tuple[int, int] | None:
+    """:func:`label_document_extent` for a caller holding a labels directory and a stem rather
+    than the document's own path."""
+    from tcip_mcp.dataset_layout import label_filename
+
+    return label_document_extent(Path(labels_dir) / label_filename(stem))
 
 
 def group_balanced_split(
@@ -189,9 +196,9 @@ def group_balanced_split(
         ``annotation_counts`` produced; given, a group counts toward a side's
         minimum only when its ``foreground_counts`` sum is positive, even when
         ``annotation_counts`` is ``None`` and the balancing pass is running its no-foreground,
-        every-group-is-foreground fallback. A manifest draw passes its subject-scoped foreground
-        count here on every draw, so the calibration side's floor is met with real foreground
-        regardless of whether balancing itself is stratified.
+        every-group-is-foreground fallback. A selection's draw passes its subject-scoped
+        foreground count here on every draw, so the calibration side's floor is met with real
+        foreground regardless of whether balancing itself is stratified.
 
     Returns
     -------
@@ -311,10 +318,10 @@ def refuse_insufficient_foreground_groups(
     of the per-side minimums a caller states.
 
     :func:`~tcip_mcp.tools.data_tools.draw_splits` calls this once, over the whole tree, ahead of
-    drawing a manifest, over the three sides a manifest write always draws (a write refuses a
-    zero ratio on any of them, so every side named here is always requested);
-    :func:`calibration_universe_from_manifest` calls it for its one held-out side in place of its
-    own inline count. Names every requested side and its minimum, the foreground groups actually
+    drawing a selection, over the three sides a selection always draws (a draw refuses a zero
+    ratio on any of them, so every side named here is always requested);
+    :func:`selection_calibration_universe` calls it for its one held-out side in place of its own
+    inline count. Names every requested side and its minimum, the foreground groups actually
     found, and the remedy: annotate or confirm more foreground groups of the draw's own subject.
     """
     needed = sum(minimums.values())
@@ -326,6 +333,19 @@ def refuse_insufficient_foreground_groups(
         f"fewer than the {needed} the requested sides need ({sides}): annotate or confirm more "
         "foreground groups of this subject."
     )
+
+
+def member_identity(date: str | None, stem: str) -> str:
+    """A draw's member identity for one image: ``<date>/<stem>``, or the bare ``stem`` under a
+    flat, dateless tree.
+
+    A stem is unique only within one capture date (cameras reuse names across dates), so a draw
+    spanning more than one date needs this to keep two same-named images from two dates apart.
+    :func:`~tcip_mcp.tools.data_tools.draw_splits` and ``tcip plant-aware-group-splits`` both key
+    their members this way, through this one function, so an agent-supplied ``group_key_map``
+    lands on the keys the draw looks up.
+    """
+    return f"{date}/{stem}" if date else stem
 
 
 def resolve_group_key_fn(
@@ -353,13 +373,41 @@ def resolve_group_key_fn(
     return GROUP_KEY_FNS[group_by]
 
 
+def recorded_group_key_fn(
+    group_by: str, *, date: str | None, stems: Sequence[str] = (),
+    group_key_map: dict[str, str] | None = None,
+) -> Callable[[str], str]:
+    """The group key a draw records for a bare stem admitted out of one capture date's directory.
+
+    The one derivation of that key: the stem becomes its member identity
+    (:func:`member_identity`, so two dates' same-named images are two groups rather than one) and
+    the policy is resolved against those identities (:func:`resolve_group_key_fn`, so an
+    agent-supplied ``group_key_map`` is keyed the way ``draw_splits`` already keys one). Every
+    producer of a recorded group key goes through this, and so does the leak check that has to
+    reproduce a key for a stem a recorded map does not cover; a producer and a reader spelling
+    one key two ways is a leak that reads as no leak.
+
+    ``stems`` and ``group_key_map`` are the producer's own: the map is checked for coverage of
+    those stems' identities before any key is handed out. A reader passes neither, since with no
+    map to check there is nothing to cover and the named policy alone answers.
+
+    :func:`~tcip_mcp.tools.data_tools.draw_splits` does not call this: it already holds member
+    identities, because it draws across several capture dates at once, so what it needs is this
+    function's middle step, :func:`resolve_group_key_fn` over those identities. This is that same
+    resolution plus the stem-to-identity adapter a producer working under one directory needs.
+    """
+    identities = [member_identity(date, stem) for stem in stems]
+    key_fn = resolve_group_key_fn(group_by, identities, group_key_map=group_key_map)
+    return lambda stem: key_fn(member_identity(date, stem))
+
+
 def draw_train_val(
     stems: Sequence[str], *, annotation_counts: dict[str, int] | None,
     group_key_fn: Callable[[str], str], val_ratio: float, seed: int,
 ) -> tuple[list[str], list[str]]:
     """``(train, val)`` for ``stems``: one call to :func:`group_balanced_split` at
     ``(1 - val_ratio, val_ratio, 0.0)``, the assembly the drawn path (``auto_train_val``'s
-    group-aware split) and a bound run's redraw (``data.split.redraw_within_manifest``) both
+    group-aware split) and a bound run's redraw (``data.split.redraw_within_selection``) both
     wrap, so the two agree on how a train/val split is actually drawn from a group-keyed stem
     list. Neither retries nor degrades on a starved side here; each caller decides what a
     starved side means for it (the drawn path's own stem-level retry and its degrade to no
@@ -372,384 +420,44 @@ def draw_train_val(
     return parts["train"], parts["val"]
 
 
-def member_identity(date: str | None, stem: str) -> str:
-    """A split manifest's member identity for one image: ``<date>/<stem>``, or the bare ``stem``
-    under a flat, dateless tree.
-
-    A stem is unique only within one capture date (cameras reuse names across dates), so a
-    manifest spanning more than one date needs this to keep two same-named images from two dates
-    apart; :func:`~tcip_mcp.tools.data_tools.draw_splits` and
-    ``tcip plant-aware-group-splits`` both key their members this way, through this one
-    function.
-    """
-    return f"{date}/{stem}" if date else stem
-
-
-def member_identity_parts(identity: str) -> tuple[str | None, str]:
-    """The inverse of :func:`member_identity`: ``(date, stem)`` for one member identity."""
-    date, sep, stem = identity.partition("/")
-    return (date, stem) if sep else (None, identity)
-
-
-def manifest_date_key(date: str | None) -> str:
-    """The ``members`` dict key a split manifest records one capture date's block under: the
-    date itself, or the empty string for a flat, dateless tree (a real capture date is never
-    empty), since a JSON object's keys must be strings."""
-    return date or ""
-
-
-def date_of_manifest_key(key: str) -> str | None:
-    """The inverse of :func:`manifest_date_key`."""
-    return key or None
-
-
-@dataclass(frozen=True)
-class ManifestBinding:
-    """What binding a run to a split manifest resolved for one capture date: the run's own
-    train/val membership, as bare stems under that date, plus the manifest's calibration
-    membership under that date (placed on neither loader, held out from both training and
-    selection), plus the counts a run's ``split.json`` records beside them. Never the manifest's
-    own member lists in full (those already live in the manifest itself);
-    ``assigned``/``train_bound``/``val_bound``/``calibration_bound``/``calibration_unadmitted``/
-    ``other_dates`` are the small, checkpoint-safe summary :func:`bind_manifest_stems`'s caller
-    persists instead.
-    """
-
-    train: list[str]
-    val: list[str]
-    calibration: list[str]
-    assigned: int
-    train_bound: int
-    val_bound: int
-    calibration_bound: int
-    calibration_unadmitted: int
-    other_dates: int
-
-
-@dataclass(frozen=True)
-class ManifestDateNarrowing:
-    """A split manifest's ``splits`` membership narrowed to one capture date: which identities
-    under that date landed on each side, and how many of the manifest's identities (any date)
-    belong to some other one. ``all_ids`` is the manifest-wide union across every date, kept
-    because a stem the run admits under ``date`` can only be checked against the whole manifest
-    for "assigned to no side at all" (:func:`bind_manifest_stems`'s own concern), never against
-    the narrowed-to-date sets alone.
-    """
-
-    train_ids: frozenset[str]
-    val_ids: frozenset[str]
-    calibration_ids: frozenset[str]
-    all_ids: frozenset[str]
-    other_dates: int
-
-
-def narrow_manifest_to_date(manifest: dict, date: str | None) -> ManifestDateNarrowing:
-    """Which of a split manifest's ``splits`` identities fall under one capture date, per side.
-
-    The one implementation of the narrowing :func:`bind_manifest_stems` performs on a run's own
-    admitted stems and the data picker performs on a candidate manifest before any admission
-    exists to bind against, so the counts shown to a breeder before Start are the identical
-    arithmetic the launch itself would apply.
-    """
-    splits = manifest.get("splits") or {}
-    train_ids = frozenset(splits.get("train") or [])
-    val_ids = frozenset(splits.get("val") or [])
-    calibration_ids = frozenset(splits.get("calibration") or [])
-    all_ids = train_ids | val_ids | calibration_ids
-    this_date_ids = frozenset(i for i in all_ids if member_identity_parts(i)[0] == date)
-    return ManifestDateNarrowing(
-        train_ids=this_date_ids & train_ids, val_ids=this_date_ids & val_ids,
-        calibration_ids=this_date_ids & calibration_ids, all_ids=all_ids,
-        other_dates=len(all_ids) - len(this_date_ids),
-    )
-
-
-def manifest_redraw_universe(
-    manifest: dict, date: str | None,
-) -> tuple[list[str], Callable[[str], str]]:
-    """The stems and resolved grouping a bound run's ``data.split.redraw_within_manifest``
-    redraws over: the manifest's own ``train`` and ``val`` identities narrowed to ``date``
-    (never ``calibration``, which a redraw never touches), and its ``group_by`` policy resolved
-    (:func:`resolve_group_key_fn`) with its ``group_key_map`` re-keyed from full identities to
-    bare stems under this one date (the map spans every date the manifest holds; a redraw reads
-    only its own, the same narrowing ``auto_train_val`` performs on the same map for its own
-    ``manifest_binding`` write-back).
-
-    Raises ``ValueError`` (:func:`resolve_group_key_fn`'s own) for an unrecognized ``group_by``
-    or a ``group_key_map`` missing coverage: the redraw refuses by name rather than falling back
-    to a policy the manifest never recorded. Shared by ``preflight_config`` and ``run_hyperparameter_search``'s
-    pre-mint check, both of which answer this before any admission exists to bind against, so
-    the two see the identical universe and grouping a real redraw would.
-    """
-    narrowing = narrow_manifest_to_date(manifest, date)
-    stems = sorted(member_identity_parts(i)[1] for i in (narrowing.train_ids | narrowing.val_ids))
-    group_by = manifest.get("group_by")
-    if not isinstance(group_by, str):
-        raise ValueError(
-            f"the split manifest carries no usable group_by ({group_by!r}): the redraw needs "
-            "one to resolve its own grouping."
-        )
-    group_key_map = manifest.get("group_key_map")
-    keyed_map = None
-    if group_by == "explicit_map" and group_key_map:
-        keyed_map = {
-            member_identity_parts(identity)[1]: group_key
-            for identity, group_key in group_key_map.items()
-            if member_identity_parts(identity)[0] == date
-        }
-    return stems, resolve_group_key_fn(group_by, stems, group_key_map=keyed_map)
-
-
 def redraw_starved_issue(
-    stems: Sequence[str], group_key_fn: Callable[[str], str], *, foreground_counts: dict[str, int],
-    manifest_dir: str | None, date: str | None, seed: int | None, group_by: str | None,
+    groups: Sequence[str], foreground_groups: Sequence[str], *,
+    selection_dir: str | None, seed: int | None,
 ) -> str | None:
-    """Whether ``stems`` (a bound run's train-plus-val universe for one date) resolves to too
-    few *foreground* groups under ``group_key_fn`` for a redraw to populate both a train and a
-    val side: :func:`group_balanced_split`'s own per-side minimum needs one foreground group for
-    each active side, met first from the smallest foreground groups; a background-only group
-    (zero foreground signal, e.g. a confirmed negative) is placed afterwards by tile deficit and
-    can concentrate entirely onto the side that already met its minimum, leaving the other side
-    genuinely empty. Counting every distinct group regardless of foreground signal misses
-    exactly that case: two groups, one of them entirely background,
-    reads as enough groups when only one of them can ever satisfy a side's minimum. Checked
-    before any run starts (:func:`~tcip_mcp.tools.training_tools.preflight_config`, and
-    ``run_hyperparameter_search``'s own pre-mint check for ``split_draws``), ahead of the redraw's own refusal
-    once it has actually drawn a starved side for real.
+    """Whether a selection's train-plus-val members resolve to too few *foreground* groups for a
+    redraw to populate both a train and a val side.
 
-    ``foreground_counts`` is ``stems``' own per-stem annotation count, subject- and
-    attribute-scoped the same way :func:`~tcip_mcp.pipelines.data.split_construction.
-    auto_train_val`'s redraw branch counts them at run time (never the manifest's recorded,
-    whole-draw ``realized_ratios``), the same ``group_key_fn(s) for s in stems if
-    foreground_counts.get(s, 0) > 0`` idiom :func:`refuse_insufficient_foreground_groups`'s own
-    caller (``draw_splits``) counts its foreground groups with.
+    :func:`group_balanced_split`'s own per-side minimum needs one foreground group for each active
+    side, met first from the smallest foreground groups; a background-only group (zero foreground
+    signal, e.g. a confirmed negative) is placed afterwards by tile deficit and can concentrate
+    entirely onto the side that already met its minimum, leaving the other side genuinely empty.
+    Counting every distinct group regardless of foreground signal misses exactly that case: two
+    groups, one of them entirely background, reads as enough groups when only one of them can ever
+    satisfy a side's minimum. Checked before any run starts
+    (:func:`~tcip_mcp.tools.training_tools.preflight_config`, and ``run_hyperparameter_search``'s
+    own pre-mint check for ``split_draws``), ahead of the redraw's own refusal once it has actually
+    drawn a starved side for real.
 
-    ``None`` when at least two foreground groups are available; the refusal otherwise, naming
-    the manifest, the date, the seed, the resolved grouping policy, the foreground group count
-    among the distinct groups found, and the two remedies: drop ``redraw_within_manifest`` and
-    ``seed`` to bind the manifest's recorded partition instead, or regenerate the manifest with
-    at least two foreground groups across train and val.
+    ``groups`` is every group key among those members, ``foreground_groups`` the subset whose
+    samples carry the draw's own subject's foreground, both computed by the caller from the
+    selection's recorded group keys, never re-derived from a grouping policy here.
+
+    ``None`` when at least two foreground groups are available; the refusal otherwise, naming the
+    selection, the seed and the two counts, with the two remedies: drop the redraw to bind the
+    selection's recorded partition instead, or draw a selection with at least two foreground
+    groups across train and val.
     """
-    groups = {group_key_fn(s) for s in stems}
-    fg_groups = {group_key_fn(s) for s in stems if foreground_counts.get(s, 0) > 0}
-    if len(fg_groups) >= 2:
+    distinct, foreground = set(groups), set(foreground_groups)
+    if len(foreground) >= 2:
         return None
-    name = f"the split manifest at {manifest_dir!r}" if manifest_dir else "the split manifest"
+    name = f"the selection at {selection_dir!r}" if selection_dir else "the selection"
     return (
-        f"redrawing train and val inside {name}'s own members under date {date!r} at seed "
-        f"{seed} would starve a side: its {len(stems)} member(s) resolve to only "
-        f"{len(fg_groups)} foreground group(s) among {len(groups)} distinct group(s) under "
-        f"group_by={group_by!r}, short of the two a train side and a val side each need at "
-        "least one of. Drop data.split.redraw_within_manifest and data.split.seed to bind the "
-        "manifest's recorded partition instead, or regenerate the manifest with at least two "
+        f"redrawing train and val inside {name}'s own members at seed {seed} would starve a "
+        f"side: they resolve to only {len(foreground)} foreground group(s) among "
+        f"{len(distinct)} distinct group(s), short of the two a train side and a val side each "
+        "need at least one of. Drop data.split.redraw_within_selection and data.split.seed to "
+        "bind the selection's recorded partition instead, or draw a selection with at least two "
         "foreground groups across train and val."
-    )
-
-
-def normalize_scope(subject: str | None, attribute: str | None) -> tuple[str | None, str | None]:
-    """A caller's ``(subject, attribute)``, normalized the way
-    :func:`~tcip_mcp.tools.training_tools._dataset_source_kwargs` already normalizes a run's own:
-    a falsy value (``None`` or ``""``) reads as ``None``. Applied on the caller's side of every
-    scope comparison :func:`manifest_scope_issues` makes, so a checkpoint whose stamped config
-    carries ``attribute=""`` compares equal to a manifest drawn with ``attribute=None``, the
-    manifest the run that produced it actually bound to.
-    """
-    return (subject or None, attribute or None)
-
-
-def empty_side_issue(narrowing: ManifestDateNarrowing, date: str | None) -> list[str]:
-    """The one-item list naming ``narrowing``'s empty train or val side, or an empty list when
-    both hold at least one member under ``date``.
-
-    Shared by the two callers that bind or list a partition (:func:`bind_manifest_stems` and
-    :func:`~tcip_mcp.tools.training_tools._manifest_dependent_issues`), each of which calls this
-    itself after its own scope check: a run needs both sides to train and validate on, so this is
-    never part of :func:`manifest_scope_issues`, which the calibration door and the review queue
-    also share and which hold out a calibration side regardless of whether train/val are
-    populated.
-    """
-    if narrowing.train_ids and narrowing.val_ids:
-        return []
-    return [
-        f"binding to the split manifest under date {date!r} leaves an empty side "
-        f"(train={len(narrowing.train_ids)}, val={len(narrowing.val_ids)}); a run needs both."
-    ]
-
-
-def manifest_scope_issues(
-    manifest: dict, *, subject: str | None, attribute: str | None, date: str | None,
-    images_dir: str | Path | None, label: str, manifest_dir: str | None = None,
-) -> tuple[list[str], ManifestDateNarrowing | None]:
-    """Every objection a caller's scope raises against ``manifest`` for one capture ``date``,
-    from the manifest's own recorded facts: the ``subject``/``attribute`` agreement (both sides
-    normalized through :func:`normalize_scope`, so an empty-string attribute compares equal to an
-    unset one whichever side carries it), the date's members block being positively present (a
-    missing key or an explicit ``null`` value both read as absent: the stricter of the two, since a
-    ``null`` block names nothing), that block naming an images root (a stated root must be
-    positively carried, never merely not contradicted), the caller's own ``images_dir`` being
-    stated, and the two roots not having moved apart
-    (:func:`refuse_if_images_root_moved`, under ``label``).
-
-    Returns ``(issues, narrowing)``: every objection together (never only the first), and the
-    manifest's membership narrowed to ``date`` (:func:`narrow_manifest_to_date`) once the members
-    block is confirmed present, ``None`` when it is not (nothing to narrow). Never checks whether
-    the narrowed train/val sides are non-empty: that is :func:`empty_side_issue`'s job for the two
-    callers that need it, not every caller's (the calibration door and the review queue hold out a
-    calibration side regardless of whether train/val are populated).
-
-    ``manifest_dir``, when given, names the manifest in every sentence; a caller without one gets
-    "the split manifest".
-    """
-    issues: list[str] = []
-    name = f"split manifest at {manifest_dir!r}" if manifest_dir else "the split manifest"
-    norm_subject, norm_attribute = normalize_scope(subject, attribute)
-    manifest_subject, manifest_attribute = normalize_scope(
-        manifest.get("subject"), manifest.get("attribute"))
-    if (manifest_subject, manifest_attribute) != (norm_subject, norm_attribute):
-        issues.append(
-            f"{name} was drawn for subject={manifest_subject!r}, attribute="
-            f"{manifest_attribute!r}, but this run is subject={norm_subject!r}, attribute="
-            f"{norm_attribute!r}: a run only binds to its own subject's (and attribute's) "
-            "manifest."
-        )
-
-    members = manifest.get("members") or {}
-    date_key = manifest_date_key(date)
-    date_block = members.get(date_key)
-    if date_key not in members or date_block is None:
-        issues.append(
-            f"{name} holds no members under date {date!r}; it holds members under "
-            f"{sorted(members)}. Regenerate the split over this date, or launch against the "
-            "date the manifest was drawn for."
-        )
-        return issues, None
-
-    images_root = date_block.get("images_root")
-    if not images_root:
-        issues.append("the manifest's members under this date name no images root.")
-    elif not images_dir:
-        issues.append(f"the run states no {label} to compare against {name}'s images root.")
-    else:
-        try:
-            refuse_if_images_root_moved(label, images_dir, images_root, date)
-        except ValueError as exc:
-            issues.append(str(exc))
-
-    narrowing = narrow_manifest_to_date(manifest, date)
-    return issues, narrowing
-
-
-def require_manifest_scope(
-    manifest: dict, *, subject: str | None, attribute: str | None, date: str | None,
-    images_dir: str | Path | None, label: str, manifest_dir: str | None = None,
-) -> ManifestDateNarrowing:
-    """:func:`manifest_scope_issues`, raising every objection together (joined with ``"; "``)
-    rather than returning them, for a caller that refuses on any of them. Reached only when the
-    accumulator finds no issue at all, so the narrowing it returns is never ``None`` here (an
-    absent members block is itself an issue, and issues always raise before a caller sees the
-    narrowing).
-    """
-    issues, narrowing = manifest_scope_issues(
-        manifest, subject=subject, attribute=attribute, date=date, images_dir=images_dir,
-        label=label, manifest_dir=manifest_dir,
-    )
-    if issues:
-        raise ValueError("; ".join(issues))
-    assert narrowing is not None, "no issue means the members block under date was found"
-    return narrowing
-
-
-def bind_manifest_stems(
-    manifest: dict, date: str | None, subject: str, attribute: str | None,
-    admitted: Sequence[str], *, images_dir: str | Path | None,
-    admission_counts: dict[str, int] | None = None, manifest_dir: str | None = None,
-) -> ManifestBinding:
-    """Bind a run's admitted stems for one capture date to a split manifest's recorded partition.
-
-    ``admitted`` is the run's own draw for ``date`` (the task path's admission, e.g.
-    ``trainable_stems``' return), never re-derived here. ``images_dir`` is the run's own images
-    directory (``None`` states the run has none); ``manifest_dir``, when given, names the manifest
-    in the messages :func:`manifest_scope_issues` produces. Refuses, in order:
-
-    - the manifest's ``subject``/``attribute`` disagree with the run's, the manifest holds no
-      members under ``date``, its members under ``date`` name no images root, the run states no
-      ``images_dir``, or ``images_dir`` is not the manifest's own recorded root for ``date``
-      (:func:`require_manifest_scope`, the one implementation this shares with every other
-      caller that binds or restricts a read to a split manifest);
-    - a stem the run admits that the manifest assigns to none of ``train``, ``val`` or
-      ``calibration`` (training it would put it on a side the manifest never chose; the remedy is
-      regenerating the split over the current data, which draws through the same admission);
-    - a ``train`` or ``val`` member under ``date`` the run does not admit (the data moved under
-      the manifest: a label emptied, a confirmation withdrawn, an assessment removed, or the
-      subject's attribute schema changed since), naming ``admission_counts`` when the caller
-      supplied it; the remedy it names is conditional on ``admission_counts``'s
-      ``quarantined_stale_definition``, since that one cause is undone by re-confirming the
-      quarantined images rather than by regenerating the split;
-    - an empty ``train`` or ``val`` side once narrowed to ``date`` (:func:`empty_side_issue`).
-
-    A ``calibration`` member is never a reason to refuse: it is held out from training and from
-    selection, so it is placed on neither loader whether or not the run currently admits it (its
-    count of unadmitted members is recorded, not refused on) and whether the third side is empty
-    for this date or not; the calibration door's own floor is where an insufficient calibration
-    side bites, never a training launch.
-
-    Because the manifest was drawn through the same admission with the same subject/attribute
-    scope, the train/val refusals fire only when the data moved since the split was drawn: the
-    quarantine cause is undone by re-confirming the held-out images, every other cause by
-    regenerating the split over the current data.
-    """
-    narrowing = require_manifest_scope(
-        manifest, manifest_dir=manifest_dir, subject=subject, attribute=attribute, date=date,
-        images_dir=images_dir, label="data.images_dir",
-    )
-
-    admitted_ids = {member_identity(date, s) for s in admitted}
-    unassigned = sorted(admitted_ids - narrowing.all_ids)
-    if unassigned:
-        preview = [member_identity_parts(i)[1] for i in unassigned[:10]]
-        more = f" (+{len(unassigned) - 10} more)" if len(unassigned) > 10 else ""
-        raise ValueError(
-            f"{len(unassigned)} stem(s) this run admits are assigned to no side of the split "
-            f"manifest: {preview}{more}. Training would put them on a side the manifest never "
-            "chose; regenerate the split over the current data (draw_splits draws through the "
-            "same admission this run does)."
-        )
-    this_date_train_val = narrowing.train_ids | narrowing.val_ids
-    not_admitted = sorted(this_date_train_val - admitted_ids)
-    if not_admitted:
-        preview = [member_identity_parts(i)[1] for i in not_admitted[:10]]
-        more = f" (+{len(not_admitted) - 10} more)" if len(not_admitted) > 10 else ""
-        quarantined = (admission_counts or {}).get("quarantined_stale_definition", 0)
-        remedy = (
-            f"this run's admission quarantined {quarantined} image(s) under "
-            f"quarantined_stale_definition (re-confirm those; regeneration does not clear a "
-            f"quarantine), and regenerate the split over the current data for every other "
-            f"membership change."
-            if quarantined else
-            "regenerate the split over the current data."
-        )
-        counts_note = f" This run's own admission counts: {admission_counts}." \
-            if admission_counts is not None else ""
-        raise ValueError(
-            f"{len(not_admitted)} member(s) the split manifest assigned under date {date!r} are "
-            f"not in this run's admitted samples: {preview}{more}. The data changed since the "
-            f"split was drawn (a label emptied, a confirmation withdrawn, an assessment "
-            f"removed, or the subject's attribute schema changed since); {remedy}{counts_note}"
-        )
-
-    empty = empty_side_issue(narrowing, date)
-    if empty:
-        raise ValueError("; ".join(empty))
-    train_bound = sorted(member_identity_parts(i)[1] for i in narrowing.train_ids)
-    val_bound = sorted(member_identity_parts(i)[1] for i in narrowing.val_ids)
-    calibration_bound = sorted(member_identity_parts(i)[1] for i in narrowing.calibration_ids)
-    calibration_unadmitted = len(narrowing.calibration_ids - admitted_ids)
-    return ManifestBinding(
-        train=train_bound, val=val_bound, calibration=calibration_bound,
-        assigned=len(narrowing.train_ids | narrowing.val_ids | narrowing.calibration_ids),
-        train_bound=len(train_bound), val_bound=len(val_bound),
-        calibration_bound=len(calibration_bound), calibration_unadmitted=calibration_unadmitted,
-        other_dates=narrowing.other_dates,
     )
 
 
@@ -761,41 +469,15 @@ def same_directory(a: str | Path | None, b: str | Path | None) -> bool:
     ``False`` whenever either side is empty or does not exist as a directory: there is nothing
     to compare a missing path against, and a caller distinguishing "same" from "cannot tell" gets
     the honest "not the same" rather than a crash. The one comparison every caller checking a
-    recorded directory against a caller-stated one shares (:func:`refuse_if_images_root_moved`
-    and the bound-checkpoint manifest comparison in ``inference_tools.py``), never a second
-    re-derivation of it.
+    recorded directory against a caller-stated one shares (the bound-checkpoint selection
+    comparison in ``calibration.py``, the project-root checks in ``experiments.py``, the image-root
+    checks the results route and the phenology tools make), never a second re-derivation of it.
     """
     if not a or not b:
         return False
     a_path, b_path = Path(a), Path(b)
     return (a_path.is_dir() and b_path.is_dir()
             and os.path.samefile(a_path.resolve(), b_path.resolve()))
-
-
-def refuse_if_images_root_moved(
-    label: str, images_dir: str | Path | None, manifest_images_root: str | Path | None,
-    date: str | None,
-) -> None:
-    """Raises when ``images_dir`` is not the exact filesystem object ``manifest_images_root``
-    names for ``date``, refusing by name rather than letting a plain existence-blind comparison
-    crash when either side no longer exists (a moved dataset root, a renamed images bucket).
-
-    A no-op when either side is empty: nothing recorded to compare against, or no images_dir the
-    caller stated. ``label`` is how the caller names its own side in the message
-    (``"images_dir"`` for a bare tool argument, ``"data.images_dir"`` for a run config field);
-    every entry point this backs (preflight, the training child, both inference entry points, and
-    ``tcip calibrate-operating-point``) reads it identically, one implementation rather
-    than each re-deriving the comparison.
-    """
-    if not images_dir or not manifest_images_root:
-        return
-    if same_directory(images_dir, manifest_images_root):
-        return
-    raise ValueError(
-        f"{label}={str(images_dir)!r} is not the split manifest's images_root for date "
-        f"{date!r} ({str(manifest_images_root)!r}): a member's identity names pixels only "
-        "under its own root."
-    )
 
 
 # -- spatial (within-image) strip split ---------------------------------------
@@ -807,7 +489,7 @@ def spatial_strip_identity(stem: str, region_label: str) -> str:
     """A spatial split's per-region membership identity for one tile's source stem.
 
     ``region_label`` names the contiguous pixel-space strip a tile fell into (e.g.
-    ``"strip_x_2"``). A manifest that lists this instead of the bare stem never reads a
+    ``"strip_x_2"``). A selection that groups by this instead of the bare stem never reads a
     within-image split as the same stem appearing on more than one side:
     :func:`stem_of_spatial_identity` is the one place that identity is parsed back.
     """
@@ -897,7 +579,7 @@ class SpatialStripSplit:
         return None if idx is None else self.region_bounds[idx][0]
 
     def identity_for(self, stem: str, tile_x: int, tile_y: int) -> str | None:
-        """The manifest identity for a kept tile at ``(tile_x, tile_y)``, or ``None`` when
+        """The region identity for a kept tile at ``(tile_x, tile_y)``, or ``None`` when
         this position falls in a dropped gap (buffer band or past-extent) rather than fully
         inside any region."""
         idx = self._region_index_for(tile_x, tile_y)
@@ -1262,10 +944,10 @@ def label_image_stems(
     own provenance sidecars are excluded through :func:`~tcip_annotation.json_io.prediction_documents`
     rather than named as if they were image stems.
 
-    This is the whole-directory universe; a caller drawing under a split manifest instead narrows
-    its own listing with :func:`calibration_universe_from_manifest`, which takes this function's
-    stems as the ``present`` set it checks the manifest's held-out members against, never a second
-    scan of its own.
+    This is the whole-directory universe; a caller drawing under a selection instead narrows its
+    own listing with :func:`selection_calibration_universe`, which takes this function's stems as
+    the ``present`` set it checks the selection's held-out samples against, never a second scan of
+    its own.
     """
     from tcip_annotation.json_io import prediction_documents
 
@@ -1280,27 +962,32 @@ def label_image_stems(
     return sorted(stem_to_image), stem_to_image
 
 
-def calibration_universe_from_manifest(
-    manifest: dict, date: str | None, present: Iterable[str],
+def selection_calibration_universe(
+    selection: "Selection", labels_dir: str | Path, present: Iterable[str],
     *, foreground_stems: Iterable[str] | None = None,
     min_foreground_groups: dict[str, int] | None = None,
-) -> tuple[list[str], str | None, dict[str, str] | None, dict[str, list[str]]]:
-    """The calibration universe a split manifest gives one caller restricting a read to it, for
-    one capture date: the manifest's ``calibration`` members under ``date`` that are present in
-    the door's own stem listing, so a read measures on exactly the side the manifest held out for
-    it, never the side the shipped checkpoint was chosen on (a disjointness check catches a leak
-    onto that side separately, against the checkpoint's own ``split.json``).
+) -> tuple[list[str], str, dict[str, str], dict[str, list[str]], dict[str, "Sample"]]:
+    """The calibration universe a selection gives one caller restricting a read to ``labels_dir``.
 
-    ``present`` is the door's own stem listing (e.g. :func:`label_image_stems`' stems), checked
-    against rather than assumed: a manifest member with no image left on disk is not a real
-    calibration candidate. ``foreground_stems``, when given, is the subset of the universe that
-    actually carries the draw's own subject's foreground (the caller's own subject-scoped read,
-    :func:`~tcip_mcp.pipelines.data.splits.count_label_lines`'s job, never re-derived here): the
-    floor below then counts only foreground groups, so a universe of background-only groups
-    cannot pass it. Omitted, the floor falls back to counting every group in the universe
-    (foreground or not), the weaker check every caller that has not wired foreground info still
-    gets; the platform's own calibration doors all wire it, through
-    :func:`resolve_manifest_calibration_universe`.
+    The selection's ``calibration`` samples whose own label document lives in ``labels_dir``, and
+    which are present in the door's own stem listing, so a read measures on exactly the side the
+    draw held out for it, never the side the shipped checkpoint was chosen on (a disjointness
+    check catches a leak onto that side separately, against the checkpoint's own selection). The
+    narrowing is by the label path each sample records, never by a capture date compared against
+    a directory: a selection spans dates, and a door that names one date's labels directory reads
+    that date's held-out samples out of it.
+
+    ``present`` is the door's own stem listing (e.g. :func:`label_image_stems`' stems). A recorded
+    calibration member the listing does not hold refuses by name: the selection is the membership
+    authority, so a member whose label or image the directory no longer carries is data that moved
+    under the draw, never a universe quietly two stems smaller than the one recorded.
+    ``foreground_stems``, when given, is the subset of the universe that actually
+    carries the draw's own subject's foreground (the caller's own subject-scoped read,
+    :func:`count_label_lines`'s job, never re-derived here): the floor below then counts only
+    foreground groups, so a universe of background-only groups cannot pass it. Omitted, the floor
+    counts every group in the universe, the weaker check every caller that has not wired
+    foreground info still gets; the platform's own calibration doors all wire it, through
+    :func:`resolve_selection_calibration_universe`.
 
     ``min_foreground_groups`` is the caller's own floor, forwarded to
     :func:`refuse_insufficient_foreground_groups` verbatim; omitted, it defaults to
@@ -1309,114 +996,111 @@ def calibration_universe_from_manifest(
     states its own floor of one instead, so a legitimate single-foreground-group universe is not
     refused for a halving this caller never performs.
 
-    Returns ``(stems, group_by, group_key_map, excluded)``: ``stems`` is the calibration-side
-    identities narrowed to bare stems; ``group_by``/``group_key_map`` are the manifest's own
-    grouping policy (``group_key_map`` narrowed to this date's bare stems, so a lookup by stem
-    resolves the way ``_train_disjointness`` already resolves one); ``excluded`` is the three-way
-    partition of the present stems the universe does not hold: present train members
-    (``excluded_training_stems``), present val members (``excluded_validation_stems``), and
-    present members none of the three sides claimed (``excluded_unassigned_stems``), the
-    universe itself in none of them.
+    Returns ``(stems, group_by, group_key_map, excluded, samples)``: ``stems`` is the calibration
+    side's bare stems under ``labels_dir``; ``group_key_map`` is each one's recorded group key,
+    with ``group_by="explicit_map"``, so the locked draw groups by exactly the keys the selection
+    drew with rather than re-resolving a policy; ``excluded`` is the three-way partition of what
+    the universe does not hold: the recorded train members under this directory
+    (``excluded_training_stems``), its recorded val members (``excluded_validation_stems``), and
+    present stems the selection never claimed (``excluded_unassigned_stems``); ``samples`` is each
+    universe stem's own recorded sample, so a caller measures on the pixels the draw held out
+    rather than on whatever a directory listing of the same names happens to hold today.
 
-    Refuses, naming the count, the date and the caller's own floor, when the resulting universe
-    would hold fewer foreground (when known) groups than that floor states. The remedy names a
-    redraw on this date specifically, since the floor at a manifest's own draw is over the whole
-    tree and one date can still land short.
+    Refuses a calibration sample naming a pixel rect or a table row
+    (:func:`~tcip_mcp.pipelines.data.selection.refuse_unreadable_samples`), the same refusal the
+    loaders apply: every door reaching a selection's samples either honors those fields or refuses
+    on them, so none of them measures a region over its whole source instead.
+
+    Refuses, naming the count, the labels directory and the caller's own floor, when the resulting
+    universe would hold fewer foreground (when known) groups than that floor states.
     """
-    present_set = set(present)
-    narrowing = narrow_manifest_to_date(manifest, date)
-    train_ids, val_ids, calibration_ids = (
-        narrowing.train_ids, narrowing.val_ids, narrowing.calibration_ids,
-    )
+    from tcip_mcp.pipelines.data.selection import refuse_unreadable_samples
 
-    stems = sorted(member_identity_parts(i)[1] for i in calibration_ids
-                  if member_identity_parts(i)[1] in present_set)
+    present_set = set(present)
+    here = Path(labels_dir).resolve()
+
+    def _stem_here(sample) -> str | None:
+        label = Path(sample.ground_truth)
+        if label.parent.resolve() != here:
+            return None
+        return label.stem
+
+    by_side: dict[str, dict[str, str]] = {name: {} for name in SPLIT_NAMES}
+    universe_samples: dict[str, "Sample"] = {}
+    for sample in selection.samples:
+        stem = _stem_here(sample)
+        if stem is None:
+            continue
+        by_side[sample.side][stem] = sample.group
+        if sample.side == "calibration":
+            universe_samples[stem] = sample
+
+    absent = sorted(stem for stem in universe_samples if stem not in present_set)
+    if absent:
+        raise ValueError(
+            f"{len(absent)} calibration member(s) of this selection are not in the stem listing "
+            f"for {labels_dir} ({absent[:5]}): the selection is what says which samples were held "
+            "out, so a member whose label or image the directory no longer holds is data that "
+            "moved under the draw. Restore them, or draw the selection again over the current data."
+        )
+    refuse_unreadable_samples(universe_samples.values())
+
+    stems = sorted(universe_samples)
+    group_key_map = {stem: by_side["calibration"][stem] for stem in stems}
+    claimed = set().union(*(set(side) for side in by_side.values()))
     excluded = {
-        "excluded_training_stems": sorted(
-            member_identity_parts(i)[1] for i in train_ids
-            if member_identity_parts(i)[1] in present_set),
-        "excluded_validation_stems": sorted(
-            member_identity_parts(i)[1] for i in val_ids
-            if member_identity_parts(i)[1] in present_set),
-        # A date-prefixed identity's membership in narrowing.all_ids (manifest-wide) is provably
-        # equal to its membership in the date-narrowed union, since it names its own date.
-        "excluded_unassigned_stems": sorted(
-            s for s in present_set if member_identity(date, s) not in narrowing.all_ids),
+        "excluded_training_stems": sorted(by_side["train"]),
+        "excluded_validation_stems": sorted(by_side["val"]),
+        "excluded_unassigned_stems": sorted(present_set - claimed),
     }
 
-    group_by = manifest.get("group_by")
-    manifest_group_key_map = manifest.get("group_key_map")
-    group_key_map = None
-    if manifest_group_key_map:
-        group_key_map = {
-            member_identity_parts(i)[1]: v for i, v in manifest_group_key_map.items()
-            if member_identity_parts(i)[0] == date
-        }
-
-    group_key_fn = resolve_group_key_fn(group_by or "tile_prefix", stems, group_key_map=group_key_map)
     if foreground_stems is None:
-        n_groups = len({group_key_fn(s) for s in stems})
+        n_groups = len(set(group_key_map.values()))
     else:
         fg = set(foreground_stems)
-        n_groups = len({group_key_fn(s) for s in stems if s in fg})
+        n_groups = len({key for stem, key in group_key_map.items() if stem in fg})
     floor = min_foreground_groups if min_foreground_groups is not None else {"calibration": 2}
     try:
         refuse_insufficient_foreground_groups(n_groups, floor)
     except ValueError as exc:
         raise ValueError(
-            f"the split manifest's calibration side for date {date!r} gives a calibration "
-            f"universe of {n_groups} foreground group(s) ({len(stems)} stem(s) total) after "
-            f"excluding what isn't present: {exc} Redraw the manifest with a larger "
-            f"calibration_ratio or more foreground groups on {date!r}."
+            f"the selection's calibration side under {labels_dir} gives a calibration universe "
+            f"of {n_groups} foreground group(s) ({len(stems)} stem(s) total) after excluding "
+            f"what isn't present: {exc} Draw the selection again with a larger "
+            "calibration_ratio or more foreground groups under this labels directory."
         ) from exc
-    return stems, group_by, group_key_map, excluded
+    return stems, "explicit_map", group_key_map, excluded, universe_samples
 
 
-def resolve_manifest_calibration_universe(
-    manifest: dict, split_manifest_dir: str | Path, labels_dir: str | Path,
-    images_dir: str | Path | None, subject: str | None, attribute: str | None,
-    present: Iterable[str], *, min_foreground_groups: dict[str, int] | None = None,
-) -> tuple[list[str], str | None, dict[str, str] | None, dict[str, list[str]], str | None,
-           str | None, str | None]:
-    """The checks every door restricting a read to a split manifest shares, ahead of
-    :func:`calibration_universe_from_manifest`'s own draw, through :func:`require_manifest_scope`:
-    the manifest's ``subject``/``attribute`` must equal the door's, the labels directory's date
-    (:func:`~tcip_mcp.dataset_layout.annotation_date`) must be one the manifest holds members
-    under, and the manifest's ``images_root`` for that date must be the door's ``images_dir``,
-    each refusing by name. Called from ``calibrate_operating_point``, ``evaluate_model``,
-    ``redraw_calibration_holdout`` and ``tcip calibrate-operating-point`` so none of
-    the four drift into disagreeing about what a manifest-restricted read reads.
+def resolve_selection_calibration_universe(
+    selection: "Selection", labels_dir: str | Path, present: Iterable[str],
+    *, min_foreground_groups: dict[str, int] | None = None,
+) -> tuple[list[str], str, dict[str, str], dict[str, list[str]], str | None, str | None,
+           dict[str, "Sample"]]:
+    """:func:`selection_calibration_universe` with the subject-scoped foreground read every
+    calibration door owes it, so ``calibrate_operating_point``, ``evaluate_model``,
+    ``redraw_calibration_holdout`` and ``tcip calibrate-operating-point`` cannot drift into
+    disagreeing about what a selection-restricted read reads.
 
-    ``min_foreground_groups`` is forwarded to :func:`calibration_universe_from_manifest`
-    unchanged: the caller's own floor, ``{"calibration": 2}`` when omitted (a locked draw's
-    halving), the shape a caller that halves nothing states for itself.
+    The selection's own ``subject``/``attribute`` are the scope: a door that named this selection
+    reads them off it rather than restating its own and being checked against them, so there is
+    one statement of the scope instead of two compared.
 
-    Returns ``(stems, group_by, group_key_map, excluded, date, subject, attribute)``: the
-    universe, the date it was drawn for, and the normalized ``(subject, attribute)``
-    (:func:`normalize_scope`) this door checked the manifest against and counted foreground with.
-    A caller that goes on to count foreground itself (e.g. for ``annotation_counts`` over the
-    returned universe) uses these two rather than re-deriving the same normalization from its own
-    raw, possibly ``""``-carrying config.
+    Returns ``(stems, group_by, group_key_map, excluded, subject, attribute, samples)``: the
+    universe, its recorded grouping, the scope the foreground was counted under (which a caller
+    going on to count foreground itself over the returned universe uses rather than re-deriving),
+    and each universe stem's own recorded sample.
     """
-    from tcip_mcp.dataset_layout import annotation_date
-
-    # Normalized once here, so the scope check, the foreground read below, and any caller's own
-    # count afterward (through the returned pair) all agree on "".
-    subject, attribute = normalize_scope(subject, attribute)
-    date = annotation_date(labels_dir)
-    require_manifest_scope(
-        manifest, manifest_dir=str(split_manifest_dir), subject=subject, attribute=attribute,
-        date=date, images_dir=images_dir, label="images_dir",
-    )
+    subject, attribute = selection.subject or None, selection.attribute or None
     present_stems = list(present)
     foreground_stems = {
         s for s in present_stems
         if count_label_lines(labels_dir, s, subject=subject, attribute=attribute) > 0
     }
-    stems, group_by, group_key_map, excluded = calibration_universe_from_manifest(
-        manifest, date, present_stems, foreground_stems=foreground_stems,
+    stems, group_by, group_key_map, excluded, samples = selection_calibration_universe(
+        selection, labels_dir, present_stems, foreground_stems=foreground_stems,
         min_foreground_groups=min_foreground_groups)
-    return stems, group_by, group_key_map, excluded, date, subject, attribute
+    return stems, group_by, group_key_map, excluded, subject, attribute, samples
 
 
 def _split_content_hash(parts: dict[str, list[str]] | None) -> str | None:
@@ -1444,7 +1128,7 @@ def resolve_locked_cal_holdout_split(
     seed: int = 0,
     force_redraw: bool = False,
     timestamp: str | None = None,
-    split_manifest_dir: str | None = None,
+    selection_dir: str | None = None,
 ) -> dict:
     """Resolve (and lock) the calibration/holdout split for one dataset identity.
 
@@ -1461,7 +1145,7 @@ def resolve_locked_cal_holdout_split(
     ``group_by``/``group_key_map`` raises loudly here rather than silently degrading.
 
     If a lock already exists and the caller's declared policy (``group_by``/``group_key_map``/
-    ``seed``/``holdout_ratio``/``split_manifest_dir``) differs from what is recorded in it, the
+    ``seed``/``holdout_ratio``/``selection_dir``) differs from what is recorded in it, the
     divergence is logged as a warning and returned under ``"policy_divergence"``
     (``{"requested": ..., "locked": ...}``), the locked split is still returned unchanged, never
     silently redrawn, so a caller can see the mismatch on the result rather than in a server
@@ -1469,12 +1153,12 @@ def resolve_locked_cal_holdout_split(
     ``"unlocked_stems"`` rather than silently dropped, the lock stays authoritative for what it
     already covers.
 
-    ``split_manifest_dir`` names the split manifest a caller drawing ``stems`` from one restricted
-    it to (``None`` for a whole-directory draw, the record's key set stays the same either way);
-    it is written into the lock and into every ``redraw_history`` entry alongside the rest of the
+    ``selection_dir`` names the selection a caller drawing ``stems`` from one restricted it to
+    (``None`` for a whole-directory draw, the record's key set stays the same either way); it is
+    written into the lock and into every ``redraw_history`` entry alongside the rest of the
     declared policy, never resolved or compared here, that is the caller's own job
-    (:func:`~tcip_mcp.pipelines.data.splits.calibration_universe_from_manifest` and the manifest
-    checks each door applies before it ever draws a universe to lock).
+    (:func:`selection_calibration_universe`, which each door calls before it ever draws a universe
+    to lock).
 
     A locked stem with no corresponding entry in the caller's current ``stems`` (its image/label
     was deleted or renamed since the split was locked) raises ``ValueError`` rather than silently
@@ -1498,7 +1182,7 @@ def resolve_locked_cal_holdout_split(
     is only meaningful when a new draw actually happens (first draw, or ``force_redraw=True``).
 
     Returns the full locked-split dict: ``{identity_hash, calibration, holdout, group_by,
-    group_key_map, seed, holdout_ratio, split_manifest_dir, redraw_history}``, plus the optional
+    group_key_map, seed, holdout_ratio, selection_dir, redraw_history}``, plus the optional
     ``policy_divergence`` / ``unlocked_stems`` report fields above when a lock already existed.
     """
     group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
@@ -1523,7 +1207,7 @@ def resolve_locked_cal_holdout_split(
     declared_policy = {
         "group_by": group_by, "group_key_map": group_key_map,
         "seed": seed, "holdout_ratio": holdout_ratio,
-        "split_manifest_dir": split_manifest_dir,
+        "selection_dir": selection_dir,
     }
 
     if existing is not None and not force_redraw:

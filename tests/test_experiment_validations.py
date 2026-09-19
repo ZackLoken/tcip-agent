@@ -27,7 +27,7 @@ TRAINING_CONFIG = {"model_source": {"builder": "my_models:bud_det"}}
 
 def _real_selection_disjointness() -> dict[str, Any]:
     """The full shape resolution.resolver_selection_disjointness returns for a foreign
-    checkpoint with no split manifest named, read back through the same
+    checkpoint with no selection named, read back through the same
     operating_point._selection_disjointness path a live calibration takes, rather than a
     hand-typed subset the resolver never actually produces."""
     from tcip_mcp.pipelines import resolution

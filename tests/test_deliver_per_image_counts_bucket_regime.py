@@ -118,7 +118,7 @@ def test_no_output_path_refuses(tmp_path):
     ("conf_threshold", 0.5), ("device", "cpu"), ("tile", True), ("tile_size", 320),
     ("overlap", 0.2), ("global_nms_iou", 0.4), ("max_dets", 50),
     ("calibration_labels_dir", "labels"), ("calibration_images_dir", "images"),
-    ("split_manifest_dir", "manifest"), ("experiment_id", "exp-live-only"),
+    ("selection_dir", "manifest"), ("experiment_id", "exp-live-only"),
     ("postprocess", "nmm"), ("tile_batch_size", 32),
 ])
 def test_each_live_only_parameter_refuses_in_the_bucket_regime(tmp_path, name, value):
@@ -133,7 +133,7 @@ def test_each_live_only_parameter_refuses_in_the_bucket_regime(tmp_path, name, v
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
-    if name in ("calibration_labels_dir", "calibration_images_dir", "split_manifest_dir"):
+    if name in ("calibration_labels_dir", "calibration_images_dir", "selection_dir"):
         value = str(tmp_path / value)
     r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, **{name: value})

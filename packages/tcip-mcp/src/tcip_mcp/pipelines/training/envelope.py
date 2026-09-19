@@ -145,11 +145,11 @@ class TrainContext:
                        transforms: Any = None) -> Any:
         """``(train_ds, val_ds)``, the seam a bespoke ``train(ctx)`` body writes against.
 
-        ``auto_train_val`` also resolves a manifest-bound run's per-stem label digests as a
-        third value; that value reaches ``persist_split_manifest`` through the internal bind
-        path (``subprocess_worker.run`` and this envelope's own binder), never through this
-        seam, so a caller written as ``train_ds, val_ds = ctx.auto_train_val()`` is not broken by
-        a change to what the bind path itself records.
+        ``auto_train_val`` also resolves a selection-bound run's recorded partition as a third
+        value; that value reaches ``persist_run_partition`` through the internal bind path
+        (``subprocess_worker.run`` and this envelope's own binder), never through this seam, so a
+        caller written as ``train_ds, val_ds = ctx.auto_train_val()`` is not broken by a change
+        to what the bind path itself records.
         """
         from tcip_mcp.pipelines.data.split_construction import auto_train_val
 

@@ -50,7 +50,7 @@ SWEEP = "sweep"
 of "sweep", distinct from the ``confidence_sweep`` store's calibration-curve claim below."""
 
 SPLITS = "splits"
-"""A partition's output directory: one document per split plus the manifest describing them."""
+"""A selection's output directory: the one document a draw writes its whole partition as."""
 
 CURATED = "curated"
 """A curated dataset's output directory."""
@@ -409,7 +409,7 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     "hpo_trial_metrics": Claim(
         SWEEP, ((Patterned(ANY), Patterned(literal("metrics"), tail=".jsonl")),)
     ),
-    "split_manifest": Claim(SPLITS, (_named(name="split_manifest", suffix=".json"),)),
+    "selection": Claim(SPLITS, (_named(name="selection", suffix=".json"),)),
     "curated_manifest": Claim(CURATED, (_named(name="curated_manifest", suffix=".json"),)),
     "evaluation_results": Claim(RUN, (_named(name="test_results", suffix=".json"),)),
     "run_launch_config": Claim(RUN, (_named(name="launch_config", suffix=".json"),)),

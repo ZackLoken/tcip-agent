@@ -113,18 +113,17 @@ export function dataPickerFor(choices: SplitChoices | undefined): DataPicker | u
     asRecordedDisabled: !choices.as_recorded.compatible,
     asRecordedReason: choices.as_recorded.reason ?? undefined,
     absenceMessage: NO_OTHER_PARTITION,
-    choices: choices.manifests.map((m) => ({
-      manifestDir: m.manifest_dir,
-      disabled: !m.enabled,
-      reason: m.reason ?? undefined,
-      replacedSplitKeys: m.replaced_split_keys,
+    choices: choices.selections.map((s) => ({
+      selectionDir: s.selection_dir,
+      disabled: !s.enabled,
+      reason: s.reason ?? undefined,
+      replacedSplitKeys: s.replaced_split_keys,
       label: (
         <>
-          <span className="block font-mono">{m.manifest_dir}</span>
+          <span className="block font-mono">{s.selection_dir}</span>
           <span className="block text-tcip-muted">
-            seed {m.seed ?? "unrecorded"} · {m.group_by ?? "unrecorded grouping"} · train {m.train}{" "}
-            · val {m.val} · calibration {m.calibration}
-            {m.other_dates > 0 ? ` · ${m.other_dates} member(s) under other dates` : ""}
+            seed {s.seed ?? "unrecorded"} · {s.group_by ?? "unrecorded grouping"} · train {s.train}{" "}
+            · val {s.val} · calibration {s.calibration}
           </span>
         </>
       ),
@@ -137,7 +136,7 @@ function configRow(
   choices: SplitChoices | undefined,
   dataLoading: boolean,
   dataError: string | undefined,
-  onStart: (splitManifestDir: string | null) => Promise<void>,
+  onStart: (selectionDir: string | null) => Promise<void>,
 ): LaunchPickerRow {
   const pristine = cfg.state === "created";
   return {
@@ -302,8 +301,8 @@ export function TrainingTab() {
     if (pickerOpen) void refreshConfigs();
   }, [pickerOpen, refreshConfigs]);
 
-  async function startFromConfig(experimentId: string, splitManifestDir: string | null) {
-    const result = await trainingApi.relaunch(experimentId, splitManifestDir);
+  async function startFromConfig(experimentId: string, selectionDir: string | null) {
+    const result = await trainingApi.relaunch(experimentId, selectionDir);
     setPickerOpen(false);
     void refreshRuns();
     if (typeof result.experiment_id === "string") setSelectedRun(result.experiment_id);

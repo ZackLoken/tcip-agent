@@ -305,7 +305,7 @@ def run_inference(
     trait: str | None = None,
     calibration_labels_dir: str | None = None,
     calibration_images_dir: str | None = None,
-    split_manifest_dir: str | None = None,
+    selection_dir: str | None = None,
     experiment_id: str | None = None,
     group_by: str | None = None,
     group_key_map: dict[str, str] | None = None,
@@ -343,7 +343,7 @@ def run_inference(
       option for a raster too large to decode whole), and writes exactly one ``<raster
       stem>.json`` prediction file (in full-raster pixel space), since there is no natural
       directory-of-per-plant-images shape for a whole-raster capture. ``calibration_labels_dir``/
-      ``split_manifest_dir`` are not accepted with it (there is no separate labeled directory
+      ``selection_dir`` are not accepted with it (there is no separate labeled directory
       shape for one raster); ``trait`` alone calibrates against the mosaic's own reserved regions
       instead (:func:`~tcip_mcp.pipelines.block_calibration.resolve_block_calibration_records`),
       when the checkpoint's own training experiment reserved one
@@ -458,18 +458,16 @@ def run_inference(
             ``raster_path``, see ``trait``). Its GT identity scopes the resolved conf (dataset
             firewall).
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
-        split_manifest_dir: Restrict the calibration universe to one capture date's
-            ``calibration`` side of a split manifest (``data_tools.read_split_manifest_dir``,
+        selection_dir: Restrict the calibration universe to a selection's ``calibration`` samples
+            under ``calibration_labels_dir`` (``pipelines.data.selection.read_selection``,
             ``images_dir`` regime only; not accepted with ``raster_path``, block calibration draws
-            no split-manifest universe) instead of every labelled stem with an image, so the
-            operating point is measured on exactly the side the manifest held out for it, never
-            the side the checkpoint was chosen on. A checkpoint bound to a different manifest than
-            the one named here is refused by name. The manifest's subject/attribute must equal the
-            checkpoint's own recorded training scope, the calibration labels' date must be one the
-            manifest holds members under, and the manifest's ``images_root`` for that date must be
-            ``calibration_images_dir`` (or ``images_dir``), each refusing by name. The response
-            carries ``n_excluded_training_stems``, ``n_excluded_validation_stems`` and
-            ``n_excluded_unassigned_stems``, the present stems the manifest's universe left out
+            no selection universe) instead of every labelled stem with an image, so the operating
+            point is measured on exactly the side the draw held out for it, never the side the
+            checkpoint was chosen on. A checkpoint bound to a different selection than the one
+            named here is refused by name. The selection states its own subject and attribute, and
+            the scope is read from it rather than restated here. The response carries
+            ``n_excluded_training_stems``, ``n_excluded_validation_stems`` and
+            ``n_excluded_unassigned_stems``, the present stems the selection's universe left out
             (its train side, its val side, and stems the draw never assigned), beside
             ``n_excluded_incomplete_attribute``.
         experiment_id: The run that produced the checkpoint, by its record id (one run's immutable
@@ -480,14 +478,14 @@ def run_inference(
         group_by: ``images_dir`` regime only. Grouping policy for the locked calibration/holdout
             split, ``"tile_prefix"`` or ``"stem"``. Ignored when ``group_key_map`` is given.
             ``None`` (default) resolves to ``"tile_prefix"`` when neither this nor
-            ``split_manifest_dir`` was given; a value beside ``split_manifest_dir`` conflicts with
-            the manifest's own grouping policy and refuses, naming both. Only the first
+            ``selection_dir`` was given; a value beside ``selection_dir`` conflicts with the group
+            keys the selection recorded on its own samples and refuses, naming both. Only the first
             calibration call for a given calibration-labels identity draws the split; later calls
             return the same locked split regardless of this argument (see
             ``redraw_calibration_holdout`` to redraw deliberately).
         group_key_map: ``images_dir`` regime only. An agent-derived ``{stem: group_key}`` map
             overriding ``group_by`` for the locked calibration/holdout split, must cover every
-            stem in ``calibration_labels_dir``. Conflicts with ``split_manifest_dir`` the same way
+            stem in ``calibration_labels_dir``. Conflicts with ``selection_dir`` the same way
             ``group_by`` does.
         split_seed: ``images_dir`` regime only. Split seed for the locked calibration/holdout
             split, like ``group_by``, only takes effect on the first calibration call for a given
@@ -540,14 +538,14 @@ def run_inference(
         return {"error": "calibration_labels_dir is not supported for a raster_path export: "
                          "block calibration (trait alone, see below) validates against the "
                          "mosaic's own reserved regions instead of a caller-supplied labeled dir."}
-    if raster_path is not None and split_manifest_dir:
-        return {"error": "split_manifest_dir is not supported for a raster_path export: block "
-                         "calibration draws no split-manifest universe, so it would be silently "
+    if raster_path is not None and selection_dir:
+        return {"error": "selection_dir is not supported for a raster_path export: block "
+                         "calibration draws no selection universe, so it would be silently "
                          "dropped rather than scoping anything."}
-    if split_manifest_dir and not calibration_labels_dir:
-        return {"error": "split_manifest_dir requires calibration_labels_dir: it scopes a "
+    if selection_dir and not calibration_labels_dir:
+        return {"error": "selection_dir requires calibration_labels_dir: it scopes a "
                          "calibration this call has no trait/calibration_labels_dir to run, so "
-                         "the manifest would be silently dropped rather than bounding one."}
+                         "the selection would be silently dropped rather than bounding one."}
     if raster_path is not None and not Path(raster_path).is_file():
         return {"error": f"raster_path not found: {raster_path}"}
     if resume and images_dir is not None:
@@ -683,7 +681,7 @@ def run_inference(
         tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, max_dets=max_dets,
         postprocess=postprocess, trait=trait,
         calibration_labels_dir=calibration_labels_dir, calibration_images_dir=calibration_images_dir,
-        split_manifest_dir=split_manifest_dir, experiment_id=experiment_id,
+        selection_dir=selection_dir, experiment_id=experiment_id,
         group_by=group_by, group_key_map=group_key_map, split_seed=split_seed,
         split_holdout_ratio=split_holdout_ratio,
     )
@@ -738,7 +736,7 @@ def _run_inference_verified(
     group_key_map: dict[str, str] | None = None,
     split_seed: int = 0,
     split_holdout_ratio: float = 0.5,
-    split_manifest_dir: str | None = None,
+    selection_dir: str | None = None,
 ) -> dict:
     """The verified body of ``run_inference``: everything after its checkpoint is loaded once.
 
@@ -862,7 +860,7 @@ def _run_inference_verified(
                 group_by=group_by, group_key_map=group_key_map,
                 experiment_id=identity["experiment_id"],
                 seed=split_seed, holdout_ratio=split_holdout_ratio,
-                split_manifest_dir=split_manifest_dir,
+                selection_dir=selection_dir,
             )
         except (ValueError, UnreadableLabelDocument) as exc:
             # An inadmissible reference, a locked split that no longer resolves, or a calibration
@@ -888,14 +886,14 @@ def _run_inference_verified(
 
         inf_stems = [stem_of(pp) for pp in resolved_paths]
         cal_label_stems = (
-            set(evidence.get("calibration_stems", [])) if split_manifest_dir is not None
+            set(evidence.get("calibration_stems", [])) if selection_dir is not None
             else {pp.stem for pp in prediction_documents(calibration_labels_dir)}
         )
         same_images = calibration_images_dir is None or (
             images_dir is not None and Path(calibration_images_dir) == Path(images_dir))
-        # A manifest's own calibration universe is a held-out subset of the labelled directory,
+        # A selection's own calibration universe is a held-out subset of the labelled directory,
         # so inferring the whole directory is still the same labelled set the calibration drew.
-        if split_manifest_dir is not None:
+        if selection_dir is not None:
             comparable = bool(
                 same_images and inf_stems and cal_label_stems
                 and cal_label_stems <= set(inf_stems)
@@ -905,7 +903,7 @@ def _run_inference_verified(
         if comparable:
             # The bundle's own hash covers the calibration universe under a manifest, not the
             # (larger) inference stem list, so the target must be hashed over that same universe.
-            hashed_stems = evidence.get("calibration_stems", []) if split_manifest_dir is not None \
+            hashed_stems = evidence.get("calibration_stems", []) if selection_dir is not None \
                 else inf_stems
             target_hash, cross_dataset_check = (
                 dataset_hash(calibration_labels_dir, stems=hashed_stems), "same-labeled-set")
@@ -2106,7 +2104,7 @@ def _export_predictions_raster(
     no-basis-at-all case. An explicit ``tile_size`` that contradicts the checkpoint's own recorded
     geometry refuses before that, from ``resolve_tile_regime`` itself. For the ``trait`` path, the
     block calibration's own reserved-region bands must also be tiled at this same resolved edge;
-    a split manifest recorded at a different edge refuses there too.
+    a selection recorded at a different edge refuses there too.
 
     Every call over a raster that is not mask-bearing (``instance_seg`` with ``require_masks``)
     records this pass' own identity and, as tile batches flush, its progress into
@@ -2552,7 +2550,7 @@ def _export_predictions_raster(
 _DELIVER_PER_IMAGE_COUNTS_LIVE_ONLY_DEFAULTS = {
     "conf_threshold": None, "device": None, "tile": None, "tile_size": None, "overlap": None,
     "global_nms_iou": None, "max_dets": None, "calibration_labels_dir": None,
-    "calibration_images_dir": None, "split_manifest_dir": None, "experiment_id": None,
+    "calibration_images_dir": None, "selection_dir": None, "experiment_id": None,
     "postprocess": "nms", "tile_batch_size": 96,
 }
 """``deliver_per_image_counts`` parameters meaningful only for its live regime, mapped to the documented
@@ -2582,7 +2580,7 @@ def deliver_per_image_counts(
     postprocess: str = "nms",
     calibration_labels_dir: str | None = None,
     calibration_images_dir: str | None = None,
-    split_manifest_dir: str | None = None,
+    selection_dir: str | None = None,
     experiment_id: str | None = None,
     allow_unvalidated_staging: bool = False,
     predictions_dir: str | None = None,
@@ -2616,7 +2614,7 @@ def deliver_per_image_counts(
       prediction bucket's own ``operating_point.json`` stamp as its identity and validity source,
       counting real detections (a ``Point`` excluded) off each of its documents, sorted by stem.
       Every parameter meaningful only to a live run (conf/device/tiling/NMS/max_dets/calibration/
-      split-manifest/experiment_id) refuses here by name, since a bucket regime call cannot honor
+      selection/experiment_id) refuses here by name, since a bucket regime call cannot honor
       a stated live parameter with nothing behind it; ``postprocess``/``tile_batch_size`` refuse
       only away from their own documented default, since stated-at-default is indistinguishable
       from unstated for a non-``None`` default. A bucket recording ``raster_path`` (a whole-mosaic
@@ -2715,10 +2713,10 @@ def deliver_per_image_counts(
             validating the operating point.
         calibration_images_dir: Live regime only. Images for the calibration labels (defaults to
             ``images_dir``).
-        split_manifest_dir: Live regime only. Restrict calibration to one capture date's
-            ``calibration`` side of a split manifest (forwarded to ``run_inference``; see its own
-            doc), so a manifest-restricted calibration's evidence can earn a validation record
-            through this door.
+        selection_dir: Live regime only. Restrict calibration to a selection's ``calibration``
+            samples under the calibration labels directory (forwarded to ``run_inference``; see
+            its own doc), so a selection-restricted calibration's evidence can earn a validation
+            record through this door.
         experiment_id: Live regime only. The run that produced the checkpoint, by its record id
             (one run's immutable record, ``tcip_mcp.experiments``), for provenance (forwarded to
             ``run_inference``; see its own doc for the best-effort resolution when omitted).
@@ -2763,7 +2761,7 @@ def deliver_per_image_counts(
                 ("global_nms_iou", global_nms_iou), ("max_dets", max_dets),
                 ("calibration_labels_dir", calibration_labels_dir),
                 ("calibration_images_dir", calibration_images_dir),
-                ("split_manifest_dir", split_manifest_dir), ("experiment_id", experiment_id),
+                ("selection_dir", selection_dir), ("experiment_id", experiment_id),
                 ("postprocess", postprocess), ("tile_batch_size", tile_batch_size),
             ) if value != _DELIVER_PER_IMAGE_COUNTS_LIVE_ONLY_DEFAULTS[name])
         if stated_live_only:
@@ -2842,7 +2840,7 @@ def deliver_per_image_counts(
         trait=trait,
         calibration_labels_dir=calibration_labels_dir,
         calibration_images_dir=calibration_images_dir,
-        split_manifest_dir=split_manifest_dir,
+        selection_dir=selection_dir,
         experiment_id=experiment_id,
     )
     if "error" in result:

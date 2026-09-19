@@ -68,20 +68,19 @@ def _dataset(root: Path, stems=_STEMS) -> Path:
     return root
 
 
-def _draw(root: Path, out: Path, *, seed: int = 2) -> dict:
-    import tcip_store as ts
-
-    from tcip_mcp.tools.data_tools import draw_splits, split_manifest_key
+def _draw(root: Path, out: Path, *, seed: int = 2):
+    from tcip_mcp.pipelines.data.selection import read_selection
+    from tcip_mcp.tools.data_tools import draw_splits
 
     result = draw_splits(str(root), output_path=str(out), subject=SUBJECT, seed=seed,
                          train_ratio=0.4, val_ratio=0.3, calibration_ratio=0.3)
     assert "error" not in result, result
-    return ts.read(split_manifest_key(out))
+    return read_selection(out)
 
 
-def _calibration_stems(manifest: dict, date: str = DATES[0]) -> list[str]:
-    return sorted(i.split("/", 1)[1] for i in manifest["splits"]["calibration"]
-                 if i.startswith(f"{date}/"))
+def _calibration_stems(selection, date: str = DATES[0]) -> list[str]:
+    return sorted(Path(s.ground_truth).stem for s in selection.on("calibration")
+                 if Path(s.ground_truth).parent.name == date)
 
 
 def _label_path(root: Path, date: str, stem: str) -> Path:
@@ -101,30 +100,24 @@ def _rewrite_label(root: Path, date: str, stem: str, *, offset: float) -> None:
 
 def _bind_run(root: Path, out: Path, experiment_id: str, *, date: str = DATES[0]) -> dict | None:
     """A run bound to the manifest at ``out``, for ``date``: the exact sequence
-    ``subprocess_worker.run`` follows (``auto_train_val`` then ``persist_split_manifest``),
+    ``subprocess_worker.run`` follows (``auto_train_val`` then ``persist_run_partition``),
     called directly so no real training subprocess is needed. Returns the run's own
-    ``label_digests`` block (``auto_train_val``'s third return value), never read back through
+    recorded partition (``auto_train_val``'s third return value), never read back through
     ``data_cfg``.
     """
     from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
 
-    data_cfg = {
-        "images_dir": str(root / "images" / date),
-        "labels_dir": str(root / "annotations" / date),
-        "subject": SUBJECT, "attribute": None,
-        "split": {"manifest_dir": str(out)},
-    }
-    train_ds, val_ds, label_digests = auto_train_val("detection", data_cfg, None)
+    data_cfg = {"split": {"selection_dir": str(out)}}
+    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
     create_experiment(experiment_id, {})
-    persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg,
-                            label_digests=label_digests)
-    return label_digests
+    persist_run_partition(experiment_id, train_ds, val_ds, data_cfg, partition=partition)
+    return partition
 
 
 def _seal(
     root: Path, out: Path, experiment_id: str, project_root: Path, *, date: str = DATES[0],
-    calibration_labels_dir: str | None = None, split_manifest_sha256: str | None = None,
+    calibration_labels_dir: str | None = None, selection_sha256: str | None = None,
     real_stem_ids: bool = True,
 ) -> tuple[dict, bool]:
     """Calibrate a stub detector under the bound manifest; returns ``(selection_disjointness,
@@ -163,25 +156,25 @@ def _seal(
         TRAIT, experiment_id=experiment_id, dataset_hash=dh, tiled=False,
         staged_conf_floor=0.01,
         calibration_records=cal_records, holdout_records=hold_records,
-        split_manifest_dir=str(out), calibration_date=date,
-        calibration_labels_dir=calibration_labels_dir,
-        split_manifest_sha256=split_manifest_sha256,
+        selection_dir=str(out),
+        calibration_labels_dir=calibration_labels_dir or str(root / "annotations" / date),
+        selection_sha256=selection_sha256,
     )
     conf = bundle.get("conf")
     assert conf is not None and conf.gate_evidence is not None, bundle
     return conf.gate_evidence["selection_disjointness"], conf.is_shippable
 
 
-def _manifest(out: Path) -> dict:
-    import tcip_store as ts
+def _manifest(out: Path):
+    from tcip_mcp.pipelines.data.selection import read_selection
 
-    from tcip_mcp.tools.data_tools import split_manifest_key
-
-    return ts.read(split_manifest_key(out))
+    return read_selection(out)
 
 
 def _manifest_sha256(out: Path) -> str:
-    return hashlib.sha256(RECORD_JSON.encode(_manifest(out))).hexdigest()
+    from tcip_mcp.pipelines.data.selection import selection_document
+
+    return hashlib.sha256(RECORD_JSON.encode(selection_document(_manifest(out)))).hexdigest()
 
 
 # -- rail: a label rewritten between the draw and the run's bind ------------------------------
@@ -279,7 +272,7 @@ def test_the_second_window_never_names_a_train_or_val_stem_absent_from_a_subset_
         "t1": "0" * 16, "v1": "1" * 16,
         "c1": compute_label_digests(cal_dir, ["c1"])["c1"],
     }
-    label_digests_block = {"at_split": dict(at_run), "at_run": dict(at_run), "manifest_sha256": "m"}
+    label_digests_block = {"at_split": dict(at_run), "at_run": dict(at_run), "selection_sha256": "m"}
 
     moved = _resolve_label_movement(label_digests_block, {"c1"}, str(cal_dir), None)
 
@@ -297,7 +290,7 @@ def test_the_second_window_still_names_a_moved_calibration_side_stem(tmp_path: P
     (cal_dir / "c1.json").write_bytes(b'{"a": 1}')
 
     at_run = {"t1": "0" * 16, "c1": "stale-digest-not-matching-the-file-on-disk"}
-    label_digests_block = {"at_split": dict(at_run), "at_run": dict(at_run), "manifest_sha256": "m"}
+    label_digests_block = {"at_split": dict(at_run), "at_run": dict(at_run), "selection_sha256": "m"}
 
     moved = _resolve_label_movement(label_digests_block, {"c1"}, str(cal_dir), None)
 
@@ -320,12 +313,12 @@ def test_nothing_touched_delivers_with_every_list_empty(
 
     sd, shippable = _seal(root, out, "exp_untouched", tmp_path,
                          calibration_labels_dir=str(root / "annotations" / DATES[0]),
-                         split_manifest_sha256=manifest_sha)
+                         selection_sha256=manifest_sha)
 
     assert sd["labels_moved_draw_to_run"] == []
     assert sd["labels_moved_run_to_now"] == []
     assert sd["calibration_labels_moved"] == []
-    assert sd["manifest_redrawn"] is False
+    assert sd["selection_redrawn"] is False
     assert shippable is True
 
 
@@ -356,10 +349,10 @@ def _review_state_over_stems(stems: list[str]) -> dict:
 def test_the_review_path_genuinely_runs_and_seals_null_second_window_when_nothing_moved(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``resolve_operating_point_from_review`` names no manifest and holds no labels directory
-    of its own, so ``labels_moved_run_to_now``/``manifest_redrawn`` stay null there, and the row
-    still delivers. Driven through the real review path, not through ``resolve_operating_point``
-    called with ``split_manifest_dir`` the way a caller-named-manifest calibration does."""
+    """``resolve_operating_point_from_review`` names no selection of its own, so
+    ``selection_redrawn`` stays null there, and the row still delivers. Driven through the real
+    review path, not through ``resolve_operating_point`` called with ``selection_dir`` the way a
+    caller-named-selection calibration does."""
     from tcip_mcp.pipelines.feedback import resolve_operating_point_from_review
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
@@ -373,22 +366,21 @@ def test_the_review_path_genuinely_runs_and_seals_null_second_window_when_nothin
     bundle = resolve_operating_point_from_review(
         state, TRAIT, scope_root=root, bucket_identities=[_REVIEW_IDENTITY],
         staged_conf_floor=0.01, tiled=False, experiment_id="exp_review_untouched",
-        calibration_date=DATES[0])
+        calibration_labels_dir=str(root / "annotations" / DATES[0]))
     sd = bundle.get("conf").gate_evidence["selection_disjointness"]
 
     assert sd["applicable"] is True
     assert sd["labels_moved_draw_to_run"] == []
     assert sd["calibration_labels_moved"] == []
-    assert sd["labels_moved_run_to_now"] is None
-    assert sd["manifest_redrawn"] is None
+    assert sd["labels_moved_run_to_now"] == []
+    assert sd["selection_redrawn"] is None
 
 
 def test_the_review_path_names_a_calibration_side_label_moved_before_the_bind(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A label rewritten between the draw and the bind is named on the review-sealed row's own
-    ``labels_moved_draw_to_run``/``calibration_labels_moved`` (the only window the review path
-    can populate, since it holds no labels directory of its own for the second), and
+    ``labels_moved_draw_to_run``/``calibration_labels_moved``, and
     ``describe_review_validation``'s sentence names it on whichever branch the gate lands on:
     the only exercise, in the repository, of ``_selection_movement_sentence``."""
     from tcip_mcp.pipelines.feedback import describe_review_validation, resolve_operating_point_from_review
@@ -406,7 +398,7 @@ def test_the_review_path_names_a_calibration_side_label_moved_before_the_bind(
     bundle = resolve_operating_point_from_review(
         state, TRAIT, scope_root=root, bucket_identities=[_REVIEW_IDENTITY],
         staged_conf_floor=0.01, tiled=False, experiment_id="exp_review_moved",
-        calibration_date=DATES[0])
+        calibration_labels_dir=str(root / "annotations" / DATES[0]))
     sd = bundle.get("conf").gate_evidence["selection_disjointness"]
 
     assert sd["applicable"] is True
@@ -465,20 +457,20 @@ def test_a_redraw_between_run_and_calibration_is_named_beside_a_moved_label(
 
     sd, _shippable = _seal(root, out, "exp_redrawn", tmp_path,
                           calibration_labels_dir=str(root / "annotations" / DATES[0]),
-                          split_manifest_sha256=redrawn_manifest_sha)
+                          selection_sha256=redrawn_manifest_sha)
 
-    assert sd["manifest_redrawn"] is True
+    assert sd["selection_redrawn"] is True
     assert stem in sd["labels_moved_draw_to_run"]
 
 
 def test_an_unbound_run_calibrated_under_a_caller_named_manifest_seals_null_keys(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A run with no ``manifest_binding`` at all (never went through the manifest branch of
+    """A run with no ``selection_binding`` at all (never went through the manifest branch of
     ``auto_train_val``), calibrated under a caller-named manifest anyway: the four
     label-movement keys are ``null`` with the reason, and the row still delivers."""
     from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
@@ -490,88 +482,39 @@ def test_an_unbound_run_calibrated_under_a_caller_named_manifest_seals_null_keys
         "labels_dir": str(root / "annotations" / DATES[0]),
         "subject": SUBJECT, "attribute": None,
     }
-    train_ds, val_ds, label_digests = auto_train_val("detection", flat_cfg, None)
-    assert label_digests is None
+    train_ds, val_ds, partition = auto_train_val("detection", flat_cfg, None)
+    # A drawn run records a partition of its own; what it must not carry is a selection binding.
+    assert partition is not None
     create_experiment("exp_unbound", {})
-    persist_split_manifest("exp_unbound", train_ds, val_ds, flat_cfg, label_digests=label_digests)
+    persist_run_partition("exp_unbound", train_ds, val_ds, flat_cfg, partition=partition)
 
     sd, shippable = _seal(root, out, "exp_unbound", tmp_path, real_stem_ids=False)
 
     assert sd["labels_moved_draw_to_run"] is None
     assert sd["labels_moved_run_to_now"] is None
     assert sd["calibration_labels_moved"] is None
-    assert sd["manifest_redrawn"] is None
+    assert sd["selection_redrawn"] is None
     assert sd["reason"]
     assert sd["checked"] is True
     assert shippable is True
 
 
-# -- rail: read_split_manifest_dir requires label_digests on every members block ---------------
+# -- rail: every drawn sample carries the digest a later movement check reads -----------------
 
 
-def test_read_split_manifest_dir_refuses_a_members_block_without_label_digests(
+def test_every_drawn_sample_carries_its_own_label_digest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A manifest ``draw_splits`` itself wrote, with one date's members block stripped of its
-    ``label_digests`` key: every other required key present, so the refusal is provably about
-    this key, not a stand-in shaped so loosely it would refuse for any reason."""
-    import tcip_store as ts
-
-    from tcip_mcp.tools.data_tools import read_split_manifest_dir, split_manifest_key
-
+    """The digest a later movement check reads rides on each sample, so a selection cannot be
+    written whose samples the check has nothing to compare against."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    manifest = _draw(root, out)
-    # Built without the key rather than deleted from a block that has it, so this arrangement
-    # cannot itself raise regardless of whether the block ever carried label_digests.
-    manifest["members"][DATES[0]] = {
-        k: v for k, v in manifest["members"][DATES[0]].items() if k != "label_digests"
-    }
-    ts.replace(split_manifest_key(out), manifest)
 
-    with pytest.raises(ValueError, match="label_digests"):
-        read_split_manifest_dir(out)
+    drawn = _draw(root, out)
 
-
-def test_read_split_manifest_dir_refuses_a_members_block_with_an_empty_label_digests(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An empty (or null) ``label_digests`` is not merely absent, and admitting it would let
-    ``_resolve_label_movement`` read an empty ``at_split`` as "checked, nothing moved" rather
-    than "not checked": ``draw_splits`` never writes a members block for a date with no admitted
-    stems, so a legitimate block's ``label_digests`` is never empty either."""
-    import tcip_store as ts
-
-    from tcip_mcp.tools.data_tools import read_split_manifest_dir, split_manifest_key
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    root = _dataset(tmp_path / "ds")
-    out = tmp_path / "m"
-    manifest = _draw(root, out)
-    manifest["members"][DATES[0]]["label_digests"] = {}
-    ts.replace(split_manifest_key(out), manifest)
-
-    with pytest.raises(ValueError, match="label_digests"):
-        read_split_manifest_dir(out)
-
-
-def test_read_split_manifest_dir_admits_a_manifest_draw_splits_wrote(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from tcip_mcp.tools.data_tools import read_split_manifest_dir
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    root = _dataset(tmp_path / "ds")
-    out = tmp_path / "m"
-    _draw(root, out)
-
-    manifest = read_split_manifest_dir(out)
-    for date, block in manifest["members"].items():
-        assert "label_digests" in block, date
-
-
-# -- rail: label_digests' absent-file convention, and dataset_hash's formula is unchanged ------
+    assert drawn.samples
+    assert all(sample.ground_truth_digest for sample in drawn.samples)
 
 
 def test_label_digests_gives_the_absent_file_digest_and_dataset_hash_is_unchanged(
@@ -610,29 +553,29 @@ def test_label_digests_gives_the_absent_file_digest_and_dataset_hash_is_unchange
     assert opened.count(labels_dir / "present.json") == 1
 
 
-def test_manifest_digest_is_the_one_function_the_bind_write_and_the_calibration_read_both_call(
+def test_selection_digest_is_the_one_function_the_bind_write_and_the_calibration_read_both_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``resolution.manifest_digest`` is the sha256 hex digest over ``RECORD_JSON.encode``, and
-    the run's own ``split.json`` (written by ``persist_split_manifest``, the bind side) already
-    carries that value for the manifest it bound to, the same value a caller's own re-encoding
-    produces: the two spellings this test's own independent oracle (``_manifest_sha256``) and the
-    production side must agree on."""
-    from tcip_mcp.experiments import read_split_manifest
-    from tcip_mcp.pipelines.resolution import manifest_digest
+    """``resolution.selection_digest`` is the sha256 hex digest over ``RECORD_JSON.encode`` of the
+    selection's own document, and the run's own ``split.json`` (written by
+    ``persist_run_partition``, the bind side) already carries that value for the selection it
+    bound to, the same value a caller's own re-encoding produces: the two spellings this test's
+    own independent oracle (``_manifest_sha256``) and the production side must agree on."""
+    from tcip_mcp.experiments import read_run_partition
+    from tcip_mcp.pipelines.resolution import selection_digest
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
-    label_digests_block = _bind_run(root, out, "exp_manifest_digest")
+    partition = _bind_run(root, out, "exp_selection_digest")
 
-    manifest = _manifest(out)
-    assert manifest_digest(manifest) == _manifest_sha256(out)
+    selection = _manifest(out)
+    assert selection_digest(selection) == _manifest_sha256(out)
 
-    split = read_split_manifest("exp_manifest_digest")
-    assert split["label_digests"]["manifest_sha256"] == manifest_digest(manifest)
-    assert label_digests_block["manifest_sha256"] == manifest_digest(manifest)
+    split = read_run_partition("exp_selection_digest")
+    assert split["label_digests"]["selection_sha256"] == selection_digest(selection)
+    assert partition["label_digests"]["selection_sha256"] == selection_digest(selection)
 
 
 def test_dataset_hash_and_label_digests_reads_each_label_once_and_agrees_with_the_apart_calls(
@@ -670,11 +613,11 @@ def test_dataset_hash_and_label_digests_reads_each_label_once_and_agrees_with_th
     assert opened.count(labels_dir / "present.json") == 1
 
 
-def test_draw_splits_calls_the_combined_helper_not_dataset_hash_and_label_digests_apart(
+def test_draw_splits_digests_each_label_directory_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The draw calls ``dataset_hash_and_label_digests`` once per date, the single-pass helper,
-    rather than a separate ``dataset_hash`` and ``label_digests`` call each opening every file."""
+    """The draw calls ``label_digests`` once per label directory it admitted from, rather than
+    once per sample, so a two-date draw opens each document once."""
     import unittest.mock as mock
 
     from tcip_mcp.pipelines import resolution
@@ -683,14 +626,14 @@ def test_draw_splits_calls_the_combined_helper_not_dataset_hash_and_label_digest
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
 
-    real_combined = resolution.dataset_hash_and_label_digests
+    real_digests = resolution.label_digests
     calls: list[tuple] = []
 
     def spy(labels_dir, stems):
         calls.append((labels_dir, tuple(stems)))
-        return real_combined(labels_dir, stems)
+        return real_digests(labels_dir, stems)
 
-    with mock.patch("tcip_mcp.pipelines.resolution.dataset_hash_and_label_digests", spy):
+    with mock.patch("tcip_mcp.pipelines.resolution.label_digests", spy):
         _draw(root, out)
 
     assert len(calls) == len(DATES), calls
@@ -702,14 +645,12 @@ def test_draw_splits_calls_the_combined_helper_not_dataset_hash_and_label_digest
 def test_auto_train_vals_third_return_value_never_lands_in_the_split_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``label_digests`` rides only as ``auto_train_val``'s own third return value: ``data_cfg
-    ["split"]`` (the block copied whole into the durable experiment config and embedded in every
-    checkpoint) never gains the key, so neither does anything downstream that merges it. This is
-    coverage of the source the durable config, every checkpoint's embedded config and every
-    trial's resolved config each copy verbatim (design test 23): the durable config's own read
-    back below reads the one place ``subprocess_worker.run`` patches it into, without a real
-    training subprocess; a checkpoint's embedded config and a trial's resolved config are not
-    independently read back here."""
+    """The per-sample digests and group keys ride only as ``auto_train_val``'s own third return
+    value: ``data_cfg["split"]`` (the block copied whole into the durable experiment config and
+    embedded in every checkpoint) never gains them, so neither does anything downstream that
+    merges it. The durable config's own read back below reads the one place
+    ``subprocess_worker.run`` patches it into, without a real training subprocess; a checkpoint's
+    embedded config and a trial's resolved config are not independently read back here."""
     import tcip_store as ts
 
     from tcip_mcp.experiments import config_key, create_experiment
@@ -721,20 +662,17 @@ def test_auto_train_vals_third_return_value_never_lands_in_the_split_config(
     out = tmp_path / "m"
     _draw(root, out)
 
-    data_cfg = {
-        "images_dir": str(root / "images" / DATES[0]),
-        "labels_dir": str(root / "annotations" / DATES[0]),
-        "subject": SUBJECT, "attribute": None,
-        "split": {"manifest_dir": str(out)},
-    }
-    _train_ds, _val_ds, label_digests = auto_train_val("detection", data_cfg, None)
+    data_cfg = {"split": {"selection_dir": str(out)}}
+    _train_ds, _val_ds, partition = auto_train_val("detection", data_cfg, None)
 
-    assert label_digests is not None
-    assert "label_digests" not in data_cfg["split"]
-    assert "label_digests" not in data_cfg["split"]["manifest_binding"]
+    assert partition is not None and partition["label_digests"] and partition["members"]
+    for block in (data_cfg["split"], data_cfg["split"]["selection_binding"]):
+        assert "label_digests" not in block
+        assert "members" not in block
 
     create_experiment("exp_split_config_readback", {})
     _patch_experiment_config_split("exp_split_config_readback", data_cfg["split"])
     durable = ts.read(config_key("exp_split_config_readback"))
-    assert "label_digests" not in durable["data"]["split"]
-    assert "label_digests" not in durable["data"]["split"]["manifest_binding"]
+    for block in (durable["data"]["split"], durable["data"]["split"]["selection_binding"]):
+        assert "label_digests" not in block
+        assert "members" not in block

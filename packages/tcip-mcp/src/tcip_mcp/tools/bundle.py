@@ -8,7 +8,7 @@ One implementation, so the three readers cannot silently drift onto different no
 "what a bundle holds".
 
 Roots are derived from the tree's own structure plus the anchored documents the platform's own
-writers place (``split_manifest.json``, ``curated_manifest.json``); an anchor found somewhere
+writers place (``selection.json``, ``curated_manifest.json``); an anchor found somewhere
 the derivation constraints exclude (the tree root, under ``.tcip``, under a blob home, or under
 or above another derived root) raises :class:`AnchorMisplaced` naming the file, since a
 mislabelled anchor would recruit a directory that is something else. One nesting is admitted
@@ -31,7 +31,7 @@ from tcip_store.layout_claims import CURATED, EXPERIMENTS, HPO_ROOT, ROOT, RUN, 
 
 from tcip_mcp.registry_paths import is_at_or_under as _is_at_or_under
 
-SPLIT_MANIFEST_NAME = "split_manifest.json"
+SELECTION_NAME = "selection.json"
 CURATED_MANIFEST_NAME = "curated_manifest.json"
 
 LABEL_EXTS = frozenset({".txt", ".xml", ".json"})
@@ -136,12 +136,12 @@ def derive_roots(tree: str | Path) -> tuple[DerivedRoot, ...]:
                 derived.append(DerivedRoot(child, SWEEP))
 
     image_root, annotation_root = _image_root(root), _annotation_root(root)
-    split_dirs = _anchored_dirs(root, SPLIT_MANIFEST_NAME)
+    split_dirs = _anchored_dirs(root, SELECTION_NAME)
     curated_dirs = _anchored_dirs(root, CURATED_MANIFEST_NAME)
     every_anchor = [*split_dirs, *curated_dirs]
     curated_set, split_set = frozenset(curated_dirs), frozenset(split_dirs)
     for directory in split_dirs:
-        _validate_anchor(root, directory, SPLIT_MANIFEST_NAME,
+        _validate_anchor(root, directory, SELECTION_NAME,
                           [d for d in every_anchor if d != directory], image_root, annotation_root,
                           curated_dirs=curated_set, split_dirs=split_set)
         derived.append(DerivedRoot(directory, SPLITS))

@@ -104,17 +104,17 @@ def _patch_experiment_config_id_map(experiment_id: str, subject: str, attribute:
     _patch_experiment_config(experiment_id, "patch_experiment_config_id_map", mutate)
 
 
-def _is_manifest_bound_split(split_cfg: object) -> bool:
-    """Whether a run's ``data.split`` block is a manifest-bound run's resolved block, the one
+def _is_selection_bound_split(split_cfg: object) -> bool:
+    """Whether a run's ``data.split`` block is a selection-bound run's resolved block, the one
     shape :func:`_patch_experiment_config_split` exists for: a spatial or auto-split run's own
     resolved block carries per-region/per-stem member identities that stay out of the durable
-    config, so only ``manifest_binding``'s presence qualifies."""
-    return isinstance(split_cfg, dict) and "manifest_binding" in split_cfg
+    config, so only ``selection_binding``'s presence qualifies."""
+    return isinstance(split_cfg, dict) and "selection_binding" in split_cfg
 
 
 def _patch_experiment_config_split(experiment_id: str, split_cfg: dict) -> None:
     """Merge this run's resolved split policy into the durable experiment record. A binding to a
-    named split manifest (``data.split.manifest_binding``) is what this exists for:
+    named selection (``data.split.selection_binding``) is what this exists for:
     ``launch_config.json``, written before the child exists, never carries it, so the durable
     record is the only other place a reviewer can see that a recorded partition, not a drawn
     one, governed the run."""
@@ -140,6 +140,13 @@ def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dic
     internally (``training_tools.py``'s own COCO-assembly branch calls this exact function),
     reproduces the identical map without depending on which internal dataset shape got built.
 
+    A run bound to a selection is the exception to that re-resolution: its samples were admitted
+    under the map the selection recorded, which ``auto_train_val`` already wrote onto
+    ``data_cfg``, so this answers that map rather than reading the registry again. A live registry
+    whose declared order changed since the draw would otherwise stamp a checkpoint with a
+    vocabulary the model never trained in. A bound run reaching here with no recorded map raises
+    rather than falling back to the registry.
+
     ``None`` when ``task`` isn't detection/instance_seg, no ``subject`` is configured, the run
     trains from a pre-built COCO source (``coco_json``/``label_format="coco"``) or a bespoke
     ``dataset_source`` (neither route's targets are guaranteed to come
@@ -155,14 +162,29 @@ def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dic
     """
     if task not in ("detection", "instance_seg") or not data_cfg.get("subject"):
         return None
+    subject = data_cfg["subject"]
+    attribute = data_cfg.get("attribute")
+    split_cfg = data_cfg.get("split")
+    split_cfg = split_cfg if isinstance(split_cfg, dict) else {}
+    bound = split_cfg.get("selection_binding")
+    if isinstance(bound, dict):
+        # A bound run already holds the exact map its samples were admitted under; re-resolving
+        # from the live registry could stamp a different order than the model trained in.
+        recorded = data_cfg.get("id_map")
+        if not isinstance(recorded, dict) or not recorded:
+            raise ValueError(
+                f"the run bound to the selection at {bound.get('selection_dir')!r} carries no "
+                "data.id_map: a bound run trains in the class space its selection recorded, and "
+                "a checkpoint stamped from a live registry instead could speak a different "
+                "vocabulary."
+            )
+        return (subject, attribute, dict(recorded))
     from tcip_mcp.pipelines.data.label_queries import targets_registry_derived
 
     if not targets_registry_derived(data_cfg):
         return None
     from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map
 
-    subject = data_cfg["subject"]
-    attribute = data_cfg.get("attribute")
     try:
         _reg, id_map = resolve_registry_id_map(data_cfg.get("labels_dir", ""), subject, attribute)
     except ValueError:
@@ -220,7 +242,7 @@ def run(experiment_id: str, output_dir: str, resume_from: str) -> None:
 def _prepare_run_context(experiment_id: str, output_dir: str, resume_from: str,
                          store: Any) -> "TrainContext":
     """Build this run's ``TrainContext``: read the launch config, build the datasets and loaders,
-    patch the durable experiment record's own provenance, and persist the split manifest.
+    patch the durable experiment record's own provenance, and persist the run's partition.
 
     Isolated from :func:`run` so a crash anywhere here is reconciled to ``failed`` with its own
     ``training_run`` audit event, through ``run``'s own except clause, before it crashes the
@@ -232,7 +254,7 @@ def _prepare_run_context(experiment_id: str, output_dir: str, resume_from: str,
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import attach_run
     from tcip_mcp.pipelines.data.split_construction import (
-        auto_train_val, dataset_identity, persist_split_manifest,
+        auto_train_val, dataset_identity, persist_run_partition,
     )
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
     from tcip_mcp.tools.training_tools import launch_config_key
@@ -253,10 +275,10 @@ def _prepare_run_context(experiment_id: str, output_dir: str, resume_from: str,
         from tcip_mcp.pipelines.data.augmentations import build_augmentation
         transforms = build_augmentation(aug_config)
 
-    train_ds, val_ds, label_digests = auto_train_val(task, data_cfg, transforms)
+    train_ds, val_ds, partition = auto_train_val(task, data_cfg, transforms)
 
     split_cfg = data_cfg.get("split")
-    if _is_manifest_bound_split(split_cfg):
+    if _is_selection_bound_split(split_cfg):
         _patch_experiment_config_split(experiment_id, split_cfg)
 
     # Stamp this run's resolved name->id map onto config["data"] in place, data_cfg
@@ -319,9 +341,9 @@ def _prepare_run_context(experiment_id: str, output_dir: str, resume_from: str,
     # own stated authority) rather than threaded across the process boundary; same deterministic
     # result the parent's own copy (used for the lineage record) already produced.
     ds_id, ds_fp = dataset_identity(data_cfg)
-    persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg,
+    persist_run_partition(experiment_id, train_ds, val_ds, data_cfg,
                            dataset_id=ds_id, dataset_fingerprint=ds_fp,
-                           label_digests=label_digests)
+                           partition=partition)
 
     from tcip_mcp.pipelines.training.envelope import TrainContext
 

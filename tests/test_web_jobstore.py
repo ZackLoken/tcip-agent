@@ -332,7 +332,7 @@ def test_review_priority_queue_rehydrate_restores_calibration_marks_fields(tmp_p
         job_id="pq-unresolved", checkpoint_path="c", images_dir="i", dataset_root="d",
         status="completed",
         queue=[{"image": "a.jpg", "score": 0.9}],
-        marks_unresolved="this run is bound to split manifest 'nope', but it could not be read",
+        marks_unresolved="this run is bound to the selection 'nope', but it could not be read",
     )
     review._pq_register(job)
     review._pq_registry.jobs.clear()
@@ -341,7 +341,7 @@ def test_review_priority_queue_rehydrate_restores_calibration_marks_fields(tmp_p
         review.rehydrate_for_current_root()
         restored = review._pq_registry.jobs["pq-unresolved"]
         assert restored.marks_unresolved == (
-            "this run is bound to split manifest 'nope', but it could not be read")
+            "this run is bound to the selection 'nope', but it could not be read")
     finally:
         review._pq_registry.jobs.clear()
 

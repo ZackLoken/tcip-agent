@@ -1,7 +1,7 @@
 """A within-mosaic calibration rect must be positively attested as reserved, not merely un-trained.
 
 A block-calibration reference has no image identity of its own, so the only proof it was held out is
-its geometry: the rect has to sit fully inside a region the split manifest actually recorded as
+its geometry: the rect has to sit fully inside a region the run's partition actually recorded as
 non-train (``val_region``/``test_region``/``calibration_region``) and clear of every recorded train
 region. Missing the containment obligation admits a rect that lies in no attested region at all: a
 gap between regions, or coordinates the persisted geometry never covered.
@@ -100,7 +100,7 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
     """
     import tcip_store as ts
     from tcip_mcp.experiments import create_experiment, split_key
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
 
     images_dir, labels_dir, stem = _mosaic_dataset(tmp_path / "ds")
     data_cfg = {
@@ -113,7 +113,7 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
     assert val_ds is not None
 
     create_experiment("exp_four_way", {})
-    persist_split_manifest("exp_four_way", train_ds, val_ds, data_cfg)
+    persist_run_partition("exp_four_way", train_ds, val_ds, data_cfg)
     spatial = ts.read(split_key("exp_four_way"))["spatial"]
     cal_region = spatial["calibration_region"]
     assert cal_region, "the writer produced no calibration region to read back"
@@ -145,7 +145,7 @@ def test_persisted_split_record_spatial_block_carries_no_seed_while_top_level_se
     """
     import tcip_store as ts
     from tcip_mcp.experiments import create_experiment, split_key
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
 
     images_dir, labels_dir, stem = _mosaic_dataset(tmp_path / "ds")
     data_cfg = {
@@ -157,7 +157,7 @@ def test_persisted_split_record_spatial_block_carries_no_seed_while_top_level_se
     assert val_ds is not None
 
     create_experiment("exp_spatial_no_seed", {})
-    persist_split_manifest("exp_spatial_no_seed", train_ds, val_ds, data_cfg)
+    persist_run_partition("exp_spatial_no_seed", train_ds, val_ds, data_cfg)
     record = ts.read(split_key("exp_spatial_no_seed"))
 
     assert record["seed"] == 7

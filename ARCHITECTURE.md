@@ -25,21 +25,21 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 2f2f5f40.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 94f7f162.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 2f2f5f40 has 441 modules across the six scanned roots (148929 total lines):
+HEAD 94f7f162 has 442 modules across the six scanned roots (149354 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 140 | 65968 |
+| tcip-mcp | 141 | 66398 |
 | tcip-annotation | 12 | 4346 |
-| tcip-web | 40 | 14209 |
+| tcip-web | 40 | 14210 |
 | tcip-store | 13 | 5283 |
-| tcip-web-frontend | 216 | 53209 |
+| tcip-web-frontend | 216 | 53203 |
 | tools | 20 | 5914 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
@@ -73,7 +73,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/cli/check_dataset_identity.py | Check a dataset's on-disk content against its recorded identity: detect changed / moved data. | 5 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/complete_removals.py | Move every workspace project carrying a pending-removal marker onto its own holding directory: the operator/agent entry point for ``tcip_mcp.project_removal.complete_pending_removals``, the same walk a served backend runs once at its own startup, run by hand or on a schedule with no backend running. | 3 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/complete_renames.py | Rename every workspace project carrying a pending-rename marker onto its own new name: the operator/agent entry point for ``tcip_mcp.project_rename.complete_pending_renames``, the same walk a served backend runs once at its own startup, run by hand or on a schedule with no backend running. | 3 | 0 |
-| packages/tcip-mcp/src/tcip_mcp/cli/doctor.py | Data-state doctor: scan a live project for state inconsistencies code audits can't see. | 24 | 0 |
+| packages/tcip-mcp/src/tcip_mcp/cli/doctor.py | Data-state doctor: scan a live project for state inconsistencies code audits can't see. | 23 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/export_store.py | Write a root's database-held records and logs back out as files. | 6 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/import_project.py | Import an annotation project from a bundle ``tcip archive-project`` wrote: a ZIP archive, or a directory tree written by its ``--output-dir`` mode. | 3 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/cli/inspect_compute_resources.py | Report the host's current compute headroom. | 3 | 0 |
@@ -108,16 +108,17 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/components/heads.py | Task-specific heads: each knows its loss, metric, and output format. | 1 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/components/losses.py | Loss functions for bespoke models: plain importable classes + a name->class map. | 0 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/components/necks.py | Neck modules: adapt backbone features for downstream heads. | 0 | 0 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/count_calibration.py | Resolve the count operating point over a locked, disjoint calibration/holdout split of a labeled directory: one bundle, read by the offline inspector (``tcip calibrate-operating-point``, which prints it and writes nothing) and earned into a validation record by :func:`tcip_mcp.tools.calibration_tools.calibrate_count_operating_point`. | 10 | 2 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/count_calibration.py | Resolve the count operating point over a locked, disjoint calibration/holdout split of a labeled directory: one bundle, read by the offline inspector (``tcip calibrate-operating-point``, which prints it and writes nothing) and earned into a validation record by :func:`tcip_mcp.tools.calibration_tools.calibrate_count_operating_point`. | 9 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/__init__.py | Data pipeline: dataset loading, augmentation, tiling, splitting. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/augmentations.py | Data augmentation transforms for all task types. | 1 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/band_groups.py | Sensor-agnostic band-group correlation: sibling single-band raster files that are really one logical multi-band capture (some multispectral drone sensors write one file per band instead of one multi-band file per image), and the ``.bandgroup`` manifest that records a found group. | 4 | 19 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/dataset_fingerprint.py | Whole-dataset content identity: the ``dataset_fingerprint`` formula (labels + image files + registry + confirmed negatives) and its formula-version stamp, recompute-on-read authority for the cached value a dataset's own ``dataset.json`` carries. | 5 | 6 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py | Multi-task datasets with standardized interfaces. | 10 | 5 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py | The label-store and registry query library: reads a dataset's per-image JSON or assembled COCO labels, its ``subjects.json`` registry, and its confirmed-negative image-status store, and assembles them into the boxes/labels/COCO shapes the dataset classes in ``datasets.py`` and the outside-layer tools (calibration, evaluation, inference, training) consume. | 9 | 13 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py | Multi-task datasets with standardized interfaces. | 12 | 6 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py | The label-store and registry query library: reads a dataset's per-image JSON or assembled COCO labels, its ``subjects.json`` registry, and its confirmed-negative image-status store, and assembles them into the boxes/labels/COCO shapes the dataset classes in ``datasets.py`` and the outside-layer tools (calibration, evaluation, inference, training) consume. | 10 | 13 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/samplers.py | Task-aware data samplers: class-imbalance handling plus read-locality ordering. | 2 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/data/split_construction.py | Constructing and persisting training splits from a data config, beside ``splits.py``. | 15 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py | Group-aware, annotation-stratified train/val/calibration splitting. | 7 | 18 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/data/selection.py | A selection: which samples train, which validate, which are held back to calibrate on. | 2 | 12 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/data/split_construction.py | Constructing and persisting training splits from a data config, beside ``splits.py``. | 16 | 3 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py | Group-aware, annotation-stratified train/val/calibration splitting. | 8 | 16 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/tiling.py | Sliding-window tiling geometry for small-object detection (SAHI-style). | 0 | 7 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/delivery_events_schema.py | The ``delivery_events`` record's declared shape, so its writer (``resolution.py``'s ``record_delivery_binding_event``) and its reader (``tcip_web``'s ``list_delivery_events`` route) agree on one shape rather than each independently tolerating whatever the other happens to have written. | 0 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/derivations.py | Tier-A data/model derivations, read the artifact in hand, compute the value. | 8 | 11 |
@@ -126,16 +127,16 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/materialize.py | Materialize a curated detection dataset from human review verdicts. | 10 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/review_calibration.py | Reconstruct a calibration reference from human review verdicts. | 4 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/verdicts.py | Reading one stored review verdict entry: the action vocabulary and the boxes it carries. | 1 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/image_utils.py | Shared image utilities for the composable ML pipeline (channel-aware). | 5 | 37 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/image_utils.py | Shared image utilities for the composable ML pipeline (channel-aware). | 5 | 38 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/inference/__init__.py | Inference pipeline: model loading and batch prediction. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/inference/generic_predictor.py | Generic predictor for any bespoke ``model_source`` checkpoint. | 10 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/inference/predictor.py | Model-kind contract + the predictor factory. | 6 | 12 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/measurement/__init__.py | Measurement primitives: morphology on a *validated* mask (a first-class toolkit primitive). | 1 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/measurement/mask_geometry.py | Mask-geometry: dimensional measurements on a validated binary/instance mask. | 3 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/measurement/scale_calibration.py | Deriving and validating a physical per-pixel scale against real physical measurements. | 3 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/model_build.py | ``build_model``, the one indirection between a config/checkpoint and an ``nn.Module``. | 5 | 17 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/model_build.py | ``build_model``, the one indirection between a config/checkpoint and an ``nn.Module``. | 5 | 18 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/model_contract.py | The one model-side contract: the measurement boundary, as a behavioral check, not a mold. | 4 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py | Resolve the calibrated operating points (detection conf/NMS/max_dets/tile, and the classifier, ordinal and regression points) per dataset, at runtime. | 8 | 12 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py | Resolve the calibrated operating points (detection conf/NMS/max_dets/tile, and the classifier, ordinal and regression points) per dataset, at runtime. | 10 | 12 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/overviews.py | External overview pyramids (.ovr sidecars) for large rasters. | 2 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/pixel_size.py | The one place the platform turns a raster's georeferencing tags into a real-world pixel size in metres. | 3 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/__init__.py | Postprocessing pipeline: temporal aggregation and CSV export. | 0 | 0 |
@@ -149,7 +150,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/raster_source.py | Raster reading: one open-and-read surface for every image source this platform decodes. | 4 | 18 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/reference_grid.py | Named reference grid over a raster's native pixel frame. | 3 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/region_completeness.py | Per-cell content digest for the region-completeness store (:func:`tcip_mcp.dataset_layout.region_completeness_path`): detects an annotation edited or deleted inside an attested cell after attestation. | 6 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py | Runtime parameter resolution, the "derive, don't pin" currency. | 9 | 41 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py | Runtime parameter resolution, the "derive, don't pin" currency. | 10 | 41 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/schemas.py | Pydantic v2 config schemas for structural/type validation. | 0 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/__init__.py | Training pipeline: trainer, progressive unfreezing, HPO. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/collation.py | Collate functions for a task's ``DataLoader``: batches a list of per-sample ``(image, target)`` pairs into the shape ``train()`` and ``evaluate()`` both expect. | 0 | 5 |
@@ -172,17 +173,17 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/registry_paths.py | Where a registry entry's stored path resolves, and the containment core the checkpoint and dataset registries share when they decide whether a target sits under their own scope root. | 0 | 8 |
 | packages/tcip-mcp/src/tcip_mcp/server.py | MCP server entry point: register all domain tools and run on stdio. | 25 | 24 |
 | packages/tcip-mcp/src/tcip_mcp/statements.py | Comparable-value and content-hash primitives shared by every statement kind. | 0 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/store_catalogue.py | The whole store catalogue in one import: every module that registers a store. | 30 | 9 |
+| packages/tcip-mcp/src/tcip_mcp/store_catalogue.py | The whole store catalogue in one import: every module that registers a store. | 31 | 9 |
 | packages/tcip-mcp/src/tcip_mcp/stray_state.py | What a stray file under a project's ``.tcip/state`` root is, and whether one path may be deleted: one predicate, read by the doctor's own listing and by :func:`delete_stray_state_file` (``tools/project_tools.py``), so the two cannot disagree (CLAUDE.md: when two code paths must agree, call one from the other). | 3 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/subject_registry.py | The dataset's subject registry, subjects, their attributes, and the deterministic name→id assignment a training run uses (and records, so predictions stay decodable). | 3 | 17 |
+| packages/tcip-mcp/src/tcip_mcp/subject_registry.py | The dataset's subject registry, subjects, their attributes, and the deterministic name→id assignment a training run uses (and records, so predictions stay decodable). | 3 | 16 |
 | packages/tcip-mcp/src/tcip_mcp/tools/__init__.py | Tool sub-package: each module registers tools with the MCP server. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py | Annotation tools: load, save, and evaluate name-based annotations via MCP. | 13 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/tools/bundle.py | What a project bundle holds: the one membership accounting both doors compose from. | 9 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/tools/calibration_tools.py | Calibration-administration tools: redrawing a locked cal/holdout split, calibrating a scalar (ordinal-rank or continuous-value) trait against a disjoint held-out split, and earning a validated count operating point over an already-published prediction bucket. | 18 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py | Data management tools: census a dataset, split data. | 16 | 11 |
+| packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py | Data management tools: census a dataset, split data. | 15 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/tools/delivery_tools.py | Delivery-general tools: doors over the delivery record and its writer that no one trait or delivery kind owns. | 9 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/experiment_tools.py | Experiment tracking MCP tools: create, list, log, compare, and trace experiments. | 4 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/tools/feedback_tools.py | Review -> retrain feedback MCP tools. | 17 | 3 |
+| packages/tcip-mcp/src/tcip_mcp/tools/feedback_tools.py | Review -> retrain feedback MCP tools. | 16 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py | GUI-driving tools: push data to a panel, or drive the live Annotate/Review tab to a frame. | 9 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py | Inference MCP tools: run_inference and deliver_per_image_counts, sharing one verified body (``_run_inference_verified``) so the firewalled operating point (conf/NMS/tiling/max_dets) resolves identically for every entry point that runs a model over images. | 25 | 6 |
 | packages/tcip-mcp/src/tcip_mcp/tools/ingest_tools.py | Image ingestion: turn a raw folder of photos into a structured TCIP project. | 10 | 1 |
@@ -226,7 +227,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
-| packages/tcip-store/src/tcip_store/__init__.py | TCIP's storage seam: one interface for the platform's mutable records, logs, and blobs. | 6 | 72 |
+| packages/tcip-store/src/tcip_store/__init__.py | TCIP's storage seam: one interface for the platform's mutable records, logs, and blobs. | 6 | 73 |
 | packages/tcip-store/src/tcip_store/adoption.py | Moving a root's existing record and log files into a database, atomically or not at all. | 6 | 3 |
 | packages/tcip-store/src/tcip_store/binding.py | Which backend a process binds, decided once at its entry point. | 3 | 29 |
 | packages/tcip-store/src/tcip_store/errors.py | Every refusal the storage seam raises. | 1 | 18 |
@@ -752,7 +753,7 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `freeze_split_manifest` | `data_tools.py:223` | yes | Freeze a finished run's own drawn train/val partition into a ``split_manifest`` record, |
+| `freeze_selection` | `data_tools.py:16` | yes | Freeze a finished run's own drawn train/val partition into a selection, so a later run can |
 | `draw_splits` | `data_tools.py:641` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
 
 ### experiment_tools.py (3 tools)
@@ -869,7 +870,7 @@ Docstring is the function's docstring first line, verbatim.
 
 `tools/bundle.py` (not a tool module: no `@mcp.tool()` sites) is the one membership accounting
 `archive_project` and `import_project` both compose from, `account_for(tree)`. It derives every
-root a project tree is or holds (the fixed `.tcip` structure, plus every `split_manifest.json`/
+root a project tree is or holds (the fixed `.tcip` structure, plus every `selection.json`/
 `curated_manifest.json` anchor under placement constraints that raise `AnchorMisplaced` when one
 sits at the tree root, under `.tcip`, under a blob home, or under/above another derived root),
 then classifies every file by precedence: bookkeeping, a record or log claimed by exactly one
@@ -1375,14 +1376,10 @@ Path: `<dataset_root>/.tcip/state/image_status.json`.
 
 Writers: `set_image_status`,
 `packages/tcip-web/src/tcip_web/routes/subjects.py:334`; `set_image_status_bulk`,
-`routes/subjects.py:375`; `tcip_mcp.tools.data_tools._apply_negative_carry`
-(split-materialized copy; every confirmed negative is read by the admission
-(`trainable_stems`) before the split's manifest or file tree is written, then
-attributed to a split by
-`negative_carry = _compute_negative_carry(label_map, bare_parts, image_map, subject, only_date)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:990`, then applied by
-`_apply_negative_carry(negative_carry, out_dir, subject)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:1088`).
+`routes/subjects.py:375`. A selection writes none: it lists the samples the admission
+(`trainable_stems`) already admitted, each by its own source and label path, so a confirmed
+negative stays a fact about the dataset it was confirmed in and is never re-attributed to a
+side's own copy of it.
 
 Readers: `tcip_mcp.pipelines.data.label_queries.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:577`; `_status_bucket_for`,
@@ -1646,29 +1643,26 @@ are listed here with the rest rather than taking numbers of their own.
   reproducible from, written once by the training envelope,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:355`. No accessor in this module
   reads it back; it is provenance a reviewer reads directly.
-- `split.json` (`split_key`, `experiments.py:257`): written by `split_construction.persist_split_manifest`,
-  `packages/tcip-mcp/src/tcip_mcp/pipelines/data/split_construction.py:63`
-  (`def persist_split_manifest(`). Read by `read_split_manifest`,
-  `experiments.py:1910`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
-  both take the manifest from. Every run, bound to a manifest or not, records `date`, the labels
-  directory's own capture date, `manifest_date_key`'s empty string for a flat tree (never `null`:
-  a selection-disjointness check comparing dates must tell a flat run's own date apart from a
-  caller that derived no date to compare at all), so it can scope itself to one date without
-  re-deriving it from the config. When the run named a split manifest (`data.split.manifest_dir`),
-  this record's `manifest_binding` carries the binding's counts (`assigned`, `train_bound`,
-  `val_bound`, `calibration_bound`, `calibration_unadmitted`, `other_dates`) and its two content
-  hashes (never the manifest's own member lists, which live in the `split_manifest` record itself,
-  see §26); `calibration_bound`
-  counts stems the manifest's `calibration` side names for this date, placed on neither loader
-  whether or not the run currently admits them, and `calibration_unadmitted` counts the subset the
-  run no longer admits at all, so a review of this one record shows the manifest's held-out side
-  was honored rather than silently folded into training or selection. Beside `manifest_binding`,
-  never inside it, `label_digests` carries the per-stem facts the count-shaped binding block
-  deliberately excludes: `at_split` (copied from the manifest's own members block for this date),
-  `at_run` (the same per-stem digests recomputed at bind time) and `manifest_sha256` (the digest
-  of the manifest record the run bound to), so a calibration can name a label that moved between
-  the draw and now without the durable experiment config, a checkpoint's embedded config or a
-  trial's resolved config ever carrying a per-stem digest.
+- `split.json` (`split_key`, `experiments.py:257`): written by `split_construction.persist_run_partition`,
+  `packages/tcip-mcp/src/tcip_mcp/pipelines/data/split_construction.py:64`
+  (`def persist_run_partition(`). Read by `read_run_partition`,
+  `experiments.py:1911`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
+  both take the partition from. Every run, bound to a selection or not, records `labels_dirs`,
+  every label directory its own members live under: a bare stem names one image only within one
+  directory, so a later selection check narrows itself to the directory a calibration named
+  rather than to a capture date, and a run whose members span dates is checked the same way a
+  single-date one is. When the run bound a selection (`data.split.selection_dir`), this record's
+  `selection_binding` carries the binding's counts (never the selection's own sample list, which
+  lives in the `selection` record itself, see §26), a `members` block per label directory (that
+  directory's `train` and `val` stems, the group key each was drawn under, and its own
+  `label_digests`), and `redrawn_within_selection` when the run redrew train and val inside the
+  selection's own members. Beside `selection_binding`, never inside it, a top-level
+  `label_digests` carries the per-stem facts the count-shaped binding block deliberately
+  excludes: `at_split` (each sample's digest as the draw recorded it), `at_run` (the same
+  per-stem digests recomputed at bind time) and `selection_sha256` (the digest of the selection
+  the run bound to), so a calibration can name a label that moved between the draw and now
+  without the durable experiment config, a checkpoint's embedded config or a trial's resolved
+  config ever carrying a per-stem digest.
 - `validations.jsonl` (`validations_key`, `experiments.py:299`, append-only): the claims earned against this
   run's evidence. Written only by the module-private `_append_validation`, `experiments.py:1116`
   (no public raw appender; the storage seam's generic append remains reachable and is a stated
@@ -1679,15 +1673,15 @@ are listed here with the rest rather than taking numbers of their own.
   disjoint from that checkpoint's own selection (val) side: `{"applicable": bool, "reason": str |
   None, "checked": bool, "unresolvable": bool, "leaked_groups": list, "leaked_stems": list,`
   `"group_check": str | None, "labels_moved_draw_to_run": list | None, "labels_moved_run_to_now":
-  list | None, "calibration_labels_moved": list | None, "manifest_redrawn": bool | None,
+  list | None, "calibration_labels_moved": list | None, "selection_redrawn": bool | None,
   "calibration_labels_dir": str | None}` for the four documents `resolver_selection_disjointness`
-  covers, `null` for `resolve_scale`; `applicable` is `False` when no split manifest is in play (no
-  `split_manifest_dir` named and no `manifest_binding` on the checkpoint's own run, a within-image
-  `spatial_strip` split, an empty `val`, an `external` group_by, no `calibration_date` derived at
-  all, or a `calibration_date` other than the run's own `split.json` `date`), each such case
+  covers, `null` for `resolve_scale`; `applicable` is `False` when no selection is in play (no
+  `selection_dir` named and no `selection_binding` on the checkpoint's own run, a within-image
+  `spatial_strip` split, an empty `val`, an `external` group_by, no `calibration_labels_dir`
+  named at all, or one none of the run's own members live under), each such case
   carrying its own `reason`; `unresolvable` marks
-  the one case the ruling refuses rather than skips, a named manifest with no experiment record to
-  read a selection side from. `verify_stamp_binding` (`packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1858`) requires the five label-movement
+  the one case the ruling refuses rather than skips, a named selection with no experiment record
+  to read a selection side from. `verify_stamp_binding` (`packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1858`) requires the five label-movement
   keys present, `null` admitted, on an applicable row it would otherwise pass: an applicable,
   checked, no-leak row missing any of them floors, the same as a leak does, so a row earned before
   the keys existed cannot read as cleared. Read by `read_validations`, `experiments.py:1149`,
@@ -1714,15 +1708,15 @@ reads the log through the seam and emits typed frames; the tuning trial route is
 that still answers in the shape `_metrics_common.metrics_response` builds, so there is no second
 parse of a row to disagree with there.
 
-Seam S30 ("split.json train/val manifest"), verdict `both-sides-one-implementation`,
-`phase0_implementation: written twice`: `tests/test_calibration_holdout_disjointness.py:124,305,357`,
-`tests/test_block_calibration.py:75`. These tests call the real writer
-`persist_split_manifest` and the real readers (`operating_point.py`'s disjointness check,
+Seam S30 ("split.json train/val membership"), verdict `both-sides-one-implementation`,
+`phase0_implementation: written twice`: `tests/test_calibration_holdout_disjointness.py:146,163,327,381`,
+`tests/test_block_calibration.py:120`. These tests call the real writer
+`persist_run_partition` and the real readers (`operating_point.py`'s disjointness check,
 `block_calibration.py`'s `resolve_block_calibration_records`) against the same file. Gap: nothing
 exercises a mismatch between `dataset_hash`/`dataset_id`/`dataset_fingerprint` values recorded by
-the writer and any downstream consumer keying off them. `manifest_binding`, the block a run bound
-to a named `split_manifest` record (format 26) carries here, is exercised by
-`tests/test_split_manifest_binding.py`'s own writer/reader pair, not by this seam's tests.
+the writer and any downstream consumer keying off them. `selection_binding`, the block a run bound
+to a recorded `selection` carries here, is exercised by `tests/test_selection_binding.py`'s own
+writer/reader pair, not by this seam's tests.
 
 ## 16. `.tcip/models/registry.json`, trained-model registry
 
@@ -2020,9 +2014,7 @@ written that way, so the fresh-interpreter claim is measured rather than inferre
 (sibling sidecars to `operating_point.json`, named in `pipelines/operating_point.py`, not opened
 for this section); `pipelines/region_completeness.py`'s own digest-writing logic beyond the
 `dataset_layout.py` cross-reference already given for format 8; any format defined inside
-`pipelines/postprocessing/`, `pipelines/feedback/`, or `pipelines/data/splits.py`'s own materialized
-tree beyond the `image_status.json` carry-over covered in format 5 (`split_manifest.json` is
-covered in format 26). No seam id covers this placeholder entry since
+`pipelines/postprocessing/` or `pipelines/feedback/` (`selection.json` is covered in format 26). No seam id covers this placeholder entry since
 it names no single format.
 
 ## 25. `.tcip/project.json`, per-project record (site)
@@ -2041,92 +2033,91 @@ one reader every surface (the picker, `inspect_project`, the doctor) calls, and 
 
 No seam id in `seam-coverage.json`'s 67-entry inventory names `project.json`: the record is new.
 
-## 26. `split_manifest.json`, a partition `draw_splits` drew
+## 26. `selection.json`, a partition `draw_splits` drew
 
-Path: `<output_path>/split_manifest.json`, addressed by `split_manifest_key`,
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:38`, under whatever directory the caller
-asked the partition to be written to; no dataset resolver owns this layout.
+Path: `<output_path>/selection.json`, addressed by `selection_key`,
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/selection.py:169`, under whatever directory the
+caller asked the partition to be written to; no dataset resolver owns this layout.
 
-Writer: `draw_splits`, `data_tools.py:641`, when `output_path` is given or `materialize=True`.
-A finished run's own drawn train/val partition freezes into the identical shape through
-`freeze_split_manifest` (`data_tools.py:223`), the second writer; both compose their fields
-through the one `compose_split_manifest` (`data_tools.py:124`) that builds the dict and writes
-it, so the two writers can never disagree on what a `split_manifest` record carries. A frozen
-manifest also carries `origin` (`{"experiment_id", "frozen_at"}`), absent on a drawn one, the
-field `read_split_manifest_dir` and its callers use to tell the two apart.
-The three sides are `splits.SPLIT_NAMES` (`train`, `val`, `calibration`); a manifest write states
-all three ratios (`train_ratio`, `val_ratio`, `calibration_ratio`) non-zero, refusing whichever is
-zero by name, since a manifest always draws all three sides. The draw refuses, before any write,
-when the tree holds fewer foreground groups of `subject` (and `attribute`, when scoped) than the
-three sides need at minimum (one each for `train`/`val`, two for `calibration`), counted through a
-subject-scoped `count_label_lines` for the minimum pass on every manifest draw, independent of
-`stratify_foreground` (which only gates the balancing pass's own foreground signal). The manifest
-records `seed`, `group_by` (the resolved policy), `group_key_map` when one was supplied,
-`dataset_fingerprint`, `subject`, `attribute` (`null` when none), `id_map` (the
-`assign_class_ids` map the draw resolved), `members` (one block per capture date that admitted at
-least one stem, keyed through `splits.manifest_date_key` (the date, or `""` for a flat tree),
-holding `labels_root`, `images_root`, that date's own `dataset_hash`, and `label_digests` (the
-per-stem sha256[:16] over each admitted stem's own label bytes, the same absent-file convention
-`dataset_hash` uses); a date the draw searched
-but admitted nothing writes no block, so a reader that finds none under a date treats it as one
-the manifest never held, not one it holds empty), `splits` (`train`/`val`/`calibration`
-identities, `<date>/<stem>`, the bare `<stem>` under a flat tree), `admission_counts` (the summed
-`trainable_stems` counts across every date; a frozen manifest records this as `{}`, since
-freezing a training run's own drawn partition records no admission draw),
-`calibration_foreground_groups_by_date` and
-`realized_ratios` (both described below). The answer (and the persisted manifest
-record) also carry `calibration_foreground_groups_by_date`, a count for every date `members`
-holds, `0` included, since the floor above is over the whole draw and one date's own calibration
-slice can still land short of two foreground groups; the calibration door's own floor is where
-that absence bites. Both also carry `realized_ratios`, each side's member share of the draw
-actually delivered: at a floor-sized tree the minimum pass can consume every foreground group
-before the balancing pass ever sees the caller's fractions, so the delivered shares can diverge
-from the ratios asked for. A stats-only call (no `output_path`, no `materialize`) writes no
-manifest, admits a zero or non-zero `calibration_ratio` either way, carries neither
-`calibration_foreground_groups_by_date` nor `realized_ratios` (both manifest-write-only fields),
-but answers `dataset_hashes_by_date` the same way, over whatever labels directories its plain
-image/label scan found, plus a single
-`dataset_hash` only when that scan found exactly one such directory; over more than one,
-`dataset_hash` is `null` rather than one directory's hash blind to the rest.
+Writer: `draw_splits`, `data_tools.py:439`, when `output_path` is given. A finished run's own
+drawn train/val partition freezes into the identical shape through `freeze_selection`
+(`data_tools.py:16`), the second writer; both go through the one `write_selection`
+(`selection.py:277`), which composes the document through `selection_document`
+(`selection.py:195`) and refuses a crossing partition before anything lands, so the two writers
+can never disagree on what a selection carries or write one a reader would reject. A frozen
+selection also carries `origin` (`{"experiment_id", "frozen_at"}`), absent on a drawn one, the
+field `read_selection` and its callers use to tell the two apart.
 
-Readers: `data_tools.read_split_manifest_dir`, `data_tools.py:175`, the one reader a training or
-tuning run's `data.split.manifest_dir` resolves through (`split_construction.auto_train_val`) and a
-manifest-restricted calibration resolves through (`splits.resolve_manifest_calibration_universe`),
-which refuses by name when the record is absent, undecodable, not a mapping, lacks any of `seed`,
-`group_by`, `dataset_fingerprint`, `subject`, `attribute`, `id_map`, `members`, `splits`,
-`admission_counts` (the tuple `data_tools._SPLIT_MANIFEST_REQUIRED_KEYS`, kept beside the writer's
-dict so the two cannot drift), holds a `members` block whose `label_digests` is missing or not a
-non-empty mapping (a manifest drawn before the platform recorded per-stem digests binds nothing
-here), lacks any name in `splits.SPLIT_NAMES` under `splits`, or whose
-sides are not pairwise disjoint; `tcip plant-aware-group-splits` reads no manifest back, it
-only writes one through `draw_splits`. `bind_manifest_stems` (`splits.py:662`) reads all three
-sides for one capture date, its own date-narrowing arithmetic extracted into
-`narrow_manifest_to_date` (`splits.py:446`), which the data picker's own counts (below) call over
-the identical manifest: a `calibration` member is placed on neither loader, whether or not the
-run currently admits it, recorded as `calibration_bound`/`calibration_unadmitted` rather than
-refused on; the `train`/`val` refusals (an admitted stem assigned to no side, a member the run no
-longer admits, an empty side) are unchanged in shape.
+The record is its sample list. Each sample carries `source` (the image path, the `.bandgroup`
+manifest standing in for a grouped capture, or the raster path when the sample is a region),
+`ground_truth` (the path to whatever answers for it, never derived from `source`), `group` (the
+key that keeps related samples together), `side` (one of `selection.SIDES`: `train`, `val`,
+`calibration`), `confirmation_bucket` (the `image_status.json` key whose human confirmations
+admitted it, `status_bucket` over a subject and a capture date, per sample so a selection
+spanning three dates answers from three buckets), and optionally `rect` (a half-open pixel rect
+for a within-image draw), `row_key` (the row inside a tabular ground truth) and
+`ground_truth_digest` (that file's digest at draw time). `rect` and `row_key` are refused by
+`selection.refuse_unreadable_samples` wherever a loader would otherwise read past them. Nothing in the record names a capture date or a directory scope:
+every sample names its own paths, so one selection spans as many dates as the draw admitted, and
+two dates holding a same-named image are two samples rather than one identity that has to be told
+apart from itself. Beside the samples the record carries `subject`, `attribute` (`null` when
+none), `id_map` (the `assign_class_ids` map the admission resolved), `seed`, `group_by` (the
+resolved policy), `dataset_fingerprint`, `admission_counts` (the summed `trainable_stems` counts;
+a frozen selection records `{}`, since freezing a training run's own drawn partition records no
+admission draw), `realized_ratios` and `origin`.
 
-`data_tools.read_split_manifest_dir_checked` (`data_tools.py:197`) is the checked variant a
-listing calls in place of the raising reader: absence answers `(None, None)`, a record that
-exists but will not decode, fails the required-key reading, or is version-refused answers
-`(None, text)`, catching `tcip_store.SchemaVersionRefused` beside the plain-shape `ValueError`
-for that purpose only, since a version refusal must never read as an ordinary absence.
-`training_tools.manifest_compatibility` (`training_tools.py:287`) is every objection a launch
-binding one config to one manifest would raise, checked ahead of that launch: composed from the
-config-only conflict and task checks (computed before any read, so an unreadable manifest never
-suppresses them) and the manifest-dependent checks (subject/attribute, date, images-root
-presence and movement, and an empty train/val side once narrowed to the run's own date).
-`preflight_config` calls both halves directly, in the same order, over a manifest it read
-itself; `training_tools.list_split_choices` (`training_tools.py:1280`), the relaunch data
-picker's own reader wrapped by `GET /api/training/configs/{experiment_id}/splits`, calls the
-composed function per candidate manifest it read through the checked variant above, and builds
-each candidate's launch config through `training_tools.candidate_config_with_manifest`
-(`training_tools.py:311`), the same function the relaunch route's own launch build calls.
+A selection write states all three ratios (`train_ratio`, `val_ratio`, `calibration_ratio`)
+non-zero, refusing whichever is zero by name, since a draw always cuts all three sides. It
+refuses, before any write, when the tree holds fewer foreground groups of `subject` (and
+`attribute`, when scoped) than the three sides need at minimum (one each for `train`/`val`, two
+for `calibration`), counted through a subject-scoped `count_label_lines` on every draw,
+independent of `stratify_foreground` (which only gates the balancing pass's own foreground
+signal). `realized_ratios` records each side's delivered member share: at a floor-sized tree the
+minimum pass can consume every foreground group before the balancing pass ever sees the caller's
+fractions, so the delivered shares can diverge from the ratios asked for. The answer also carries
+`calibration_foreground_groups`, how many of the calibration side's own groups carry foreground
+at all, since the floor above is over the whole draw and the calibration slice can still land
+short of two; the calibration door's own floor is where that absence bites. A stats-only call (no
+`output_path`) writes nothing, admits a zero or non-zero `calibration_ratio` either way, carries
+neither `calibration_foreground_groups` nor `realized_ratios` (both write-only fields), but
+answers `dataset_hashes_by_date` the same way, over whatever labels directories its plain
+image/label scan found, plus a single `dataset_hash` only when that scan found exactly one such
+directory; over more than one, `dataset_hash` is `null` rather than one directory's hash blind to
+the rest.
+
+Readers: `selection.read_selection` (`selection.py:290`), the one reader a training or tuning
+run's `data.split.selection_dir` resolves through (`split_construction.auto_train_val`) and a
+selection-restricted calibration resolves through
+(`splits.resolve_selection_calibration_universe`), which refuses by name when the record is
+absent, undecodable, not a mapping, lists no samples, holds a sample missing any of
+`source`/`label`/`group`/`side`, names a side outside `selection.SIDES`, carries a malformed
+`rect`, or holds a partition whose sides cross. That last check is `refuse_crossing_sides`
+(`selection.py:120`), the same one the writer runs: one source identity on two sides is the same
+pixels trained on and selected on, and one group key on two sides splits the crops of one parent
+across sides. `tcip plant-aware-group-splits` reads no selection back, it only writes one through
+`draw_splits`.
+
+`selection.read_selection_checked` (`selection.py:307`) is the checked variant a listing calls in
+place of the raising reader: absence answers `(None, None)`, a record that exists but will not
+decode, fails a shape check, or is version-refused answers `(None, text)`, catching
+`tcip_store.SchemaVersionRefused` beside the plain-shape `ValueError` for that purpose only,
+since a version refusal must never read as an ordinary absence.
+`training_tools.selection_compatibility` is every objection a launch binding one config to one
+selection would raise, checked ahead of that launch: composed from the config-only conflict and
+task checks (computed before any read, so an unreadable selection never suppresses them) and the
+selection-dependent checks (a selection recording no subject, an empty train or val side, and a
+config stating a scope of its own that disagrees with the selection's, which calls the bind's own
+`_refuse_scope_disagreement` rather than restating it). A bound run does not restate its scope at
+all in the ordinary case: it reads subject, attribute and class map off the selection. `preflight_config` calls both halves directly, in the same order, over a selection it
+read itself; `training_tools.list_split_choices`, the relaunch data picker's own reader wrapped by
+`GET /api/training/configs/{experiment_id}/splits`, calls the composed function per candidate
+selection it read through the checked variant above, and builds each candidate's launch config
+through `training_tools.candidate_config_with_selection`, the same function the relaunch route's
+own launch build calls.
 
 No seam id in `seam-coverage.json`'s inventory names this record: it is new, and
-`tests/test_split_manifest_binding.py` calls the real writer and the real consumer
-(`auto_train_val`'s manifest branch) against the same files.
+`tests/test_selection_binding.py` calls the real writer and the real consumer
+(`auto_train_val`'s selection branch) against the same files.
 
 ## 27. `cal_holdout_split_lock`, `.tcip/artifacts/cal_holdout_split_<hash>.json`
 
@@ -2137,13 +2128,13 @@ scope root the split was drawn over (`cal_holdout_scope_root`).
 Writer: `resolve_locked_cal_holdout_split`, `splits.py:1435`, locking on first draw for a given
 identity hash; every later call for the same identity answers from the lock unchanged unless
 `force_redraw=True`. The record carries `identity_hash`, `calibration`, `holdout`, `group_by`,
-`group_key_map`, `seed`, `holdout_ratio`, `split_manifest_dir` (`null` for a whole-directory draw,
-the identity hash otherwise being `dataset_hash` over the manifest's own `calibration` side rather
-than the whole directory), and `redraw_history` (one entry per draw, each carrying its own
-declared policy, including `split_manifest_dir`, and the old/new content hashes). `calibration`
+`group_key_map`, `seed`, `holdout_ratio`, `selection_dir` (`null` for a whole-directory draw,
+the identity hash otherwise being `dataset_hash` over the selection's own `calibration` side
+rather than the whole directory), and `redraw_history` (one entry per draw, each carrying its own
+declared policy, including `selection_dir`, and the old/new content hashes). `calibration`
 and `holdout` here are the two halves `cal_holdout_split` cuts from whatever universe it is
-given: the manifest's own `calibration` side under a manifest-restricted draw, the whole labelled
-directory otherwise; the lock's own field names do not change with the source.
+given: the selection's own `calibration` side under a selection-restricted draw, the whole
+labelled directory otherwise; the lock's own field names do not change with the source.
 
 Readers: six callers draw a lock through this one function -
 `pipelines.calibration.calibrate_operating_point`, `calibration_tools.redraw_calibration_holdout`,
@@ -2153,9 +2144,9 @@ Readers: six callers draw a lock through this one function -
 `tcip calibrate-operating-point` and `calibration_tools.calibrate_count_operating_point`
 reach through), and `feedback.review_calibration.
 resolve_operating_point_from_review` - each answering its own identity's lock, so a whole-directory
-draw and a manifest-restricted draw over the same directory coexist as two distinct locks.
+draw and a selection-restricted draw over the same directory coexist as two distinct locks.
 
-A one-off operator script added `split_manifest_dir: null` to every lock (and each
+A one-off operator script added `selection_dir: null` to every lock (and each
 `redraw_history` entry) written before this key existed; it conformed the repo root's own
 thirteen pre-existing locks once, outside the test suite, and has since been applied and
 retired along with the fixture-root test that covered it.
@@ -2524,11 +2515,11 @@ Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:376` (`def resolve
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/proposal_tools.py:460` (`from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes`) and `tools/proposal_tools.py:610` (`from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes`, both leaving `refuse_documents` at its default off and reaching `stage_prediction_shapes`, which turns `count_review_state` on), `tools/inference_tools.py:1082` (`_resolve_writable_bucket_for`, passing `refuse_documents=True` on every branch) and `packages/tcip-web/src/tcip_web/routes/inference.py:534` (`refuse_documents=True`, the document agreement now reaching the route's own `resolve_prediction_bucket` call too).
 Phase 3 verdict: single.
 
-## S30. split.json train/val manifest
+## S30. split.json train/val partition
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on, and,
-when a split manifest is in play, from the checkpoint's own selection (val) side too.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1910` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+when a selection is in play, from the checkpoint's own selection (val) side too.
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1911` (`def read_run_partition(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (`_train_disjointness` and `_selection_disjointness` both read through it and share `_resolve_group_stem_disjointness`, the one group/stem-overlap implementation).
 Phase 3 verdict: single.
 

@@ -2,7 +2,7 @@
 
 Locks the additive provenance stamping across the spine: checkpoint experiment_id plus a
 computed-once sha256, the terminal-state lock (additive-only), the enriched capture_env,
-the split manifest, and the producing-model stamps on the delivery CSV and manifest surfaces.
+the run's partition, and the producing-model stamps on the delivery CSV and manifest surfaces.
 """
 
 from __future__ import annotations
@@ -182,14 +182,14 @@ def test_record_artifact_additive_only_when_terminal(exp_store):
 
 # ── draw_splits manifest embeds dataset_hash + seed ─────────────────────────────
 
-def test_draw_splits_manifest_embeds_hash_and_seed(data_dir, tmp_path):
-    import tcip_store as ts
+def test_draw_splits_selection_embeds_digests_and_seed(data_dir, tmp_path):
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.tools.data_tools import draw_splits, split_manifest_key
+    from tcip_mcp.pipelines.data.selection import read_selection
+    from tcip_mcp.tools.data_tools import draw_splits
 
-    # A manifest write needs at least four foreground groups to clear the floor; the fixture's
-    # own three (img_001..003) need one more, added here rather than in the shared fixture.
+    # A selection needs at least four foreground groups to clear the floor; the fixture's own
+    # three (img_001..003) need one more, added here rather than in the shared fixture.
     from PIL import Image
 
     images_dir = data_dir / "images" / "2-11-26"
@@ -204,10 +204,10 @@ def test_draw_splits_manifest_embeds_hash_and_seed(data_dir, tmp_path):
     result = draw_splits(str(data_dir), output_path=str(out), seed=7, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert result["seed"] == 7
-    manifest = ts.read(split_manifest_key(out))
-    assert manifest["seed"] == 7
-    assert manifest["members"]["2-11-26"]["dataset_hash"]
-    assert set(manifest["splits"]) == {"train", "val", "calibration"}
+    drawn = read_selection(out)
+    assert drawn.seed == 7
+    assert all(sample.ground_truth_digest for sample in drawn.samples)
+    assert set(drawn.counts()) == {"train", "val", "calibration"}
 
 
 # ── delivery CSVs carry the producing-model provenance columns ─────────────────

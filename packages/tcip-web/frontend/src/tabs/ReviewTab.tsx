@@ -268,8 +268,8 @@ export function ReviewTab() {
     { image: string; score: number; calibration_member?: boolean }[] | null
   >(null);
   const [pqError, setPqError] = useState<string | null>(null);
-  // Set when the calibration side couldn't be marked (unreadable split record/manifest, or a
-  // root mismatch); no queue entry then carries calibration_member, and this names why.
+  // Set when the calibration side couldn't be marked (an unreadable split record or selection);
+  // no queue entry then carries calibration_member, and this names why.
   const [pqMarksUnresolved, setPqMarksUnresolved] = useState<string | null>(null);
   // Auto-enabled once a queue completes (that's clearly what computing one was for); the breeder
   // can turn it back off to browse in the ordinary (positional) order without discarding the queue.

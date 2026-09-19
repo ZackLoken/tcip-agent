@@ -224,13 +224,13 @@ def test_refuses_an_empty_reason(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 def test_a_state_root_the_accounting_refuses_is_an_error_dict_and_a_warn_finding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An AnchorMisplaced split_manifest.json at the tree root, the same misplacement
+    """An AnchorMisplaced selection.json at the tree root, the same misplacement
     bundle's own tests provoke, is caught and answered rather than left to escape as a
     traceback: an error dict from the tool, a warn finding from the doctor."""
     root = _project(tmp_path, monkeypatch)
     state = _state(root)
     (state / "notes.json").write_text("{}", encoding="utf-8")
-    (root / "split_manifest.json").write_text("{}", encoding="utf-8")
+    (root / "selection.json").write_text("{}", encoding="utf-8")
 
     res = delete_stray_state_file(project_root=str(root), relative_path="notes.json", reason="x")
     assert "error" in res

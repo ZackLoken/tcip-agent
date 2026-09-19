@@ -127,15 +127,15 @@ def test_dataset_identity_fingerprint_io_error_degrades_to_none(tmp_path, monkey
     assert ds_id is None  # no dataset.json registered in this fixture
 
 
-def test_persist_split_manifest_records_identity(exp_dir):
-    from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
+def test_persist_run_partition_records_identity(exp_dir):
+    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
 
     create_experiment("e1", {})
 
     class _DS:
         stems = ["a", "b"]
 
-    persist_split_manifest("e1", _DS(), None, {"labels_dir": ""},
+    persist_run_partition("e1", _DS(), None, {"labels_dir": ""},
                             dataset_id="x", dataset_fingerprint="yz")
     split = ts.read(exp.split_key("e1"))
     assert split["dataset_id"] == "x" and split["dataset_fingerprint"] == "yz"

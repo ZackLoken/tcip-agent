@@ -189,39 +189,23 @@ def test_run_hyperparameter_search_refuses_a_trial_budget_not_a_count(
 # -- refusals --------------------------------------------------------------------
 
 
-def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_manifest_would_starve_a_side(
+def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_would_starve_a_side(
     tmp_path, monkeypatch,
 ):
-    """A manifest whose date's train-plus-val members resolve to only one group under its own
-    recorded grouping refuses the sweep before minting, the same distinct-groups check
-    preflight_config runs for one config."""
-    import tcip_store as ts
+    """A selection whose train-plus-val members hold one foreground group refuses the sweep
+    before minting, the same distinct-groups check preflight_config runs for one config."""
     import tcip_mcp.tools.training_tools as tt
-    from tcip_mcp.tools.data_tools import draw_splits, split_manifest_key
 
-    from tests.test_split_manifest_binding import (
-        DATES, SUBJECT, _collapse_date_to_one_group, _two_subject_two_date_dataset,
-    )
+    from tests.test_selection_binding import one_foreground_group_selection
 
     ran = []
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
 
-    root = _two_subject_two_date_dataset(tmp_path / "ds")
-    manifest_dir = tmp_path / "m"
-    make_result = draw_splits(str(root), output_path=str(manifest_dir), subject=SUBJECT,
-                              seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
-    assert "error" not in make_result, make_result
-    manifest = ts.read(split_manifest_key(manifest_dir))
-    ts.replace(split_manifest_key(manifest_dir), _collapse_date_to_one_group(manifest, DATES[0]))
-
+    _root, selection_dir = one_foreground_group_selection(tmp_path)
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {
-            "images_dir": str(root / "images" / DATES[0]),
-            "labels_dir": str(root / "annotations" / DATES[0]),
-            "subject": SUBJECT, "split": {"manifest_dir": str(manifest_dir)},
-        },
+        "data": {"split": {"selection_dir": str(selection_dir)}},
     }
     result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
@@ -618,11 +602,8 @@ def test_run_hyperparameter_search_reports_the_seed_axis_refusal_over_a_prefligh
 # -- admits valid work -------------------------------------------------------------
 
 
-def _bound_hpo_config(root, manifest_dir, date, subject, *, auto_val: bool | None = None) -> dict:
-    data: dict = {
-        "images_dir": str(root / "images" / date), "labels_dir": str(root / "annotations" / date),
-        "subject": subject, "split": {"manifest_dir": str(manifest_dir)},
-    }
+def _bound_hpo_config(selection_dir, *, auto_val: bool | None = None) -> dict:
+    data: dict = {"split": {"selection_dir": str(selection_dir)}}
     if auto_val is not None:
         data["auto_val"] = auto_val
     return {
@@ -632,21 +613,21 @@ def _bound_hpo_config(root, manifest_dir, date, subject, *, auto_val: bool | Non
     }
 
 
-def test_run_hyperparameter_search_admits_split_draws_bound_to_a_manifest_and_sets_the_redraw_flag(
+def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection_and_sets_the_redraw_flag(
     tmp_path, monkeypatch,
 ):
-    """A base_config bound to a split manifest is no longer refused: run_hyperparameter_search sets
-    data.split.redraw_within_manifest on its own copy, so every trial redraws train and val
-    inside the manifest's own members instead of the manifest's one recorded partition, and the
-    recorded sweep manifest's own base_config carries the claim."""
+    """A base_config bound to a selection is no longer refused: run_hyperparameter_search sets
+    data.split.redraw_within_selection on its own copy, so every trial redraws train and val
+    inside the selection's own members instead of its one recorded partition, and the recorded
+    sweep manifest's own base_config carries the claim."""
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.tools.data_tools import draw_splits
 
-    from tests.test_split_manifest_binding import DATES, SUBJECT, _two_subject_two_date_dataset
+    from tests.test_selection_binding import SUBJECT, _two_subject_two_date_dataset
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    manifest_dir = tmp_path / "m"
-    make_result = draw_splits(str(root), output_path=str(manifest_dir), subject=SUBJECT,
+    selection_dir = tmp_path / "m"
+    make_result = draw_splits(str(root), output_path=str(selection_dir), subject=SUBJECT,
                               seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in make_result, make_result
 
@@ -659,7 +640,7 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_manifest_and_se
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    cfg = _bound_hpo_config(root, manifest_dir, DATES[0], SUBJECT)
+    cfg = _bound_hpo_config(selection_dir)
     result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2, trial_budget=2)
 
@@ -667,26 +648,26 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_manifest_and_se
     assert captured["param_space"]["data.split.seed"] == {
         "type": "categorical", "choices": [42, 43],
     }
-    assert cfg["data"]["split"] == {"manifest_dir": str(manifest_dir)}  # the caller's own copy
+    assert cfg["data"]["split"] == {"selection_dir": str(selection_dir)}  # the caller's own copy
 
     import tcip_store as ts
     manifest = ts.read(tt.sweep_manifest_key(result["study_name"], str(tmp_path)))
     recorded_split = manifest["base_config"]["data"]["split"]
-    assert recorded_split["redraw_within_manifest"] is True
+    assert recorded_split["redraw_within_selection"] is True
     assert recorded_split["seed"] == 42
 
 
 def test_run_hyperparameter_search_admits_split_draws_bound_with_auto_val_false(tmp_path, monkeypatch):
-    """A bound base_config reads neither val_images_dir nor auto_val (the manifest branch binds
+    """A bound base_config reads neither val_images_dir nor auto_val (the selection branch binds
     ahead of both), so auto_val=False no longer refuses it the way it refuses a drawn config."""
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.tools.data_tools import draw_splits
 
-    from tests.test_split_manifest_binding import DATES, SUBJECT, _two_subject_two_date_dataset
+    from tests.test_selection_binding import SUBJECT, _two_subject_two_date_dataset
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    manifest_dir = tmp_path / "m"
-    make_result = draw_splits(str(root), output_path=str(manifest_dir), subject=SUBJECT,
+    selection_dir = tmp_path / "m"
+    make_result = draw_splits(str(root), output_path=str(selection_dir), subject=SUBJECT,
                               seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in make_result, make_result
 
@@ -696,7 +677,7 @@ def test_run_hyperparameter_search_admits_split_draws_bound_with_auto_val_false(
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    cfg = _bound_hpo_config(root, manifest_dir, DATES[0], SUBJECT, auto_val=False)
+    cfg = _bound_hpo_config(selection_dir, auto_val=False)
     result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2, trial_budget=2)
 

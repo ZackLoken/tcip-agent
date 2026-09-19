@@ -92,7 +92,7 @@ def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
     ``spatial_manifest``.
     """
     from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
 
     root = tmp_path / "ds"
     images_dir, labels_dir = root / "images", root / "annotations"
@@ -117,7 +117,7 @@ def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     create_experiment(experiment_id, {"data": data_cfg})
-    persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
+    persist_run_partition(experiment_id, train_ds, val_ds, data_cfg)
 
     checkpoint_path = _bespoke_detection_checkpoint(tmp_path)
     return {
@@ -214,7 +214,7 @@ def test_block_calibration_completeness_checked_before_feasibility(tmp_path: Pat
 
 def test_block_calibration_refuses_when_export_tile_size_differs_from_manifest(tmp_path: Path):
     """The reserved-region claim and the exported bucket must be tiled at one regime: an export
-    resolved to a different tile edge than the split manifest's own tile_size refuses, naming
+    resolved to a different tile edge than the run partition's own tile_size refuses, naming
     both, before completeness or feasibility even run."""
     exp = _build_experiment(tmp_path)
 
@@ -362,21 +362,21 @@ def test_a_saturated_band_cap_surfaces_as_cap_saturated_frac_provenance(
     assert hold_frac is not None and hold_frac > 0.0
 
 
-def _rewrite_split_manifest_dims(root: Path, experiment_id: str, *, width: int, height: int) -> None:
-    """Hand-edits a persisted experiment's split manifest ``spatial.width``/``spatial.height``,
+def _rewrite_run_partition_dims(root: Path, experiment_id: str, *, width: int, height: int) -> None:
+    """Hand-edits a persisted experiment's partition ``spatial.width``/``spatial.height``,
     simulating a manifest recorded against a raster that was later replaced or truncated."""
     import tcip_store
 
-    from tcip_mcp.experiments import read_split_manifest, split_key
+    from tcip_mcp.experiments import read_run_partition, split_key
 
-    split = read_split_manifest(experiment_id)
+    split = read_run_partition(experiment_id)
     split["spatial"]["width"] = width
     split["spatial"]["height"] = height
     tcip_store.replace(split_key(experiment_id), split)
 
 
 def test_block_calibration_refuses_by_name_when_manifest_dims_exceed_the_real_raster(tmp_path: Path):
-    """The split manifest's recorded mosaic dimensions must be cross-checked against the real
+    """The run partition's recorded mosaic dimensions must be cross-checked against the real
     raster's own current dimensions before block calibration trusts the reserved regions'
     geometry: a manifest recording larger-than-real dims must refuse by name
     (``BlockCalibrationRefused``), not let a too-large haloed rect reach ``_RegionView.__init__``'s
@@ -385,7 +385,7 @@ def test_block_calibration_refuses_by_name_when_manifest_dims_exceed_the_real_ra
     manifest = exp["spatial_manifest"]
     _attest_regions_complete(
         exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
-    _rewrite_split_manifest_dims(
+    _rewrite_run_partition_dims(
         tmp_path, exp["experiment_id"], width=WIDTH + 500, height=HEIGHT)
 
     from tcip_mcp.pipelines.block_calibration import (
@@ -414,7 +414,7 @@ def test_block_calibration_refuses_by_name_when_manifest_dims_are_smaller_than_t
     manifest = exp["spatial_manifest"]
     _attest_regions_complete(
         exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
-    _rewrite_split_manifest_dims(
+    _rewrite_run_partition_dims(
         tmp_path, exp["experiment_id"], width=WIDTH - 500, height=HEIGHT)
 
     from tcip_mcp.pipelines.block_calibration import (
@@ -1004,7 +1004,7 @@ def _build_attribute_scoped_experiment(
     from tcip_mcp.pipelines.model_build import build_model
     from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
     from tcip_mcp.tools.model_tools import register_model
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
 
     def _write_registry(values: tuple[str, ...]) -> None:
         write_registry(root / "subjects.json", SubjectRegistry(subjects=(
@@ -1036,7 +1036,7 @@ def _build_attribute_scoped_experiment(
     _subject, _attribute, recorded_id_map = _resolve_run_id_map("detection", data_cfg)
     data_cfg["id_map"] = dict(recorded_id_map)
     create_experiment(experiment_id, {"data": data_cfg})
-    persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
+    persist_run_partition(experiment_id, train_ds, val_ds, data_cfg)
 
     _write_registry(reordered_values)
 

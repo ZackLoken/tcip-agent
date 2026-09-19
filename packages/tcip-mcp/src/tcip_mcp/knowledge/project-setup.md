@@ -141,23 +141,22 @@ Never train or evaluate on an unconfirmed format: `tcip_annotation.format_io.det
 refuses rather than guesses, inherited by `load_annotations_any` and
 `annotation_tools.read_annotations` (library call, no MCP tool for it).
 
-## 5. Split: `draw_splits`
+## 5. Select: `draw_splits`
 
-Create leakage-free train/val/calibration splits with `draw_splits` (group-aware, keeps sibling
-tiles of one source image in the same split; there is no held-out test list, and no launch path
-honours one). Non-destructive by default (a stats dict only; a manifest is written only when
-`output_path` is given or `materialize=True`); pass `materialize=True` to also lay out a
-`{train,val,calibration}/{images,labels}/` tree, with the
-platform's own per-image JSON labels (not YOLO's `.txt` format; `tcip-annotation` supports
-`{json, coco}` only). Writing a manifest requires `subject` and all three ratios stated non-zero:
-its members are drawn through the same admission a training run uses, and a run names it with
-`data.split.manifest_dir` to train against that exact partition instead of drawing its own; the
-manifest's `calibration` side is never bound to a loader, so a run's own selection (`val`) side is
-never what the checkpoint is later validated against (see the `evaluation` skill's
-Calibration/Holdout Split section). A run that drew its own split can have that exact
-partition frozen into a manifest afterwards with `freeze_split_manifest(experiment_id)`, so a
-later run binds to it from the data picker; a frozen manifest records an empty `calibration`
-side and an `origin` naming the run, and the calibration doors refuse it by their own floor.
+Draw a leakage-free train/val/calibration selection with `draw_splits` (group-aware, keeps
+sibling tiles of one source image in the same split; there is no held-out test list, and no
+launch path honours one). It copies nothing: a selection lists, per sample, the image source, the
+label document, a group key and a side, so a draw spanning capture dates trains in place. Nothing
+is written without `output_path` (a stats dict only). Writing a selection requires `subject` and
+all three ratios stated non-zero: its samples are drawn through the same admission a training run
+uses, and a run names it with `data.split.selection_dir` to train against that exact partition
+instead of drawing its own; the `calibration` side is never bound to a loader, so a run's own
+selection (`val`) side is never what the checkpoint is later validated against (see the
+`evaluation` skill's Calibration/Holdout Split section). A run that drew its own split can have
+that exact partition frozen into a selection afterwards with `freeze_selection(experiment_id)`,
+so a later run binds to it from the data picker; a frozen selection records an empty
+`calibration` side and an `origin` naming the run, and the calibration doors refuse it by their
+own floor.
 
 ## 6. Build a model, train, infer
 

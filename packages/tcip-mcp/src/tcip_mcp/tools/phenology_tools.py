@@ -614,7 +614,7 @@ def calibrate_classifier_operating_point(
     rather than a measurement; the pred dirs are predictions by definition and are not held to it,
     and when a GT dir's own dataset root contradicts the stated ``dataset_root``.
 
-    This door takes no split manifest: it draws no universe at all, the caller already hands it
+    This door takes no selection: it draws no universe at all, the caller already hands it
     four already-split directories.
 
     Args:
@@ -645,8 +645,6 @@ def calibrate_classifier_operating_point(
             detector calibration path does. ``None`` (a foreign/unregistered checkpoint) skips
             that check rather than failing closed.
     """
-    from tcip_mcp.dataset_layout import annotation_date
-    from tcip_mcp.pipelines.data.splits import manifest_date_key
     from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
     from tcip_mcp.traits import TraitUnknownError, get_trait
 
@@ -676,7 +674,6 @@ def calibrate_classifier_operating_point(
     result = resolve_classifier_operating_point(
         trait_name, calibration_items=cal_items, holdout_items=hold_items,
         experiment_id=experiment_id,
-        calibration_date=manifest_date_key(annotation_date(calibration_gt_dir)),
         calibration_labels_dir=calibration_gt_dir,
     )
 

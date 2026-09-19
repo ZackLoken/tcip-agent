@@ -45,8 +45,8 @@ def list_configs_route() -> dict:
 @router.get("/configs/{experiment_id}/splits")
 def list_split_choices_route(experiment_id: str) -> dict:
     """Every choice this config's own "Data" control offers a relaunch: its stored data
-    section as recorded, and every split manifest directory this project's own bound runs or
-    the dataset's own splits directory hold, compatibility-checked as the launch itself would
+    section as recorded, and every selection directory this project's own bound runs or the
+    dataset's own splits directory hold, compatibility-checked as the launch itself would
     check them."""
     from tcip_mcp.tools.training_tools import list_split_choices
 
@@ -58,7 +58,7 @@ def list_split_choices_route(experiment_id: str) -> dict:
 
 class RelaunchConfigPayload(BaseModel):
     experiment_id: str
-    split_manifest_dir: str | None = None
+    selection_dir: str | None = None
 
 
 @router.post("/runs")
@@ -67,13 +67,13 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
     path is ever submitted by the browser. A pristine config launches as its own first run; a
     run's config launches as a new experiment id with the picked one as parent.
 
-    An optional ``split_manifest_dir`` names a partition the browser picked instead of the
+    An optional ``selection_dir`` names a partition the browser picked instead of the
     snapshot's own "As recorded" data section: checked against this same config's own
     :func:`~tcip_mcp.tools.training_tools.list_split_choices` listing (an enabled offer or 409)
     through :func:`~tcip_mcp.tools.training_tools.split_dir_identity`, so a symlinked or
     differently cased spelling of an offered directory is admitted, not just an exact string
     match; the path itself is never resolved as one the server follows. The launch config then
-    carries ``data.split`` replaced wholesale by ``{"manifest_dir": chosen}`` with any
+    carries ``data.split`` replaced wholesale by ``{"selection_dir": chosen}`` with any
     ``data.val_images_dir`` removed; ``auto_train_val`` clears the previous binding's own stamps
     on its way to a fresh one.
 
@@ -85,7 +85,7 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
     from tcip_mcp.experiments import config_key, read_member
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
     from tcip_mcp.tools.training_tools import (
-        candidate_config_with_manifest, declare_launcher, launch_training, list_split_choices,
+        candidate_config_with_selection, declare_launcher, launch_training, list_split_choices,
         split_dir_identity,
     )
 
@@ -94,16 +94,16 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
         raise HTTPException(404, f"no launchable config named {payload.experiment_id}")
 
     config = {**config, "experiment_id": payload.experiment_id}
-    if payload.split_manifest_dir:
+    if payload.selection_dir:
         choices = list_split_choices(payload.experiment_id)
-        enabled = {split_dir_identity(m["manifest_dir"])
-                   for m in choices.get("manifests", []) if m.get("enabled")}
-        if split_dir_identity(payload.split_manifest_dir) not in enabled:
+        enabled = {split_dir_identity(s["selection_dir"])
+                   for s in choices.get("selections", []) if s.get("enabled")}
+        if split_dir_identity(payload.selection_dir) not in enabled:
             raise HTTPException(
-                409, f"{payload.split_manifest_dir!r} is not an offered partition for "
+                409, f"{payload.selection_dir!r} is not an offered partition for "
                      f"{payload.experiment_id}",
             )
-        config = candidate_config_with_manifest(config, payload.split_manifest_dir)
+        config = candidate_config_with_selection(config, payload.selection_dir)
     try:
         with declare_launcher("gui"):
             result = launch_training(config)

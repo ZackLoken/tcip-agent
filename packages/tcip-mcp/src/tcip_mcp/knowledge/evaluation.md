@@ -38,7 +38,7 @@ measurement-agreement/method-comparison contexts specifically because of that de
 
 | Tool | Purpose |
 |------|---------|
-| `evaluate_model` | Evaluate a checkpoint on a held-out dataset, or a named split manifest's `calibration` side (`split_manifest_dir`); writes `test_results.json` |
+| `evaluate_model` | Evaluate a checkpoint on a held-out dataset, or a named selection's `calibration` side (`selection_dir`); writes `test_results.json` |
 | `annotation_tools.score_predictions` (library call) / `tcip score-predictions` (logged command) | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN. On a classified bucket this scores the object's localization, never the classifier's own confirmed-state call |
 | `tcip render-failure-cases` (logged command) | Surface + render the N images with highest triage error |
 | `experiment_tools.compare_experiments` (library call) | Side-by-side metrics across experiments |
@@ -92,39 +92,41 @@ membership is recorded in a dataset's audit log alongside the reason, so a redra
 pattern stays visible on review.
 
 `run_inference` and `deliver_per_image_counts` (whose live regime forwards it to the shared
-verified pass), `redraw_calibration_holdout` and `evaluate_model` all take
-`split_manifest_dir`: draw the calibration universe from one capture date's `calibration` side of
-a named `split_manifest` record instead of every labelled stem with an image, a side
-`draw_splits` drew held out from both training and checkpoint selection (see the `training`
-skill's Dataset Splits section). `evaluate_model` is the one whose purpose is a held-out score:
-without `split_manifest_dir` it scores the whole directory; with it, the loader's own
-admitted count is recorded as `evaluated_stem_count`, refused by name when it falls short of the
-universe the manifest drew. The manifest's own subject/attribute must match this call's
-(`redraw_calibration_holdout` takes `subject`/`attribute` directly; `run_inference` and
-`evaluate_model` resolve them from the run's own training scope), and `split_manifest_dir`
-conflicts with an explicit `group_by`/`group_key_map`, whose default becomes `None` for this
-reason (resolved to `tile_prefix` when neither was given). `redraw_calibration_holdout`
-additionally requires `labels_dir`, `subject` and `images_dir` alongside `split_manifest_dir`: it
-refuses by name without one, since a labels-only universe can include a stem whose image is gone.
+verified pass), `redraw_calibration_holdout` and `evaluate_model` all take `selection_dir`: draw
+the calibration universe from a selection's `calibration` samples under the labels directory the
+call names, instead of every labelled stem with an image, a side `draw_splits` drew held out from
+both training and checkpoint selection (see the `training` skill's Dataset Selections section).
+`evaluate_model` is the one whose purpose is a held-out score: without `selection_dir` it scores
+the whole directory; with it, the loader's own admitted count is recorded as
+`evaluated_stem_count`, refused by name when it falls short of the universe the selection drew.
+The selection states its own subject and attribute and the scope is read from it rather than
+restated, and `selection_dir` conflicts with an explicit `group_by`/`group_key_map`, whose
+default becomes `None` for this reason (resolved to `tile_prefix` when neither was given): the
+group keys the selection recorded on its own samples govern the locked draw.
+`redraw_calibration_holdout` additionally requires `labels_dir`, `subject` and `images_dir`
+alongside `selection_dir`: it refuses by name without one, since a labels-only universe can
+include a stem whose image is gone.
 
-A calibration under a named manifest also earns a `selection_disjointness` check: whether the
+A calibration under a named selection also earns a `selection_disjointness` check: whether the
 cal/holdout stems it drew also sit on the checkpoint being calibrated's own selection (`val`)
 side, the leak these disjointness checks close (a checkpoint chosen on a side, then
 calibrated over that same side, would otherwise clear every other gate while measuring the
 operating point on exactly the data the shipped weights were picked to fit). It rides beside
-`train_disjointness` in the validation row and floors `verify_stamp_binding` when a manifest-scoped
-reference carries none.
+`train_disjointness` in the validation row and floors `verify_stamp_binding` when a
+selection-scoped reference carries none. The check applies when the calibration's own labels
+directory is one the run's own members live under; a calibration read from another directory the
+run never trained over answers not-applicable with that reason.
 
-For a run bound to a split manifest, the same check also names a calibration label that moved
-since the split was drawn: `labels_moved_draw_to_run` (a stem whose digest at the draw differs
-from its digest when the run bound), `labels_moved_run_to_now` (differs again between the bind
-and this calibration's own read of the labels directory, `null` when the calibration named none),
+For a run bound to a selection, the same check also names a calibration label that moved since
+the selection was drawn: `labels_moved_draw_to_run` (a stem whose digest at the draw differs from
+its digest when the run bound), `labels_moved_run_to_now` (differs again between the bind and
+this calibration's own read of the labels directory, `null` when the calibration named none),
 `calibration_labels_moved` (the calibration-side stems among those two lists) and
-`manifest_redrawn` (the manifest directory was overwritten since the run bound). This is a
-disclosure, not a floor: the row still validates with the moved stems named on it, and
+`selection_redrawn` (the selection was written again since the run bound). This is a disclosure,
+not a floor: the row still validates with the moved stems named on it, and
 `describe_review_validation` renders one sentence when `calibration_labels_moved` is non-empty. A
 run bound before this check existed, or one calibrated with no bound run under a caller-named
-manifest, seals all four keys `null`.
+selection, seals all four keys `null`.
 
 ## Failure Triage
 
@@ -146,11 +148,11 @@ When metrics are poor, investigate systematically:
 ## Comparison Protocol
 
 When comparing models:
-1. Same dataset split: draw one manifest with `draw_splits` and name it from every compared run
-   with `data.split.manifest_dir`, so each binds to the identical membership rather than each
+1. Same dataset split: draw one selection with `draw_splits` and name it from every compared run
+   with `data.split.selection_dir`, so each binds to the identical membership rather than each
    redrawing its own from a shared seed
-2. Same evaluation set: the manifest's own `calibration` side (`evaluate_model` with
-   `split_manifest_dir`), never each run's own `val`, which is the side its checkpoint was chosen
+2. Same evaluation set: the selection's own `calibration` side (`evaluate_model` with
+   `selection_dir`), never each run's own `val`, which is the side its checkpoint was chosen
    on
 3. Compare using the metric that governs this trait/task's phenotype (see Metrics by Task Type
    above), not necessarily the labeled comparability metric

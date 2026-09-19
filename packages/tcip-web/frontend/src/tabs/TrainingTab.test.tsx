@@ -984,7 +984,7 @@ describe("TrainingTab config picker", () => {
         compatible: true,
         reason: null,
       },
-      manifests: [],
+      selections: [],
     });
     const relaunchSpy = vi
       .spyOn(trainingApi, "relaunch")
@@ -1013,7 +1013,7 @@ describe("TrainingTab config picker", () => {
         compatible: true,
         reason: null,
       },
-      manifests: [],
+      selections: [],
     });
     vi.spyOn(trainingApi, "relaunch").mockRejectedValue(
       new StructuredRefusalError({ issues: ["batch_size must be positive"] }, 422, ""),
@@ -1054,9 +1054,9 @@ describe("TrainingTab config picker", () => {
         compatible: true,
         reason: null,
       },
-      manifests: [
+      selections: [
         {
-          manifest_dir: "/data/splits",
+          selection_dir: "/data/splits",
           enabled: true,
           reason: null,
           seed: 7,
@@ -1064,7 +1064,6 @@ describe("TrainingTab config picker", () => {
           train: 4,
           val: 2,
           calibration: 1,
-          other_dates: 0,
           replaced_split_keys: [],
         },
       ],
@@ -1120,7 +1119,7 @@ describe("TrainingTab config picker", () => {
 
     resolveChoices({
       as_recorded: { case: "drawn", line: "draws its split again", compatible: true, reason: null },
-      manifests: [],
+      selections: [],
     });
     await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled());
   });
@@ -1161,9 +1160,9 @@ describe("dataPickerFor", () => {
       compatible: false,
       reason: "Directory not found: data.images_dir = '/moved'",
     },
-    manifests: [
+    selections: [
       {
-        manifest_dir: "/data/splits",
+        selection_dir: "/data/splits",
         enabled: true,
         reason: null,
         seed: 7,
@@ -1171,19 +1170,17 @@ describe("dataPickerFor", () => {
         train: 4,
         val: 2,
         calibration: 1,
-        other_dates: 3,
         replaced_split_keys: ["seed"],
       },
       {
-        manifest_dir: "/data/other",
+        selection_dir: "/data/other",
         enabled: false,
-        reason: "split manifest was drawn for subject='bud'",
+        reason: "the selection at /data/other records no subject",
         seed: null,
         group_by: null,
         train: 0,
         val: 0,
         calibration: 0,
-        other_dates: 0,
         replaced_split_keys: [],
       },
     ],
@@ -1197,27 +1194,26 @@ describe("dataPickerFor", () => {
     expect(picker?.absenceMessage).toMatch(/this listing found no other recorded partition/);
   });
 
-  it("maps each manifest's own enabled flag and reason onto the choice the picker renders", () => {
+  it("maps each selection's own enabled flag and reason onto the choice the picker renders", () => {
     const picker = dataPickerFor(choices);
     expect(picker?.choices[0]).toMatchObject({
-      manifestDir: "/data/splits",
+      selectionDir: "/data/splits",
       disabled: false,
       replacedSplitKeys: ["seed"],
     });
     expect(picker?.choices[1]).toMatchObject({
-      manifestDir: "/data/other",
+      selectionDir: "/data/other",
       disabled: true,
-      reason: "split manifest was drawn for subject='bud'",
+      reason: "the selection at /data/other records no subject",
     });
   });
 
-  it("renders the seed/group_by/counts line from the manifest's own recorded fields", () => {
+  it("renders the seed/group_by/counts line from the selection's own recorded fields", () => {
     const picker = dataPickerFor(choices);
     render(<div>{picker?.choices[0].label}</div>);
     expect(
       screen.getByText(/seed 7 · tile_prefix · train 4 · val 2 · calibration 1/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/3 member\(s\) under other dates/)).toBeInTheDocument();
   });
 
   it("answers undefined for a row with no choices fetched yet", () => {

@@ -107,29 +107,29 @@ def test_a_project_relative_splits_manifest_is_derived_and_claimed(tmp_path: Pat
     _dataset_tree(root)
     splits_dir = root / "splits_out"
     splits_dir.mkdir()
-    (splits_dir / "split_manifest.json").write_text("{}", encoding="utf-8")
+    (splits_dir / "selection.json").write_text("{}", encoding="utf-8")
 
     accounting = account_for(root)
 
-    assert str(splits_dir / "split_manifest.json") in _plan_paths(accounting)
+    assert str(splits_dir / "selection.json") in _plan_paths(accounting)
     assert not accounting.unaccounted
 
 
-def test_a_split_manifest_at_the_tree_root_refuses_by_name(tmp_path: Path):
+def test_a_selection_at_the_tree_root_refuses_by_name(tmp_path: Path):
     root = tmp_path / "proj"
     _dataset_tree(root)
-    (root / "split_manifest.json").write_text("{}", encoding="utf-8")
+    (root / "selection.json").write_text("{}", encoding="utf-8")
 
-    with pytest.raises(AnchorMisplaced, match="split_manifest.json"):
+    with pytest.raises(AnchorMisplaced, match="selection.json"):
         account_for(root)
 
 
-def test_a_split_manifest_under_annotations_refuses_by_name(tmp_path: Path):
+def test_a_selection_under_annotations_refuses_by_name(tmp_path: Path):
     root = tmp_path / "proj"
     _dataset_tree(root)
-    (root / "annotations" / "split_manifest.json").write_text("{}", encoding="utf-8")
+    (root / "annotations" / "selection.json").write_text("{}", encoding="utf-8")
 
-    with pytest.raises(AnchorMisplaced, match="split_manifest.json"):
+    with pytest.raises(AnchorMisplaced, match="selection.json"):
         account_for(root)
 
 

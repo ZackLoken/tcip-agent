@@ -216,12 +216,13 @@ def test_draw_splits_keeps_every_plants_stems_on_one_split_side(
     tmp_path: Path, four_plant_csv: Path,
 ) -> None:
     from tcip_mcp.dataset_layout import parse_image_path
+    from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.pipelines.data.splits import member_identity
-    from tcip_mcp.tools.data_tools import _scan_dataset, draw_splits, split_manifest_key
+    from tcip_mcp.tools.data_tools import _scan_dataset, draw_splits
 
     dataset_root = tmp_path / "dataset"
     # Four plants, two capture dates each: eight stems total, four groups of two, exactly the
-    # manifest floor (one each for train/val, two for calibration).
+    # selection floor (one each for train/val, two for calibration).
     for plot, tiepoint in (
         ("p1", P1_TIEPOINT), ("p2", P2_TIEPOINT), ("p3", P3_TIEPOINT), ("p4", P4_TIEPOINT),
     ):
@@ -244,13 +245,13 @@ def test_draw_splits_keeps_every_plants_stems_on_one_split_side(
     assert "error" not in result, result
     assert result["group_by"] == "explicit_map"
 
-    manifest = ts.read(split_manifest_key(out_dir))
-    identity_side = {s: side for side, identities in manifest["splits"].items() for s in identities}
+    drawn = read_selection(out_dir)
+    stem_side = {Path(s.source).stem: s.side for s in drawn.samples}
     # Every group's members (same plot_name) land on the identical side.
     for plot in ("p1", "p2", "p3", "p4"):
-        group_identities = [f"{d}/{plot}_{d}" for d in ("2026-02-01", "2026-03-01")]
-        sides = {identity_side[s] for s in group_identities}
-        assert len(sides) == 1, f"{group_identities} split across sides: {identity_side}"
+        group_stems = [f"{plot}_{d}" for d in ("2026-02-01", "2026-03-01")]
+        sides = {stem_side[s] for s in group_stems}
+        assert len(sides) == 1, f"{group_stems} split across sides: {stem_side}"
 
 
 # ── CLI end to end ───────────────────────────────────────────────────────
@@ -267,7 +268,7 @@ def _four_plant_dataset(tmp_path: Path) -> Path:
 
 
 def test_main_cli_end_to_end(tmp_path: Path, four_plant_csv: Path) -> None:
-    from tcip_mcp.tools.data_tools import split_manifest_key
+    from tcip_mcp.pipelines.data.selection import selection_key
 
     dataset_root = _four_plant_dataset(tmp_path)
 
@@ -279,15 +280,15 @@ def test_main_cli_end_to_end(tmp_path: Path, four_plant_csv: Path) -> None:
     ])
 
     assert rc == 0
-    assert ts.exists(split_manifest_key(out_dir))
+    assert ts.exists(selection_key(out_dir))
 
 
-def test_main_cli_states_all_three_ratios_and_writes_a_three_sided_manifest(
+def test_main_cli_states_all_three_ratios_and_writes_a_three_sided_selection(
     tmp_path: Path, four_plant_csv: Path,
 ) -> None:
     """--train-ratio, --val-ratio and --calibration-ratio have no default and are all stated:
-    the write lands a real three-sided manifest."""
-    from tcip_mcp.tools.data_tools import split_manifest_key
+    the write lands a real three-sided selection."""
+    from tcip_mcp.pipelines.data.selection import read_selection
 
     dataset_root = _four_plant_dataset(tmp_path)
 
@@ -297,11 +298,10 @@ def test_main_cli_states_all_three_ratios_and_writes_a_three_sided_manifest(
               "--output-path", str(out_dir)])
 
     assert rc == 0
-    manifest = ts.read(split_manifest_key(out_dir))
-    assert set(manifest["splits"]) == {"train", "val", "calibration"}
-    assert manifest["splits"]["train"]
-    assert manifest["splits"]["val"]
-    assert manifest["splits"]["calibration"]
+    drawn = read_selection(out_dir)
+    assert drawn.on("train")
+    assert drawn.on("val")
+    assert drawn.on("calibration")
 
 
 def test_main_cli_missing_a_required_ratio_flag_refuses(tmp_path: Path, four_plant_csv: Path) -> None:

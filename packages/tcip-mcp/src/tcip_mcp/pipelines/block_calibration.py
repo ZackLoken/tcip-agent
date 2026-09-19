@@ -55,9 +55,9 @@ def reserved_calibration_region_available(experiment_id: str) -> bool:
     ``run_inference`` runs before deciding whether a ``trait`` + ``raster_path`` export may
     proceed into block calibration at all.
     """
-    from tcip_mcp.experiments import read_split_manifest
+    from tcip_mcp.experiments import read_run_partition
 
-    return _reserved_spatial_regions(read_split_manifest(experiment_id)) is not None
+    return _reserved_spatial_regions(read_run_partition(experiment_id)) is not None
 
 
 def _band_rects(
@@ -208,13 +208,13 @@ def resolve_block_calibration_records(
     single file to read tags from) always falls back to GT-spacing.
 
     ``export_tile_size`` (required, no default) is the edge the caller's own whole-mosaic export
-    pass resolved to run at; refused when it differs from the split manifest's own ``tile_size``,
+    pass resolved to run at; refused when it differs from the run partition's own ``tile_size``,
     naming both, so the reserved-region claim this resolves and the bucket the export pass writes
     are tiled at one regime by construction, never two values nothing holds equal.
     """
     from tcip_store import store
 
-    from tcip_mcp.experiments import config_key, read_split_manifest
+    from tcip_mcp.experiments import config_key, read_run_partition
 
     if experiment_id is None:
         raise BlockCalibrationRefused(
@@ -225,7 +225,7 @@ def resolve_block_calibration_records(
             "knowing which training run's split produced them."
         )
 
-    split = read_split_manifest(experiment_id)
+    split = read_run_partition(experiment_id)
     if split.get("group_by") != "spatial_strip":
         raise BlockCalibrationRefused(
             f"block calibration refused: experiment {experiment_id!r} has no spatial-strip split "
@@ -304,7 +304,7 @@ def resolve_block_calibration_records(
     tile_size, overlap = int(spatial["tile_size"]), float(spatial["overlap"])
     if tile_size != int(export_tile_size):
         raise BlockCalibrationRefused(
-            f"block calibration refused: the split manifest's reserved regions were tiled at "
+            f"block calibration refused: the run's reserved regions were tiled at "
             f"{tile_size}px, but this export is resolved to run the whole-mosaic pass at "
             f"{int(export_tile_size)}px; the reserved-region claim and the exported bucket must be "
             "tiled at one regime, or the claim says nothing about the counts the export actually "
@@ -406,7 +406,7 @@ def resolve_block_calibration_records(
     with open_raster(training_source, predictor.in_chans) as reader:
         if (reader.width, reader.height) != (mosaic_w, mosaic_h):
             raise BlockCalibrationRefused(
-                f"block calibration refused: the split manifest's recorded mosaic dimensions "
+                f"block calibration refused: the run's recorded mosaic dimensions "
                 f"({mosaic_w}x{mosaic_h}) do not match the actual raster {training_source}'s "
                 f"current dimensions ({reader.width}x{reader.height}); the raster was likely "
                 f"replaced or truncated since training. Retrain or re-split against the current "
@@ -425,7 +425,6 @@ def resolve_block_calibration_records(
             stem=stem,
         )
 
-    from tcip_mcp.dataset_layout import annotation_date
     from tcip_mcp.pipelines.operating_point import (
         attach_spatial_split_kind_provenance, resolve_operating_point,
     )
@@ -442,8 +441,8 @@ def resolve_block_calibration_records(
         "staged_conf_floor": applied.get("score_thresh"),
         "staged_conf_floor_attribute_path": applied_attribute_path,
         "cal_rects": cal_rects, "hold_rects": test_rects,
-        # No manifest on this route; not-applicable regardless via the record's spatial_strip.
-        "split_manifest_dir": None, "calibration_date": annotation_date(labels_dir),
+        # No selection on this route; not-applicable regardless via the record's spatial_strip.
+        "selection_dir": None, "calibration_labels_dir": str(labels_dir),
     }
     bundle = resolve_operating_point(trait_name, experiment_id=experiment_id, **resolver_inputs)
     attach_spatial_split_kind_provenance(bundle, spatial)

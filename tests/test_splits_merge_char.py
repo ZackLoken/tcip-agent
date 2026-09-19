@@ -1,8 +1,7 @@
 """Characterization goldens for ``draw_splits``.
 
-Freezes the stats ``draw_splits(materialize=False)`` returns and the on-disk tree plus
-``output_dir`` and ``structure`` that ``draw_splits(materialize=True)`` produces, so a change to
-either shape fails here.
+Freezes the statistics ``draw_splits`` returns and the selection document it writes beside
+them, so a change to either shape fails here.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from tcip_annotation.state import Annotation, BBox
 
 
 # 4 source prefixes (srcA..srcD) x 3 tiles x 1 GT box each: 4 leakage groups, uniform density,
-# exactly meeting the manifest floor (one group each for train/val, two for calibration).
+# exactly meeting the draw's floor (one group each for train/val, two for calibration).
 GOLDEN_DRAW_SPLITS = {
     "splits": {"train": 3, "val": 3, "calibration": 6},
     "foreground_annotations": {"train": 3, "val": 3, "calibration": 6},
@@ -28,23 +27,15 @@ GOLDEN_DRAW_SPLITS = {
     "group_by": "tile_prefix",
     "stratified": True,
 }
-GOLDEN_CALIBRATION_FOREGROUND_GROUPS_BY_DATE = {"2-11-26": 2}
+GOLDEN_CALIBRATION_FOREGROUND_GROUPS = 2
 GOLDEN_REALIZED_RATIOS = {"train": 0.25, "val": 0.25, "calibration": 0.5}
 
-# split_dataset (seed=1) and draw_splits (seed=1) assign the same groups per split.
-GOLDEN_TREE = sorted([
-    "split_manifest.json",
-    "train/images/srcD_0_0.jpg", "train/images/srcD_1_0.jpg", "train/images/srcD_2_0.jpg",
-    "train/labels/srcD_0_0.json", "train/labels/srcD_1_0.json", "train/labels/srcD_2_0.json",
-    "val/images/srcA_0_0.jpg", "val/images/srcA_1_0.jpg", "val/images/srcA_2_0.jpg",
-    "val/labels/srcA_0_0.json", "val/labels/srcA_1_0.json", "val/labels/srcA_2_0.json",
-    "calibration/images/srcB_0_0.jpg", "calibration/images/srcB_1_0.jpg",
-    "calibration/images/srcB_2_0.jpg", "calibration/images/srcC_0_0.jpg",
-    "calibration/images/srcC_1_0.jpg", "calibration/images/srcC_2_0.jpg",
-    "calibration/labels/srcB_0_0.json", "calibration/labels/srcB_1_0.json",
-    "calibration/labels/srcB_2_0.json", "calibration/labels/srcC_0_0.json",
-    "calibration/labels/srcC_1_0.json", "calibration/labels/srcC_2_0.json",
-])
+# The side each group's crops land on at seed 1: the draw places whole groups, never crops. A
+# group key carries its capture date, so two dates' same-named sources are two groups.
+GOLDEN_SIDE_BY_GROUP = {
+    "2-11-26/srcD": "train", "2-11-26/srcA": "val",
+    "2-11-26/srcB": "calibration", "2-11-26/srcC": "calibration",
+}
 
 
 def _multi_source_dataset(root: Path) -> Path:
@@ -62,15 +53,6 @@ def _multi_source_dataset(root: Path) -> Path:
     return root
 
 
-def _tree(out_dir: Path) -> list[str]:
-    # Lock files outlive writes on POSIX; the golden tree lists the split's real artifacts.
-    return sorted(
-        str(p.relative_to(out_dir)).replace("\\", "/")
-        for p in out_dir.rglob("*")
-        if p.is_file() and p.suffix != ".lock"
-    )
-
-
 def test_draw_splits_stats_golden(tmp_path: Path):
     from tcip_mcp.tools.data_tools import draw_splits
 
@@ -78,38 +60,42 @@ def test_draw_splits_stats_golden(tmp_path: Path):
     out = tmp_path / "m"
     result = draw_splits(str(root), output_path=str(out), seed=1, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
-    result.pop("manifest_dir")
+    result.pop("selection_dir")
     assert result.pop("subject") == "bud"
     assert result.pop("attribute") is None
     admission_counts = result.pop("admission_counts")
     assert admission_counts["annotated"] == 12
-    hashes = result.pop("dataset_hashes_by_date")
-    assert list(hashes) == ["2-11-26"] and hashes["2-11-26"]
-    assert result.pop("calibration_foreground_groups_by_date") == \
-        GOLDEN_CALIBRATION_FOREGROUND_GROUPS_BY_DATE
+    assert result.pop("calibration_foreground_groups") == GOLDEN_CALIBRATION_FOREGROUND_GROUPS
     assert result.pop("realized_ratios") == GOLDEN_REALIZED_RATIOS
     assert result == GOLDEN_DRAW_SPLITS
 
 
-def test_draw_splits_materialize_tree_golden(tmp_path: Path):
-    """Bound to the file backend on purpose: the golden lists the split's own record document
-    (split_manifest.json) as a sibling file, a fact about the file layout a database backend
-    does not reproduce."""
+def test_draw_splits_selection_document_golden(tmp_path: Path):
+    """Bound to the file backend on purpose: the selection's own document sits beside the draw
+    as ``selection.json``, a fact about the file layout a database backend does not reproduce.
+    Every sample names its own source and label; the draw copies nothing."""
     from tcip_store.file_backend import FileBackend
 
-    from tcip_mcp.tools.data_tools import draw_splits, split_manifest_key
+    from tcip_mcp.pipelines.data.selection import read_selection
+    from tcip_mcp.tools.data_tools import draw_splits
 
     ts.bind(FileBackend())
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "s"
-    result = draw_splits(str(root), output_path=str(out), seed=1, materialize=True, subject="bud",
+    result = draw_splits(str(root), output_path=str(out), seed=1, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert result["splits"] == {"train": 3, "val": 3, "calibration": 6}
     assert result["total_stems"] == 12
     assert result["seed"] == 1
-    assert result["output_dir"] == str(out)
-    assert result["structure"] == f"{out}/{{train,val,calibration}}/{{images,labels}}/"
-    assert _tree(out) == GOLDEN_TREE
-    manifest = ts.read(split_manifest_key(out))
-    for split in ("train", "val", "calibration"):
-        assert manifest["splits"][split]
+    assert result["selection_dir"] == str(out)
+
+    written = sorted(str(p.relative_to(out)).replace("\\", "/") for p in out.rglob("*")
+                     if p.is_file() and p.suffix != ".lock")
+    assert written == ["selection.json"]
+
+    drawn = read_selection(out)
+    assert drawn.counts() == {"train": 3, "val": 3, "calibration": 6}
+    assert {s.group: s.side for s in drawn.samples} == GOLDEN_SIDE_BY_GROUP
+    for sample in drawn.samples:
+        assert Path(sample.source).parent == root / "images" / "2-11-26"
+        assert Path(sample.ground_truth).parent == root / "annotations" / "2-11-26"

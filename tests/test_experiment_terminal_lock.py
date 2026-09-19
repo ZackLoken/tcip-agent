@@ -1,6 +1,6 @@
 """The terminal lock protects an experiment's provenance writers, not just its own members.
 
-subprocess_worker's two config.json patches and persist_split_manifest's split.json write share
+subprocess_worker's two config.json patches and persist_run_partition's split.json write share
 experiments.refuse_if_terminal with log_metrics and record_artifact, so a run whose experiment
 record turned terminal mid-flight (the wall-clock watchdog marking it failed while the child was
 still building its dataset) cannot have those writes land anyway. A refusal there raises
@@ -22,7 +22,7 @@ def _refusals(root):
 
 
 class _StemDataset:
-    """The minimal shape persist_split_manifest reads off a built dataset."""
+    """The minimal shape persist_run_partition reads off a built dataset."""
 
     def __init__(self, stems):
         self.stems = stems
@@ -30,7 +30,7 @@ class _StemDataset:
 
 def test_split_write_refused_against_a_watchdog_failed_record_leaves_it_failed(tmp_path):
     from tcip_mcp.experiments import ExperimentTerminal, create_experiment, update_status
-    from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
 
     import pytest
 
@@ -38,11 +38,11 @@ def test_split_write_refused_against_a_watchdog_failed_record_leaves_it_failed(t
     create_experiment(eid, {"model_source": {"builder": "my_models:bud_det"}})
     update_status(eid, "running")
     # The reachable trigger: the wall-clock watchdog marks the run failed while the child worker
-    # is still alive and mid dataset-build, before it ever reaches persist_split_manifest.
+    # is still alive and mid dataset-build, before it ever reaches persist_run_partition.
     update_status(eid, "failed", error="exceeded max_wall_clock_seconds (5)")
 
     with pytest.raises(ExperimentTerminal):
-        persist_split_manifest(
+        persist_run_partition(
             eid, _StemDataset(["img_001"]), _StemDataset(["img_002"]),
             {"labels_dir": ""},
         )
@@ -54,7 +54,7 @@ def test_split_write_refused_against_a_watchdog_failed_record_leaves_it_failed(t
 
     refusals = _refusals(tmp_path)
     assert len(refusals) == 1
-    assert refusals[0]["arguments"]["op"] == "persist_split_manifest"
+    assert refusals[0]["arguments"]["op"] == "persist_run_partition"
     assert refusals[0]["arguments"]["experiment_id"] == eid
     assert refusals[0]["status"] == "refused"
 
@@ -87,13 +87,13 @@ def test_update_status_refusal_audits_the_launch_root_not_the_current_one(tmp_pa
 def test_split_write_still_lands_against_a_running_record(tmp_path):
     """The guard admits the ordinary case: a live run's own split write still succeeds."""
     from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
 
     eid = "exp-021-chestnut-burr-det"
     create_experiment(eid, {"model_source": {"builder": "my_models:burr_det"}})
     update_status(eid, "running")
 
-    persist_split_manifest(
+    persist_run_partition(
         eid, _StemDataset(["img_001", "img_003"]), _StemDataset(["img_002"]),
         {"labels_dir": ""},
     )
@@ -167,7 +167,7 @@ def test_id_map_patch_refused_against_a_terminal_record(tmp_path):
          {"subject": "bud", "attribute": None, "id_map": {"bud": 0}},
          "patch_experiment_config_id_map"),
         ("_patch_experiment_config_split",
-         {"split_cfg": {"manifest_binding": {"date": "2024-01-01"}}},
+         {"split_cfg": {"selection_binding": {"date": "2024-01-01"}}},
          "patch_experiment_config_split"),
     ],
     ids=["tiling", "id_map", "split"],
@@ -199,7 +199,7 @@ def test_split_write_raises_when_the_refusal_audit_append_fails(tmp_path, monkey
     never lands and ExperimentTerminal still reaches the caller, chaining the append failure
     rather than losing it to a logged warning."""
     from tcip_mcp.experiments import ExperimentTerminal, create_experiment, update_status
-    from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
 
     import pytest
 
@@ -214,7 +214,7 @@ def test_split_write_raises_when_the_refusal_audit_append_fails(tmp_path, monkey
     monkeypatch.setattr("tcip_mcp.audit.record_event_or_raise", _boom)
 
     with pytest.raises(ExperimentTerminal) as excinfo:
-        persist_split_manifest(
+        persist_run_partition(
             eid, _StemDataset(["img_001"]), _StemDataset(["img_002"]),
             {"labels_dir": ""},
         )

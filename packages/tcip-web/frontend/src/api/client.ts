@@ -634,7 +634,7 @@ export const api = {
         body: JSON.stringify(body),
       }),
 
-    // calibration_member is present only when the run was bound to a manifest that could be read.
+    // calibration_member is present only when the run was bound to a selection that could be read.
     priorityQueueJob: (jobId: string) =>
       call<{
         job_id: string;

@@ -342,20 +342,20 @@ def test_script_prints_and_exits_cleanly_for_fewer_than_two_labeled_stems(monkey
     assert "Need >=2 labeled stems" in capsys.readouterr().err
 
 
-def test_script_split_manifest_dir_requires_subject(tmp_path):
-    """--split-manifest-dir needs --subject to check the manifest's own subject against; this
+def test_script_selection_dir_requires_subject(tmp_path):
+    """--selection-dir needs --subject to check the selection's own subject against; this
     refuses before touching a checkpoint or a dataset."""
     from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path),
-              "--split-manifest-dir", str(tmp_path / "m")])
+              "--selection-dir", str(tmp_path / "m")])
 
     assert rc == 2
 
 
-def test_script_split_manifest_dir_conflicts_with_group_by(tmp_path):
+def test_script_selection_dir_conflicts_with_group_by(tmp_path):
     """A drawn split's own parameter beside a recorded partition is a conflict, not a silent
     choice between the two."""
     from tcip_mcp.cli.calibrate_operating_point import main
@@ -363,7 +363,7 @@ def test_script_split_manifest_dir_conflicts_with_group_by(tmp_path):
     rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path),
-              "--split-manifest-dir", str(tmp_path / "m"),
+              "--selection-dir", str(tmp_path / "m"),
               "--subject", "bud", "--group-by", "stem"])
 
     assert rc == 2

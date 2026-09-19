@@ -20,7 +20,7 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                                tile_size_source="default", tile_size_derived_from=None,
                                tiled_source="default",
                                group_by=None, group_key_map=None, experiment_id=None,
-                               seed=0, holdout_ratio=0.5, split_manifest_dir=None):
+                               seed=0, holdout_ratio=0.5, selection_dir=None):
     """Resolve a per-dataset operating point from a labeled split.
 
     Returns ``(bundle, hash, n_excluded_incomplete_attribute, evidence)``. The third value is the
@@ -52,7 +52,7 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
 
     Raises ``ValueError`` (propagated from ``resolve_locked_cal_holdout_split``) when the lock
     references a stem whose image/label no longer exists, or its lock file is corrupt; also
-    raised by name when ``split_manifest_dir`` is given with no ``images_dir``, a labels-only
+    raised by name when ``selection_dir`` is given with no ``images_dir``, a labels-only
     universe the redraw refuses the same way. The caller (``run_inference``) turns either into a
     clean ``{"error": ...}``.
 
@@ -70,30 +70,29 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     edge (see ``predictor.explicit_edge_provenance``), forwarded unchanged; ``None`` for every
     other source.
 
-    ``split_manifest_dir`` restricts the calibration universe to one capture date's
-    ``calibration`` side of a ``split_manifest`` record (``data_tools.read_split_manifest_dir``)
-    instead of every labelled stem with an image: the manifest's ``subject``/``attribute`` must
-    equal this run's recorded training scope, the labels directory's date
-    (``dataset_layout.annotation_date``) must be one the manifest holds members under, and the
-    manifest's ``images_root`` for that date must be ``images_dir``, each refusing by name. A
-    checkpoint bound to a different manifest than the one named here is refused by name too.
+    ``selection_dir`` restricts the calibration universe to the ``calibration`` samples of a
+    selection (``pipelines.data.selection.read_selection``) whose label documents live under
+    ``labels_dir``, instead of every labelled stem with an image. A checkpoint bound to a
+    different selection than the one named here is refused by name, and so is one trained for a
+    subject or attribute the selection was not drawn for: a model only speaks its own training
+    vocabulary, so it cannot be measured against a reference drawn over another class space.
     ``group_by``/``group_key_map`` default to ``None``
-    (resolved to ``"tile_prefix"`` when neither a manifest nor a value was given) so a value passed
-    beside a manifest is detectable and refuses, naming both: the manifest's own grouping policy
-    governs the locked draw instead. The identity (``dh``, the lock, the evidence's
-    ``split_identity_hash``) is ``dataset_hash(labels_dir, stems=universe)`` rather than the whole
-    directory's hash, so a manifest draw never addresses the lock a whole-directory draw locked,
-    and the evidence records the swept universe under ``label_stems.calibration`` (with
-    ``stated_values.split_manifest_dir``) instead of the whole directory under
-    ``label_dirs.calibration``. ``evidence`` also carries ``calibration_stems`` (the swept stem
-    list, every calibration) and, under a manifest, ``excluded``
-    (``calibration_universe_from_manifest``'s own ``excluded_training_stems``/
+    (resolved to ``"tile_prefix"`` when neither a selection nor a value was given) so a value
+    passed beside a selection is detectable and refuses, naming both: the group keys the selection
+    recorded on its own samples govern the locked draw instead. The identity (``dh``, the lock,
+    the evidence's ``split_identity_hash``) is ``dataset_hash(labels_dir, stems=universe)`` rather
+    than the whole directory's hash, so a selection draw never addresses the lock a
+    whole-directory draw locked, and the evidence records the swept universe under
+    ``label_stems.calibration`` (with ``stated_values.selection_dir``) instead of the whole
+    directory under ``label_dirs.calibration``. ``evidence`` also carries ``calibration_stems``
+    (the swept stem list, every calibration) and, under a selection, ``excluded``
+    (``selection_calibration_universe``'s own ``excluded_training_stems``/
     ``excluded_unassigned_stems``).
     """
     from tcip_annotation.json_io import require_reference_ground_truth
     from tcip_mcp.pipelines.data.label_queries import json_det_targets, resolve_registry_id_map
     from tcip_mcp.pipelines.data.splits import (
-        cal_holdout_scope_root, count_label_lines, label_image_stems, manifest_date_key,
+        cal_holdout_scope_root, count_label_lines, label_image_stems,
         resolve_locked_cal_holdout_split, same_directory,
     )
     from tcip_mcp.pipelines.operating_point import (
@@ -104,64 +103,79 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     from tcip_mcp.pipelines.training.evaluation import build_coco_image_record
     from tcip_mcp.tools.inference_tools import _recorded_training_id_map
 
-    from tcip_mcp.dataset_layout import annotation_date
-
     labels_p = Path(labels_dir)
     require_reference_ground_truth(labels_p)
-    cal_date = annotation_date(labels_dir)
-    if split_manifest_dir is not None and (group_by is not None or group_key_map is not None):
+    if selection_dir is not None and (group_by is not None or group_key_map is not None):
         raise ValueError(
-            f"split_manifest_dir={split_manifest_dir!r} conflicts with group_by/group_key_map: "
-            "the manifest's own grouping policy governs the locked draw; pass neither beside it."
+            f"selection_dir={selection_dir!r} conflicts with group_by/group_key_map: the group "
+            "keys the selection recorded on its own samples govern the locked draw; pass neither "
+            "beside it."
         )
     # The run's subject + single id map (from predictor.config): calibration GT reads through the
     # same loader-side reader the training targets use, so the swept count can't diverge from training.
     _data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
     _subject, _attribute = _data_cfg.get("subject"), _data_cfg.get("attribute")
-    _checkpoint_manifest_dir = (
-        (_data_cfg.get("split") or {}).get("manifest_binding") or {}).get("manifest_dir")
-    if (split_manifest_dir is not None and _checkpoint_manifest_dir is not None
-            and not same_directory(_checkpoint_manifest_dir, split_manifest_dir)):
+    _checkpoint_selection_dir = (
+        (_data_cfg.get("split") or {}).get("selection_binding") or {}).get("selection_dir")
+    if (selection_dir is not None and _checkpoint_selection_dir is not None
+            and not same_directory(_checkpoint_selection_dir, selection_dir)):
         raise ValueError(
-            f"this checkpoint is bound to split manifest {_checkpoint_manifest_dir!r}, not the "
-            f"{split_manifest_dir!r} this calibration names: calibrating a bound checkpoint "
-            "under a different manifest would check its selection disjointness against a side "
+            f"this checkpoint is bound to the selection at {_checkpoint_selection_dir!r}, not the "
+            f"{selection_dir!r} this calibration names: calibrating a bound checkpoint "
+            "under a different selection would check its selection disjointness against a side "
             "the checkpoint was never trained or chosen with."
         )
     # Prefers the training run's own recorded map over a fresh registry read: the model only
     # speaks its training vocabulary, so an edited subjects.json must not silently relabel the GT.
-    _cal_id_map = None
-    if _subject:
-        _cal_id_map = _recorded_training_id_map(predictor)
-        if _cal_id_map is None:
-            # No try/except: resolve_registry_id_map's only exception is its own deliberate
-            # ValueError, which must reach the caller rather than degrade to a single-class read.
-            _reg, _cal_id_map = resolve_registry_id_map(labels_dir, _subject, _attribute)
     # The shared labels-intersect-images scan redraw_calibration_holdout also uses: a stem
     # whose image was deleted/renamed never enters the split universe here.
     stems, stem_to_image = label_image_stems(labels_dir, images_dir)
     excluded = None
-    split_manifest_sha256 = None
-    if split_manifest_dir is not None:
+    selection_sha256 = None
+    selection_id_map: dict[str, int] | None = None
+    if selection_dir is not None:
         if not images_dir:
             raise ValueError(
-                "split_manifest_dir requires calibration_images_dir (or images_dir): a "
+                "selection_dir requires calibration_images_dir (or images_dir): a "
                 "labels-only universe can include a stem whose image is gone, a lock the redraw "
-                "would address that no manifest-restricted calibration ever draws."
+                "would address that no selection-restricted calibration ever draws."
             )
-        from tcip_mcp.pipelines.data.splits import resolve_manifest_calibration_universe
-        from tcip_mcp.pipelines.resolution import manifest_digest
-        from tcip_mcp.tools.data_tools import read_split_manifest_dir
+        from tcip_mcp.pipelines.data.selection import read_selection
+        from tcip_mcp.pipelines.data.splits import resolve_selection_calibration_universe
+        from tcip_mcp.pipelines.image_utils import resolve_source_path
+        from tcip_mcp.pipelines.resolution import selection_digest
 
-        manifest = read_split_manifest_dir(split_manifest_dir)
-        split_manifest_sha256 = manifest_digest(manifest)
-        stems, group_by, group_key_map, excluded, cal_date, _subject, _attribute = \
-            resolve_manifest_calibration_universe(
-                manifest, split_manifest_dir, labels_dir, images_dir, _subject, _attribute, stems)
-        stem_to_image = {s: stem_to_image[s] for s in stems}
+        selection = read_selection(selection_dir)
+        selection_sha256 = selection_digest(selection)
+        if (_subject or None, _attribute or None) != (
+                selection.subject or None, selection.attribute or None):
+            raise ValueError(
+                f"this checkpoint was trained for subject={_subject!r}, attribute="
+                f"{_attribute!r}, and the selection at {selection_dir!r} was drawn for "
+                f"subject={selection.subject!r}, attribute={selection.attribute!r}: the model "
+                "only speaks its training vocabulary, so it cannot be measured against a "
+                "reference drawn for another class space."
+            )
+        selection_id_map = dict(selection.id_map) if selection.id_map else None
+        stems, group_by, group_key_map, excluded, _subject, _attribute, universe_samples = \
+            resolve_selection_calibration_universe(selection, labels_dir, stems)
+        # Each stem's own recorded source and ground truth, never the directory listing's: two
+        # directories can hold identically named files.
+        stem_to_image = {s: resolve_source_path(universe_samples[s].source) for s in stems}
+        gt_path_of = {s: universe_samples[s].ground_truth for s in stems}
     else:
         group_by = group_by or "tile_prefix"
-    dh = dataset_hash(labels_dir, stems=(stems if split_manifest_dir is not None else None))
+        gt_path_of = {s: str(labels_p / f"{s}.json") for s in stems}
+    _cal_id_map = None
+    if _subject:
+        # A selection states the exact map its samples were admitted under; it wins over both the
+        # checkpoint's stamp and a fresh registry read for a selection-restricted measurement.
+        _cal_id_map = selection_id_map or _recorded_training_id_map(predictor)
+        if _cal_id_map is None:
+            # No try/except: resolve_registry_id_map's only exception is its own deliberate
+            # ValueError, which must reach the caller rather than degrade to a single-class read.
+            _reg, _cal_id_map = resolve_registry_id_map(labels_dir, _subject, _attribute)
+    dh = dataset_hash(labels_dir, stems=(stems if selection_dir is not None else None))
     annotation_counts = {
         s: count_label_lines(labels_dir, s, subject=_subject, attribute=_attribute)
         for s in stems
@@ -173,7 +187,7 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         stems, identity_hash=dh, scope_root=cal_holdout_scope_root(labels_dir),
         annotation_counts=annotation_counts,
         group_by=group_by, group_key_map=group_key_map, seed=seed, holdout_ratio=holdout_ratio,
-        split_manifest_dir=split_manifest_dir,
+        selection_dir=selection_dir,
     )
     if locked.get("unlocked_stems"):
         logger.info(
@@ -206,7 +220,7 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                   for (x1, y1, x2, y2), sc, lab in zip(r["boxes"], r["scores"], r["labels"])]
             # GT lifted to the predictor's 1-indexed labels via the loader-side reader (subject +
             # id map); with no run subject in scope, fall back to a single-class read of every box.
-            gt_path = str(labels_p / f"{s}.json")
+            gt_path = gt_path_of[s]
             if _subject and _cal_id_map is not None:
                 gboxes, glabels, n_unlabeled = json_det_targets(gt_path, _subject, _attribute, _cal_id_map)
                 # An image with any instance unlabeled for `attribute` is dropped whole from the
@@ -239,15 +253,15 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         "cross_tile_nms": cross_tile_nms, "max_dets": max_dets,
         "staged_conf_floor": applied.get("score_thresh"),
         "staged_conf_floor_attribute_path": applied_attribute_path,
-        "split_manifest_dir": split_manifest_dir, "calibration_date": manifest_date_key(cal_date),
-        "calibration_labels_dir": str(labels_p), "split_manifest_sha256": split_manifest_sha256,
+        "selection_dir": selection_dir,
+        "calibration_labels_dir": str(labels_p), "selection_sha256": selection_sha256,
     }
     bundle = resolve_operating_point(trait, experiment_id=experiment_id, **resolver_inputs)
     attach_split_policy_provenance(bundle, locked)
     drawn = (locked.get("redraw_history") or [{}])[-1]
     stated_values = {"split_identity_hash": dh, "split_content_hash": drawn.get("new_content_hash")}
-    if split_manifest_dir is not None:
-        stated_values["split_manifest_dir"] = split_manifest_dir
+    if selection_dir is not None:
+        stated_values["selection_dir"] = selection_dir
         reference_inputs = {
             "label_stems": {"calibration": {"path": str(labels_p), "stems": stems}},
             "stated_values": stated_values,
