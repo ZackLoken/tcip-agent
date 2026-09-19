@@ -585,14 +585,12 @@ def check_retired_subject_registry(root: Path, findings: list) -> None:
     retired_document`), at every root the project's own records reach, so an operator learns of
     it without a door having to hit the write refusal first.
 
-    Enumerates roots through :func:`store_catalogue.project_roots` (the project's own registered
-    dataset roots and every other root a run's records name) plus, under each ``SPLITS``-layout
-    root, each of its ``SPLIT_NAMES`` subdirectories: the split materializer places its registry
-    copy one level below the manifest directory ``project_roots`` reports
-    (``draw_splits``, ``split_root = out_dir / split_name``). Absent from :func:`gated_stores`
-    because the retired document is no store's document under either backend: a loose file the
-    seam does not address, so the database backend's staleness gate does not apply to it, and
-    this always reads straight off disk.
+    Enumerates the dataset roots :func:`store_catalogue.project_roots` reports (the project's own
+    registered roots and every other root a run's records name); a selection directory holds one
+    record and no registry, so only a dataset root can carry the retired document. Absent from
+    :func:`gated_stores` because the retired document is no store's document under either
+    backend: a loose file the seam does not address, so the database backend's staleness gate
+    does not apply to it, and this always reads straight off disk.
 
     ``warn``, the level a version refusal gets: a document a reader refuses whole is the soft
     rail, the operator's next step being a hand rename to ``subjects.json``, never a defect in
@@ -601,7 +599,7 @@ def check_retired_subject_registry(root: Path, findings: list) -> None:
     document.
 
     ``project_roots`` itself reads the project root's own experiments store members (each run's
-    status, split-manifest binding, curated-artifact and lineage records) and the project's
+    status, selection binding, curated-artifact and lineage records) and the project's
     registered-datasets record, no sweep manifest; a root holding those as loose records under
     the database backend cannot be enumerated, a fact about that unrelated store, not this
     check's own subject. This is the only check that enumerates roots through ``project_roots``,
@@ -610,10 +608,9 @@ def check_retired_subject_registry(root: Path, findings: list) -> None:
     rather than ending the whole doctor run.
     """
     from tcip_store import StoreError
-    from tcip_store.layout_claims import ROOT, SPLITS
+    from tcip_store.layout_claims import ROOT
 
     from tcip_mcp.dataset_layout import RETIRED_SUBJECTS_FILENAME
-    from tcip_mcp.pipelines.data.splits import SPLIT_NAMES
     from tcip_mcp.subject_registry import retired_document
     from tcip_mcp.store_catalogue import project_roots
 
@@ -624,12 +621,7 @@ def check_retired_subject_registry(root: Path, findings: list) -> None:
                          f"project's roots: {exc}"))
         return
 
-    candidates: list[Path] = []
-    for path, layout in roots:
-        if layout == ROOT:
-            candidates.append(Path(path))
-        elif layout == SPLITS:
-            candidates.extend(Path(path) / name for name in SPLIT_NAMES)
+    candidates = [Path(path) for path, layout in roots if layout == ROOT]
 
     seen: set[str] = set()
     for candidate in candidates:
