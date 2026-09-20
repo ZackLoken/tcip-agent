@@ -588,9 +588,7 @@ describe("TuningTab selection change", () => {
       id === "hpo-a"
         ? Promise.resolve({
             sweep_id: "hpo-a",
-            trials: [
-              { trial_id: "trial_a1", has_metrics: false, params: {} },
-            ],
+            trials: [{ trial_id: "trial_a1", has_metrics: false, params: {} }],
           })
         : new Promise(() => {}),
     );
