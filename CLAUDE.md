@@ -5,9 +5,10 @@ invariants, not documentation. When this file and a skill disagree on a domain f
 wins; on behavior, this file wins. Machine and harness facts live in `CLAUDE.local.md` (not
 shipped); commit, push and prose rules that hold across projects live in the global `CLAUDE.md`.
 
-While the architecture contraction is underway, `docs/NEXT_SESSION_PROMPT.md` governs wherever it
-and this file disagree, and a conflict between them is brought to the owner rather than resolved
-silently.
+While the architecture contraction is underway, `docs/NEXT_SESSION_PROMPT.md` governs procedure
+only: which session does what, in what order, with which tools. This file governs what a change
+is and how it is judged, and the prompt never overrides it; a prompt sentence that would change
+how a change is judged is a conflict brought to the owner rather than followed.
 
 ## The foundation
 
@@ -93,7 +94,11 @@ implementation is replaceable and the guarantee is not.
   proving a legitimate call still succeeds, constructed through the platform's own producer.
 - No silent fallback when required information is missing: require it or refuse, naming the real
   primitive. A guessed value that can reach a delivered result is a fabrication with a warning
-  attached.
+  attached. A refusal is the last resort, never the design: the goal is fewer places where a
+  fact can go missing, so a fact read in several places gets one producer and one path its
+  readers share, and one check at that boundary, rather than a refusal inside each reader.
+  Several readers each asking the same question is the defect, and adding a refusal to each is
+  how it survives.
 - A stated format, subject or root is a claim the data must positively carry, never one it merely
   fails to contradict.
 
@@ -107,6 +112,20 @@ for general techniques only, never for a per-trait pipeline; the endpoint is a t
 
 ## Working a change
 
+- A contraction change starts from its deletion list: the functions, keys, branches and records
+  it removes, named with their line counts read from the tree, and what replaces each. The
+  change is done when each is gone and nothing was added beside the replacement. The line delta by
+  area (`packages/`, `tests/`, other, off `git diff --numstat`, run by `tools/line_delta.py`) is
+  evidence that the list was executed, never the target: package code that grew means a mechanism
+  survived beside its replacement and is named and deleted or the change stops, and a delta that
+  fell without a named deletion is the same finding the other way. A finding names a site; the fix
+  names the mechanism that produced the site and removes it. Patching the site with a refusal, a
+  second comparison, a lookup by another spelling or a per-shape copy of an existing reader keeps
+  the mechanism and is how it survives to the next read. Before proposing any fix, say what
+  deleting the mechanism would look like and what stops that; only a live consumer or an owner
+  ruling stops it, never the code's current shape. A brief never scopes out a sibling of a
+  mechanism the change deletes: if every instance cannot go, that is the stop rule, brought to the
+  owner, never a paragraph naming what was left.
 - A test that guards a fix is observed failing without the fix. Say when you have seen it fail and
   say when you have not. Every admits-valid-work test constructs its input through the platform's
   own producer.
@@ -115,8 +134,10 @@ for general techniques only, never for a per-trait pipeline; the endpoint is a t
   covers deleting something shared covers changing one: a convention changed at the site that
   named the defect and not at its siblings leaves the fact spelled two ways, and a producer and a
   reader spelling one key differently is a rail that answers no leak where there is one.
-- A shared fact ships an agreement test: two producers' own records compared against each other,
-  not each against a fixture. Guard tests cannot stand in for it. A guard test proves the site it
+- A shared fact ships an agreement test: two routes' own records compared against each other,
+  not each against a fixture. The two routes share one implementation of the fact (CLAUDE.md's
+  "call one from the other"); the test guards that they still agree, and never licenses a second
+  implementation to stay. Guard tests cannot stand in for it. A guard test proves the site it
   guards, so a suite of them stays green over exactly this defect, which is how it survives to be
   found by a reader instead of by the suite.
 - Gates before reporting a change done: `ruff check packages tests tools`, `mypy`, and the change's
