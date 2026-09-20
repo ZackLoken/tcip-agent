@@ -148,14 +148,12 @@ def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dic
     rather than falling back to the registry.
 
     ``None`` when ``task`` isn't detection/instance_seg, no ``subject`` is configured, the run
-    trains from a pre-built COCO source (``coco_json``/``label_format="coco"``) or a bespoke
-    ``dataset_source`` (neither route's targets are guaranteed to come
-    from this ``(labels_dir, subject, attribute)`` triple at all, a COCO file's own category ids
-    can be authored in any order, and a bespoke builder owns its class space entirely, so
-    re-deriving here could stamp a map that is the wrong id space for what the run actually
-    trained on, exactly the class of error class-aware admission exists to prevent; ``build_dataset``
-    itself only calls ``resolve_registry_id_map`` on the same predicate, datasets.py's own
-    ``has_coco``/``dataset_source`` branch), or the one legitimate degraded case
+    trains from a bespoke ``dataset_source`` (that route's targets are not guaranteed to come
+    from this ``(labels_dir, subject, attribute)`` triple at all, since a bespoke builder owns its
+    class space entirely, so re-deriving here could stamp a map that is the wrong id space for
+    what the run actually trained on, exactly the class of error class-aware admission exists to
+    prevent; ``build_dataset`` itself only calls ``resolve_registry_id_map`` on the same
+    predicate, datasets.py's own ``dataset_source`` branch), or the one legitimate degraded case
     ``resolve_registry_id_map`` itself names (an attribute scope with no ``subjects.json`` for this
     labels dir), honest: no map recorded, decode falls through to its own live-registry
     re-derivation.

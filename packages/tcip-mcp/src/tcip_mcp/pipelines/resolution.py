@@ -604,11 +604,13 @@ def _digest_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()[:16]
 
 
-def _ground_truth_digest(path: Path) -> str:
+def ground_truth_digest(path: Path) -> str:
     """One ground-truth file's own digest, by the same convention :func:`_digest_bytes` states.
 
     Takes the file rather than a directory and a stem, so it answers for ground truth that is not
-    a per-image label document too.
+    a per-image label document too: the run's own recorded partition digests each member's stated
+    path through this, and the delivery-time check recomputes a reference sample's through it, so
+    the two cannot drift into hashing one file two ways.
     """
     return _digest_bytes(_label_bytes(path))
 
@@ -622,7 +624,7 @@ def label_digests(labels_dir: str | Path, stems: list[str]) -> dict[str, str]:
     which reads each label once for both.
     """
     labels_dir = Path(labels_dir)
-    return {stem: _ground_truth_digest(labels_dir / f"{stem}.json") for stem in sorted(stems)}
+    return {stem: ground_truth_digest(labels_dir / f"{stem}.json") for stem in sorted(stems)}
 
 
 def dataset_hash_and_label_digests(
@@ -1882,7 +1884,7 @@ def _reference_ground_truth_moved(
     records each one's digest at draw time. Recomputing those digests now is what distinguishes a
     claim that still answers for its reference from one whose reference moved underneath it.
 
-    Recomputes over each sample's own ``ground_truth`` path through :func:`_ground_truth_digest`,
+    Recomputes over each sample's own ``ground_truth`` path through :func:`ground_truth_digest`,
     the byte convention :func:`label_digests` recorded the draw's digests with, so the producing
     side and the checking side cannot drift into hashing one file two ways. Reading the sample's
     stated path rather than rebuilding a label filename from its stem keeps this answering for
@@ -1915,7 +1917,7 @@ def _reference_ground_truth_moved(
         ground_truth = Path(sample.ground_truth)
         if sample.ground_truth_digest is None:
             unstated.append(ground_truth.name)
-        elif _ground_truth_digest(ground_truth) != sample.ground_truth_digest:
+        elif ground_truth_digest(ground_truth) != sample.ground_truth_digest:
             moved.append(ground_truth.name)
     return sorted(moved), sorted(unstated), None
 

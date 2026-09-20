@@ -101,9 +101,12 @@ def test_auto_train_val_malformed_val_ratio_degrades(tmp_path: Path):
         "auto_val": True,
         "split": {"val_ratio": "not_a_number"},
     }
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
     assert val_ds is None
-    assert sorted(train_ds.stems) == sorted(all_stems)
+    # Still the producer's own samples, indexed by source identity, with every admitted stem
+    # recorded as trained: a failed draw drops the validation side, never the membership.
+    assert sorted(Path(s).stem for s in train_ds.stems) == sorted(all_stems)
+    assert partition["train"] == sorted(all_stems) and partition["val"] == []
 
 
 def test_auto_train_val_ordinal_returns_none(tmp_path: Path):
@@ -382,37 +385,6 @@ def test_auto_train_val_degenerate_group_retries_at_stem_level(tmp_path: Path):
     assert data_cfg["split"]["resolved_group_by"] == "stem"
 
 
-def test_auto_train_val_trains_on_the_coco_document_the_config_names(tmp_path: Path):
-    """A config naming its own assembled COCO states where this run's targets come from. The
-    drawn split reads the per-image sidecars beside a registry, so it is not a split this run may
-    draw: the membership is the COCO's own images, never every sidecar in the labels directory."""
-    import json
-
-    images_dir, labels_dir, all_stems = _detection_dataset(tmp_path / "ds")
-    named = sorted(all_stems)[:4]
-    coco = {
-        "images": [{"id": i, "file_name": f"{stem}.png", "width": IMG, "height": IMG}
-                   for i, stem in enumerate(named)],
-        "annotations": [{"id": i, "image_id": i, "category_id": 0, "iscrowd": 0,
-                         "bbox": [19.2, 19.2, 25.6, 25.6], "area": 655.36}
-                        for i, _stem in enumerate(named)],
-        "categories": [{"id": 0, "name": "bud"}],
-    }
-    coco_path = tmp_path / "assembled.json"
-    coco_path.write_text(json.dumps(coco), encoding="utf-8")
-
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "subject": "bud", "auto_val": True, "coco_json": str(coco_path),
-                "label_format": "coco",
-                "split": {"val_ratio": 0.5, "seed": 1}}
-    train_ds, val_ds, _partition = auto_train_val("detection", data_cfg, None)
-
-    assert val_ds is not None
-    trained = {Path(s).stem for s in list(train_ds.stems) + list(val_ds.stems)}
-    assert trained == set(named)
-    assert trained != set(all_stems)
-
-
 def test_auto_train_val_explicit_group_key_map_not_overridden_by_retry(tmp_path: Path):
     """A caller-supplied group_key_map that starves val is a deliberate leakage policy, not a
     data limitation: the retry must never silently discard it for stem-level grouping."""
@@ -486,31 +458,38 @@ def test_reserve_calibration_fraction_adds_a_disjoint_calibration_region(tmp_pat
 
 def test_reserve_calibration_fraction_raises_on_unresolvable_extent(tmp_path: Path):
     """Reason 1: no width/height in the label file. Explicitly requested -> raises by name,
-    rather than the unrequested case's silent (train_ds, None) degradation."""
-    from tcip_mcp.pipelines.data.split_construction import spatial_single_source_split
+    rather than the unrequested case's silent (train_ds, None) degradation. The one source is
+    admitted through the producer the run itself admits through, so the split is derived over the
+    dataset the run would build."""
+    from tcip_mcp.pipelines.data.split_construction import (
+        admit_geometry, spatial_single_source_split,
+    )
+    from tcip_mcp.tools.training_tools import _dataset_source_kwargs
 
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir(parents=True, exist_ok=True)
     _save_png(images_dir / "mosaic.png")
-    # A readable document with no width/height recorded, distinct from an unreadable one.
-    (labels_dir / "mosaic.json").write_text('{"annotations": []}', encoding="utf-8")
+    # A readable, annotated document recording no width/height, distinct from an unreadable one.
+    json_io.write_annotations(
+        str(labels_dir / "mosaic.json"),
+        [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))], 0, 0, keep_empty=True)
 
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud"}
     tiling = {"enabled": True, "tile_size": 128, "overlap": 0.2}
     split_cfg = {"val_ratio": 0.2, "test_ratio": 0.1, "reserve_calibration_fraction": 0.15}
+    admitted = admit_geometry("detection", data_cfg, _dataset_source_kwargs("detection", data_cfg))
     with pytest.raises(ValueError, match="reserve_calibration_fraction"):
-        spatial_single_source_split("mosaic", data_cfg, tiling, object(), split_cfg, None)
+        spatial_single_source_split(admitted, data_cfg, tiling, split_cfg, None)
 
 
-def test_spatial_single_source_split_raises_on_an_unreadable_label_regardless_of_reserve(
-    tmp_path: Path,
+def test_single_tiled_source_raises_on_an_unreadable_label_regardless_of_reserve(
+    tmp_path: Path, caplog,
 ):
     """A present, unreadable label document is a categorically different fact than one recording
-    no width/height: it raises unconditionally, whether or not reserve_calibration_fraction was
-    requested, rather than degrading to no validation over a document nobody can read."""
+    no width/height: the run aborts, whether or not reserve_calibration_fraction was requested,
+    rather than degrading to no validation over a document nobody can read."""
     from tcip_annotation.json_io import UnreadableLabelDocument
-    from tcip_mcp.pipelines.data.split_construction import spatial_single_source_split
 
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
@@ -518,11 +497,14 @@ def test_spatial_single_source_split_raises_on_an_unreadable_label_regardless_of
     _save_png(images_dir / "mosaic.png")
     (labels_dir / "mosaic.json").write_text("[]", encoding="utf-8")  # not a dict: unreadable
 
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud"}
-    tiling = {"enabled": True, "tile_size": 128, "overlap": 0.2}
-    split_cfg = {"val_ratio": 0.2, "test_ratio": 0.1}  # no reserve_calibration_fraction
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.2, "test_ratio": 0.1},  # no reserve_calibration_fraction
+    }
     with pytest.raises(UnreadableLabelDocument):
-        spatial_single_source_split("mosaic", data_cfg, tiling, object(), split_cfg, None)
+        auto_train_val("detection", data_cfg, None)
+    assert "training without validation" not in caplog.text
 
 
 def test_reserve_calibration_fraction_raises_on_infeasible_layout(tmp_path: Path):

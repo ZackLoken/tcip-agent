@@ -76,16 +76,19 @@ class BaseImageDataset(BaseDataset):
     sample's own source and ground-truth path, keyed by the sample key this dataset indexes by.
     Every read then goes to the path the sample recorded rather than to a directory listing,
     which is what lets one dataset span capture dates and keeps two dates' same-named images
-    apart.
+    apart. ``sample_member_stems`` holds the bare stem a membership record names each sample by.
     """
 
     images_dir: Path
     transforms: Any = None
     sample_sources: dict[str, str] | None = None
     sample_ground_truth: dict[str, str] | None = None
+    sample_member_stems: dict[str, str] | None = None
     sample_counts: dict[str, int]
     labels_dir: Path
     id_map: dict[str, int] | None
+    _coco: dict | None
+    _num_classes: int
     _image_names: dict[str, str]
 
     @property
@@ -95,13 +98,50 @@ class BaseImageDataset(BaseDataset):
         The key a membership record, a cal/holdout lock and a leakage join all name a member by.
         A directory-built dataset already indexes by that stem; a sample-built one indexes by each
         sample's source identity, which keeps two dates' same-named images apart but is not what
-        those records spell, so the stem is read back off the sample's own ground-truth path here
-        rather than each measurement door converting on its own.
+        those records spell, so the sample's own member stem is read back here rather than each
+        measurement door converting on its own.
         """
         keys: list[str] = list(getattr(self, "stems", None) or getattr(self, "_stems", []))
-        if self.sample_ground_truth is not None:
-            return [Path(self.sample_ground_truth[key]).stem for key in keys]
-        return keys
+        return [self.member_stem_of(key) for key in keys]
+
+    def member_stem_of(self, key: str) -> str:
+        """The bare stem a membership record names one indexed sample by: the stem the sample
+        itself states when this dataset was built from samples, else the key, which a directory
+        build already indexes by."""
+        if self.sample_member_stems is not None:
+            return self.sample_member_stems[key]
+        return key
+
+    def _init_from_samples(
+        self, samples: Sequence[Sample], id_map: dict[str, int] | None,
+    ) -> list[str]:
+        """Index a recorded sample list and answer the keys this dataset indexes: each sample's
+        own source and ground-truth document, the class ids it was admitted under, and nothing
+        rediscovered from a directory.
+
+        Each sample is keyed by its own source identity, distinct across capture dates by
+        construction, so two dates holding a same-named image index as two samples rather than
+        collapsing into one, and the bare stem a membership record names it by rides beside the
+        key. Refuses a sample whose ground truth these loaders cannot read
+        (:func:`~tcip_mcp.pipelines.data.selection.refuse_unreadable_samples`) before indexing any
+        of it. ``id_map`` is required and is the draw's own: recorded samples can span label
+        trees, so there is no single registry beside them to resolve class ids from.
+        """
+        refuse_unreadable_samples(samples)
+        if not id_map:
+            raise ValueError(
+                f"a {self.task_type} dataset built from recorded samples needs the draw's own "
+                "id_map: its samples can span label trees, so there is no single registry beside "
+                "them to resolve class ids from."
+            )
+        self.sample_sources = {s.identity: s.source for s in samples}
+        self.sample_ground_truth = {s.identity: s.ground_truth for s in samples}
+        self.sample_member_stems = {s.identity: s.member_stem for s in samples}
+        self.sample_counts = {}
+        self._image_names = {}
+        self.id_map = dict(id_map)
+        self._num_classes = len(id_map)
+        return [s.identity for s in samples]
 
     def _resolve_path(self, stem: str) -> Path | BandGroupRef:
         """The logical image one sample key names: the sample's own recorded source when this
@@ -187,37 +227,18 @@ def indexed_sample_keys(dataset: Any) -> set[str]:
     return set(getattr(dataset, "stems", None) or getattr(dataset, "_stems", None) or [])
 
 
-def _sample_maps(
-    samples: Sequence[Sample],
-) -> tuple[list[str], dict[str, str], dict[str, str]]:
-    """``(keys, sources, ground_truth)`` for a dataset built from explicit samples.
-
-    The key is the sample's own source identity, which is distinct across capture dates by
-    construction, so two dates holding a same-named image index as two samples instead of
-    collapsing into one. Refuses a sample naming a region or a table row, which these loaders do
-    not read (:func:`~tcip_mcp.pipelines.data.selection.refuse_unreadable_samples`), rather than
-    reading its whole source or its whole ground-truth file instead.
-    """
-    refuse_unreadable_samples(samples)
-    keys = [s.identity for s in samples]
-    return (keys, {s.identity: s.source for s in samples},
-            {s.identity: s.ground_truth for s in samples})
-
-
 class DetectionDataset(BaseImageDataset):
-    """Object detection over a selection's samples, or over a labeled directory.
+    """Object detection over a recorded sample list, or over a labeled directory.
 
-    Given ``samples`` (a selection's own list), membership is exactly what the draw recorded:
-    each sample reads its own source and its own label document, no directory is scanned and no
-    admission is re-derived, so the dataset spans whatever capture dates the selection does.
+    Given ``samples`` (a draw's own list), membership is exactly what the draw recorded: each
+    sample reads its own source and the ground truth that answers for it, no directory is scanned
+    and no admission is re-derived, so the dataset spans whatever capture dates the draw did.
 
     Given ``images_dir``/``labels_dir`` instead, membership is drawn from the directory through
-    the platform's own admission (``trainable_stems``) and ``label_format`` selects the on-disk
-    label format:
-
-    - ``json`` (default): canonical per-image ``<labels_dir>/<stem>.json`` (json_io schema)
-    - ``coco``: a single COCO JSON at ``coco_json``, the assembled dataset view of the per-image
-      JSON, used for training (annotations matched by file name)
+    the platform's own admission (``trainable_stems``), and the targets come from the canonical
+    per-image ``<labels_dir>/<stem>.json`` of the json_io schema, either read one at a time or,
+    when the caller hands in ``coco_data``, through the dataset-level COCO ``assemble_coco`` built
+    from those same documents, whose annotations are matched by image file name.
     """
 
     task_type = "detection"
@@ -229,8 +250,6 @@ class DetectionDataset(BaseImageDataset):
         stems: list[str] | None = None,
         transforms: Any = None,
         num_classes: int = 1,
-        label_format: str = "json",
-        coco_json: str | None = None,
         coco_data: dict | None = None,
         subject: str | None = None,
         attribute: str | None = None,
@@ -243,35 +262,20 @@ class DetectionDataset(BaseImageDataset):
         self._num_classes = num_classes
         self.subject = subject
         self.attribute = attribute
-        self.label_format = (label_format or "json").lower()
         self._coco = None
         if samples is not None:
-            self._init_from_samples(samples, id_map)
+            # Recorded samples each name their own document; nothing assembles a view of them.
+            self.stems = self._init_from_samples(samples, id_map)
             return
-        if coco_data is not None:  # in-memory COCO assembled from per-image JSON (train/eval)
-            self._coco = coco_data
-            self.label_format = "coco"
-        elif self.label_format == "coco":
-            if not coco_json:
-                raise ValueError("label_format='coco' requires coco_json (path to the COCO JSON).")
-            from tcip_annotation import json_io
-
-            # An assembled dataset-level COCO document is interop, never checked against this
-            # platform's own per-image schema_version ceiling (see tcip_annotation.format_io).
-            self._coco = json_io.load_json_document(coco_json)
+        self._coco = coco_data  # the assembled view of this directory's per-image documents
         # The single name→id map: resolved here for a direct-json build, else supplied by
         # build_dataset (which resolved it once for the COCO assembly). One derivation either way.
-        if id_map is None and self.label_format == "json":
+        if id_map is None and self._coco is None:
             _reg, id_map = resolve_registry_id_map(self.labels_dir, subject, attribute)
             self._num_classes = len(id_map)
         self.id_map = id_map
-        # The attribute-completeness rail (an image with any instance never assessed for `attribute`
-        # is held out whole, never trained on its labelled subset) lives inside trainable_stems, the
-        # one partition that already decides admission and records why, see its docstring. A second
-        # filter over trainable_stems' *output* would both corrupt those counts and never run at all
-        # on the real build_dataset path (which assembles COCO and so takes the
-        # `label_format == "coco"` branch). Applying it at the partition covers both label paths
-        # from one implementation and reports a truthful reason for each drop.
+        # The attribute-completeness rail lives inside trainable_stems, the one partition that
+        # already decides admission and records why a stem left; see its docstring for why.
         self.stems, self.sample_counts = trainable_stems(
             self.labels_dir, self.images_dir, stems,
             subject=subject, date=admission_date(self.labels_dir), coco=self._coco,
@@ -282,29 +286,6 @@ class DetectionDataset(BaseImageDataset):
         # true name), image_name_map reads the actual directory listing, never a constructed guess.
         self._image_names = image_name_map(self.images_dir)
 
-    def _init_from_samples(
-        self, samples: Sequence[Sample], id_map: dict[str, int] | None,
-    ) -> None:
-        """Index a selection's samples: each one's own source and label, the class ids the draw
-        admitted under, and nothing rediscovered from a directory.
-
-        ``id_map`` is required, and is the selection's own: a bespoke or directory build can
-        resolve one from a registry beside its labels, but a selection's samples may sit under
-        several label trees and the map they were admitted under is recorded on the selection.
-        """
-        if not id_map:
-            raise ValueError(
-                "a detection dataset built from a selection needs the selection's own id_map: "
-                "its samples can span label trees, so there is no single registry beside them to "
-                "resolve class ids from."
-            )
-        self.label_format = "json"
-        self.id_map = id_map
-        self._num_classes = len(id_map)
-        self.stems, self.sample_sources, self.sample_ground_truth = _sample_maps(samples)
-        self.sample_counts = {}
-        self._image_names = {}
-
     def _det_targets(self, stem: str, file_name: str) -> tuple[list, list]:
         """Pixel-xyxy boxes + 1-indexed labels for one image (coco or name-based json).
 
@@ -314,7 +295,7 @@ class DetectionDataset(BaseImageDataset):
         here by construction; the 3-tuple is unpacked for the shared ``json_det_targets``
         signature, not because a nonzero count is expected at this point.
         """
-        if self.label_format == "coco":
+        if self._coco is not None:
             return coco_det_targets(self._coco, file_name)
         boxes, labels, _n_unlabeled = json_det_targets(
             str(self._label_path(stem)), self.subject, self.attribute, self.id_map)
@@ -331,7 +312,7 @@ class DetectionDataset(BaseImageDataset):
     @property
     def class_distribution(self) -> dict[int, int]:
         counts: Counter[int] = Counter()
-        if self.label_format == "coco" and self._coco:
+        if self._coco:
             # self._coco may be shared across a full/train/val split trio (assembled once in
             # training_tools.py, threaded into all three builds rather than re-assembled per
             # split), its annotations cover the whole dataset, not just this dataset's own
@@ -354,7 +335,7 @@ class DetectionDataset(BaseImageDataset):
         stem = self.stems[idx]
         img = self._open_image(stem)
         w, h = self._image_size(img)
-        file_name = self._image_names.get(stem, "") if self.label_format == "coco" else ""
+        file_name = self._image_names.get(stem, "") if self._coco is not None else ""
         boxes, labels = self._det_targets(stem, file_name)
         target = {
             "boxes": torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4),
@@ -441,10 +422,11 @@ class TiledDetectionDataset(BaseImageDataset):
         # would otherwise fall back to the 3-channel class default.
         self.images_dir = base.images_dir
         self.labels_dir = base.labels_dir
-        # A sample-built base reads each sample's own source and ground truth; the wrapper indexes
-        # and reads through the same two maps, so the tiles come from the recorded paths.
+        # A sample-built base reads each sample's own source and ground truth; the wrapper reads
+        # through the same maps, so the tiles come from the paths those samples recorded.
         self.sample_sources = base.sample_sources
         self.sample_ground_truth = base.sample_ground_truth
+        self.sample_member_stems = base.sample_member_stems
         self.expected_channels = getattr(base, "expected_channels", 3)
         self.tile_size = tile_size
         self.overlap = overlap
@@ -494,8 +476,8 @@ class TiledDetectionDataset(BaseImageDataset):
             # multi-band raster the authored frame and the decoded frame genuinely disagree, and
             # every box would be cropped from somewhere it was never drawn. Comparing the two
             # decoders instead would prove nothing: they share a branch and agree by construction.
-            authored = authored_frame(base._label_path(stem), base.label_format,
-                                       base._coco, stem, base._image_names.get(stem, ""))
+            authored = authored_frame(base._label_path(stem), base._coco, stem,
+                                       base._image_names.get(stem, ""))
             if authored is not None and authored != (w, h):
                 raise ValueError(
                     f"tiled dataset frame mismatch for stem {stem!r}: the labels record a "
@@ -508,7 +490,7 @@ class TiledDetectionDataset(BaseImageDataset):
             # Format-aware read via the base dataset's own targeting (json/coco share one path);
             # only coco needs the image file name to match its annotations. Use the real on-disk name
             # (img_path.name can be miscased on Windows), or the coco match silently finds nothing.
-            file_name = base._image_names.get(stem, "") if base.label_format == "coco" else ""
+            file_name = base._image_names.get(stem, "") if base._coco is not None else ""
             full_boxes, full_labels = base._det_targets(stem, file_name)
             fb = np.asarray(full_boxes, dtype=np.float32).reshape(-1, 4)
             fl = np.asarray(full_labels, dtype=np.int64)
@@ -657,9 +639,10 @@ class TiledDetectionDataset(BaseImageDataset):
 # ====================================================================
 
 class InstanceSegDataset(BaseImageDataset):
-    """Instance masks from per-image polygons: a selection's samples (each naming its own source
-    and label), the canonical per-image JSON ``<stem>.json`` under a labeled directory (default),
-    or a COCO dict / assembled per-image JSON (``label_format='coco'`` / ``coco_data``)."""
+    """Instance masks from per-image polygons: a draw's own samples, each naming its own source
+    and the label document that answers for it, or a labeled directory's own ``<stem>.json``
+    documents, read one at a time or through the dataset-level ``coco_data`` assembled from
+    them."""
 
     task_type = "instance_seg"
 
@@ -670,8 +653,6 @@ class InstanceSegDataset(BaseImageDataset):
         stems: list[str] | None = None,
         transforms: Any = None,
         num_classes: int = 1,
-        label_format: str = "json",
-        coco_json: str | None = None,
         coco_data: dict | None = None,
         subject: str | None = None,
         attribute: str | None = None,
@@ -684,34 +665,13 @@ class InstanceSegDataset(BaseImageDataset):
         self._num_classes = num_classes
         self.subject = subject
         self.attribute = attribute
-        self.label_format = (label_format or "json").lower()
         self._coco = None
         if samples is not None:
-            if not id_map:
-                raise ValueError(
-                    "an instance_seg dataset built from a selection needs the selection's own "
-                    "id_map: its samples can span label trees, so there is no single registry "
-                    "beside them to resolve class ids from."
-                )
-            self.label_format = "json"
-            self.id_map = dict(id_map)
-            self._num_classes = len(id_map)
-            self.stems, self.sample_sources, self.sample_ground_truth = _sample_maps(samples)
-            self.sample_counts = {}
-            self._image_names = {}
+            # Recorded samples each name their own document; nothing assembles a view of them.
+            self.stems = self._init_from_samples(samples, id_map)
             return
-        if coco_data is not None:
-            self._coco = coco_data
-            self.label_format = "coco"
-        elif self.label_format == "coco":
-            if not coco_json:
-                raise ValueError("label_format='coco' requires coco_json (path to the COCO JSON).")
-            from tcip_annotation import json_io
-
-            # An assembled dataset-level COCO document is interop, never checked against this
-            # platform's own per-image schema_version ceiling (see tcip_annotation.format_io).
-            self._coco = json_io.load_json_document(coco_json)
-        if id_map is None and self.label_format == "json":
+        self._coco = coco_data  # the assembled view of this directory's per-image documents
+        if id_map is None and self._coco is None:
             _reg, id_map = resolve_registry_id_map(self.labels_dir, subject, attribute)
             self._num_classes = len(id_map)
         self.id_map = id_map
@@ -736,9 +696,8 @@ class InstanceSegDataset(BaseImageDataset):
         genuinely more than one ring; ``__getitem__`` rasterizes every ring of an instance into
         that instance's one mask."""
         out: list[tuple[list[list[tuple[float, float]]], int]] = []
-        if self.label_format == "coco":
+        if self._coco is not None:
             from tcip_annotation import format_io
-            assert self._coco is not None, "__init__ always sets _coco when label_format is 'coco'"
             file_name = self._image_names.get(stem, "")
             anns, _, _ = format_io._coco_image_annotations(self._coco, file_name=file_name)
             for a in anns:
@@ -1109,20 +1068,21 @@ def _autoresolve_json_labels(kwargs: dict, *, subject: str, attribute: str | Non
                              id_map: dict[str, int]) -> None:
     """Route a name-based per-image-JSON label dir onto the assembled-COCO path for training/eval.
 
-    No-op when the caller pinned a format, already supplied COCO data, or has no ``images_dir`` to
-    assemble against (both branches below share that one precondition). The single ``id_map`` is
+    No-op when the caller already supplied the assembled document as ``coco_data``, or has no
+    ``images_dir`` to assemble against (both branches below share that one precondition). The
+    single ``id_map`` is
     threaded into ``assemble_coco`` (and thus the one ``to_coco_dataset`` call), so the assembled
     categories rest on the same name→id derivation as the loader targets and the contract dims.
     A dataset-level COCO export sitting alongside real per-image label files is refused by name,
-    with both remedies stated (move the export out, or point ``data.coco_json`` at it), since
-    only the breeder knows which of the two is this dataset's real label source.
+    with both remedies stated (move the export out of the directory, or import it into per-image
+    documents), since only the breeder knows which of the two is this dataset's real label source.
 
     The confirmation bucket comes from :func:`~tcip_mcp.pipelines.data.label_queries.
     admission_date` over the same ``labels_dir``, the one resolution the dataset class hands
     ``trainable_stems`` too, so the assembled COCO and the partition that consumes it read one
     bucket rather than two keys that can disagree.
     """
-    if kwargs.get("coco_data") is not None or kwargs.get("coco_json") or kwargs.get("label_format"):
+    if kwargs.get("coco_data") is not None:
         return
     labels_dir = kwargs.get("labels_dir", "")
     images_dir = kwargs.get("images_dir", "")
@@ -1134,15 +1094,14 @@ def _autoresolve_json_labels(kwargs: dict, *, subject: str, attribute: str | Non
         raise ValueError(
             f"labels_dir={labels_dir!r} holds a dataset-level COCO file ({offending}): if the "
             "per-image label files in this directory are the ones that should train, move it out "
-            "of labels_dir; if this COCO export is the intended label source, pass data.coco_json "
-            "(or label_format='coco') to train on it directly."
+            "of labels_dir; if this COCO export is the intended label source, import it into "
+            "per-image label documents first, which is the one shape training reads."
         )
     if detected == "json":
         kwargs["coco_data"] = assemble_coco(
             labels_dir, images_dir, stems=kwargs.get("stems"),
             subject=subject, attribute=attribute, id_map=id_map,
             date=admission_date(labels_dir))
-        kwargs["label_format"] = "coco"
 
 
 def _probe_num_channels(images_dir: str | Path | None, stems: list[str] | None,
@@ -1228,10 +1187,11 @@ def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Da
     ``num_channels`` is derived by probing one sample raster when the caller does not pin it, so a
     multi-band input threads its real band count through ``in_chans`` instead of defaulting to RGB.
 
-    ``samples`` (detection and instance_seg) is a selection's own sample list: membership is
-    exactly what the draw recorded, each sample reading its own source and label, so the dataset
-    spans whatever capture dates the selection does and no directory is scanned. It is exclusive
-    with the directory keys below.
+    ``samples`` (detection and instance_seg) is a draw's own sample list: membership is exactly
+    what the draw recorded, each sample reading its own source and the ground truth that answers
+    for it, its own label document, so the dataset spans whatever
+    capture dates the draw did and no directory is scanned. It is exclusive with the directory
+    keys below.
 
     ``date`` names the capture date whose confirmed negatives a directory build may admit, the
     same key the GUI recorded them under, and reaches both the assembled COCO and the partition
@@ -1267,8 +1227,7 @@ def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Da
     if task in ("detection", "instance_seg") and samples is None:
         subject = kwargs.get("subject")
         attribute = kwargs.get("attribute")
-        has_coco = (kwargs.get("coco_data") is not None or kwargs.get("coco_json")
-                    or (kwargs.get("label_format") or "").lower() == "coco")
+        has_coco = kwargs.get("coco_data") is not None
         if not has_coco and kwargs.get("labels_dir"):
             # Name-based json: resolve the single id map once, set num_classes and assemble the COCO
             # from it, the loader, the categories, and resolve_contract_dims all read this one map.

@@ -75,6 +75,31 @@ class Sample:
             return self.source
         return f"{self.source}[{self.rect[0]},{self.rect[1]},{self.rect[2]},{self.rect[3]}]"
 
+    @property
+    def member_stem(self) -> str:
+        """The bare stem a membership record names this sample by.
+
+        Its row key's stem when one document answers for many samples, its own ground-truth
+        document's otherwise, which is every sample a geometry loader reads today: those name a
+        document per image and carry no row key. Every membership record, every cal/holdout lock
+        and every leakage join names a member this way, so the sample states it once here rather
+        than each consumer deriving it from whichever of the two fields it happens to hold.
+        """
+        return Path(self.row_key or self.ground_truth).stem
+
+    @property
+    def ground_truth_scope(self) -> str:
+        """Where this sample's ground truth lives: the directory holding its own document, or the
+        one document that answers for many samples.
+
+        The container a bare member stem is unique within, so a record listing members per scope
+        keeps two directories' same-named images apart. A geometry sample names a document per
+        image, so its scope is that document's directory.
+        """
+        if self.row_key is None:
+            return str(Path(self.ground_truth).parent)
+        return self.ground_truth
+
 
 @dataclass(frozen=True)
 class Selection:
@@ -134,13 +159,14 @@ def refuse_unreadable_samples(samples: Iterable[Sample]) -> None:
     """Refuse a sample whose ground truth today's geometry loaders cannot read, naming what is
     missing rather than letting the loader read something else.
 
-    Two fields the record carries and no loader honors yet: ``rect``, a within-image region, which
-    a loader would otherwise read as the whole source, so two regions of one raster would train as
-    the same repeated image; and ``row_key``, a row inside a tabular ground truth, which a loader
-    reading the file whole would take for a per-image document. Both refuse here rather than being
-    ignored. The record shape is settled either way, so honoring them later changes a loader and
-    not a persisted record.
+    Two fields the record carries and no geometry loader honors: ``rect``, a within-image region,
+    which a loader would otherwise read as the whole source, so two regions of one raster would
+    train as the same repeated image; and ``row_key``, a row inside a ground truth that answers
+    for many samples, which a loader reading the file whole would take for a per-image document.
+    Both refuse here rather than being ignored. The record shape is settled either way, so
+    honoring them later changes a loader and not a persisted record.
     """
+    samples = list(samples)
     with_rect = [s.identity for s in samples if s.rect is not None]
     if with_rect:
         raise ValueError(
@@ -153,8 +179,8 @@ def refuse_unreadable_samples(samples: Iterable[Sample]) -> None:
     if with_row:
         raise ValueError(
             f"{len(with_row)} sample(s) of this selection name a row inside their ground truth "
-            f"({with_row[:5]}): no loader reads a tabular ground truth by row yet, and reading "
-            "the file whole would take a table for a per-image document."
+            f"({with_row[:5]}): no geometry loader reads a ground truth by row yet, and reading "
+            "the file whole would take a document answering for many samples for a per-image one."
         )
 
 

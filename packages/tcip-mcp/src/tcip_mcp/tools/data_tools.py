@@ -21,19 +21,25 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
     not decode refuses rather than reading as absent) and its durable config, and refuses,
     naming the primitive, when: no split record exists for ``experiment_id`` or it does not
     decode; the run was bound to a selection already (``selection_binding``: bind to that
-    selection directly instead); the split is spatial (region identities, not stems); the
-    validation came from ``data.val_images_dir`` (``resolved_group_by == "external"``: those
-    stems never lived under the training roots); the run's val side is empty (it trained without
+    selection directly instead); the split is spatial (region identities, not stems); the record
+    carries no per-scope ``members`` block at all, so which directory each member's ground truth
+    lives under is not on record and freezing would name every one of them under this run's own
+    ``data.labels_dir``; the record names a member whose ground truth lives under a scope other
+    than that directory, which a validation directory the caller named is (every member is
+    re-produced under the one directory below, so a member from elsewhere cannot be composed);
+    the run's val side is empty (it trained without
     validation, a partition no bind can use); the task is not ``detection``/``instance_seg``; the
     config's ``data`` section carries no ``subject``, ``labels_dir``, ``images_dir`` or
     ``id_map``; the record carries no ``group_by`` at all (no grouping policy recorded; never
     defaulted to ``"stem"``); the record's ``dataset_hash`` is ``None`` (the
     run recorded no labels hash, so staleness cannot be checked); the labels changed since the
     run (``dataset_hash(labels_dir)`` now differs from the one ``split.json`` recorded, both
-    named; the comparison is over the whole labels directory, since a drawn run's ``split.json``
-    records no per-stem digests, so any change anywhere under the labels directory refuses
-    freezing, not only a change to the run's own stems: draw a fresh split over the current
-    data instead); or a selection already exists at the output directory.
+    named; the comparison is over the whole labels directory, wider than the run's own members'
+    per-stem digests beside it, so any change anywhere under the labels directory refuses
+    freezing, not only a change to the run's own stems: a stem this freeze would compose from
+    that changed is a member whose ground truth moved, and one outside it that changed is a draw
+    over data that is no longer what the run saw, so draw a fresh split over the current data
+    instead); or a selection already exists at the output directory.
 
     The frozen selection's ``calibration`` side is always empty: freezing a training run's own
     train/val draw records no calibration draw, so the calibration doors' own floor refuses any
@@ -58,6 +64,7 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
     from tcip_mcp.pipelines.data.splits import (
         GROUP_KEY_FNS, member_identity, recorded_group_key_fn,
     )
+    from tcip_mcp.pipelines.operating_point import is_the_same_labels_dir
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
     from tcip_mcp.pipelines.resolution import dataset_hash as _dataset_hash
     from tcip_mcp.pipelines.resolution import label_digests as _label_digests
@@ -87,10 +94,6 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
         return {"error": f"{experiment_id!r}'s split is spatial (region identities, not stems): "
                          "freeze_selection binds a stem-keyed partition, which a spatial split "
                          "never draws."}
-    if resolved_group_by == "external":
-        return {"error": f"{experiment_id!r}'s validation came from data.val_images_dir "
-                         "(resolved_group_by='external'): those stems never lived under the "
-                         "training roots, so there is no partition of this dataset to freeze."}
     train_stems, val_stems = split.get("train") or [], split.get("val") or []
     if not val_stems:
         return {"error": f"{experiment_id!r} trained without validation (an empty val side): "
@@ -118,6 +121,24 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
                          "freeze_selection needs every one of them to compose a selection."}
     assert labels_dir is not None and images_dir is not None and id_map is not None, \
         "checked non-empty above"
+    # Every member is re-produced under this one labels directory below, so the record has to say
+    # its members live there. Absence of that evidence is not evidence of one scope.
+    if not isinstance(split.get("members"), dict):
+        return {"error": f"{experiment_id!r}'s split records no per-scope membership, only flat "
+                         "train and val lists: which directory each member's ground truth lives "
+                         "under is not on record, so freezing would name every one of them under "
+                         f"data.labels_dir ({labels_dir}) and a later bind could read different "
+                         "ground truth than this run validated on. Draw a selection over the "
+                         "current data with draw_splits, or freeze a run trained under the "
+                         "current tree, which records membership per scope."}
+    elsewhere = sorted(d for d in (split.get("labels_dirs") or [])
+                       if not is_the_same_labels_dir(d, labels_dir))
+    if elsewhere:
+        return {"error": f"{experiment_id!r}'s split records members whose ground truth lives "
+                         f"under {', '.join(elsewhere)}, not under this run's data.labels_dir "
+                         f"({labels_dir}): a validation side the caller named a directory for, "
+                         "or a bind spanning several, is not a partition of one dataset this tool "
+                         "can freeze. Draw a selection over the current data instead."}
     if resolved_group_by is None:
         return {"error": f"{experiment_id!r}'s split record carries no group_by at all (no "
                          "grouping policy recorded): freeze_selection never defaults one, "
@@ -135,8 +156,8 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
         return {"error": f"the labels under {labels_dir!r} changed since {experiment_id!r} "
                          f"trained (dataset_hash was {labels_hash_at_split!r}, is now "
                          f"{labels_hash_now!r}): the comparison is over the whole labels "
-                         "directory, since a drawn run's split.json records no per-stem "
-                         "digests, so any change anywhere under it refuses freezing, not only "
+                         "directory, deliberately wider than the per-stem digests the record "
+                         "carries, so any change anywhere under it refuses freezing, not only "
                          "a change to the run's own stems; freeze a run whose labels have not "
                          "moved, or draw a fresh split over the current data."}
 

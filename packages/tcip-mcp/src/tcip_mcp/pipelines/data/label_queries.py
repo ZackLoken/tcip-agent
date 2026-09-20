@@ -27,17 +27,19 @@ def image_name_map(images_dir) -> dict[str, str]:
     return {stem: logical_image_name(src) for stem, src in list_logical_images(images_dir).items()}
 
 
-def authored_frame(label_path, fmt: str, coco=None, stem: str = "",
+def authored_frame(label_path, coco=None, stem: str = "",
                     file_name: str = "") -> tuple[int, int] | None:
     """``(width, height)`` the labels record, or ``None`` when they record none.
 
     The frame the boxes were drawn in, straight from the annotation a human produced, the only
-    reference that can catch a reader disagreeing with the authoring tool. ``label_path`` is the
-    label document itself, so a caller reading a selection's samples names each one's own
-    document rather than reconstructing it from a directory and a stem. The json branch reads
-    through :func:`~tcip_mcp.pipelines.data.splits.label_document_extent`, the same function a
-    split derives its own frame from, so the two agree by construction rather than each parsing
-    the label file on its own; a present, unreadable label raises
+    reference that can catch a reader disagreeing with the authoring tool. ``coco`` is the
+    assembled document when one answers for this sample, read by its own image entry; without one
+    the ground truth is a document per image and ``label_path`` is this sample's own, so a caller
+    reading recorded samples names each one's document rather than reconstructing it from a
+    directory and a stem. The per-image branch reads through
+    :func:`~tcip_mcp.pipelines.data.splits.label_document_extent`, the same function a split
+    derives its own frame from, so the two agree by construction rather than each parsing the
+    label file on its own; a present, unreadable label raises
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than reading as no frame.
     """
     if coco is not None:
@@ -48,8 +50,6 @@ def authored_frame(label_path, fmt: str, coco=None, stem: str = "",
                 w, h = int(entry.get("width", 0) or 0), int(entry.get("height", 0) or 0)
                 return (w, h) if w > 0 and h > 0 else None
         return None
-    if fmt not in ("", "json"):
-        return None  # only the canonical per-image JSON carries its own frame
     from tcip_mcp.pipelines.data.splits import label_document_extent
 
     return label_document_extent(label_path)
@@ -60,20 +60,17 @@ def targets_registry_derived(data_cfg: dict) -> bool:
     one shape a run's own recorded ``id_map`` can be trusted to have come from this
     ``(labels_dir, subject, attribute)`` triple.
 
-    ``False`` for a run trained from a bespoke ``dataset_source``, a pre-built ``coco_json``, or
-    ``label_format="coco"``: none of those routes guarantee their targets came from this triple at
-    all, a COCO file's own category ids can be authored in any order, and a bespoke builder owns
-    its class space entirely. The one predicate ``_resolve_run_id_map``
-    (``pipelines/training/subprocess_worker.py``) records no map by, extracted here so the
-    inference-side door remedy (``unmapped_classified_run``) reads the identical rule rather than
-    a second copy of it.
+    ``False`` for a run trained from a bespoke ``dataset_source``: that builder owns its class
+    space entirely, so its targets are not guaranteed to come from this triple at all. Every other
+    geometry run reads the per-image label documents beside a registry, whether its loader reads
+    them one at a time or through the dataset-level COCO :func:`assemble_coco` builds from them.
+    The one predicate ``_resolve_run_id_map`` (``pipelines/training/subprocess_worker.py``)
+    records no map by, extracted here so the inference-side door remedy
+    (``unmapped_classified_run``) reads the identical rule rather than a second copy of it.
     """
     from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
 
-    return not (
-        data_cfg.get(DATASET_SOURCE_KEY) or data_cfg.get("coco_json")
-        or (data_cfg.get("label_format") or "").lower() == "coco"
-    )
+    return not data_cfg.get(DATASET_SOURCE_KEY)
 
 
 def resolved_subjects_path(dataset_dir) -> Path | None:
@@ -327,8 +324,7 @@ def admitted_records(
                 keep.append(key)
                 counts["annotated"] += 1
             elif image_name in negatives:
-                # An externally supplied coco_json never went through assemble_coco, so the human
-                # Complete a zero-annotation negative needs is re-checked here, never inferred.
+                # Re-checked against the store, never inferred from the document's own silence.
                 keep.append(key)
                 counts["confirmed_negative"] += 1
             elif image_name in quarantined:
@@ -465,6 +461,10 @@ def directory_samples(
     computed them. Each sample's ``source`` is resolved through
     :func:`~tcip_mcp.pipelines.image_utils.resolve_image_source`, so a grouped capture is named by
     its ``.bandgroup`` manifest and an ambiguous stem refuses here rather than picking a file.
+
+    Each sample's ground truth is its own ``<labels_dir>/<stem>`` label document, the one shape
+    geometry ground truth has: the dataset-level COCO a loader may read is assembled from those
+    documents (:func:`assemble_coco`) rather than standing in for them.
 
     Each sample also records the ``image_status.json`` bucket its admission read
     (:func:`~tcip_mcp.dataset_layout.status_bucket` over ``subject`` and this directory's own
@@ -898,8 +898,8 @@ def assemble_coco(
     name the dataset resolves at read time, so the COCO ``file_name`` keys line up. ``id_map`` is
     the run's ``assign_class_ids`` map; this is the single delegation to ``json_io.to_coco_dataset``,
     so the COCO categories, the loader targets, and the contract dims all rest on one name→id map.
-    Stems whose image is missing are skipped. This is how per-image JSON reaches training: a COCO the
-    ``label_format='coco'`` path consumes. ``date`` is the confirmation bucket's own date, stated by
+    Stems whose image is missing are skipped. This is how per-image JSON reaches training: a COCO
+    handed to a loader as ``coco_data``. ``date`` is the confirmation bucket's own date, stated by
     the caller and passed straight through, so the assembled COCO's negatives and the partition's
     come from one key.
     """
