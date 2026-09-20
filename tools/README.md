@@ -38,6 +38,10 @@ breeder or an operator runs against a project are documented in `README.md` and
   extracted response, and run metadata describing what the harness was and how long it took.
 - `list_tools.py` - prints the live MCP tool registry (count + names); the single source of
   truth for "how many domain tools exist," since the count drifts as tools are added/renamed.
+- `line_delta.py` - sums a change's insertions and deletions by area (`packages/`, `tests/`,
+  other) for a commit, a `rev1..rev2` range or `--cached`; the one measurement a contraction
+  change reports before landing (CLAUDE.md, "Working a change"), so package growth beside a
+  replacement is seen rather than assumed away.
 - `worktree_gate.py` - runs ruff, mypy and a pytest file list inside a worktree, its own
   `tcip_mcp` resolution proved first (the editable installs point at the main checkout, so a
   worktree needs its own `PYTHONPATH`) and refused before any gate runs if `tcip_mcp` resolves
