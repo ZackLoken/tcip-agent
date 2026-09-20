@@ -399,3 +399,75 @@ class DivergingDetection(nn.Module):
 
 def build_diverging_detection(*, num_classes: int = 1, in_chans: int = 3, **det_kwargs):
     return DivergingDetection(num_classes, in_chans=in_chans, **det_kwargs)
+
+
+class BrightRegionDetector(nn.Module):
+    """A detector whose box geometry is analytic and whose confidence is learned.
+
+    Finds the bright region of a frame and reports its extent as one box, beside one low-scored
+    decoy, so a conf sweep has two score levels to choose between and a count-unbiased operating
+    point exists between them. The learned ``logit`` scales the confidence the true box carries,
+    fit against the labels, so a training pass is a real optimization over real data while the
+    geometry stays fixed and a chain measured over this model's counts is measuring the chain.
+    """
+
+    def __init__(self, in_chans: int = 3, bright: float = 0.5, decoy_score: float = 0.03) -> None:
+        super().__init__()
+        self.logit = nn.Parameter(torch.tensor([2.5]))
+        self.bright = float(bright)
+        # Just above the floor a calibration stages a reference at, so the swept curve sees the
+        # low-confidence tail it assumes rather than reading the reference as truncated.
+        self.decoy_score = float(decoy_score)
+        self.score_thresh = 0.0
+        self.nms_thresh = 0.5
+        self.detections_per_img = 100
+
+    def _extent(self, image):
+        """The bounding box of the frame's bright pixels, or ``None`` when it holds none."""
+        mask = image.mean(dim=0) > self.bright
+        ys, xs = torch.nonzero(mask, as_tuple=True)
+        if xs.numel() == 0:
+            return None
+        return torch.tensor(
+            [float(xs.min()), float(ys.min()), float(xs.max()) + 1.0, float(ys.max()) + 1.0],
+            dtype=torch.float32, device=image.device,
+        )
+
+    def forward(self, images, targets=None):
+        if isinstance(images, torch.Tensor):
+            images = [images[i] for i in range(images.shape[0])]
+        confidence = torch.sigmoid(self.logit)
+        if self.training and targets is not None:
+            # Fit the reported confidence toward one per labelled object present, so the
+            # parameter answers to the data rather than drifting free.
+            present = torch.tensor(
+                [1.0 if len(t.get("boxes", [])) else 0.0 for t in targets],
+                dtype=torch.float32,
+            )
+            return {"confidence": ((confidence - present.mean()) ** 2)}
+        results = []
+        for image in images:
+            device = image.device
+            extent = self._extent(image)
+            if extent is None:
+                results.append({"boxes": torch.zeros((0, 4), dtype=torch.float32, device=device),
+                                "scores": torch.zeros(0, device=device),
+                                "labels": torch.zeros(0, dtype=torch.int64, device=device)})
+                continue
+            decoy = extent + torch.ones(4, dtype=torch.float32, device=device)
+            boxes = torch.stack([extent, decoy])
+            reported = confidence.squeeze().detach().to(device)
+            scores = torch.stack(
+                [reported, torch.tensor(self.decoy_score, dtype=torch.float32, device=device)])
+            labels = torch.ones(2, dtype=torch.int64, device=device)
+            keep = scores >= self.score_thresh
+            results.append({"boxes": boxes[keep][: self.detections_per_img],
+                            "scores": scores[keep][: self.detections_per_img],
+                            "labels": labels[keep][: self.detections_per_img]})
+        return results
+
+
+def build_bright_region_detector(*, in_chans: int = 3, bright: float = 0.5,
+                                 decoy_score: float = 0.03) -> BrightRegionDetector:
+    """``model_source`` builder for :class:`BrightRegionDetector`, deterministic in its inputs."""
+    return BrightRegionDetector(in_chans=in_chans, bright=bright, decoy_score=decoy_score)
