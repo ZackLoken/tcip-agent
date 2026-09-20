@@ -135,15 +135,16 @@ for general techniques only, never for a per-trait pipeline; the endpoint is a t
 - A second model family's verdict is not advisory. When two families agree against your own
   position, conform to them or bring the split to the owner; the outvoted side never lands on the
   adjudicator's own authority.
-- When a change gives a record the ability to carry a fact, the parameter that carried it before is
-  deleted, never threaded through the new shape beside it. Run the check at the moment the surface
-  changes: name the fact, ask whether the record can now state it per item, and delete the
-  parameter when it can. A fact that cannot be re-derived and has nowhere yet to live is scheduled
-  work, never a parameter left in place. Watch the single-valued ones especially, since the one
-  value is usually the limit itself: a run scoped to one capture date could only ever train on one,
-  and moving that single value onto the new record rebuilds the limit one level down. The check is
-  that each item answers for itself, so a record holding samples from three capture dates says
-  which one admitted each sample.
+- One fact has one spelling. Whenever a change touches a fact, ask what else states it: a second
+  key, field, flag or parameter that must agree with the first is a derived spelling, whether or
+  not this change introduced it, and it is deleted rather than kept, reconciled or asked which one
+  governs. Delete it at the moment the surface changes, and conform every test config, sample
+  project and knowledge sentence that carried it; those are sample data the work rewrites as it
+  goes, never an interface whose current shape constrains the change. The commonest case is a
+  record that can now carry a fact per item: the parameter that carried it once for the whole run
+  goes, since its single value is usually the limit itself, and moving that value onto the new
+  record rebuilds the limit one level down. A fact that cannot be re-derived and has nowhere yet
+  to live is scheduled work, never a spelling left in place.
 
 ## Commands
 
