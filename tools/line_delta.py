@@ -25,11 +25,14 @@ def area_of(path: str) -> str:
 def line_delta(repo: str, target: str) -> dict[str, tuple[int, int]]:
     """``{area: (insertions, deletions)}`` for ``target`` in ``repo``.
 
-    ``target`` is a commit, a ``rev1..rev2`` range, or ``--cached`` for the staged change. Binary
-    files, which numstat reports with dashes, are not counted.
+    ``target`` is a commit, a ``rev1..rev2`` range, ``<rev>..`` for the whole working tree against
+    ``rev`` (staged and unstaged alike, the form a worktree measures itself with), or ``--cached``
+    for the staged change. Binary files, which numstat reports with dashes, are not counted.
     """
     if target == "--cached":
         args = ["git", "diff", "--cached", "--numstat"]
+    elif target.endswith(".."):
+        args = ["git", "diff", "--numstat", target[:-2]]
     elif ".." in target:
         args = ["git", "diff", "--numstat", target]
     else:
