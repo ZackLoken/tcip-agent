@@ -55,6 +55,36 @@ def _count_stamp(**overrides) -> dict:
     return operating_point_stamp(op, **fields)
 
 
+def _drawn_selection(root: Path, *, subject: str = "bud", date: str = "2026-03-04") -> Path:
+    """A real selection over a small dataset, drawn through ``draw_splits``.
+
+    A row naming a selection is answered for by the selection itself at delivery, so an
+    admits-valid-work test has to hand the delivery one it can actually open, built by the
+    producer that writes them rather than by a path this module makes up.
+    """
+    from PIL import Image
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.tools.data_tools import draw_splits
+
+    images_dir, labels_dir = root / "images" / date, root / "annotations" / date
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    for index in range(8):
+        stem = f"sel_{index:02d}"
+        Image.new("RGB", (32, 32), color=(20 + index, 40, 60)).save(images_dir / f"{stem}.png")
+        json_io.write_annotations(
+            str(labels_dir / f"{stem}.json"),
+            [Annotation(subject=subject, geometry=BBox(2, 2, 12, 12))], 32, 32)
+
+    out = root / "selection"
+    result = draw_splits(str(root), output_path=str(out), subject=subject, seed=3,
+                         train_ratio=0.4, val_ratio=0.3, calibration_ratio=0.3)
+    assert "error" not in result, result
+    return out
+
+
 def _bucket(root: Path, *, name: str = "live", date: str = "2026-03-04", stems=("img_a",)) -> Path:
     """A prediction bucket in the canonical layout, holding per-image predictions."""
     d = root / "predictions" / name / date
@@ -303,12 +333,18 @@ def test_a_row_stating_selection_dir_with_a_checked_no_leak_selection_disjointne
     tmp_path,
 ):
     """The admits-valid-work half: a row whose selection_disjointness is checked with no leak
-    delivers normally, the floor above never reaches a legitimate manifest-bound claim."""
+    delivers normally, the floor above never reaches a legitimate selection-bound claim.
+
+    The selection is drawn through ``draw_splits`` rather than named as a path, because the
+    delivery also re-reads it to ask whether its calibration-side ground truth has moved since,
+    and a claim naming a selection nobody can open is refused rather than delivered.
+    """
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
+    selection_dir = _drawn_selection(root)
     write_bound_sidecar(
         pred_dir, _count_stamp(), dataset_root=root,
-        reference_identity={"stated_values": {"selection_dir": "some/manifest"}},
+        reference_identity={"stated_values": {"selection_dir": str(selection_dir)}},
         selection_disjointness={"applicable": True, "reason": None, "checked": True,
                                 "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
                                 "group_check": "performed", "labels_moved_draw_to_run": None,

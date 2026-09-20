@@ -594,6 +594,25 @@ def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
     return h.hexdigest()[:16]
 
 
+def _digest_bytes(b: bytes) -> str:
+    """One ground-truth record's digest from its bytes, ``sha256(bytes)[:16]``.
+
+    The convention stated once, for the three callers that must agree on it: the draw that records
+    a digest per sample, the per-stem digests beside a combined dataset hash, and the delivery-time
+    check that recomputes one to see whether the reference moved.
+    """
+    return hashlib.sha256(b).hexdigest()[:16]
+
+
+def _ground_truth_digest(path: Path) -> str:
+    """One ground-truth file's own digest, by the same convention :func:`_digest_bytes` states.
+
+    Takes the file rather than a directory and a stem, so it answers for ground truth that is not
+    a per-image label document too.
+    """
+    return _digest_bytes(_label_bytes(path))
+
+
 def label_digests(labels_dir: str | Path, stems: list[str]) -> dict[str, str]:
     """Each stem's own content-addressed digest, ``sha256(label bytes)[:16]``, the same
     empty-bytes-for-a-missing-file convention :func:`dataset_hash` folds into its one combined
@@ -603,10 +622,7 @@ def label_digests(labels_dir: str | Path, stems: list[str]) -> dict[str, str]:
     which reads each label once for both.
     """
     labels_dir = Path(labels_dir)
-    return {
-        stem: hashlib.sha256(_label_bytes(labels_dir / f"{stem}.json")).hexdigest()[:16]
-        for stem in sorted(stems)
-    }
+    return {stem: _ground_truth_digest(labels_dir / f"{stem}.json") for stem in sorted(stems)}
 
 
 def dataset_hash_and_label_digests(
@@ -627,7 +643,7 @@ def dataset_hash_and_label_digests(
         h.update(b"\0")
         h.update(b)
         h.update(b"\0")
-        per_stem[stem] = hashlib.sha256(b).hexdigest()[:16]
+        per_stem[stem] = _digest_bytes(b)
     return h.hexdigest()[:16], per_stem
 
 
@@ -1857,6 +1873,53 @@ class StampBinding:
     note: str = ""
 
 
+def _reference_ground_truth_moved(
+    selection_dir: str,
+) -> tuple[list[str], list[str], str | None]:
+    """Which of a selection's calibration-side ground truths differ from the draw's own record.
+
+    A calibration is measured against the labels the selection held out for it, and the selection
+    records each one's digest at draw time. Recomputing those digests now is what distinguishes a
+    claim that still answers for its reference from one whose reference moved underneath it.
+
+    Recomputes over each sample's own ``ground_truth`` path through :func:`_ground_truth_digest`,
+    the byte convention :func:`label_digests` recorded the draw's digests with, so the producing
+    side and the checking side cannot drift into hashing one file two ways. Reading the sample's
+    stated path rather than rebuilding a label filename from its stem keeps this answering for
+    ground truth that is not a per-image label document, since a selection names where each
+    sample's ground truth is rather than deriving it.
+
+    Returns ``(moved, unstated, unreadable)``: the ground-truth filenames whose digest changed,
+    the ones carrying no recorded digest to compare against, and a reason the selection could not
+    be read at all. The third is an answer the caller refuses on rather than skips: a claim naming
+    a reference nobody can open is a claim whose reference cannot be confirmed, and delivering it
+    would rest a number on evidence that is no longer there to check.
+
+    Deliberately wider than the universe the sweep actually measured, in two ways, because the row
+    records a count of the stems it swept rather than their names and neither can be narrowed from
+    what is on file. A calibration sample the universe excluded (no image present) still reads as a
+    move, and a sample whose ground truth is one row of a table (``row_key``) is compared by the
+    whole file, so an edit to another row of it reads as a move too. Both refuse a reference that
+    moved rather than admit one that did not, which is the side to err on here.
+    """
+    try:
+        from tcip_mcp.pipelines.data.selection import read_selection
+
+        selection = read_selection(selection_dir)
+    except Exception as exc:
+        return [], [], f"{type(exc).__name__}: {exc}"
+
+    moved: list[str] = []
+    unstated: list[str] = []
+    for sample in selection.on("calibration"):
+        ground_truth = Path(sample.ground_truth)
+        if sample.ground_truth_digest is None:
+            unstated.append(ground_truth.name)
+        elif _ground_truth_digest(ground_truth) != sample.ground_truth_digest:
+            moved.append(ground_truth.name)
+    return sorted(moved), sorted(unstated), None
+
+
 def verify_stamp_binding(
     sidecar: dict | None, pred_dir: str | Path, *, document: str, trait: str | None = None,
     digest_memo: dict[str, str] | None = None, images_dir: str | Path | None = None,
@@ -1864,9 +1927,10 @@ def verify_stamp_binding(
     """Check that a stamp's validation claim is answered for by a record it cannot itself write.
 
     Called from inside the reconcilers rather than at each delivery door, so no door can deliver
-    without it. Every check is cheap: a stamp read, a log read, and for the count and scale
-    documents one pass over the bucket's own prediction files or imagery the claim covers. No model
-    is loaded and no gate is re-run.
+    without it. Every check is cheap: a stamp read, a log read, for a selection-scoped claim one
+    pass over the calibration side's own label files, and for the count and scale documents one
+    pass over the bucket's own prediction files or imagery the claim covers. No model is loaded
+    and no gate is re-run.
 
     In order: the stamp's own parameter cleared a reference of the document's kind (unchanged, and
     still first); it names an experiment and a row; that experiment exists; that row is in it and
@@ -1878,7 +1942,12 @@ def verify_stamp_binding(
     When the reference identity carries a ``selection_dir``, the row must also carry a
     ``selection_disjointness`` that is either not-applicable (with a reason) or checked with no
     leak; a selection-scoped reference earned before that field existed, or earned against a
-    checkpoint whose own run is unknown, floors here rather than reading as cleared.
+    checkpoint whose own run is unknown, floors here rather than reading as cleared. That
+    selection's calibration-side ground truth must also still be the ground truth the draw
+    recorded (:func:`_reference_ground_truth_moved`): a claim measured against labels edited
+    since, under a selection that recorded no digest to compare against, or under one that can no
+    longer be read at all, floors rather than delivering a number earned against a reference that
+    cannot now be confirmed.
 
     Verification is per stamp file, not per parameter. One failed check floors every dimension that
     stamp carries, so a count operating point, a tile geometry, a claim scope and a review upgrade
@@ -1986,6 +2055,27 @@ def verify_stamp_binding(
                 "checked with no leak and the label-movement keys sealed. Calibrate again under "
                 "the selection's calibration side with a checkpoint whose run is on record.",
                 **known)
+        moved, unstated, unreadable = _reference_ground_truth_moved(row_selection_dir)
+        if unreadable is not None:
+            return floored(
+                f"{document}.json at {bucket!r} claims a validated reference under the selection "
+                f"at {row_selection_dir!r}, which cannot be read now ({unreadable}), so the ground "
+                "truth the claim was earned against cannot be confirmed. Restore the selection, or "
+                "calibrate again under one that can be read.", **known)
+        if unstated:
+            return floored(
+                f"{document}.json at {bucket!r} claims a validated reference under the selection "
+                f"at {row_selection_dir!r}, and {len(unstated)} of its calibration samples record "
+                f"no ground-truth digest ({', '.join(unstated[:3])}), so whether the reference "
+                "moved since the claim was earned cannot be answered. Draw the selection again "
+                "and calibrate under it.", **known)
+        if moved:
+            return floored(
+                f"{document}.json at {bucket!r} claims a {reference!r} reference, and the ground "
+                f"truth it was earned against has changed since: {', '.join(moved[:3])}"
+                f"{f' and {len(moved) - 3} more' if len(moved) > 3 else ''}. The operating point "
+                "was measured against labels that no longer exist, so it does not answer for this "
+                "delivery. Calibrate again against the reference as it stands.", **known)
 
     if document in ("operating_point", "resolve_scale"):
         resolved = Path(bucket).resolve()
