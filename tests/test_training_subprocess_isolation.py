@@ -59,28 +59,19 @@ def test_resolve_run_id_map_none_for_non_detection_task_or_no_subject(tmp_path):
     assert _resolve_run_id_map("detection", {"labels_dir": "x"}) is None  # no subject
 
 
-def test_resolve_run_id_map_none_for_coco_or_bespoke_source(tmp_path):
-    """A run trained from a pre-built COCO file or a bespoke dataset_source doesn't necessarily
-    get its targets from (labels_dir, subject, attribute) at all: a COCO file's own category ids
-    can be authored in any order, and a bespoke builder owns its class space entirely. Re-deriving
-    via the registry anyway could stamp a map that is the wrong id space for what the run actually
-    trained on and record it as an authoritative fact, worse than recording nothing. Must return
-    None for both, even with a real, resolvable registry present (build_dataset itself never
-    reaches the registry resolution on this same predicate, datasets.py's has_coco/dataset_source
+def test_resolve_run_id_map_none_for_a_bespoke_source(tmp_path):
+    """A run trained from a bespoke dataset_source doesn't necessarily get its targets from
+    (labels_dir, subject, attribute) at all: that builder owns its class space entirely.
+    Re-deriving via the registry anyway could stamp a map that is the wrong id space for what the
+    run actually trained on and record it as an authoritative fact, worse than recording nothing.
+    Must return None even with a real, resolvable registry present (build_dataset itself never
+    reaches the registry resolution on this same predicate, datasets.py's dataset_source
     branch)."""
     from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
 
     proj = tmp_path / "proj"
     (proj / "labels").mkdir(parents=True)
     _write_classes_json(proj, subject="bud")
-
-    coco_cfg = {"images_dir": str(proj / "images"), "labels_dir": str(proj / "labels"),
-               "subject": "bud", "coco_json": str(proj / "coco.json")}
-    assert _resolve_run_id_map("detection", coco_cfg) is None
-
-    coco_fmt_cfg = {"images_dir": str(proj / "images"), "labels_dir": str(proj / "labels"),
-                    "subject": "bud", "label_format": "coco"}
-    assert _resolve_run_id_map("detection", coco_fmt_cfg) is None
 
     bespoke_cfg = {"images_dir": str(proj / "images"), "labels_dir": str(proj / "labels"),
                    "subject": "bud", "dataset_source": "tests.bespoke_models:build_dataset"}

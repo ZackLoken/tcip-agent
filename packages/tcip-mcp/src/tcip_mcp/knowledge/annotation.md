@@ -29,6 +29,12 @@ was.
 | json | One `.json` per image (canonical) | Pixel coordinates | an `annotations` key, no `images`/`categories` key |
 | coco | Single `.json` for the dataset | Pixel coordinates | an `images`/`categories` key |
 
+These are import and export shapes. Training never reads a dataset-level COCO file: geometry
+ground truth is the per-image document, and the dataset-level COCO a loader may read is the one
+`assemble_coco` builds from those documents in memory. An external COCO export becomes per-image
+documents on the way in, and one left sitting in a run's `labels_dir` is refused by name rather
+than shadowing the per-image files beside it.
+
 Both are read by `format_io.load_annotations` / written by `save_annotations`; the read side is
 wrapped for the agent by `annotation_tools.read_annotations`, a library call, not a tool of its
 own. A missing label file

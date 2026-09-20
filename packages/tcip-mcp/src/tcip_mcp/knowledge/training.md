@@ -198,7 +198,7 @@ side out of the number that later validates it.
 A run names the selection it should train against with `data.split.selection_dir` (the
 `selection_dir` `draw_splits` returned): detection and instance_seg only. The selection states
 its own subject, attribute and class-id map, and the run reads them from it rather than restating
-them; `selection_dir` conflicts with `val_images_dir`, `coco_json`/`label_format='coco'`, and a
+them; `selection_dir` conflicts with `val_images_dir` and a
 drawn split's own parameters (`group_by`, `group_key_map`, `val_ratio`, `seed`,
 `stratify_foreground`, `test_ratio`, `reserve_calibration_fraction`). The loaders read the
 selection's `train` and `val` samples as recorded, admitting nothing afresh; its `calibration`

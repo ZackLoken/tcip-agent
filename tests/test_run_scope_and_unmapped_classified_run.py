@@ -76,18 +76,11 @@ def test_unmapped_classified_run_names_retrain_for_a_bespoke_dataset_source() ->
     assert "write_subject_registry" not in message
 
 
-def test_unmapped_classified_run_names_retrain_for_a_coco_sourced_run() -> None:
-    data_cfg = {"subject": "bud", "attribute": "bud_opening", "coco_json": "/data/anns.json"}
-    message = unmapped_classified_run(data_cfg, None, images_dir="/data/images")
-    assert message is not None
-    assert "data.id_map" in message and "retrain" in message
-
-
 def test_unmapped_classified_run_a_non_registry_derived_run_names_retrain_even_with_no_images_dir() -> None:
-    """A bespoke or COCO-sourced run's remedy never depends on ``images_dir`` at all (the raster
-    regime, which always calls with ``images_dir=None``, reaches exactly this branch when its own
-    targets are not registry-derived): the message names the retrain route, never the
-    registry-derived branch's ``images_dir``/``write_subject_registry`` text."""
+    """A bespoke run's remedy never depends on ``images_dir`` at all (the raster regime, which
+    always calls with ``images_dir=None``, reaches exactly this branch when its own targets are
+    not registry-derived): the message names the retrain route, never the registry-derived
+    branch's ``images_dir``/``write_subject_registry`` text."""
     data_cfg = {"subject": "bud", "attribute": "bud_opening", "dataset_source": "pkg.mod:build"}
     message = unmapped_classified_run(data_cfg, None, images_dir=None)
     assert message is not None

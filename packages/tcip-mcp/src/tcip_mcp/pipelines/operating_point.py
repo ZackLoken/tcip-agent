@@ -455,7 +455,7 @@ def _spatial_strip_geometric_disjointness(
     }
 
 
-def _is_the_same_labels_dir(recorded: str | None, stated: str | None) -> bool:
+def is_the_same_labels_dir(recorded: str | None, stated: str | None) -> bool:
     """Whether a recorded label directory and a caller-stated one are the same directory.
 
     Filesystem identity when both are on disk (:func:`~tcip_mcp.pipelines.data.splits.
@@ -463,6 +463,9 @@ def _is_the_same_labels_dir(recorded: str | None, stated: str | None) -> bool:
     normalized absolute paths: a recorded directory that has since moved still names the
     directory the run's own members were recorded under, and a comparison that read it as a
     different one would silently skip the check.
+
+    The one comparison every reader of a record's own scopes makes, so the leakage checks here and
+    ``freeze_selection``'s refusal cannot disagree about whether two spellings name one directory.
     """
     if not recorded or not stated:
         return False
@@ -492,15 +495,15 @@ def _members_under(
     if not isinstance(members, dict) or calibration_labels_dir is None:
         return None, None
     for recorded, block in members.items():
-        if _is_the_same_labels_dir(recorded, calibration_labels_dir) and isinstance(block, dict):
+        if is_the_same_labels_dir(recorded, calibration_labels_dir) and isinstance(block, dict):
             return recorded, block
     return None, None
 
 
 def _named_group_key_fn(group_by: str | None, date: str | None) -> Callable[[str], str] | None:
     """The group key a draw records for a bare stem admitted out of ``date``'s directory, or
-    ``None`` when the record names no policy this reader recognizes (``external``,
-    ``explicit_map``, an unrecognized string, a missing field).
+    ``None`` when the record names no policy this reader recognizes (``explicit_map``, an
+    unrecognized string, a missing field).
 
     One derivation with every producer of a recorded key
     (:func:`~tcip_mcp.pipelines.data.splits.recorded_group_key_fn`), so a key this check
@@ -592,10 +595,10 @@ def _train_disjointness(
     stem-level fallback below.
 
     Otherwise (``split.json`` readable, with real training stems) this never blanket-refuses just
-    because a group policy can't be resolved, a blanket refusal would permanently block the
-    explicit-``val_images_dir`` route (``group_by="external"``, no computed grouping) and the
-    ``group_key_map`` route (the map was never persisted) even though both are legitimate, disjoint
-    training regimes. Instead, group-level resolution is attempted per stem:
+    because a group policy can't be resolved, a blanket refusal would permanently block a run
+    whose recorded policy this reader does not know (a selection's own named strategy) and the
+    ``group_key_map`` route (the map was never persisted) even though both are legitimate,
+    disjoint training regimes. Instead, group-level resolution is attempted per stem:
 
       - a persisted ``group_key_map`` resolves whichever stems it actually covers.
       - a named, recognized strategy (``tile_prefix``/``stem``) resolves the rest, so a stem
@@ -603,8 +606,8 @@ def _train_disjointness(
         says which directory (and so which capture date) the stem belongs to: a per-directory
         record read against a directory it names nothing under resolves no key at all, since a
         bare stem of its flat member list belongs to no one date (:func:`_unscoped_group_key_fn`).
-      - anything else (``"external"``, an unrecognized string, a missing field) resolves nothing
-        at the group level beyond what the map covers.
+      - anything else (an unrecognized string, a missing field) resolves nothing at the group
+        level beyond what the map covers.
 
     Every stem the group check couldn't cover falls back to the free, policy-independent check
     that's always available regardless of grouping: exact stem-set overlap between the training
@@ -617,6 +620,14 @@ def _train_disjointness(
     spatial-strip branch) is :func:`_resolve_group_stem_disjointness`, shared verbatim with
     :func:`_selection_disjointness`, which runs the identical check against a checkpoint's own
     selection (val) side instead of its training side.
+
+    A record carrying no per-scope ``members`` block still gets that exact-stem fallback over its
+    flat ``train`` list, where the selection check refuses such a record outright. The two differ
+    because the answers differ in direction: this side compares every recorded training stem
+    against the calibration by name whatever directory either lives under, so an unscoped record
+    can name a leak that is only a shared filename, and can never miss one it holds. Over-naming a
+    leak refuses a claim that might have been fine; the selection side's unscoped comparison could
+    instead clear one that is not, which is why it requires the scope and this side does not.
 
     ``cal_rects``/``hold_rects`` (keyed by source stem, one pixel rect ``(x0, y0, x1, y1)`` per
     stem) are optional and additive: omitting them gets exactly the
@@ -806,11 +817,20 @@ def _selection_disjointness(
     whichever is true. Not-applicable, each with a breeder-legible reason
     (``review_calibration.py`` renders it), for: no selection named and no ``selection_binding`` on
     the record; a ``spatial_strip`` record (the within-image route's own ``calibration_region`` is
-    a different check, untouched here); an empty ``val``; ``resolved_group_by == "external"`` (the
-    ``val`` came from a directory the record's own members say nothing about);
+    a different check, untouched here); an empty ``val``;
     ``calibration_labels_dir is None`` (the caller named no directory to compare at all); or a
     ``calibration_labels_dir`` none of the run's own members live under (a bare stem means the
-    same image only within one label directory). Unresolvable, rather than not-applicable, when
+    same image only within one label directory). A run whose validation side came from a directory
+    the caller named is checked like any other: the record says which members that side holds and
+    which scope they live under, so a calibration reading that same directory is exactly the
+    overlap this check exists to catch.
+
+    A record carrying no per-scope ``members`` block at all is unresolvable, never compared: its
+    flat ``val`` list names stems with no directory to scope them to, so the same list could be
+    one directory's membership or two, and reading the absence as one directory would both
+    compare against a scope the record never stated and skip the one it never named. Requiring
+    the evidence is the only answer that cannot be wrong in the direction that matters.
+    Unresolvable, rather than not-applicable, when
     the calibration names a selection but there is no experiment record to check it against
     (``experiment_id is None``): a number whose provenance can't be checked is refused, and a
     foreign checkpoint's train check being merely skipped is not license to skip this one
@@ -856,11 +876,15 @@ def _selection_disjointness(
     if not val_stems:
         return {"applicable": False, "reason": "the run's split.json carries no val members",
                 **_NOT_APPLICABLE_SELECTION_SHAPE}
-    if split.get("group_by") == "external":
-        return {"applicable": False,
-                "reason": "the run validated against an explicit val_images_dir; its own members "
-                          "say nothing about that directory's membership",
-                **_NOT_APPLICABLE_SELECTION_SHAPE}
+    if not isinstance(split.get("members"), dict):
+        return {"applicable": True,
+                "reason": "this run's split.json records no per-scope membership, only flat "
+                          "train and val lists, so which directory its val members live under "
+                          "is not on record: comparing them against the one this calibration "
+                          "read would answer for a scope the record never stated. Retrain, or "
+                          "calibrate under a selection drawn over the current data, so the run's "
+                          "own membership is recorded per scope",
+                **_UNRESOLVABLE_SELECTION_SHAPE}
     if calibration_labels_dir is None:
         return {"applicable": False,
                 "reason": "this calibration named no labels directory to check against the "
@@ -868,7 +892,7 @@ def _selection_disjointness(
                 **_NOT_APPLICABLE_SELECTION_SHAPE}
     recorded_dirs = split.get("labels_dirs") or []
     if recorded_dirs and not any(
-            _is_the_same_labels_dir(d, calibration_labels_dir) for d in recorded_dirs):
+            is_the_same_labels_dir(d, calibration_labels_dir) for d in recorded_dirs):
         return {"applicable": False,
                 "reason": f"the calibration reads labels from {calibration_labels_dir!r}, and the "
                           f"run's own val members live under {sorted(recorded_dirs)}; a bare stem "

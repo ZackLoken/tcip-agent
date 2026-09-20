@@ -89,10 +89,9 @@ _SELECTION_CONFLICT_KEYS = (
 )
 
 
-def _split_selection_drawn_conflicts(data_cfg: dict, split_cfg: dict) -> list[str]:
-    """Every top-level key ``data.split.selection_dir`` conflicts with beside
-    ``data.val_images_dir`` (checked separately, its own refusal): a document a selection never
-    read (``coco_json``/``label_format='coco'``), or a drawn split's own parameters
+def _split_selection_drawn_conflicts(split_cfg: dict) -> list[str]:
+    """Every key under ``data.split`` that ``data.split.selection_dir`` conflicts with, beside
+    ``data.val_images_dir`` (checked separately, its own refusal): a drawn split's own parameters
     (:data:`_SELECTION_CONFLICT_KEYS`). ``seed`` is admitted, not a conflict, only when
     ``data.split.redraw_within_selection`` is true (:func:`_redraw_flag_issue` covers the flag's
     own remaining requirement, that a redraw states a seed at all): a seed left over from a
@@ -103,12 +102,7 @@ def _split_selection_drawn_conflicts(data_cfg: dict, split_cfg: dict) -> list[st
     keys: tuple[str, ...] = _SELECTION_CONFLICT_KEYS
     if split_cfg.get("redraw_within_selection"):
         keys = tuple(k for k in keys if k != "seed")
-    conflicts = [k for k in keys if split_cfg.get(k) is not None]
-    if data_cfg.get("coco_json"):
-        conflicts.append("coco_json")
-    if (data_cfg.get("label_format") or "").lower() == "coco":
-        conflicts.append("label_format")
-    return sorted(conflicts)
+    return sorted(k for k in keys if split_cfg.get(k) is not None)
 
 
 def _redraw_flag_issue(split_cfg: dict) -> str | None:
@@ -197,7 +191,7 @@ def _selection_dir_conflicts(config: dict) -> tuple[list[str], bool]:
             "data.split.selection_dir conflicts with data.val_images_dir: two membership "
             "sources for one run's validation split."
         )
-    conflicts = _split_selection_drawn_conflicts(data_cfg, split_cfg)
+    conflicts = _split_selection_drawn_conflicts(split_cfg)
     if conflicts:
         issues.append(
             f"data.split.selection_dir conflicts with {conflicts}: a recorded partition and "
@@ -2958,17 +2952,15 @@ def _unbound_single_source_spatial_issue(task: str, data_cfg: dict, split_draws:
     calibration fraction; no draw of that path holds a different partition out.
 
     Only for a built-in detection build: a bespoke ``dataset_source`` is excluded, since its
-    admitted set may depend on the transforms it is built with and this door builds with none,
-    so counting over it would not be a fact this run's own trials share. Counts the stems
-    ``base_config`` admits the same way ``auto_train_val`` does
-    (:func:`~tcip_mcp.pipelines.data.split_construction.checked_label_format`, then
-    :func:`~tcip_mcp.pipelines.data.split_construction.build_full_admitted_dataset`), inside one
-    handler answering no refusal on any exception: a dataset-level COCO misrouted as
-    ``data.labels_dir``, or an unreadable label document, is a caller-config error the trial or
-    the preflight that follows reports in its own words, never this leg's to fold in. ``None``
-    when ``task`` is not ``"detection"``, ``data.tiling`` is absent, not a mapping, or disabled,
-    a bespoke ``dataset_source`` is named, the admitted count could not be resolved, or more than
-    one source is admitted: a built-in detection build never admits zero
+    builder owns its own admission and this leg cannot name what it would admit. Counts the stems
+    ``base_config`` admits through the producer the run itself admits through
+    (:func:`~tcip_mcp.pipelines.data.split_construction.admit_geometry`), never a second
+    admission, inside one handler answering no refusal on any exception: a dataset-level COCO
+    misrouted as ``data.labels_dir``, or an unreadable label document, is a caller-config error
+    the trial or the preflight that follows reports in its own words, never this leg's to fold in.
+    ``None`` when ``task`` is not ``"detection"``, ``data.tiling`` is absent, not a mapping, or
+    disabled, a bespoke ``dataset_source`` is named, the admitted count could not be resolved, or
+    more than one source is admitted: a built-in detection build never admits zero
     (``require_samples`` raises inside the split's own degrading handler), so this leg never
     names a path a run does not take.
     """
@@ -2982,18 +2974,14 @@ def _unbound_single_source_spatial_issue(task: str, data_cfg: dict, split_draws:
     if not isinstance(tiling, dict) or not tiling or not tiling.get("enabled", True):
         return None
 
-    from tcip_mcp.pipelines.data.split_construction import (
-        build_full_admitted_dataset, checked_label_format,
-    )
+    from tcip_mcp.pipelines.data.split_construction import admit_geometry
 
     src = _dataset_source_kwargs(task, data_cfg)
     try:
-        detected_label_format = checked_label_format(task, data_cfg, src)
-        _full_ds, stems, _build_src = build_full_admitted_dataset(
-            task, data_cfg, src, None, detected_label_format)
+        admitted = admit_geometry(task, data_cfg, src)
     except Exception:
         return None
-    if len(stems) != 1:
+    if len(admitted.stems) != 1:
         return None
     return (
         f"split_draws={split_draws} redraws the split, and base_config admits one trainable "
@@ -3327,11 +3315,6 @@ def _dataset_source_kwargs(task: str, data_cfg: dict) -> dict:
             kw["subject"] = data_cfg["subject"]
         if data_cfg.get("attribute"):
             kw["attribute"] = data_cfg["attribute"]
-        # Thread the on-disk label format through to the dataset (json | coco).
-        if data_cfg.get("label_format"):
-            kw["label_format"] = data_cfg["label_format"]
-        if data_cfg.get("coco_json"):
-            kw["coco_json"] = data_cfg["coco_json"]
     elif task == "semantic_seg":
         kw = {"images_dir": data_cfg.get("images_dir", ""),
               "masks_dir": data_cfg.get("masks_dir", data_cfg.get("labels_dir", ""))}
@@ -3390,13 +3373,16 @@ def _reserve_calibration_feasibility_issues(
     fires at training-launch time, with neither in scope).
 
     Structurally inapplicable configs (not detection, tiling disabled, a multi-stem dataset that
-    would use the group-balanced split instead) are always flagged, cheaply, no dataset build
-    needed. The single-source geometry
+    would use the group-balanced split instead) are always flagged, cheaply, from the images
+    directory's own listing, no admission or dataset build needed. The single-source geometry
     :func:`~tcip_mcp.pipelines.data.split_construction.spatial_single_source_split` itself would derive
     (extent, strip-layout feasibility, an empty side after real filtering) is checked by actually
-    calling it, real dataset construction, so gated on ``smoke=True`` like this function's other
-    dataset/model-touching checks (a plain, non-smoke ``preflight_config`` call still catches the
-    structurally-inapplicable cases above, just not this geometry).
+    calling it over the membership the run's own producer admits
+    (:func:`~tcip_mcp.pipelines.data.split_construction.admit_geometry`), so the feasibility
+    reported here is the feasibility of the dataset the run will build, and so gated on
+    ``smoke=True`` like this function's other dataset/model-touching checks (a plain, non-smoke
+    ``preflight_config`` call still catches the structurally-inapplicable cases above, just not
+    this geometry).
     """
     task = (model_source.get("task") if isinstance(model_source, dict) else None) \
         or (data_cfg.get("task", "detection") if isinstance(data_cfg, dict) else "detection")
@@ -3427,14 +3413,12 @@ def _reserve_calibration_feasibility_issues(
     from tcip_annotation.json_io import UnreadableLabelDocument
 
     try:
-        from tcip_mcp.pipelines.data.datasets import build_dataset
-        from tcip_mcp.pipelines.data.split_construction import spatial_single_source_split
+        from tcip_mcp.pipelines.data.split_construction import (
+            admit_geometry, spatial_single_source_split,
+        )
 
-        base = build_dataset(
-            "detection", images_dir=images_dir, labels_dir=labels_dir,
-            subject=data_cfg.get("subject"), attribute=data_cfg.get("attribute"))
-        spatial_single_source_split(
-            stems[0], dict(data_cfg), tiling_cfg, base, dict(split_cfg), None)
+        admitted = admit_geometry("detection", data_cfg, _dataset_source_kwargs("detection", data_cfg))
+        spatial_single_source_split(admitted, dict(data_cfg), tiling_cfg, dict(split_cfg), None)
     except (ValueError, UnreadableLabelDocument) as exc:
         return [f"data.split.reserve_calibration_fraction: {exc}"]
     except Exception as exc:  # noqa: BLE001, an unrelated build failure isn't this check's own

@@ -1,7 +1,8 @@
 """COCO-training-assembly: training/eval reads the canonical per-image JSON label store by
 assembling a dataset-level COCO on the fly (``build_dataset`` auto-routes a JSON label dir onto
-the ``label_format='coco'`` path). Covers detection + instance-seg, format detection, and the
-stratification line-count that must see JSON objects (not only YOLO ``.txt``)."""
+the assembled document it hands the loader as ``coco_data``). Covers detection + instance-seg,
+format detection, and the stratification line-count that must see JSON objects (not only YOLO
+``.txt``)."""
 
 import json
 
@@ -203,11 +204,9 @@ def test_class_distribution_on_a_shared_coco_scopes_to_its_own_stems(tmp_path):
     shared_coco = assemble_coco(labels, images, subject=BUD, date=None, id_map=id_map)  # over all 4 stems
 
     train_ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
-                             subject=BUD, coco_data=shared_coco, label_format="coco",
-                             stems=stems[:2])
+                             subject=BUD, coco_data=shared_coco, stems=stems[:2])
     val_ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
-                           subject=BUD, coco_data=shared_coco, label_format="coco",
-                           stems=stems[2:])
+                           subject=BUD, coco_data=shared_coco, stems=stems[2:])
 
     assert train_ds._coco is val_ds._coco is shared_coco  # the actual sharing this bug depends on
     # img0 (1 box) + img1 (2 boxes) = 3; img2 (3 boxes) + img3 (4 boxes) = 7: not the shared
@@ -272,7 +271,7 @@ def test_build_dataset_detection_autoresolves_json(tmp_path):
     json_io.write_annotations(labels / "img0.json", [_box(10, 10, 50, 50)], 100, 100)
 
     ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=BUD)
-    assert ds.label_format == "coco"  # auto-routed
+    assert ds._coco is not None  # auto-routed onto the assembled document
     _, target = ds[0]
     assert target["boxes"].shape == (1, 4)
     assert target["boxes"].tolist()[0] == pytest.approx([10, 10, 50, 50])
@@ -283,8 +282,8 @@ def test_build_dataset_detection_autoresolves_json(tmp_path):
 def test_build_dataset_refuses_a_dataset_level_coco_misrouted_as_labels_dir(tmp_path):
     """A dataset-level COCO file sitting in labels_dir must not be assembled from per-image files
     that are not there; the refusal names the offending file and both remedies (move it out, or
-    point data.coco_json at it), since only the breeder knows which is this dataset's real label
-    source."""
+    import it into per-image documents), since only the breeder knows which is this dataset's real
+    label source."""
     from tcip_mcp.pipelines.data.datasets import build_dataset
     images = tmp_path / "images"
     labels = tmp_path / "detect"
@@ -293,10 +292,11 @@ def test_build_dataset_refuses_a_dataset_level_coco_misrouted_as_labels_dir(tmp_
     (labels / "dataset.json").write_text(json.dumps(
         {"images": [{"id": 1, "file_name": "img0.jpg"}], "annotations": [], "categories": []}))
 
-    with pytest.raises(ValueError, match="coco_json") as excinfo:
+    with pytest.raises(ValueError, match="dataset-level COCO") as excinfo:
         build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=BUD)
     assert "dataset.json" in str(excinfo.value)
     assert "move it out" in str(excinfo.value)
+    assert "import it" in str(excinfo.value)
 
 
 def test_autoresolve_json_labels_no_ops_without_an_images_dir(tmp_path):
@@ -312,21 +312,7 @@ def test_autoresolve_json_labels_no_ops_without_an_images_dir(tmp_path):
 
     kwargs = {"labels_dir": str(labels), "images_dir": ""}
     _autoresolve_json_labels(kwargs, subject=BUD, attribute=None, id_map={BUD: 0})
-    assert "coco_data" not in kwargs and "label_format" not in kwargs
-
-
-def test_build_dataset_respects_explicit_format(tmp_path):
-    """An explicit label_format is never overridden by auto-resolve."""
-    from tcip_mcp.pipelines.data.datasets import build_dataset
-    images = tmp_path / "images"
-    labels = tmp_path / "detect"
-    labels.mkdir()
-    _make_images(images, ["img0"])
-    json_io.write_annotations(labels / "img0.json", [_box(10, 10, 50, 50)], 100, 100)
-
-    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
-                       subject=BUD, label_format="yolo")
-    assert ds.label_format == "yolo"  # honored, even though .json is present
+    assert "coco_data" not in kwargs
 
 
 def test_build_dataset_instance_seg_autoresolves_json(tmp_path):
@@ -340,7 +326,7 @@ def test_build_dataset_instance_seg_autoresolves_json(tmp_path):
         [_poly([(10, 10), (50, 10), (50, 50), (10, 50)])], 100, 100)
 
     ds = build_dataset("instance_seg", images_dir=str(images), labels_dir=str(labels), subject=BUD)
-    assert ds.label_format == "coco"
+    assert ds._coco is not None  # auto-routed onto the assembled document
     _, target = ds[0]
     assert target["boxes"].shape == (1, 4)
     assert target["masks"].shape[0] == 1
@@ -451,24 +437,23 @@ def _rail_fixture(tmp_path):
     return images, labels
 
 
-@pytest.mark.parametrize("label_format", [None, "json", "coco"])
-def test_only_annotated_and_confirmed_negatives_train(tmp_path, label_format):
+@pytest.mark.parametrize("assembled", [False, True])
+def test_only_annotated_and_confirmed_negatives_train(tmp_path, assembled):
     """The rail is a property of the data, not of which kwargs the caller passed.
 
     Samples come from the annotated set, never from an image list: a project where the breeder
-    labelled 30 of 400 images must not train on the other 370 asserted to be empty.
+    labelled 30 of 400 images must not train on the other 370 asserted to be empty. Both ground
+    truths reach the same verdict: one assembled document handed in, or the per-image documents
+    the loader reads when the caller names no document at all.
     """
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.data.label_queries import assemble_coco
 
     images, labels = _rail_fixture(tmp_path)
     kwargs = {"images_dir": str(images), "labels_dir": str(labels), "subject": BUD}
-    if label_format == "coco":
+    if assembled:
         _reg, id_map = _reg_id_map()
         kwargs["coco_data"] = assemble_coco(labels, images, subject=BUD, date=None, id_map=id_map)
-        kwargs["label_format"] = "coco"
-    elif label_format:
-        kwargs["label_format"] = label_format
 
     ds = build_dataset("detection", **kwargs)
     assert sorted(ds.stems) == ["ann", "neg"], ds.stems
@@ -487,8 +472,7 @@ def test_a_corrupt_confirmed_negative_refuses_the_direct_json_loader(tmp_path):
     (labels / "neg.json").write_text("not json {][", encoding="utf-8")
 
     with pytest.raises(UnreadableLabelDocument):
-        build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
-                     subject=BUD, label_format="json")
+        build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=BUD)
 
 
 def test_caller_supplied_stems_are_filtered_too(tmp_path):
@@ -623,9 +607,10 @@ def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(tmp_path):
                                 "quarantined_stale_definition": 0}
 
 
-def test_external_coco_zero_annotation_image_still_needs_a_human_complete(tmp_path):
-    """An externally supplied COCO never passed through assemble_coco, so its zero-annotation
-    images are not confirmed negatives: inferring that from the file's shape alone is invalid."""
+def test_a_zero_annotation_coco_image_still_needs_a_human_complete(tmp_path):
+    """A document handed to the loader that assemble_coco did not build carries no confirmation
+    of its own, so its zero-annotation images are not negatives: inferring that from the
+    document's shape alone is invalid, and the store is re-read for each one."""
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     images, labels = _rail_fixture(tmp_path)
@@ -635,7 +620,7 @@ def test_external_coco_zero_annotation_image_still_needs_a_human_complete(tmp_pa
         "categories": [{"id": 1, "name": "c0"}],
     }
     ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
-                       subject=BUD, coco_data=external, label_format="coco")
+                       subject=BUD, coco_data=external)
     assert ds.stems == ["ann"], "an unconfirmed zero-annotation COCO image must not train"
     assert ds.sample_counts["confirmed_negative"] == 0
 
@@ -1017,9 +1002,9 @@ def test_detection_dataset_excludes_partially_labeled_stem_from_training(tmp_pat
 
 def test_detection_dataset_excludes_incomplete_attribute_on_the_real_build_dataset_path(tmp_path):
     """The exclusion above must also fire on the path build_dataset actually takes: build_dataset
-    assembles an in-memory COCO and passes it as coco_data, which forces label_format='coco'. A
-    check guarded only by label_format == 'json' is inert here, and the dropped image would be
-    reported under the false reason 'skipped_unconfirmed_empty'."""
+    assembles an in-memory COCO and hands it to the loader as coco_data, so a check guarded only
+    by the per-image branch is inert here and the dropped image would be reported under the false
+    reason 'skipped_unconfirmed_empty'."""
     from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, write_registry
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
@@ -1042,7 +1027,7 @@ def test_detection_dataset_excludes_incomplete_attribute_on_the_real_build_datas
                           subject=BUD, attribute="opening")
     ds = built.dataset if hasattr(built, "dataset") else built
 
-    assert ds.label_format == "coco"  # build_dataset forces the coco path, not the json-guarded one
+    assert ds._coco is not None  # build_dataset took the assembled path, not the per-image one
     assert "partial" not in ds.stems
     assert ds.sample_counts["skipped_incomplete_attribute"] == 1
     assert ds.sample_counts["skipped_unconfirmed_empty"] == 0

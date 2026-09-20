@@ -27,7 +27,8 @@ BUILDER = "tests.bespoke_models:build_bespoke_detection"
 
 def _real_drawn_experiment(
     root: Path, experiment_id: str, *, date: str = DATES[0], subject: str = SUBJECT,
-    attribute: str | None = None, val_images_dir: str | None = None, auto_val: bool = True,
+    attribute: str | None = None, val_images_dir: str | None = None,
+    val_labels_dir: str | None = None, auto_val: bool = True,
 ) -> dict:
     """Draws a real train/val split over ``root``'s own fixture dataset (through auto_train_val,
     the identical function a training run's own draw calls) and persists it as ``experiment_id``'s
@@ -41,6 +42,8 @@ def _real_drawn_experiment(
                       "subject": subject, "attribute": attribute, "auto_val": auto_val}
     if val_images_dir is not None:
         data_cfg["val_images_dir"] = val_images_dir
+    if val_labels_dir is not None:
+        data_cfg["val_labels_dir"] = val_labels_dir
     # data_cfg keeps the caller's raw attribute; the registry lookup needs "no attribute" as None.
     _reg, id_map = resolve_registry_id_map(str(labels_dir), subject, attribute or None)
 
@@ -155,53 +158,6 @@ def test_freeze_selection_carries_an_explicit_group_key_map_onto_its_samples(tmp
     assert len(by_group) == len({s.group for s in frozen.samples})
 
 
-def test_freeze_selection_carries_the_plain_paths_own_explicit_map(tmp_path: Path):
-    """The plain split path draws whatever the drawn geometry path does not: a run naming its own
-    assembled COCO takes it. Its explicit map is resolved and recorded through the same derivation
-    every producer uses, so freezing such a run reads the keys it wrote rather than a second
-    spelling of them."""
-    import json
-
-    from tcip_mcp.pipelines.data.splits import member_identity
-    from tcip_mcp.tools.data_tools import freeze_selection
-
-    root = _two_subject_two_date_dataset(tmp_path / "ds")
-    images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
-    stems = sorted(p.stem for p in labels_dir.glob("*.json"))
-    coco = {
-        "images": [{"id": i, "file_name": f"{stem}.jpg", "width": 64, "height": 64}
-                   for i, stem in enumerate(stems)],
-        "annotations": [{"id": i, "image_id": i, "category_id": 0, "iscrowd": 0,
-                         "bbox": [4, 4, 16, 16], "area": 256} for i, _stem in enumerate(stems)],
-        "categories": [{"id": 0, "name": SUBJECT}],
-    }
-    coco_path = tmp_path / "assembled.json"
-    coco_path.write_text(json.dumps(coco), encoding="utf-8")
-
-    _reg, id_map = resolve_registry_id_map(str(labels_dir), SUBJECT, None)
-    group_key_map = {member_identity(DATES[0], stem): f"g{index % 2}"
-                     for index, stem in enumerate(stems)}
-    data_cfg: dict[str, Any] = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": SUBJECT,
-        "label_format": "coco", "coco_json": str(coco_path),
-        "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": group_key_map},
-    }
-    create_experiment("exp-plain-map", {
-        "model_source": {"builder": BUILDER, "task": "detection"},
-        "data": {**data_cfg, "id_map": id_map},
-    })
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-    assert val_ds is not None
-    persist_run_partition("exp-plain-map", train_ds, val_ds, data_cfg, partition=partition)
-
-    frozen = freeze_selection("exp-plain-map")
-    assert "error" not in frozen, frozen
-
-    selection = read_selection(frozen["selection_dir"])
-    assert selection.group_by == "explicit_map"
-    assert {s.group for s in selection.samples} <= {"g0", "g1"}
-
-
 # -- refusals ------------------------------------------------------------------
 
 
@@ -309,20 +265,49 @@ def test_freeze_selection_refuses_no_dataset_hash(tmp_path: Path):
     assert "error" in result and "dataset_hash" in result["error"]
 
 
-def test_freeze_selection_refuses_an_external_validation_run(tmp_path: Path):
+def test_freeze_selection_refuses_a_record_with_no_per_scope_membership(tmp_path: Path):
+    """A run recorded before the per-scope members block existed leaves flat train and val lists
+    and one labels directory. Freezing would then name every member under that directory, so an
+    older explicit-validation run's validation members would be composed from labels they never
+    validated on and a later bind would read different ground truth. The absence of the evidence
+    is not evidence of one scope, so it refuses; the same record as produced still freezes."""
+    import tcip_store as ts
+
+    from tcip_mcp.experiments import split_key
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    val_root = tmp_path / "external_val"
-    val_root.mkdir()
-    from PIL import Image
-    Image.new("RGB", (64, 64)).save(val_root / "z.jpg")
+    _real_drawn_experiment(root, "exp-unscoped")
 
-    _real_drawn_experiment(root, "exp-external", val_images_dir=str(val_root))
+    # Admits valid work: as produced, the record freezes.
+    assert "error" not in freeze_selection("exp-unscoped", str(tmp_path / "frozen-scoped"))
 
-    result = freeze_selection("exp-external")
+    recorded = ts.read(split_key("exp-unscoped"))
+    ts.replace(split_key("exp-unscoped"),
+               {k: v for k, v in recorded.items() if k != "members"})
+
+    result = freeze_selection("exp-unscoped", str(tmp_path / "frozen-unscoped"))
     assert "error" in result
-    assert "external" in result["error"].lower() or "val_images_dir" in result["error"]
+    assert "per-scope membership" in result["error"]
+    assert "draw_splits" in result["error"]
+
+
+def test_freeze_selection_refuses_a_run_whose_members_span_another_scope(tmp_path: Path):
+    """A run validated against a second directory the caller named records members whose ground
+    truth lives under it. Freezing re-produces every member under the run's own data.labels_dir,
+    so the record's own scopes are what the refusal rests on, not a marker naming the route."""
+    from tcip_mcp.tools.data_tools import freeze_selection
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    val_images, val_labels = root / "images" / DATES[1], root / "annotations" / DATES[1]
+
+    _real_drawn_experiment(root, "exp-two-scopes", val_images_dir=str(val_images),
+                           val_labels_dir=str(val_labels))
+
+    result = freeze_selection("exp-two-scopes")
+    assert "error" in result
+    assert str(val_labels) in result["error"]
+    assert str(root / "annotations" / DATES[0]) in result["error"]
 
 
 def test_freeze_selection_refuses_an_empty_val_side(tmp_path: Path):

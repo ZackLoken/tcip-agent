@@ -69,21 +69,22 @@ class _CalStub:
                  "boxes": [], "scores": [], "labels": [], "count": 0} for p in paths]
 
 
-# ===========================================================================
-# The train-disjointness gate must not permanently block the explicit-val_images_dir
-# ("external") and group_key_map training routes.
-# ===========================================================================
+# The train-disjointness gate must not permanently block a record whose grouping policy this
+# reader cannot reproduce: one that recorded none, and the group_key_map route.
 
-def test_external_marker_not_permanently_blocked_when_disjoint(tmp_path, monkeypatch):
-    """group_by="external" (the explicit-val_images_dir route) falls back to the exact-stem check
-    and validates when genuinely disjoint, rather than mapping to unresolvable=True forever."""
+def test_a_record_with_no_group_policy_is_not_permanently_blocked_when_disjoint(
+    tmp_path, monkeypatch,
+):
+    """A record carrying no grouping policy at all, which is what a run that resolved none writes,
+    falls back to the exact-stem check and validates when genuinely disjoint, rather than mapping
+    to unresolvable=True forever."""
     import tcip_store
 
     from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    tcip_store.replace(split_key("exp_ext"), {"train": ["train_a", "train_b"], "group_by": "external"})
+    tcip_store.replace(split_key("exp_ext"), {"train": ["train_a", "train_b"]})
 
     cal, hold = _good_dense_op_records()
     b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
@@ -97,7 +98,7 @@ def test_external_marker_not_permanently_blocked_when_disjoint(tmp_path, monkeyp
     assert td["leaked_stems"] == []
 
 
-def test_external_marker_still_catches_a_real_leak(tmp_path, monkeypatch):
+def test_a_record_with_no_group_policy_still_catches_a_real_leak(tmp_path, monkeypatch):
     """The exact-stem fallback must still refuse a genuine leak, not just always pass."""
     import tcip_store
 
@@ -106,7 +107,7 @@ def test_external_marker_still_catches_a_real_leak(tmp_path, monkeypatch):
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     # Training trained on "c_a", the same stem the calibration reference uses below.
-    tcip_store.replace(split_key("exp_ext2"), {"train": ["c_a", "other_stem"], "group_by": "external"})
+    tcip_store.replace(split_key("exp_ext2"), {"train": ["c_a", "other_stem"]})
 
     b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
                                 calibration_records=_op_records("c"),
@@ -166,6 +167,88 @@ def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
         "e1", {"extra_leak_stem"}, set(), calibration_labels_dir=str(labels_dir))
     assert td_leak["unresolvable"] is False
     assert td_leak["leaked_groups"] == [train_group]
+
+
+def test_a_caller_named_validation_side_is_checked_end_to_end(tmp_path):
+    """A run validated against a directory the caller named, driven through auto_train_val ->
+    persist_run_partition -> _selection_disjointness: the record names those val members and the
+    scope they live under, so a calibration reading that same directory is checked against them
+    like any other side. A reader that skipped this route would report no overlap where the
+    calibration is measuring on exactly the images the checkpoint was chosen against."""
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
+    from tcip_mcp.pipelines.operating_point import _selection_disjointness
+
+    images_dir, labels_dir = _detection_dataset(tmp_path / "train", ["t0", "t1"])
+    val_images, val_labels = _detection_dataset(tmp_path / "val", ["v0", "v1"])
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "val_images_dir": str(val_images), "val_labels_dir": str(val_labels),
+    }
+    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
+    assert val_ds is not None
+
+    create_experiment("exp-named-val-dir", {})
+    persist_run_partition("exp-named-val-dir", train_ds, val_ds, data_cfg, partition=partition)
+
+    leaked = _selection_disjointness(
+        "exp-named-val-dir", {"v0"}, set(), selection_dir="some/selection",
+        calibration_labels_dir=str(val_labels))
+    assert leaked["applicable"] is True
+    assert leaked["leaked_stems"] == ["v0"] or leaked["leaked_groups"] == ["v0"]
+
+    # Admits valid work: a calibration over that same directory sharing no member is clean.
+    clean = _selection_disjointness(
+        "exp-named-val-dir", {"unrelated"}, set(), selection_dir="some/selection",
+        calibration_labels_dir=str(val_labels))
+    assert clean["applicable"] is True
+    assert clean["leaked_stems"] == [] and clean["leaked_groups"] == []
+
+
+def test_a_record_with_no_per_scope_membership_is_unresolvable_for_the_selection_check(tmp_path):
+    """A run recorded before the per-scope members block existed leaves flat train and val lists
+    and one labels directory. Which directory its val members live under is then not on record, so
+    comparing them against whichever directory a calibration read would answer for a scope the
+    record never stated: against the training directory it would name a leak that is only a shared
+    filename, and against the real validation directory it would clear one it never checked.
+    Both answer unresolvable instead, and the same record before the block was stripped is
+    checked for real."""
+    from tcip_mcp.experiments import create_experiment, split_key
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
+    from tcip_mcp.pipelines.operating_point import _selection_disjointness
+
+    images_dir, labels_dir = _detection_dataset(tmp_path / "train", ["t0", "t1"])
+    val_images, val_labels = _detection_dataset(tmp_path / "val", ["v0", "v1"])
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "val_images_dir": str(val_images), "val_labels_dir": str(val_labels),
+    }
+    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
+    create_experiment("exp-unscoped-record", {})
+    persist_run_partition("exp-unscoped-record", train_ds, val_ds, data_cfg, partition=partition)
+
+    def _check(cal_id: str, labels: str) -> dict:
+        return _selection_disjointness(
+            "exp-unscoped-record", {cal_id}, set(), selection_dir="some/selection",
+            calibration_labels_dir=labels)
+
+    # Admits valid work: as produced, the record's own members answer the check.
+    assert _check("v0", str(val_labels))["applicable"] is True
+    assert _check("v0", str(val_labels))["unresolvable"] is False
+
+    # The record a run from before that block wrote: the real writer's own output with the
+    # per-scope membership taken back out, which is exactly what such a record lacks.
+    import tcip_store
+
+    recorded = tcip_store.read(split_key("exp-unscoped-record"))
+    tcip_store.replace(split_key("exp-unscoped-record"),
+                       {k: v for k, v in recorded.items() if k != "members"})
+
+    for cal_id, labels in (("v0", str(val_labels)), ("t0", str(labels_dir))):
+        answer = _check(cal_id, labels)
+        assert answer["unresolvable"] is True, (cal_id, labels)
+        assert answer["leaked_stems"] == [] and answer["leaked_groups"] == []
+        assert "per-scope membership" in answer["reason"]
 
 
 DATE = "2-11-26"

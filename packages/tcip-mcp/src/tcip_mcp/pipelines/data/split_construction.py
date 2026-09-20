@@ -8,8 +8,14 @@ membership as the run's ``split.json`` provenance record.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from tcip_mcp.pipelines.data.selection import Sample
 
 logger = logging.getLogger(__name__)
 
@@ -68,11 +74,13 @@ def persist_run_partition(experiment_id: str, train_ds, val_ds, data_cfg: dict, 
     """Persist which stems (+ seed + dataset_hash + dataset identity) produced this run's metrics.
 
     ``partition`` is ``auto_train_val``'s own third return value, for every run whose membership
-    resolved into explicit samples (a bound one and a drawn geometry one alike; ``None`` for the
-    paths that still build straight from a directory): the run's recorded membership as bare
-    ground-truth stems, the group key each was drawn under, the directories those stems live in,
-    and their per-stem digests. It is what keeps the record's members bare stems when the loaders
-    index by a per-sample identity.
+    resolved into explicit samples, which is every detection and instance_seg run the known
+    loaders cover, bound or not: the run's recorded membership as bare stems, the group key each
+    was drawn under, the scopes those stems live under, and their per-member digests. It is what
+    keeps the record's members bare stems when the loaders index by a per-sample identity. It is
+    ``None`` for the within-image spatial route, whose manifest below is its own record, and for
+    the runs that still resolve straight from a directory (a mask- or CSV-driven task, a bespoke
+    ``dataset_source`` build), whose members are read off the built loaders instead.
     Its ``label_digests`` block is written as ``split.json``'s own top-level ``label_digests``
     key, beside ``selection_binding`` rather than inside it, so a selection-disjointness check
     can name a calibration label that moved since the draw without the durable config, a
@@ -142,8 +150,8 @@ def persist_run_partition(experiment_id: str, train_ds, val_ds, data_cfg: dict, 
             "dataset_hash": dh,
             "dataset_id": dataset_id,
             "dataset_fingerprint": dataset_fingerprint,
-            # The actually resolved grouping ("explicit_map"/"external"/a named strategy/
-            # "spatial_strip"/None); _train_disjointness recomputes group keys from this.
+            # The actually resolved grouping ("explicit_map"/a named strategy/"spatial_strip"/
+            # None); _train_disjointness recomputes group keys from this.
             "group_by": resolved_group_by,
             # Every label directory this run's own members live under, so a selection check
             # narrows to the directory a calibration named rather than to one capture date.
@@ -208,16 +216,18 @@ def spatial_split_raster_identity(data_cfg: dict, stem: str) -> dict | None:
 
 
 def spatial_single_source_split(
-    stem: str, data_cfg: dict, tiling: dict, base, split_cfg: dict, transforms,
+    admitted: GeometryAdmission, data_cfg: dict, tiling: dict, split_cfg: dict, transforms,
 ) -> tuple | None:
     """A train/val split over one detection source's own tile lattice, by disjoint pixel strips.
 
-    Called only from ``auto_train_val``'s single-source branch: there is no second stem to hold
-    out whole, but a tiled source has many tiles, and :func:`~tcip_mcp.pipelines.data.splits.
-    spatial_strip_split` can hold out disjoint, buffered regions of them. ``base`` is the
-    already-built (untiled) ``DetectionDataset`` for this one source, reused for every view (its
-    construction, and the class/subject/id-map resolution inside it, cost nothing extra to
-    share). A test region is derived and reserved alongside train/val (excluded from both, so it
+    Called from ``auto_train_val``'s single-source branch, and from the preflight leg that reports
+    whether a reserved calibration region is feasible, so both derive their geometry from one
+    implementation over one dataset. There is no second stem to hold out whole, but a tiled source
+    has many tiles, and :func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split` can hold out
+    disjoint, buffered regions of them. ``admitted`` is the run's own admitted membership, whose
+    single sample every view here is built over: the untiled base each tiled view wraps is built
+    from that sample, so the loaders name their members the way the producer did rather than
+    rediscovering them from a directory. A test region is derived and reserved alongside train/val (excluded from both, so it
     is genuinely held out) but no dataset is built for it: nothing downstream consumes a third
     dataset from this function, so only its geometry and kept-tile count are recorded,
     material the block-aware calibration mechanism (``pipelines.block_calibration``) consumes
@@ -243,9 +253,16 @@ def spatial_single_source_split(
     validation over a document nobody can read would be exactly the gap this mechanism exists to
     close.
     """
-    from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset, tile_kwargs_from_tiling
+    from tcip_mcp.pipelines.data.datasets import (
+        DetectionDataset, TiledDetectionDataset, build_dataset, tile_kwargs_from_tiling,
+    )
     from tcip_mcp.pipelines.data.splits import image_extent_from_labels, spatial_strip_split
 
+    sample = admitted.one_sample()
+    stem = sample.member_stem
+    base = build_dataset(
+        "detection", samples=[sample], transforms=None, **admitted.build_kwargs)
+    assert isinstance(base, DetectionDataset), "a detection build over samples is one of these"
     reserve_cal = float(split_cfg.get("reserve_calibration_fraction") or 0.0)
 
     extent = image_extent_from_labels(data_cfg.get("labels_dir", ""), stem)
@@ -325,7 +342,10 @@ def spatial_single_source_split(
         return None
 
     def _identities(ds) -> list[str]:
-        raw = {spatial.identity_for(s, tx, ty) for s, tx, ty in ds.tile_entries}
+        # Through the dataset's own member stem: a tile is keyed by the sample it was cut from,
+        # and a region identity names the bare stem every consumer of this manifest joins on.
+        raw = {spatial.identity_for(ds.member_stem_of(key), tx, ty)
+               for key, tx, ty in ds.tile_entries}
         return sorted(name for name in raw if name is not None)
 
     split_cfg["resolved_group_by"] = "spatial_strip"
@@ -365,12 +385,17 @@ def checked_label_format(task: str, data_cfg: dict, src: dict) -> str | None:
     Refuses a dataset-level assembled COCO document sitting in ``data.labels_dir`` rather than
     per-image label files: a caller-fixable config error, since the per-image files in that
     directory would be shadowed by the assembled export, silently training on the wrong source
-    being worse than refusing. Called once per run, by each caller of
-    :func:`build_full_admitted_dataset` ahead of its own handler and never from inside the
-    helper, so neither the auto path's degrade handler nor a manifest bind can catch this
-    refusal and fold it into "training without validation".
+    being worse than refusing. Called once per membership source, by :func:`admit_geometry` and by
+    each caller of :func:`build_full_admitted_dataset`, never from inside either.
+
+    Where the source is the run's own training membership the refusal reaches the caller: nothing
+    around it catches, so a misrouted export cannot be folded into "training without validation".
+    A misrouted *validation* directory is the one exception, and deliberately so: the explicit
+    validation route admits that directory inside the handler that degrades when it admits
+    nothing, so this refusal is logged with the directory it names and the run trains on its own
+    membership without validation rather than aborting over the side it could do without.
     """
-    if task not in ("detection", "instance_seg") or data_cfg.get("label_format") or data_cfg.get("coco_json"):
+    if task not in ("detection", "instance_seg"):
         return None
     labels_dir, images_dir = src.get("labels_dir", ""), src.get("images_dir", "")
     if not (labels_dir and images_dir):
@@ -384,8 +409,8 @@ def checked_label_format(task: str, data_cfg: dict, src: dict) -> str | None:
             f"data.labels_dir={labels_dir!r} holds a dataset-level COCO file "
             f"({offending}): if the per-image label files in this directory are the ones "
             "that should train, move it out of data.labels_dir; if this COCO export is "
-            "the intended label source, set data.coco_json (or data.label_format='coco') "
-            "to train on it directly."
+            "the intended label source, import it into per-image label documents first, "
+            "which is the one shape training reads."
         )
     return fmt
 
@@ -394,10 +419,10 @@ def build_full_admitted_dataset(
     task: str, data_cfg: dict, src: dict, transforms, detected_label_format: str | None,
 ):
     """The full, admitted-set dataset for one run's data config, plus the ``build_dataset`` kwargs
-    that produced it: one implementation, called both by the auto-split path (inside its own
-    degrading handler) and by a selection bind (unwrapped, so a real build failure raises
-    rather than degrading to no validation over a recorded partition), so the two can never
-    disagree about what this run admits.
+    that produced it: the directory build ``auto_train_val`` resolves a run the known geometry
+    loaders do not cover from, a mask- or CSV-driven task and a bespoke ``dataset_source`` build
+    alike, whose builder owns its own admission and class space. A detection or instance_seg run
+    those loaders do cover is named by :func:`admit_geometry` instead, and never reaches here.
 
     ``detected_label_format`` is the caller's own :func:`checked_label_format` result: a
     dataset-level COCO document sitting in ``data.labels_dir`` is refused there, ahead of the
@@ -405,8 +430,8 @@ def build_full_admitted_dataset(
 
     Returns ``(full_ds, stems, build_src)``: ``stems`` is the task path's own admitted set
     (``full_ds.stems``/``full_ds._stems``), and ``build_src`` is ``src`` plus any assembled
-    ``coco_data``/``label_format``/``num_classes`` the COCO branch added, for a caller that narrows
-    it with ``stems=`` afterward.
+    ``coco_data``/``num_classes`` the COCO branch added, for a caller that narrows it with
+    ``stems=`` afterward.
     """
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
@@ -421,7 +446,6 @@ def build_full_admitted_dataset(
         build_src["coco_data"] = assemble_coco(
             labels_dir, images_dir, subject=subject, attribute=attribute, id_map=id_map,
             date=src.get("date"))
-        build_src["label_format"] = "coco"
         build_src["num_classes"] = len(id_map)
 
     full_ds = build_dataset(task, **build_src, transforms=transforms)
@@ -491,108 +515,254 @@ def _redrawn_selection(selection, selection_dir: str, seed: int):
     return with_sides(selection, assignment)
 
 
-def _recorded_partition(train_samples, val_samples, bound, labels_dirs, selection=None) -> dict:
+def _recorded_partition(
+    train_samples: "Sequence[Sample]", val_samples: "Sequence[Sample]",
+    bound: "Sequence[Sample]", selection=None,
+) -> dict:
     """The run's own recorded partition, for :func:`persist_run_partition` to write onto
-    ``split.json``: its train and val members per label directory, the group key each was drawn
+    ``split.json``: its train and val members per ground-truth scope, the group key each was drawn
     under, and the digest window a later selection check reads to name a calibration label that
     moved since the draw.
 
-    Members are recorded as bare ground-truth stems, whatever key the loaders indexed by: every
-    consumer of this record (the disjointness checks, ``freeze_selection``, block calibration)
-    names a member by its stem under one directory. ``selection`` is the record a bound run
-    bound to, and ``None`` for a run that drew its own split, whose partition rests on no
-    selection to digest.
+    Members are recorded as bare stems, whatever key the loaders indexed by
+    (:attr:`~tcip_mcp.pipelines.data.selection.Sample.member_stem`): every consumer of this record
+    (the disjointness checks, ``freeze_selection``, block calibration) names a member by its stem
+    under one scope. ``selection`` is the record a bound run bound to, and ``None`` for a run that
+    drew its own split, whose partition rests on no selection to digest.
 
-    Membership is recorded per label directory because every calibration door names a sample by
-    its bare stem under one directory, and a selection spans as many as its draw admitted: a flat
+    A scope is where a member's ground truth lives, the directory holding its own label document
+    or the one document that answers for many samples, and it is read off the samples rather than
+    stated beside them, so the scope a member is filed under and the path its ground truth is read
+    from cannot disagree. Membership is recorded per scope because every calibration door names a
+    sample by its bare stem under one of them, and a draw spans as many as it admitted: a flat
     list would read two dates' same-named images as one member and a disjointness check over it
-    would report the run leaking into itself. The flat ``train``/``val`` lists beside it are the
-    union, for a reader that narrows to no directory at all.
+    would report the run leaking into itself. The flat ``train``/``val`` lists beside them are the
+    union, for a reader that narrows to no scope at all. Each member's ``at_run`` digest is its own
+    stated path's (:func:`~tcip_mcp.pipelines.resolution.ground_truth_digest`), read once per
+    document however many members that document answers for.
     """
-    from tcip_mcp.pipelines.resolution import label_digests as compute_label_digests
-    from tcip_mcp.pipelines.resolution import selection_digest
+    from tcip_mcp.pipelines.resolution import ground_truth_digest, selection_digest
 
-    def _stems_under(samples, labels_dir: str) -> list[str]:
-        return sorted({Path(s.ground_truth).stem for s in samples
-                       if str(Path(s.ground_truth).parent) == labels_dir})
+    digest_of: dict[str, str] = {}
+
+    def _at_run(path: str) -> str:
+        if path not in digest_of:
+            digest_of[path] = ground_truth_digest(Path(path))
+        return digest_of[path]
+
+    def _stems_under(samples: "Sequence[Sample]", scope: str) -> list[str]:
+        return sorted({s.member_stem for s in samples if s.ground_truth_scope == scope})
 
     sha256 = selection_digest(selection) if selection is not None else None
+    scopes = sorted({s.ground_truth_scope for s in bound})
     members: dict[str, dict] = {}
     at_draw: dict[str, str] = {}
     at_run: dict[str, str] = {}
-    for labels_dir in labels_dirs:
-        here = [s for s in bound if str(Path(s.ground_truth).parent) == labels_dir]
-        here_draw = {Path(s.ground_truth).stem: s.ground_truth_digest for s in here
+    for scope in scopes:
+        here = [s for s in bound if s.ground_truth_scope == scope]
+        here_draw = {s.member_stem: s.ground_truth_digest for s in here
                      if s.ground_truth_digest is not None}
-        here_run = compute_label_digests(
-            labels_dir, sorted({Path(s.ground_truth).stem for s in here}))
-        members[labels_dir] = {
-            "train": _stems_under(train_samples, labels_dir),
-            "val": _stems_under(val_samples, labels_dir),
-            "group_key_map": {Path(s.ground_truth).stem: s.group for s in here},
+        here_run = {s.member_stem: _at_run(s.ground_truth) for s in here}
+        members[scope] = {
+            "train": _stems_under(train_samples, scope),
+            "val": _stems_under(val_samples, scope),
+            "group_key_map": {s.member_stem: s.group for s in here},
             "label_digests": {"at_split": here_draw, "at_run": here_run,
                               "selection_sha256": sha256},
         }
         at_draw.update(here_draw)
         at_run.update(here_run)
     return {
-        "train": sorted({Path(s.ground_truth).stem for s in train_samples}),
-        "val": sorted({Path(s.ground_truth).stem for s in val_samples}),
+        "train": sorted({s.member_stem for s in train_samples}),
+        "val": sorted({s.member_stem for s in val_samples}),
         "members": members,
-        "labels_dirs": labels_dirs,
+        "labels_dirs": scopes,
         "label_digests": {
             "at_split": at_draw, "at_run": at_run, "selection_sha256": sha256,
         },
     }
-def _drawn_geometry_split(task: str, data_cfg: dict, src: dict, tiling, transforms):
-    """``(train_ds, val_ds, None)`` for a detection/instance_seg run that draws its own split, or
-    ``None`` when this run is not one this path can draw.
+@dataclass(frozen=True)
+class GeometryAdmission:
+    """What one geometry run admits, and the facts every loader over it is built from.
 
-    The directory a caller names is a producer interface, not a second membership representation:
-    admission runs once here (:func:`~tcip_mcp.pipelines.data.label_queries.trainable_stems`, the
-    platform's own, including the human confirmation an empty label needs), the draw partitions
-    the admitted stems, and the result becomes explicit samples
-    (:func:`~tcip_mcp.pipelines.data.label_queries.directory_samples`) before either loader is
-    built. A run that drew its split and a run bound to a recorded selection then hold the same
-    membership shape and read through the same recorded paths.
+    ``stems`` is the admitted set: the platform's own admission
+    (:func:`~tcip_mcp.pipelines.data.label_queries.trainable_stems`, including the human
+    confirmation an empty label needs) over one labeled directory's images. :meth:`samples` turns
+    a side assignment over those stems into explicit samples, the one shape every loader here is
+    built from, so a directory a caller names is this run's producer interface and never a second
+    membership representation.
+    """
 
-    Answers ``None``, leaving the caller's own fallbacks to run, when: the config names no labels
-    or images directory; admission or the draw fails (the caller degrades to training without
-    validation, as it always has); fewer than two stems are admitted (the caller's single-source
-    spatial-strip branch owns that case); or no grouping policy can populate both sides.
+    images_dir: str
+    labels_dir: str
+    stems: list[str]
+    subject: str | None
+    date: str | None
+    build_kwargs: dict[str, Any]
+
+    def samples(
+        self, assignment: dict[str, str], group_of: "Callable[[str], str]",
+    ) -> list["Sample"]:
+        """The admitted stems this assignment names, as samples on the sides it gives them."""
+        from tcip_mcp.pipelines.data.label_queries import directory_samples
+
+        return directory_samples(
+            assignment, images_dir=self.images_dir, labels_dir=self.labels_dir,
+            subject=self.subject or "", group_of=group_of,
+        )
+
+    def one_sample(self) -> "Sample":
+        """The single admitted sample, for the within-image route that splits one source's own
+        tile lattice. Its group is its member identity: that route draws over tiles, so nothing
+        here groups one source with another."""
+        from tcip_mcp.pipelines.data.splits import member_identity
+
+        return self.samples({self.stems[0]: "train"},
+                            lambda stem: member_identity(self.date, stem))[0]
+
+
+def admit_geometry(task: str, data_cfg: dict, src: dict) -> GeometryAdmission:
+    """The membership a geometry run admits, through the platform's own admission.
+
+    One admission per membership source, so the loaders, the run's recorded partition and the
+    preflight legs that ask what this run would train on all read one answer. Geometry ground
+    truth is the per-image label document, one shape: a dataset-level COCO export sitting in
+    ``data.labels_dir`` in place of those documents is refused here
+    (:func:`checked_label_format`), ahead of any caller's degrading handler.
+
+    Raises rather than degrading: a run whose own admission fails has no membership to train on at
+    all, so naming the failure is the only honest answer, and an empty admitted set refuses by
+    name through :func:`~tcip_mcp.pipelines.data.label_queries.require_samples`.
+    """
+    from tcip_mcp.pipelines.data.label_queries import (
+        admission_date, require_samples, resolve_registry_id_map, trainable_stems,
+    )
+
+    labels_dir, images_dir = src.get("labels_dir", ""), src.get("images_dir", "")
+    subject, attribute = src.get("subject"), src.get("attribute")
+    checked_label_format(task, data_cfg, src)
+    date = admission_date(labels_dir)
+    # The single name->id map this run admits under, and the one its loaders read.
+    _registry, id_map = resolve_registry_id_map(labels_dir, subject, attribute)
+    stems, counts = trainable_stems(
+        labels_dir, images_dir, subject=subject, date=date,
+        attribute=attribute, id_map=id_map,
+    )
+    require_samples(stems, counts, labels_dir)
+    return GeometryAdmission(
+        images_dir=images_dir, labels_dir=labels_dir, stems=stems, subject=subject, date=date,
+        build_kwargs={"subject": subject, "attribute": attribute, "id_map": id_map},
+    )
+
+
+def _geometry_loaders(
+    task: str, admitted: GeometryAdmission, train_samples: "Sequence[Sample]",
+    val_samples: "Sequence[Sample]", tiling, transforms,
+):
+    """The run's loaders over its own samples, and the partition its record is written from.
+
+    Both sides are built under the admitted run's own class space: one run trains in one
+    vocabulary, whichever directory a sample was admitted out of.
     """
     from tcip_mcp.pipelines.data.datasets import build_dataset
-    from tcip_mcp.pipelines.data.label_queries import (
-        admission_date, directory_samples, resolve_registry_id_map, trainable_stems,
-    )
+
+    train_ds = build_dataset(task, samples=list(train_samples), transforms=transforms,
+                             tiling=tiling, **admitted.build_kwargs)
+    val_ds = (build_dataset(task, samples=list(val_samples), transforms=None, tiling=tiling,
+                            **admitted.build_kwargs) if val_samples else None)
+    partition = _recorded_partition(
+        train_samples, val_samples, [*train_samples, *val_samples])
+    return train_ds, val_ds, partition
+
+
+def _geometry_split(task: str, data_cfg: dict, src: dict, tiling, transforms):
+    """``(train_ds, val_ds, partition)`` for a detection or instance_seg run whose membership the
+    platform's own producer names.
+
+    Admission runs once (:func:`admit_geometry`), becomes explicit samples before any loader is
+    built, and the loaders answer for their own members through those samples: a run that drew its
+    split, a run given an explicit validation directory and a run bound to a recorded selection
+    then hold one membership shape and read through the same recorded paths. The caller's own
+    resolution order is kept: an explicit validation directory partitions two directories' admitted
+    samples; ``auto_val`` off trains on every admitted sample; a single admitted source with tiling
+    on splits its own tile lattice spatially; anything else draws a group-aware split over the
+    admitted stems.
+
+    Degrades to training without validation, naming which failure did it, when the validation
+    directory admits nothing, when the draw or a malformed ``val_ratio``/``seed`` fails, or when no
+    grouping policy can populate both sides. An admission failure over the run's own membership is
+    not one of those: there is nothing left to train on, so it raises.
+
+    A route that draws nothing records ``stem`` as its resolved grouping, the policy it actually
+    applied: every member is its own group. The record then says per member which scope its ground
+    truth lives under, so a reader that has to tell a caller-named validation directory from a
+    drawn side reads the members rather than a marker naming the route.
+    """
+    from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.pipelines.data.splits import (
         count_label_lines, draw_train_val, recorded_group_key_fn,
     )
 
-    labels_dir, images_dir = src.get("labels_dir", ""), src.get("images_dir", "")
-    if not labels_dir or not images_dir:
-        return None
-    subject, attribute = src.get("subject"), src.get("attribute")
-    date = admission_date(labels_dir)
-    try:
-        _registry, id_map = resolve_registry_id_map(labels_dir, subject, attribute)
-        stems, _counts = trainable_stems(
-            labels_dir, images_dir, subject=subject, date=date,
-            attribute=attribute, id_map=id_map,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Admission for the drawn split failed (%s); falling back.", exc)
-        return None
-    if len(stems) < 2:
-        return None
-
     split_cfg = data_cfg.setdefault("split", {})
+    admitted = admit_geometry(task, data_cfg, src)
+
+    def each_its_own_group(date: str | None) -> "Callable[[str], str]":
+        """Every member its own group, the ``stem`` policy: a route that drew no split grouped
+        nothing, and recording that policy by name lets a reader reproduce the same key for a
+        member the record's own map does not cover."""
+        return recorded_group_key_fn("stem", date=date)
+
+    def train_only(group_of: "Callable[[str], str]"):
+        samples = admitted.samples({s: "train" for s in admitted.stems}, group_of)
+        return _geometry_loaders(task, admitted, samples, [], tiling, transforms)
+
+    val_images = data_cfg.get("val_images_dir")
+    if val_images:
+        split_cfg["resolved_group_by"] = "stem"
+        val_src = dict(src)
+        val_src["images_dir"] = val_images
+        val_src["labels_dir"] = data_cfg.get("val_labels_dir", data_cfg.get("labels_dir", ""))
+        try:
+            val_admitted = admit_geometry(task, data_cfg, val_src)
+        except UnreadableLabelDocument:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("The explicit validation directory %s admits nothing (%s); training "
+                           "without validation.", val_images, exc)
+            return train_only(each_its_own_group(admitted.date))
+        return _geometry_loaders(
+            task, admitted,
+            admitted.samples({s: "train" for s in admitted.stems},
+                             each_its_own_group(admitted.date)),
+            val_admitted.samples({s: "val" for s in val_admitted.stems},
+                                 each_its_own_group(val_admitted.date)),
+            tiling, transforms)
+
+    if not data_cfg.get("auto_val", True):
+        logger.info("data.auto_val is off for %s: training on all %d admitted sample(s) with no "
+                    "validation.", task, len(admitted.stems))
+        split_cfg["resolved_group_by"] = "stem"
+        return train_only(each_its_own_group(admitted.date))
+
+    if len(admitted.stems) < 2:
+        # A single source cannot hold out a whole stem, but a tiled detection source can hold out
+        # disjoint pixel blocks of its own tile lattice.
+        if task == "detection" and tiling and tiling.get("enabled", True):
+            spatial = spatial_single_source_split(
+                admitted, data_cfg, tiling, split_cfg, transforms)
+            if spatial is not None:
+                return (*spatial, None)
+        logger.warning("Auto train/val split for %s: %d admitted source(s) leave nothing to hold "
+                       "out; training without validation.", task, len(admitted.stems))
+        split_cfg["resolved_group_by"] = "stem"
+        return train_only(each_its_own_group(admitted.date))
+
     group_by = split_cfg.get("group_by", "tile_prefix")
     group_key_map = split_cfg.get("group_key_map")
     # Deliberately outside any handler: a malformed grouping policy is a caller-config error.
     # Through recorded_group_key_fn, so this draw spells a group key the way draw_splits does.
     group_key_fn = recorded_group_key_fn(
-        group_by, date=date, stems=stems, group_key_map=group_key_map)
+        group_by, date=admitted.date, stems=admitted.stems, group_key_map=group_key_map)
     split_cfg["resolved_group_by"] = "explicit_map" if group_key_map else group_by
 
     try:
@@ -600,64 +770,64 @@ def _drawn_geometry_split(task: str, data_cfg: dict, src: dict, tiling, transfor
         seed = int(split_cfg.get("seed", 42))
         annotation_counts = None
         if split_cfg.get("stratify_foreground", True):
-            annotation_counts = {s: count_label_lines(labels_dir, s) for s in stems}
+            annotation_counts = {s: count_label_lines(admitted.labels_dir, s)
+                                 for s in admitted.stems}
         train_stems, val_stems = draw_train_val(
-            stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
+            admitted.stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
             val_ratio=val_ratio, seed=seed,
         )
         if (not val_stems or not train_stems) and group_by != "stem" and not group_key_map:
             # Too few groups under the requested policy starved val; retry at stem grouping.
-            retry_key_fn = recorded_group_key_fn("stem", date=date, stems=stems)
+            retry_key_fn = recorded_group_key_fn("stem", date=admitted.date, stems=admitted.stems)
             retry_train, retry_val = draw_train_val(
-                stems, annotation_counts=annotation_counts, group_key_fn=retry_key_fn,
+                admitted.stems, annotation_counts=annotation_counts, group_key_fn=retry_key_fn,
                 val_ratio=val_ratio, seed=seed,
             )
             if retry_train and retry_val:
+                logger.info(
+                    "Auto train/val split for %s: group_by=%r left val empty (too few groups); "
+                    "retried at stem-level grouping.", task, group_by,
+                )
                 train_stems, val_stems = retry_train, retry_val
                 split_cfg["resolved_group_by"] = "stem"
                 group_key_fn = retry_key_fn
         if not val_stems or not train_stems:
-            return None
+            logger.warning(
+                "Auto train/val split for %s: no grouping policy could populate both sides; "
+                "training without validation.", task,
+            )
+            return train_only(group_key_fn)
 
         assignment = {s: "train" for s in train_stems}
         assignment.update({s: "val" for s in val_stems})
-        samples = directory_samples(
-            assignment, images_dir=images_dir, labels_dir=labels_dir, subject=subject or "",
-            group_of=group_key_fn,
-        )
+        samples = admitted.samples(assignment, group_key_fn)
         by_side = {side: [s for s in samples if s.side == side] for side in ("train", "val")}
-        build_kwargs: dict[str, Any] = {
-            "subject": subject, "attribute": attribute, "id_map": id_map, "tiling": tiling,
-        }
-        train_ds = build_dataset(
-            task, samples=by_side["train"], transforms=transforms, **build_kwargs)
-        val_ds = build_dataset(task, samples=by_side["val"], transforms=None, **build_kwargs)
-        partition = _recorded_partition(
-            by_side["train"], by_side["val"], samples, [str(labels_dir)])
+    except UnreadableLabelDocument:
+        raise
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Auto train/val split failed (%s); falling back.", exc)
-        return None
+        logger.warning("Auto train/val split for %s failed (%s); training without validation.",
+                       task, exc)
+        return train_only(group_key_fn)
     logger.info("Auto train/val split for %s: %d train / %d val samples.",
                 task, len(by_side["train"]), len(by_side["val"]))
-    return train_ds, val_ds, partition
+    return _geometry_loaders(
+        task, admitted, by_side["train"], by_side["val"], tiling, transforms)
 
 
 def auto_train_val(task: str, data_cfg: dict, transforms):
     """Build ``(train_ds, val_ds, partition)`` for a run, deriving a leakage-free val split.
 
-    ``partition`` is ``None`` on every path but the selection-bound one (1.5 below), where it
-    carries the membership, group keys, label directories and per-stem digests
+    ``partition`` carries the membership, group keys, ground-truth scopes and per-member digests
     :func:`persist_run_partition` writes onto ``split.json`` beside, never inside,
     ``selection_binding``: passed as its own value rather than through ``data_cfg["split"]``
     since that block is copied whole into the durable config and every checkpoint, and a
-    per-sample map must not multiply through every copy.
+    per-sample map must not multiply through every copy. Every detection and instance_seg run the
+    known loaders cover records one (2 below), bound or not; it is ``None`` for the within-image
+    spatial route, whose members are regions and whose record is its own manifest, and for the
+    tasks and the bespoke ``dataset_source`` builds that still resolve straight from a directory.
 
     Resolution order:
-      1. ``data.val_images_dir`` set -> build val from it explicitly (a CSV-driven task -
-         classification/ordinal/regression - also requires ``data.val_csv_path``; there is no
-         graceful fallback to the train CSV the way the geometry tasks fall back to the train
-         labels/masks dir, see the CSV branch below for why).
-      1.5. ``data.split.selection_dir`` set (detection/instance_seg only) -> train on the
+      1. ``data.split.selection_dir`` set (detection/instance_seg only) -> train on the
          selection's own ``train`` and ``val`` samples instead of drawing a split, each sample
          reading the source and label the draw recorded for it. A recorded partition is an
          explicit split ``auto_val`` does not govern, checked ahead of its gate below; every
@@ -671,27 +841,36 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
          ``selection_dir`` and ``seed``) redraws train and val fresh inside the selection's own
          train-plus-val samples instead of binding them as recorded, calibration still untouched;
          a starved side refuses rather than retrying or degrading.
-      2. ``data.auto_val`` (default True) and a stem-capable task
-         (detection / instance_seg / semantic_seg / classification) -> derive a
-         group-aware train/val split (no held-out test) so the trainer receives
-         a real validation loader. Train keeps augmentation; val gets none.
-      3. ordinal / regression, ``auto_val`` disabled, a tiny/single-group set, or
-         most failures -> ``(full_train_ds, None)``. ``resolve_group_key_fn`` (an
-         unrecognized ``split.group_by`` or a ``split.group_key_map`` missing stem
-         coverage) is called outside any handler here and its ``ValueError`` propagates
-         to the caller, silently training without validation on a policy error the
-         caller could have fixed is worse than surfacing it. A present, unreadable
-         validation label (``UnreadableLabelDocument``) from the explicit ``val_images_dir``
-         build propagates too, rather than degrading to a run with no validation over a
-         document nobody can read. Every other failure in this function (dataset build
-         errors, a malformed ``val_ratio``/``seed``, a ``group_balanced_split`` failure)
-         still degrades to ``(full_train_ds, None)``.
+      2. detection / instance_seg, the tasks the known loaders cover -> :func:`_geometry_split`,
+         which admits once through the platform's own producer and builds every loader from the
+         resulting samples: an explicit ``data.val_images_dir``, ``auto_val`` off, a single tiled
+         source's own spatial strips, and the group-aware draw are all that one route's branches.
+      3. ``data.val_images_dir`` on a task outside it (a CSV-driven one -
+         classification/ordinal/regression - also requires ``data.val_csv_path``; there is no
+         graceful fallback to the train CSV the way semantic_seg falls back to the train masks
+         dir, see that branch below for why).
+      4. ``data.auto_val`` (default True) and a stem-capable task (semantic_seg /
+         classification) -> derive a group-aware train/val split (no held-out test) so the
+         trainer receives a real validation loader. Train keeps augmentation; val gets none.
+      5. ordinal / regression, ``auto_val`` disabled, a tiny/single-group set, or most failures
+         -> ``(full_train_ds, None)``. ``resolve_group_key_fn`` (an unrecognized
+         ``split.group_by`` or a ``split.group_key_map`` missing stem coverage) is called outside
+         any handler here and its ``ValueError`` propagates to the caller, silently training
+         without validation on a policy error the caller could have fixed is worse than surfacing
+         it. A present, unreadable label (``UnreadableLabelDocument``) propagates too, rather than
+         degrading to a run with no validation over a document nobody can read. Every other
+         failure in these branches (dataset build errors, a malformed ``val_ratio``/``seed``, a
+         ``group_balanced_split`` failure) still degrades to ``(full_train_ds, None)``.
+
+    A bespoke ``data.dataset_source`` build takes 3 to 5 whatever its task: that builder owns its
+    own class space and admission, so no producer here can name its samples, and it keeps
+    receiving the directory kwargs it always has.
 
     Reads ``auto_val`` / ``val_*`` / ``split.*`` from ``data_cfg`` (== config["data"]).
     """
     from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.pipelines.data.datasets import build_dataset
-    from tcip_mcp.pipelines.data.label_queries import admission_date, targets_registry_derived
+    from tcip_mcp.pipelines.data.label_queries import admission_date
     from tcip_mcp.pipelines.data.splits import (
         draw_train_val, count_label_lines, recorded_group_key_fn,
     )
@@ -714,47 +893,17 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
     ):
         split_cfg_raw.pop(_stale_key, None)
 
-    # 1. Explicit validation source.
     val_images = data_cfg.get("val_images_dir")
     if selection_dir and val_images:
         raise ValueError(
             "data.split.selection_dir conflicts with data.val_images_dir: two membership "
             "sources for one run's validation split."
         )
-    if val_images:
-        # No computed grouping here; record "external" explicitly so persist_run_partition
-        # writes a distinct marker rather than leaving the field unset (ambiguous with never-set).
-        data_cfg.setdefault("split", {})["resolved_group_by"] = "external"
-        try:
-            train_ds = build_dataset(task, **src, transforms=transforms, tiling=tiling)
-            val_src = dict(src)
-            val_src["images_dir"] = val_images
-            if task in ("detection", "instance_seg"):
-                val_src["labels_dir"] = data_cfg.get("val_labels_dir", data_cfg.get("labels_dir", ""))
-            elif task == "semantic_seg":
-                val_src["masks_dir"] = data_cfg.get("val_masks_dir", data_cfg.get("masks_dir", ""))
-            elif task in ("classification", "ordinal", "regression"):
-                val_csv = data_cfg.get("val_csv_path")
-                if not val_csv:
-                    # A CSV dataset fails per-item deep in training if a row's image isn't in
-                    # val_images_dir; unlike the geometry tasks, there's no graceful fallback.
-                    raise ValueError(
-                        "val_images_dir set for a CSV-driven task also requires "
-                        "data.val_csv_path; the train CSV's rows won't generally match a "
-                        "different val_images_dir."
-                    )
-                val_src["csv_path"] = val_csv
-            return train_ds, build_dataset(task, **val_src, transforms=None, tiling=tiling), None
-        except UnreadableLabelDocument:
-            raise
-        except Exception as exc:
-            logger.warning("Explicit val build failed (%s); training without validation.", exc)
-            return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
 
-    # 1.5. A named selection is an explicit partition auto_val does not govern; every refusal
+    # 1. A named selection is an explicit partition auto_val does not govern; every refusal
     # here, and any build failure while binding to it, raises rather than degrading.
     if selection_dir:
-        conflicts = _split_selection_drawn_conflicts(data_cfg, split_cfg_raw)
+        conflicts = _split_selection_drawn_conflicts(split_cfg_raw)
         if conflicts:
             raise ValueError(
                 f"data.split.selection_dir conflicts with {sorted(conflicts)}: a recorded "
@@ -830,8 +979,7 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
 
         # Kept out of split_cfg/selection_binding: that block is copied whole into the durable
         # config and every checkpoint. Handed to persist_run_partition as its own parameter.
-        partition = _recorded_partition(
-            train_samples, val_samples, bound, labels_dirs, selection)
+        partition = _recorded_partition(train_samples, val_samples, bound, selection)
 
         build_kwargs: dict[str, Any] = {
             "subject": selection.subject, "attribute": selection.attribute,
@@ -843,18 +991,46 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
         val_ds = build_dataset(task, samples=val_samples, transforms=None, **build_kwargs)
         return train_ds, val_ds, partition
 
+    # 2. A geometry run the known loaders cover: one producer names its membership and every
+    # branch of its resolution order builds from the samples that producer made.
+    if task in ("detection", "instance_seg") and not data_cfg.get(DATASET_SOURCE_KEY):
+        return _geometry_split(task, data_cfg, src, tiling, transforms)
+
+    # 3. Explicit validation source. These routes record no membership of their own, so nothing
+    # here resolves a grouping policy and the record's group_by stays unset.
+    if val_images:
+        try:
+            train_ds = build_dataset(task, **src, transforms=transforms, tiling=tiling)
+            val_src = dict(src)
+            val_src["images_dir"] = val_images
+            if task in ("detection", "instance_seg"):
+                val_src["labels_dir"] = data_cfg.get("val_labels_dir", data_cfg.get("labels_dir", ""))
+            elif task == "semantic_seg":
+                val_src["masks_dir"] = data_cfg.get("val_masks_dir", data_cfg.get("masks_dir", ""))
+            elif task in ("classification", "ordinal", "regression"):
+                val_csv = data_cfg.get("val_csv_path")
+                if not val_csv:
+                    # A CSV dataset fails per-item deep in training if a row's image isn't in
+                    # val_images_dir; unlike the mask tasks, there's no graceful fallback.
+                    raise ValueError(
+                        "val_images_dir set for a CSV-driven task also requires "
+                        "data.val_csv_path; the train CSV's rows won't generally match a "
+                        "different val_images_dir."
+                    )
+                val_src["csv_path"] = val_csv
+            return train_ds, build_dataset(task, **val_src, transforms=None, tiling=tiling), None
+        except UnreadableLabelDocument:
+            raise
+        except Exception as exc:
+            logger.warning("Explicit val build failed (%s); training without validation.", exc)
+            return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
+
     if not data_cfg.get("auto_val", True) or task not in STEM_TASKS:
         return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
 
-    # 2. Auto group-aware train/val split. A dataset-level COCO here is a caller-fixable config
+    # 4. Auto group-aware train/val split. A dataset-level COCO here is a caller-fixable config
     # error, raised outside the handler below rather than degraded.
     detected_label_format = checked_label_format(task, data_cfg, src)
-    # The drawn path reads the per-image sidecars beside a registry, so a config naming its own
-    # COCO document or a bespoke source is not one it may draw (targets_registry_derived).
-    if task in ("detection", "instance_seg") and targets_registry_derived(data_cfg):
-        drawn = _drawn_geometry_split(task, data_cfg, src, tiling, transforms)
-        if drawn is not None:
-            return drawn
     try:
         full_ds, stems, build_src = build_full_admitted_dataset(
             task, data_cfg, src, transforms, detected_label_format)
@@ -863,14 +1039,8 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
         return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
 
     if len(stems) < 2:
-        # A single source can't hold out a whole stem, but a tiled detection source can still
-        # hold out disjoint pixel blocks of its own tile lattice, see spatial_single_source_split.
-        split_cfg = data_cfg.setdefault("split", {})
-        if task == "detection" and tiling and tiling.get("enabled", True):
-            spatial_ds = spatial_single_source_split(
-                stems[0], data_cfg, tiling, full_ds, split_cfg, transforms)
-            if spatial_ds is not None:
-                return (*spatial_ds, None)
+        # A single source cannot hold out a whole stem, and the within-image route that holds out
+        # pixel blocks instead builds over samples a producer named.
         return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
 
     # setdefault (not get): the resolved grouping is written back so a later

@@ -241,14 +241,14 @@ def test_the_draw_and_the_delivery_check_digest_a_ground_truth_the_same_way(tmp_
     report every untouched reference as moved, and a guard test on either side alone would stay
     green over it.
     """
-    from tcip_mcp.pipelines.resolution import _ground_truth_digest
+    from tcip_mcp.pipelines.resolution import ground_truth_digest
 
     root = tmp_path / "ds"
     _synthetic_capture(root)
     selection = _draw_reference_selection(root, tmp_path / "selection")
 
     for sample in selection.on("calibration"):
-        assert _ground_truth_digest(Path(sample.ground_truth)) == sample.ground_truth_digest, (
+        assert ground_truth_digest(Path(sample.ground_truth)) == sample.ground_truth_digest, (
             sample.ground_truth)
 
 

@@ -415,6 +415,51 @@ def test_a_positive_named_unlike_its_image_contradicts_a_stale_negative(tmp_path
         read_selection(out).samples, attribute=None, id_map={SUBJECT: 0})
 
 
+def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(tmp_path: Path):
+    """``row_key`` names one row inside a ground truth that answers for many samples. No geometry
+    loader reads a ground truth by row, and reading the file whole would take a document
+    answering for many samples for a per-image one, so the loader refuses by name rather than
+    training on whatever the whole file holds. The same selection without the row key builds.
+
+    The record comes back through ``read_selection``, the platform's own reader: the field is part
+    of the recorded shape, which is why a loader has to answer for it rather than ignore it.
+    """
+    from PIL import Image
+
+    from tcip_mcp.dataset_layout import status_bucket
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.data.selection import (
+        Sample, Selection, read_selection, write_selection,
+    )
+
+    root = tmp_path / "ds"
+    images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (64, 64), (100, 120, 90)).save(images_dir / "a.jpg")
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    json_io.write_annotations(labels_dir / "a.json",
+                              [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))],
+                              64, 64, keep_empty=True)
+
+    def _selection(row_key: str | None) -> Selection:
+        out = tmp_path / ("rows" if row_key else "whole")
+        write_selection(out, Selection(samples=(Sample(
+            source=str(images_dir / "a.jpg"), ground_truth=str(labels_dir / "a.json"),
+            group="g", side="train", confirmation_bucket=status_bucket(SUBJECT, DATES[0]),
+            row_key=row_key),
+        ), subject=SUBJECT, id_map={SUBJECT: 0}))
+        return read_selection(out)
+
+    with pytest.raises(ValueError, match="row inside their ground truth"):
+        build_dataset("detection", samples=_selection("a.jpg").samples,
+                      subject=SUBJECT, id_map={SUBJECT: 0})
+
+    admitted = build_dataset("detection", samples=_selection(None).samples,
+                             subject=SUBJECT, id_map={SUBJECT: 0})
+    assert list(admitted.stems) == [str(images_dir / "a.jpg")]
+
+
 def test_crops_of_one_parent_cannot_cross_sides(tmp_path: Path):
     """Every crop of one parent image shares a group key, and the reader refuses a selection
     whose group keys straddle two sides, so a run bound to one can never train on one crop of a

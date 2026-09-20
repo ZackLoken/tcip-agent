@@ -47,7 +47,7 @@ def test_a_boxs_width_and_height_survive_the_assembled_coco_round_trip(tmp_path)
     _write(labels, "img0", [(10, 20, 70, 40), (80, 5, 95, 75)], size)
 
     ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=BUD)
-    assert ds.label_format == "coco"
+    assert ds._coco is not None
     _img, target = ds[0]
     assert target["boxes"].tolist() == [[10.0, 20.0, 70.0, 40.0], [80.0, 5.0, 95.0, 75.0]]
 
