@@ -1158,7 +1158,7 @@ describe("dataPickerFor", () => {
       case: "bound",
       line: "on the partition it bound",
       compatible: false,
-      reason: "Directory not found: data.images_dir = '/moved'",
+      reason: "Not found: data.images_dir = '/moved'",
     },
     selections: [
       {
@@ -1190,7 +1190,7 @@ describe("dataPickerFor", () => {
     const picker = dataPickerFor(choices);
     expect(picker?.asRecordedLine).toBe("on the partition it bound");
     expect(picker?.asRecordedDisabled).toBe(true);
-    expect(picker?.asRecordedReason).toBe("Directory not found: data.images_dir = '/moved'");
+    expect(picker?.asRecordedReason).toBe("Not found: data.images_dir = '/moved'");
     expect(picker?.absenceMessage).toMatch(/this listing found no other recorded partition/);
   });
 

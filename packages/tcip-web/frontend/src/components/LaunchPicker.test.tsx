@@ -317,7 +317,7 @@ describe("LaunchPicker", () => {
               data: {
                 asRecordedLine: "on the partition it bound",
                 asRecordedDisabled: true,
-                asRecordedReason: "Directory not found: data.images_dir = '/moved'",
+                asRecordedReason: "Not found: data.images_dir = '/moved'",
                 absenceMessage: "unused",
                 choices: [],
               },
@@ -332,10 +332,8 @@ describe("LaunchPicker", () => {
     );
     fireEvent.click(screen.getByText("exp-1"));
     expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
-    expect(screen.getAllByText("Directory not found: data.images_dir = '/moved'")).toHaveLength(1);
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Directory not found: data.images_dir = '/moved'",
-    );
+    expect(screen.getAllByText("Not found: data.images_dir = '/moved'")).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent("Not found: data.images_dir = '/moved'");
   });
 
   it("shows a disabled candidate's own inline reason once it is no longer the checked choice, not duplicated into the status region", () => {
