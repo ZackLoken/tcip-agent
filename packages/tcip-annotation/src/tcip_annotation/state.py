@@ -10,6 +10,7 @@ artifact (see :mod:`tcip_mcp.subject_registry`), never stored on an annotation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TypeGuard
 
 
 @dataclass
@@ -79,6 +80,27 @@ class Annotation:
     accepted_by: str | None = None
     accepted_at: str | None = None
     accepted_by_rule: str | None = None
+
+
+def box_derivable(geometry: "BBox | Polygon | Point | None") -> TypeGuard[BBox | Polygon]:
+    """Whether a geometry yields a box: a rect or a polygon, never a point and never nothing.
+
+    The one statement of which geometries a detection or segmentation target can be read from.
+    A loader declares it as the geometry it reads, the readers that extract targets filter by it
+    and the writers that assemble them skip by it, so what a sample is admitted as and what is
+    read out of it cannot disagree about what a target is. :func:`bbox_of` is what reads the box
+    once this has answered.
+    """
+    return geometry is not None and not isinstance(geometry, Point)
+
+
+def polygonal(geometry: "BBox | Polygon | Point | None") -> TypeGuard[Polygon]:
+    """Whether a geometry is a polygon, the one shape an instance mask is rasterized from.
+
+    Declared by the instance segmentation loader and asked by every reader of its rings, so the
+    same rule admits a sample and extracts its masks.
+    """
+    return isinstance(geometry, Polygon)
 
 
 def bbox_of(geometry: BBox | Polygon) -> BBox:

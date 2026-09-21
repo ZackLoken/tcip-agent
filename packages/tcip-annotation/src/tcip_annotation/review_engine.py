@@ -37,7 +37,7 @@ from tcip_store import RECORD_JSON, Key, StoreDescriptor, Version, register_stor
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation.json_io import write_annotations
-from tcip_annotation.state import Annotation, Point, bbox_of
+from tcip_annotation.state import Annotation, bbox_of, box_derivable
 from tcip_annotation.verdicts import VERDICT_ACTIONS, VerdictAction
 
 logger = logging.getLogger(__name__)
@@ -458,7 +458,7 @@ class ReviewEngine:
         if idx is None or not (0 <= idx < len(anns)):
             return None
         geom = anns[idx].geometry
-        if geom is None or isinstance(geom, Point):
+        if not box_derivable(geom):
             return None
         b = bbox_of(geom)
         return (b.x1, b.y1, b.x2, b.y2)

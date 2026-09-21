@@ -1,15 +1,12 @@
-"""COCO parser correctness, and the loaders reading an assembled COCO handed to them.
+"""COCO parser correctness, for the import and export doors that read one.
 
-Training reads geometry ground truth as per-image label documents; the dataset-level COCO a
-loader may read is the one ``assemble_coco`` builds from those documents and hands over as
-``coco_data``. No loader opens a dataset-level COCO file of its own, so what is covered here is
-the in-memory document, not a path.
+Training reads geometry ground truth as per-image label documents, so no loader here opens a
+dataset-level COCO at all; what is covered is the parser those doors share.
 """
 
 import pytest
 
 torch = pytest.importorskip("torch")
-from PIL import Image  # noqa: E402
 
 
 def test_parse_coco_annotations_decodes_names():
@@ -28,24 +25,3 @@ def test_parse_coco_annotations_decodes_names():
     assert isinstance(anns[0].geometry, Polygon)
 
 
-def _make_images(images_dir, n=1):
-    images_dir.mkdir(parents=True, exist_ok=True)
-    for i in range(n):
-        Image.new("RGB", (100, 100)).save(images_dir / f"img{i}.jpg")
-
-
-def test_build_dataset_reads_an_assembled_coco_handed_to_it(tmp_path):
-    """The assembled view reaches the loader as ``coco_data``, and its annotations are matched to
-    each admitted image by file name."""
-    from tcip_mcp.pipelines.data.datasets import build_dataset
-    images_dir = tmp_path / "images"
-    _make_images(images_dir)
-    coco = {"images": [{"id": 1, "file_name": "img0.jpg", "width": 100, "height": 100}],
-            "annotations": [{"id": 1, "image_id": 1, "category_id": 0, "bbox": [10, 10, 40, 40]}],
-            "categories": []}
-
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(images_dir),
-                       num_classes=1, coco_data=coco)
-    _, target = ds[0]
-    assert target["boxes"].shape == (1, 4)
-    assert ds.class_distribution == {0: 1}

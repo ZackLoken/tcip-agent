@@ -49,6 +49,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import tcip_store
 from tcip_store import (
@@ -62,7 +63,9 @@ from tcip_store import (
 )
 from tcip_store.file_backend import RootedFileLocator
 
-from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
+from tcip_annotation.state import (
+    Annotation, BBox, Point, Polygon, bbox_of, box_derivable, polygonal,
+)
 
 ANNOTATIONS_KEY = "annotations"  # the one top-level list key; format_io.detect_format shares it
 _PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at", "accepted_by_rule")
@@ -552,7 +555,7 @@ def detection_annotations(path: str | Path) -> list[Annotation]:
     what counts as a detection.
     """
     return [a for a in read_annotations(str(path))
-           if a.geometry is not None and not isinstance(a.geometry, Point)]
+           if box_derivable(a.geometry)]
 
 
 def read_annotations_versioned(target: Key | str | Path) -> tuple[list[Annotation], Version]:
@@ -801,19 +804,19 @@ def geometry_extent_ok(geometry: BBox | Polygon) -> bool:
     detection before it ever reaches the writer reaches the identical verdict the writer would.
     An empty ring list (every ring shorter than three points) has no shape and is not ok.
     """
-    if isinstance(geometry, Polygon):
+    if polygonal(geometry):
         rings = [r for r in geometry.rings if len(r) >= 3]
         if not rings:
             return False
         return stored_box_extent_ok(bbox_of(Polygon(_rounded_rings(rings))))
-    return stored_box_extent_ok(geometry)
+    return stored_box_extent_ok(cast(BBox, geometry))
 
 
 def _annotation_record(a: Annotation) -> dict | None:
     """One annotation → its JSON object, or None if a degenerate polygon should be skipped."""
     rec: dict = {"subject": a.subject}
     geom = a.geometry
-    if isinstance(geom, Polygon):
+    if polygonal(geom):
         valid_rings = [r for r in geom.rings if len(r) >= 3]
         if not valid_rings:
             return None  # no ring is a real shape; skip so write<->read stays symmetric
@@ -890,7 +893,7 @@ def target_class_id(a: Annotation, subject: str, attribute: str | None,
     per-image target reader both call this, so the assembled COCO and the calibration/eval GT can
     never disagree about which annotation is a target or which class it is.
     """
-    if a.subject != subject or a.geometry is None or isinstance(a.geometry, Point):
+    if a.subject != subject or not box_derivable(a.geometry):
         return None
     key = a.attributes.get(attribute) if attribute else subject
     if key is None:
@@ -992,9 +995,9 @@ def to_coco_dataset(
     wholesale, not trained on its labeled subset alone: silently narrowing to the labeled instances
     would leave the image's other real, unlabeled objects to train as background noise. The excluded
     ``file_name``s are reported in the returned dict's own ``excluded_incomplete_attribute`` list,
-    alongside ``images``/``annotations``/``categories``, so a downstream partition
-    (``trainable_stems``) can attribute the drop to its real reason rather than re-deriving one from
-    the image's mere absence, which reads identically to an empty label file nobody confirmed.
+    alongside ``images``/``annotations``/``categories``, so a downstream partition can attribute
+    the drop to its real reason rather than re-deriving one from the image's mere absence, which
+    reads identically to an empty label file nobody confirmed.
 
     A missing label file is skipped, unannotated; a present, unreadable one raises
     :class:`UnreadableLabelDocument` rather than assembling as a zero-object image, so a corrupt
@@ -1026,10 +1029,10 @@ def to_coco_dataset(
             "width": int(data.get("width", 0) or 0), "height": int(data.get("height", 0) or 0),
         })
         for a, cid in zip(scoped, cids):
-            if cid is None or a.geometry is None:
+            if cid is None:
                 continue  # image-level label: counts the image as annotated, no detection/seg target
-            assert not isinstance(a.geometry, Point), (
-                "target_class_id already returned None for a Point geometry"
+            assert box_derivable(a.geometry), (
+                "target_class_id already returned None for a geometry no box can be read from"
             )
             box = bbox_of(a.geometry)
             rec: dict = {
@@ -1037,7 +1040,7 @@ def to_coco_dataset(
                 "bbox": xywh(box.x1, box.y1, box.x2, box.y2),
                 "area": round((box.x2 - box.x1) * (box.y2 - box.y1), 2),
             }
-            if isinstance(a.geometry, Polygon):
+            if polygonal(a.geometry):
                 rec["segmentation"] = [[round(float(c), 2) for xy in ring for c in xy]
                                        for ring in a.geometry.rings if len(ring) >= 3]
             if a.score is not None:

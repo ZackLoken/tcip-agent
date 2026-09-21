@@ -19,6 +19,7 @@ from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp import subject_registry
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
 def _write_image(images_dir: Path, stem: str, size=(640, 480)) -> None:
@@ -34,8 +35,6 @@ def _write_registry(root: Path, *subjects: Subject) -> SubjectRegistry:
 
 # (a) a registry decodes its own labels after the flip.
 def test_registry_decodes_its_own_labels(tmp_path):
-    from tcip_mcp.pipelines.data.label_queries import assemble_coco
-
     registry = _write_registry(tmp_path, Subject(name="bud"))
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "annotations"
@@ -46,21 +45,22 @@ def test_registry_decodes_its_own_labels(tmp_path):
         [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 640, 480)
 
     id_map = subject_registry.assign_class_ids(registry, "bud")
-    coco = assemble_coco(labels_dir, images_dir, subject="bud", date=None, id_map=id_map)
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
+    _img, target = ds[0]
 
-    # The COCO categories are the assign_class_ids map, and every emitted annotation decodes back to
-    # the name its label carried: the registry reads its own labels without guessing.
-    assert {c["name"]: c["id"] for c in coco["categories"]} == id_map
+    # The loader's class ids are the assign_class_ids map, and the target decodes back to the name
+    # its label carried: the registry reads its own labels without guessing.
+    assert ds.id_map == id_map
     inv = subject_registry.decode_class_ids(id_map)
-    assert coco["annotations"], "the labeled image produced no COCO annotation"
-    assert all(inv[a["category_id"]] == "bud" for a in coco["annotations"])
+    assert target["labels"].tolist() == [1], "the labeled image produced no target"
+    assert all(inv[int(label) - 1] == "bud" for label in target["labels"].tolist())
 
 
 # (b) a geometry-less annotation round-trips and its image is not collapsed to empty/negative.
 def test_geometryless_annotation_roundtrips_and_marks_image_annotated(tmp_path):
-    from tcip_mcp.pipelines.data.label_queries import assemble_coco
+    from tcip_mcp.pipelines.data.label_queries import admitted_documents
 
-    registry = _write_registry(tmp_path, Subject(name="bud"))
+    _write_registry(tmp_path, Subject(name="bud"))
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "annotations"
     _write_image(images_dir, "img_001")
@@ -72,19 +72,17 @@ def test_geometryless_annotation_roundtrips_and_marks_image_annotated(tmp_path):
     back = json_io.read_annotations(str(labels_dir / "img_001.json"))
     assert len(back) == 1 and back[0].subject == "bud" and back[0].geometry is None
 
-    id_map = subject_registry.assign_class_ids(registry, "bud")
-    coco = assemble_coco(labels_dir, images_dir, subject="bud", date=None, id_map=id_map)
-    # The image is annotated (it carries a subject annotation), so it is present as an image and is
-    # not collapsed to an empty negative; the geometry-less label just has no detection target.
-    assert [im["file_name"] for im in coco["images"]] == ["img_001.jpg"]
-    assert coco["annotations"] == []
+    # The image carries a subject annotation, so the admission counts it as annotated rather than
+    # as an empty one nobody confirmed; which geometries answer for a measurement is the loader's.
+    records, counts = admitted_documents(labels_dir, images_dir, subject="bud", date=None)
+    assert [record.member for record in records] == ["img_001"]
+    assert counts["annotated"] == 1
+    assert counts["skipped_unannotated"] == 0
+    assert counts["skipped_unconfirmed_empty"] == 0
 
 
-# (c) loader.num_classes == subject_registry.num_classes == len(assemble_coco categories), one map.
+# (c) loader.num_classes == subject_registry.num_classes, one map.
 def test_num_classes_agree_on_one_assign_class_ids_map(tmp_path):
-    from tcip_mcp.pipelines.data.datasets import build_dataset
-    from tcip_mcp.pipelines.data.label_queries import assemble_coco
-
     registry = _write_registry(tmp_path, Subject(name="bud"))
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "annotations"
@@ -97,11 +95,9 @@ def test_num_classes_agree_on_one_assign_class_ids_map(tmp_path):
             [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 640, 480)
 
     id_map = subject_registry.assign_class_ids(registry, "bud")
-    coco = assemble_coco(labels_dir, images_dir, subject="bud", date=None, id_map=id_map)
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="bud")
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
 
-    assert ds.num_classes == subject_registry.num_classes(registry, "bud") == len(coco["categories"])
+    assert ds.num_classes == subject_registry.num_classes(registry, "bud")
     assert len(id_map) == ds.num_classes == 1
 
 
@@ -130,7 +126,6 @@ def test_confirmed_negatives_thread_subject_and_refuse_when_unthreaded(tmp_path)
 def test_loader_filters_by_subject_and_geometry(tmp_path):
     import torch
 
-    from tcip_mcp.pipelines.data.datasets import build_dataset
 
     _write_registry(tmp_path, Subject(name="bud"), Subject(name="bush"))
     images_dir = tmp_path / "images"
@@ -146,8 +141,7 @@ def test_loader_filters_by_subject_and_geometry(tmp_path):
         ],
         640, 480)
 
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="bud")
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
     assert ds.num_classes == 1
     _img, target = ds[0]
     # Only the one legitimate bud box survives; the wrong-subject and geometry-less rows are gone.
@@ -312,12 +306,16 @@ def test_save_annotations_accepts_rings(tmp_path):
     assert ann3.geometry.rings == [[(1.0, 2.0), (3.0, 2.0), (3.0, 4.0)]]
 
 
-# (h) the direct-json and COCO loader paths agree: a geometry-less-only image is a target on neither,
-# so it is never trained as a fabricated zero-object negative (the two-paths-disagree measurement bug).
-def test_geometryless_only_image_is_not_a_trainable_stem_on_either_path(tmp_path):
-    from tcip_mcp.pipelines.data.label_queries import assemble_coco, trainable_stems
+# (h) a geometry-less-only image carries the subject and is admitted; the detection loader reads
+# no target from it and refuses it by name.
+def test_geometryless_only_image_is_refused_by_the_loader_that_reads_no_target_from_it(tmp_path):
+    """Never trained as a fabricated zero-object negative: admission asks whether the document
+    carries the subject, and the loader owns which geometries answer for its measurement."""
+    from tcip_mcp.pipelines.data.label_queries import admitted_documents
 
-    registry = _write_registry(tmp_path, Subject(name="bud"))
+    from tests._producer_fixtures import dataset_over
+
+    _write_registry(tmp_path, Subject(name="bud"))
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "annotations"
     for stem in ("boxed", "geomless"):
@@ -328,12 +326,15 @@ def test_geometryless_only_image_is_not_a_trainable_stem_on_either_path(tmp_path
     # geomless: a bud annotation with NO geometry (an image-level label, not a box).
     json_io.write_annotations(labels_dir / "geomless.json", [Annotation(subject="bud")], 640, 480)
 
-    id_map = subject_registry.assign_class_ids(registry, "bud")
-    coco = assemble_coco(labels_dir, images_dir, subject="bud", date=None, id_map=id_map)
-    stems_direct, _ = trainable_stems(labels_dir, images_dir, subject="bud", date=None)          # coco=None path
-    stems_coco, _ = trainable_stems(labels_dir, images_dir, subject="bud", date=None, coco=coco)  # COCO path
+    records, _ = admitted_documents(labels_dir, images_dir, subject="bud", date=None)
+    assert [record.member for record in records] == ["boxed", "geomless"]
 
-    assert stems_direct == stems_coco == ["boxed"]  # the two paths agree; geomless-only is dropped
+    with pytest.raises(ValueError, match="only in geometries a detection loader does not read"):
+        dataset_over("detection", images_dir, labels_dir, subject="bud")
+
+    # Admits valid work: the image whose document carries a box still trains.
+    ds = dataset_over("detection", images_dir, labels_dir, subject="bud", members=["boxed"])
+    assert [Path(s).stem for s in ds.stems] == ["boxed"]
 
 
 # (i) eval accumulates every per-image record into one COCOeval, so a subject must carry the same
@@ -360,7 +361,6 @@ def test_records_from_annotation_honors_a_global_name_id():
 # yields zero boxes (an all-empty training set). A miscased probe opens the file anyway on a
 # case-insensitive filesystem, so the match is made on the real on-disk name.
 def test_uppercase_extension_image_still_yields_boxes(tmp_path):
-    from tcip_mcp.pipelines.data.datasets import build_dataset
 
     _write_registry(tmp_path, Subject(name="bud"))
     images_dir = tmp_path / "images"
@@ -372,8 +372,7 @@ def test_uppercase_extension_image_still_yields_boxes(tmp_path):
         labels_dir / "IMG_1.json",
         [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 640, 480)
 
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="bud")
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
     assert ds.num_samples == 1
     _img, target = ds[0]
     assert target["boxes"].shape[0] == 1  # the bud box survived the COCO name match

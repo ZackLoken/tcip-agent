@@ -24,7 +24,7 @@ try:
 except ImportError:  # pragma: no cover - older shapely
     ShapelyError = Exception
 
-from tcip_annotation.state import Annotation, BBox, Point, Polygon
+from tcip_annotation.state import Annotation, BBox, Polygon, box_derivable, polygonal
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,7 @@ def _to_shapely(a: Annotation):
     """Convert an annotation's geometry to a Shapely polygon (or multipolygon) + area."""
     if isinstance(a.geometry, BBox):
         g = ShapelyPolygon(box_ring(a.geometry))
-    elif isinstance(a.geometry, Polygon):
+    elif polygonal(a.geometry):
         g = _rings_to_shapely(a.geometry.rings)
     else:  # pragma: no cover - callers filter geometry-less annotations out first
         g = ShapelyPolygon([])
@@ -157,7 +157,7 @@ def compute_matches(
     ``gt_idx`` / ``pred_idx`` index into ``gt`` / ``preds`` directly.
     """
     def _matchable(a: Annotation) -> bool:
-        return a.geometry is not None and not isinstance(a.geometry, Point)
+        return box_derivable(a.geometry)
 
     gt_items: list[tuple[int, str, Annotation]] = [
         (i, a.subject, a) for i, a in enumerate(gt) if _matchable(a)
