@@ -1377,7 +1377,7 @@ Path: `<dataset_root>/.tcip/state/image_status.json`.
 Writers: `set_image_status`,
 `packages/tcip-web/src/tcip_web/routes/subjects.py:334`; `set_image_status_bulk`,
 `routes/subjects.py:375`. A selection writes none: it lists the samples the admission
-(`trainable_stems`) already admitted, each by its own source and label path, so a confirmed
+(`label_queries.admit`) already admitted, each by its own source and label path, so a confirmed
 negative stays a fact about the dataset it was confirmed in and is never re-attributed to a
 side's own copy of it.
 
@@ -1614,9 +1614,9 @@ are listed here with the rest rather than taking numbers of their own.
   `_patch_experiment_config`, `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:33`:
   `_patch_experiment_config_tiling`,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:74`
-  (`def _patch_experiment_config_tiling(`), `_patch_experiment_config_id_map`,
+  (`def _patch_experiment_config_tiling(`), `_patch_experiment_config_scope`,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:92`
-  (`def _patch_experiment_config_id_map(`), and `_patch_experiment_config_split`,
+  (`def _patch_experiment_config_scope(`), and `_patch_experiment_config_split`,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:115`
   (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1558`
   (`def get_experiment(`), and `compare_experiments`, `experiments.py:1734`.
@@ -1647,22 +1647,25 @@ are listed here with the rest rather than taking numbers of their own.
   `packages/tcip-mcp/src/tcip_mcp/pipelines/data/split_construction.py:64`
   (`def persist_run_partition(`). Read by `read_run_partition`,
   `experiments.py:1911`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
-  both take the partition from. Every run, bound to a selection or not, records `labels_dirs`,
-  every label directory its own members live under: a bare stem names one image only within one
-  directory, so a later selection check narrows itself to the directory a calibration named
-  rather than to a capture date, and a run whose members span dates is checked the same way a
-  single-date one is. When the run bound a selection (`data.split.selection_dir`), this record's
-  `selection_binding` carries the binding's counts (never the selection's own sample list, which
-  lives in the `selection` record itself, see §26), a `members` block per label directory (that
-  directory's `train` and `val` stems, the group key each was drawn under, and its own
-  `label_digests`), and `redrawn_within_selection` when the run redrew train and val inside the
-  selection's own members. Beside `selection_binding`, never inside it, a top-level
-  `label_digests` carries the per-stem facts the count-shaped binding block deliberately
-  excludes: `at_split` (each sample's digest as the draw recorded it), `at_run` (the same
-  per-stem digests recomputed at bind time) and `selection_sha256` (the digest of the selection
-  the run bound to), so a calibration can name a label that moved between the draw and now
-  without the durable experiment config, a checkpoint's embedded config or a trial's resolved
-  config ever carrying a per-stem digest.
+  both take the partition from. Every run, bound to a selection or not, records its membership in
+  a `members` block per ground-truth scope and nowhere else: a bare member name means one image
+  only within one scope, so a later selection check narrows itself to the scope a calibration
+  named rather than to a capture date, and a run whose members span dates is checked the same way
+  a single-date one is. Each scope's block carries that scope's `train` and `val` members, the
+  group key each was drawn under (`group_key_map`), the source each one's pixels came from
+  (`sources`) and its own `label_digests`: `at_split` (each sample's digest as the draw recorded
+  it), `at_run` (the same digests recomputed at bind time) and `ground_truth` (the file that
+  answered for each member), so a calibration can name a label that moved between the draw and now, and
+  `freeze_selection` can compose the run's own samples out of this record alone, without the
+  durable experiment config, a checkpoint's embedded config or a trial's resolved config ever
+  carrying a per-member digest. A reader narrowing to no scope unions the blocks
+  (`split_construction.recorded_side`) rather than reading a flat list beside them. When the run
+  bound a selection (`data.split.selection_dir`), `selection_binding` carries the binding's counts
+  and `selection_sha256`, the digest of the selection it bound, recorded once for the run rather
+  than per scope (never the selection's own sample list, which lives in the `selection` record
+  itself, see §26), and `redrawn_within_selection` when the run redrew train and val inside the
+  selection's own members. A within-image `spatial_strip` split records `train` and `val` region identities and
+  its own `spatial` manifest instead, its members being regions rather than bare names.
 - `validations.jsonl` (`validations_key`, `experiments.py:299`, append-only): the claims earned against this
   run's evidence. Written only by the module-private `_append_validation`, `experiments.py:1116`
   (no public raw appender; the storage seam's generic append remains reachable and is a stated
@@ -1713,7 +1716,7 @@ Seam S30 ("split.json train/val membership"), verdict `both-sides-one-implementa
 `tests/test_block_calibration.py:120`. These tests call the real writer
 `persist_run_partition` and the real readers (`operating_point.py`'s disjointness check,
 `block_calibration.py`'s `resolve_block_calibration_records`) against the same file. Gap: nothing
-exercises a mismatch between `dataset_hash`/`dataset_id`/`dataset_fingerprint` values recorded by
+exercises a mismatch between the `dataset_id`/`dataset_fingerprint` values recorded by
 the writer and any downstream consumer keying off them. `selection_binding`, the block a run bound
 to a recorded `selection` carries here, is exercised by `tests/test_selection_binding.py`'s own
 writer/reader pair, not by this seam's tests.
@@ -2062,7 +2065,7 @@ every sample names its own paths, so one selection spans as many dates as the dr
 two dates holding a same-named image are two samples rather than one identity that has to be told
 apart from itself. Beside the samples the record carries `subject`, `attribute` (`null` when
 none), `id_map` (the `assign_class_ids` map the admission resolved), `seed`, `group_by` (the
-resolved policy), `dataset_fingerprint`, `admission_counts` (the summed `trainable_stems` counts;
+resolved policy), `dataset_fingerprint`, `admission_counts` (the summed admission counts;
 a frozen selection records `{}`, since freezing a training run's own drawn partition records no
 admission draw), `realized_ratios` and `origin`.
 
@@ -2088,7 +2091,7 @@ the rest.
 Readers: `selection.read_selection` (`selection.py:290`), the one reader a training or tuning
 run's `data.split.selection_dir` resolves through (`split_construction.auto_train_val`) and a
 selection-restricted calibration resolves through
-(`splits.resolve_selection_calibration_universe`), which refuses by name when the record is
+(`splits.selection_calibration_universe`), which refuses by name when the record is
 absent, undecodable, not a mapping, lists no samples, holds a sample missing any of
 `source`/`label`/`group`/`side`, names a side outside `selection.SIDES`, carries a malformed
 `rect`, or holds a partition whose sides cross. That last check is `refuse_crossing_sides`
@@ -2611,7 +2614,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the builder the reader resolves off `data.dataset_source` returns a Dataset the trainer's loaders accept.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/model_build.py:346` (`dataset_source = (config.get("data") or {}).get(DATASET_SOURCE_KEY)`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:1048` (`def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Dataset:`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:1079` (`def build_dataset(`).
 Phase 3 verdict: duplicated.
 
 ## S44. Model-contract smoke batch versus the trainer's real batch
