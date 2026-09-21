@@ -125,10 +125,14 @@ for general techniques only, never for a per-trait pipeline; the endpoint is a t
   deleting the mechanism would look like and what stops that; only a live consumer or an owner
   ruling stops it, never the code's current shape. A brief never scopes out a sibling of a
   mechanism the change deletes: if every instance cannot go, that is the stop rule, brought to the
-  owner, never a paragraph naming what was left. A caller that splits a value it already holds
-  whole (a path into a directory and a stem, a record into its fields) to call a function that
-  recomposes it has found a function whose parameters are the wrong shape: the function takes the
-  value, and the callers that genuinely hold only the parts are the ones to enumerate.
+  owner, never a paragraph naming what was left. When the shape a fact travels in
+  changes (a record gains a field, a value arrives whole where parts arrived before, a sample list
+  stands where a directory stood), the functions that read it change their parameters to the new
+  shape in the same change. A caller adapting a new-shape value to an old-shape parameter, by
+  splitting a path into a directory and a stem, listing a directory to rebuild a sample list it
+  already holds, or passing a config key where the record carries the value, keeps the old shape
+  alive at that call and leaves the signature claiming it is the real one. Enumerate those
+  callers; only a caller that genuinely holds the old shape keeps a parameter for it.
 - A test that guards a fix is observed failing without the fix. Say when you have seen it fail and
   say when you have not. Every admits-valid-work test constructs its input through the platform's
   own producer.
