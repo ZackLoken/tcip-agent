@@ -5,6 +5,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
 def test_pil_to_tensor_grayscale_and_multiband():
@@ -28,13 +29,11 @@ def test_load_image_grayscale_pil_and_npy_multiband(tmp_path):
 
 
 def test_build_dataset_grayscale_yields_one_channel(tmp_path):
-    from tcip_mcp.pipelines.data.datasets import build_dataset
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     Image.new("RGB", (16, 16)).save(images_dir / "a.png")
     (tmp_path / "labels.csv").write_text("stem,label\na,0\n")
-    ds = build_dataset("classification", images_dir=str(images_dir),
-                       csv_path=str(tmp_path / "labels.csv"), num_classes=2, num_channels=1)
+    ds = dataset_over("classification", str(images_dir), str(tmp_path / "labels.csv"), num_classes=2, num_channels=1)
     img, _ = ds[0]
     assert img.shape[0] == 1
 
@@ -43,7 +42,6 @@ def test_grayscale_classification_end_to_end(tmp_path):
     pytest.importorskip("torchvision")
     from torch.utils.data import DataLoader
 
-    from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import create_run
@@ -56,8 +54,7 @@ def test_grayscale_classification_end_to_end(tmp_path):
         rows.append(f"img{i},{i % 2}")
     (tmp_path / "labels.csv").write_text("\n".join(rows) + "\n")
 
-    ds = build_dataset("classification", images_dir=str(images_dir),
-                       csv_path=str(tmp_path / "labels.csv"), num_classes=2, num_channels=1)
+    ds = dataset_over("classification", str(images_dir), str(tmp_path / "labels.csv"), num_classes=2, num_channels=1)
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
     model_source = {"builder": "tests.bespoke_models:build_bespoke_classifier",
                     "builder_kwargs": {"num_classes": 2, "in_chans": 1},

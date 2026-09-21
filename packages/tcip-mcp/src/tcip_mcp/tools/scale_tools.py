@@ -174,7 +174,7 @@ def calibrate_physical_scale(
         return {"error": disagreement}
 
     from tcip_annotation import json_io
-    from tcip_annotation.state import Polygon
+    from tcip_annotation.state import polygonal
     from tcip_mcp.prediction_buckets import bucket_stems
 
     bucket_image_stems = bucket_stems(pred_dir)
@@ -214,7 +214,7 @@ def calibrate_physical_scale(
                 "reference image must carry exactly one."
             )}
         geometry = annotations[0].geometry
-        if not isinstance(geometry, Polygon):
+        if not polygonal(geometry):
             return {"error": (
                 f"{label_path}'s {reference_subject!r} annotation is a "
                 f"{type(geometry).__name__ if geometry is not None else 'None'}, not a Polygon/"

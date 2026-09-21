@@ -13,7 +13,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from tcip_annotation import BBox, Point, Polygon
+from tcip_annotation import BBox, Point
+from tcip_annotation.state import polygonal
 from tcip_annotation.json_io import (
     UnreadableLabelDocument,
     annotation_from_payload,
@@ -137,7 +138,7 @@ def _ann_dict(a: Annotation) -> dict:
     """
     out: dict = {"subject": a.subject, "attributes": dict(a.attributes)}
     geom = a.geometry
-    if isinstance(geom, Polygon):
+    if polygonal(geom):
         out["rings"] = [[list(pt) for pt in ring] for ring in geom.rings]
     elif isinstance(geom, BBox):
         out["bbox"] = [geom.x1, geom.y1, geom.x2, geom.y2]

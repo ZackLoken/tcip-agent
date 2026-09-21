@@ -182,12 +182,13 @@ def test_resolve_statement_registry_names_the_retired_file(tmp_path):
 
 
 def test_unmapped_classified_run_names_the_retired_file(tmp_path):
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.tools.inference_tools import unmapped_classified_run
 
     root = _dataset(tmp_path)
     _retire(root)
     msg = unmapped_classified_run(
-        {"subject": "bud", "attribute": "condition"}, None, images_dir=str(root / "images" / "2026-03-04"))
+        ClassScope("bud", "condition"), None, images_dir=str(root / "images" / "2026-03-04"))
     assert msg is not None
     assert "classes.json" in msg
     assert "Rename it to subjects.json" in msg

@@ -46,7 +46,7 @@ from tcip_annotation.json_io import (
     prediction_documents, read_annotations,
 )
 from tcip_annotation.review_engine import capture_label_baseline
-from tcip_annotation.state import Annotation
+from tcip_annotation.state import Annotation, polygonal
 from tcip_annotation.verdicts import VerdictAction
 from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status
 from tcip_mcp.pipelines.image_utils import (
@@ -261,7 +261,7 @@ def _ann_dict(a: Annotation) -> dict:
     """
     out: dict = {"subject": a.subject, "attributes": dict(a.attributes)}
     geom = a.geometry
-    if isinstance(geom, Polygon):
+    if polygonal(geom):
         out["rings"] = [[list(pt) for pt in ring] for ring in geom.rings]
     elif isinstance(geom, BBox):
         out["bbox"] = [geom.x1, geom.y1, geom.x2, geom.y2]

@@ -85,9 +85,11 @@ class TrainContext:
         return build_model(self.config)
 
     def _contract_dims(self, **overrides: Any) -> dict:
+        from tcip_mcp.pipelines.data.selection import ClassScope
         from tcip_mcp.pipelines.model_build import resolve_contract_dims
 
-        return {**resolve_contract_dims(self.config, self.task), **overrides}
+        scope = ClassScope.recorded_in(self.config.get("data") or {})
+        return {**resolve_contract_dims(self.config, self.task, scope=scope), **overrides}
 
     def check_contract(self, model: Any = None, **overrides: Any) -> dict:
         """Run the measurement-boundary contract on ``model`` (built if omitted) at the run's

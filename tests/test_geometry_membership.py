@@ -28,7 +28,7 @@ pytest.importorskip("torchvision")
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
-    auto_train_val, persist_run_partition,
+    auto_train_val, persist_run_partition, recorded_side,
 )
 
 IMG = 64
@@ -114,11 +114,17 @@ def _membership(ds) -> set[str]:
     return {ds.member_stem_of(key) for key in keys}
 
 
-def _persisted(experiment_id: str, data_cfg: dict, train_ds, val_ds, partition) -> dict:
+def _persisted(experiment_id: str, data_cfg: dict, _train_ds, _val_ds, partition) -> dict:
+    """The record one ``auto_train_val`` answer persists, read back through the one reader.
+
+    Takes the loaders positionally so a caller can splat ``auto_train_val``'s own answer, and
+    hands the writer only the partition: the record's members come from the producer, never from
+    a loader's own keys.
+    """
     from tcip_mcp.experiments import create_experiment, read_run_partition
 
     create_experiment(experiment_id, {"data": data_cfg})
-    persist_run_partition(experiment_id, train_ds, val_ds, data_cfg, partition=partition)
+    persist_run_partition(experiment_id, data_cfg, partition=partition)
     return read_run_partition(experiment_id)
 
 
@@ -134,43 +140,8 @@ def test_the_drawn_route_loaders_name_their_own_samples(tmp_path: Path, task: st
     assert val_ds is not None
     assert _membership(train_ds).isdisjoint(_membership(val_ds))
     assert _membership(train_ds) | _membership(val_ds) == set(stems)
-    assert partition["train"] == sorted(_membership(train_ds))
+    assert recorded_side(partition, "train") == sorted(_membership(train_ds))
     _one_target(train_ds, task)
-
-
-@pytest.mark.parametrize("task", GEOMETRY_TASKS)
-def test_the_explicit_validation_route_partitions_through_the_producer(tmp_path: Path, task: str):
-    """Both sides are the producer's own samples, and the record says which directory each
-    member's ground truth lives under rather than leaving the validation side unaccounted for."""
-    train_stems, val_stems = ["a_0_0", "b_0_0"], ["v_0_0", "w_0_0"]
-    images_dir, labels_dir = _labeled(tmp_path / "train_ds", train_stems, task=task)
-    val_images, val_labels = _labeled(tmp_path / "val_ds", val_stems, task=task)
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "subject": SUBJECT, "val_images_dir": str(val_images),
-                "val_labels_dir": str(val_labels)}
-
-    train_ds, val_ds, partition = auto_train_val(task, data_cfg, None)
-
-    assert val_ds is not None
-    assert _membership(train_ds) == set(train_stems)
-    assert _membership(val_ds) == set(val_stems)
-    # The validation side reads the documents under the directory the caller named, not the
-    # train directory's: each sample states its own.
-    assert {str(Path(p).parent) for p in val_ds.sample_ground_truth.values()} == {
-        str(val_labels)}
-    _one_target(val_ds, task)
-
-    record = _persisted(f"exp-explicit-val-{task}", data_cfg, train_ds, val_ds, partition)
-    # The route drew nothing, so every member is its own group: the "stem" policy, by its own
-    # name, not a marker saying which route wrote the record.
-    assert record["group_by"] == "stem"
-    assert sorted(record["labels_dirs"]) == sorted({str(labels_dir), str(val_labels)})
-    assert record["members"][str(labels_dir)]["train"] == sorted(train_stems)
-    assert record["members"][str(labels_dir)]["val"] == []
-    assert record["members"][str(val_labels)]["val"] == sorted(val_stems)
-    # What a reader needs to tell this route apart is in the record itself: the validation side
-    # lives under a scope holding none of this run's training members.
-    assert record["members"][str(val_labels)]["train"] == []
 
 
 @pytest.mark.parametrize("task", GEOMETRY_TASKS)
@@ -184,38 +155,11 @@ def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(tmp_path:
 
     assert val_ds is None
     assert _membership(train_ds) == set(stems)
-    assert partition["train"] == sorted(stems) and partition["val"] == []
+    assert recorded_side(partition, "train") == sorted(stems)
+    assert recorded_side(partition, "val") == []
     _one_target(train_ds, task)
     record = _persisted(f"exp-no-auto-val-{task}", data_cfg, train_ds, val_ds, partition)
     assert record["members"][str(labels_dir)]["train"] == sorted(stems)
-
-
-@pytest.mark.parametrize("task", GEOMETRY_TASKS)
-def test_a_validation_directory_that_admits_nothing_trains_without_validation_and_says_so(
-    tmp_path: Path, caplog, task: str,
-):
-    """Admission failing over the validation directory degrades, naming the directory and what it
-    found, and the training side is still every sample the run's own admission held."""
-    stems = ["a_0_0", "b_0_0"]
-    images_dir, labels_dir = _labeled(tmp_path / "ds", stems, task=task)
-    val_images = tmp_path / "val_images"
-    val_labels = tmp_path / "val_labels"
-    val_labels.mkdir(parents=True, exist_ok=True)
-    _image(val_images / "unlabelled.png")  # an image nobody annotated or confirmed
-
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "subject": SUBJECT, "val_images_dir": str(val_images),
-                "val_labels_dir": str(val_labels)}
-
-    with caplog.at_level(logging.WARNING, logger=SPLIT_LOGGER):
-        train_ds, val_ds, partition = auto_train_val(task, data_cfg, None)
-
-    assert val_ds is None
-    assert _membership(train_ds) == set(stems)
-    assert partition["val"] == []
-    assert str(val_images) in caplog.text
-    assert "no trainable samples" in caplog.text
-    assert "training without validation" in caplog.text
 
 
 @pytest.mark.parametrize("task", GEOMETRY_TASKS)
@@ -234,7 +178,7 @@ def test_a_starved_draw_trains_without_validation_and_says_so(tmp_path: Path, ca
 
     assert val_ds is None
     assert _membership(train_ds) == set(stems)
-    assert partition["val"] == []
+    assert recorded_side(partition, "val") == []
     assert "no grouping policy could populate both sides" in caplog.text
     assert "training without validation" in caplog.text
 
@@ -264,31 +208,30 @@ def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: 
     assert set(manifest["train_identities"]).isdisjoint(manifest["val_identities"])
 
 
-def test_the_explicit_and_drawn_routes_record_one_directory_the_same_way(tmp_path: Path):
+def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(tmp_path: Path):
     """Two producers of one fact, compared against each other rather than against a fixture.
 
-    The same training directory is admitted twice, once by a run whose validation came from a
-    second directory and once by a run that drew its own split over it. The two runs partition it
-    differently, which is what each route is for; what they may not do is disagree about which
-    members that directory holds, where it is, or what each member's ground truth digests to now.
+    The same training directory is admitted twice, once by a run training on every admitted sample
+    and once by a run that drew its own split over it. The two runs partition it differently,
+    which is what each route is for; what they may not do is disagree about which members that
+    directory holds, where it is, or what each member's ground truth digests to now.
     """
-    train_stems, val_stems = ["a_0_0", "b_0_0", "c_0_0", "d_0_0"], ["v_0_0", "w_0_0"]
-    images_dir, labels_dir = _labeled(tmp_path / "train_ds", train_stems)
-    val_images, val_labels = _labeled(tmp_path / "val_ds", val_stems)
+    stems = ["a_0_0", "b_0_0", "c_0_0", "d_0_0"]
+    images_dir, labels_dir = _labeled(tmp_path / "train_ds", stems)
 
-    explicit_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                    "subject": SUBJECT, "val_images_dir": str(val_images),
-                    "val_labels_dir": str(val_labels)}
-    explicit = _persisted("exp-explicit", explicit_cfg,
-                          *auto_train_val("detection", explicit_cfg, None))
+    whole_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                 "subject": SUBJECT, "auto_val": False}
+    whole = _persisted("exp-whole", whole_cfg,
+                       *auto_train_val("detection", whole_cfg, None))
 
     drawn_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                  "subject": SUBJECT, "auto_val": True, "split": {"val_ratio": 0.5, "seed": 1}}
     drawn = _persisted("exp-drawn", drawn_cfg, *auto_train_val("detection", drawn_cfg, None))
 
     scope = str(labels_dir)
-    assert scope in explicit["labels_dirs"] and drawn["labels_dirs"] == [scope]
-    here, there = explicit["members"][scope], drawn["members"][scope]
+    assert sorted(whole["members"]) == sorted(drawn["members"]) == [scope]
+    here, there = whole["members"][scope], drawn["members"][scope]
     assert sorted(here["train"] + here["val"]) == sorted(there["train"] + there["val"])
     assert sorted(here["group_key_map"]) == sorted(there["group_key_map"])
     assert here["label_digests"]["at_run"] == there["label_digests"]["at_run"]
+    assert here["sources"] == there["sources"]

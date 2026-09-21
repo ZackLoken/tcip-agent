@@ -1,76 +1,42 @@
-"""The label-store and registry query library: reads a dataset's per-image JSON or assembled
-COCO labels, its ``subjects.json`` registry, and its confirmed-negative image-status store, and
-assembles them into the boxes/labels/COCO shapes the dataset classes in ``datasets.py`` and the
-outside-layer tools (calibration, evaluation, inference, training) consume. Holds no ``Dataset``
-subclass and no tensor conversion; those stay in ``datasets.py``.
+"""The producer: the one place a directory of ground truth or a ground-truth table becomes the
+samples a run trains, evaluates or calibrates over.
+
+It reads a dataset's per-image label documents, its ``<stem>.png`` masks or its table of rows,
+its ``subjects.json`` registry and its confirmed-negative image-status store, admits by the shape
+the ground truth itself carries (:func:`ground_truth_shape`), and answers an :class:`Admission`
+whose samples the dataset classes in ``datasets.py`` and the outside-layer tools (calibration,
+evaluation, inference, training) build from. Holds no ``Dataset`` subclass and no tensor
+conversion; those stay in ``datasets.py``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tcip_mcp.pipelines.image_utils import list_logical_images, logical_image_name
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.data.selection import Sample
+    from tcip_mcp.pipelines.data.selection import ClassScope, Sample
 
 
-def image_name_map(images_dir) -> dict[str, str]:
-    """``{stem: real on-disk filename}`` from one directory listing (``list_logical_images``).
-
-    A ``BandGroupRef``'s "name" is its own ``.bandgroup`` manifest's filename, the file that
-    stands in for the grouped capture everywhere a name is matched against a store
-    (``image_status.json``, a COCO ``file_name``), never one of its sibling band files.
-    """
-    return {stem: logical_image_name(src) for stem, src in list_logical_images(images_dir).items()}
-
-
-def authored_frame(label_path, coco=None, stem: str = "",
-                    file_name: str = "") -> tuple[int, int] | None:
-    """``(width, height)`` the labels record, or ``None`` when they record none.
+def authored_frame(label_path) -> tuple[int, int] | None:
+    """``(width, height)`` one sample's own label document records, or ``None`` when it records
+    none.
 
     The frame the boxes were drawn in, straight from the annotation a human produced, the only
-    reference that can catch a reader disagreeing with the authoring tool. ``coco`` is the
-    assembled document when one answers for this sample, read by its own image entry; without one
-    the ground truth is a document per image and ``label_path`` is this sample's own, so a caller
-    reading recorded samples names each one's document rather than reconstructing it from a
-    directory and a stem. The per-image branch reads through
-    :func:`~tcip_mcp.pipelines.data.splits.label_document_extent`, the same function a split
-    derives its own frame from, so the two agree by construction rather than each parsing the
-    label file on its own; a present, unreadable label raises
+    reference that can catch a reader disagreeing with the authoring tool. ``label_path`` is the
+    sample's own document, the path it recorded, so nothing reconstructs one from a directory and
+    a stem. Reads through :func:`~tcip_mcp.pipelines.data.splits.label_document_extent`, the same
+    function a split derives its own frame from, so the two agree by construction rather than each
+    parsing the label file on its own; a present, unreadable label raises
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than reading as no frame.
     """
-    if coco is not None:
-        images = coco.get("images", []) if isinstance(coco, dict) else []
-        for entry in images:
-            if entry.get("file_name") in (file_name, stem) or Path(
-                    str(entry.get("file_name", ""))).stem == stem:
-                w, h = int(entry.get("width", 0) or 0), int(entry.get("height", 0) or 0)
-                return (w, h) if w > 0 and h > 0 else None
-        return None
     from tcip_mcp.pipelines.data.splits import label_document_extent
 
     return label_document_extent(label_path)
-
-
-def targets_registry_derived(data_cfg: dict) -> bool:
-    """Whether a run's targets are registry-derived: an image folder plus ``subjects.json``, the
-    one shape a run's own recorded ``id_map`` can be trusted to have come from this
-    ``(labels_dir, subject, attribute)`` triple.
-
-    ``False`` for a run trained from a bespoke ``dataset_source``: that builder owns its class
-    space entirely, so its targets are not guaranteed to come from this triple at all. Every other
-    geometry run reads the per-image label documents beside a registry, whether its loader reads
-    them one at a time or through the dataset-level COCO :func:`assemble_coco` builds from them.
-    The one predicate ``_resolve_run_id_map`` (``pipelines/training/subprocess_worker.py``)
-    records no map by, extracted here so the inference-side door remedy
-    (``unmapped_classified_run``) reads the identical rule rather than a second copy of it.
-    """
-    from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
-
-    return not data_cfg.get(DATASET_SOURCE_KEY)
 
 
 def resolved_subjects_path(dataset_dir) -> Path | None:
@@ -91,8 +57,9 @@ def resolved_subjects_path(dataset_dir) -> Path | None:
 def resolve_registry_id_map(labels_dir, subject: str | None, attribute: str | None):
     """``(registry, id_map)`` for a training scope from the dataset's ``subjects.json``.
 
-    The single name→id derivation is :func:`subject_registry.assign_class_ids`; the loader below,
-    ``assemble_coco``, and the contract dims all read *this* map, never a second one. A plain
+    The single name→id derivation is :func:`subject_registry.assign_class_ids`: the admission
+    below resolves it once and every reader downstream, the loaders and the contract dims among
+    them, reads the map it recorded rather than a second resolution of its own. A plain
     single-class detector (``attribute`` is ``None``) needs no registry file, the subject *is* the
     class, so it is derived from a synthesized single-subject registry through the same
     ``assign_class_ids``, not a local ``{subject: 0}`` literal. Attribute classification needs the
@@ -125,29 +92,12 @@ def resolve_registry_id_map(labels_dir, subject: str | None, attribute: str | No
     return registry, subject_registry.assign_class_ids(registry, subject, attribute)
 
 
-def coco_det_targets(coco, file_name):
-    """Pixel-xyxy boxes + 1-indexed labels for one image from an assembled COCO.
-
-    ``category_id`` is the run's 0-indexed id (from ``to_coco_dataset`` over the run's id_map); +1
-    applies the detector's background offset. The loader owns the +1, nothing on disk.
-    """
-    from tcip_annotation import format_io
-    anns, _, _ = format_io._coco_image_annotations(coco, file_name=file_name)
-    boxes, labels = [], []
-    for a in anns:
-        bb = a.get("bbox")
-        if not (isinstance(bb, list) and len(bb) == 4):
-            continue
-        x, y, bw, bh = (float(v) for v in bb)
-        boxes.append([x, y, x + bw, y + bh])
-        labels.append(int(a.get("category_id", 0)) + 1)
-    return boxes, labels
-
-
 def json_det_targets(path, subject, attribute, id_map):
     """``(boxes, labels, n_unlabeled)`` for one image from the name-based per-image JSON.
 
-    Filters to ``subject`` + a box-derivable geometry, then maps each kept annotation to its
+    Filters to ``subject`` + a box-derivable geometry
+    (:func:`~tcip_annotation.state.box_derivable`, the one statement of that rule), then maps each
+    kept annotation to its
     0-indexed id via ``id_map`` (the single ``assign_class_ids`` map), +1 for background. An
     annotation the registry cannot decode raises, a real label read as nothing is a measurement bug.
 
@@ -161,10 +111,10 @@ def json_det_targets(path, subject, attribute, id_map):
     A caller that builds per-image records fresh each call (delivery evaluation, operating-point
     calibration) drops the record as it builds it; a caller bound to a fixed per-image dataset
     length (a ``Dataset.__getitem__``, which cannot drop a sample per call) applies the same
-    verdict once, up front, in ``trainable_stems``' ``skipped_incomplete_attribute`` partition.
+    verdict once, up front, in ``admitted_documents``' ``skipped_incomplete_attribute`` partition.
     """
     from tcip_annotation import json_io
-    from tcip_annotation.state import Point, bbox_of
+    from tcip_annotation.state import bbox_of, box_derivable
 
     boxes, labels = [], []
     n_unlabeled = 0
@@ -175,83 +125,103 @@ def json_det_targets(path, subject, attribute, id_map):
         if cid == json_io.UNLABELED:
             n_unlabeled += 1
             continue
-        if cid is None or a.geometry is None or isinstance(a.geometry, Point):
+        if cid is None:
             continue
-        # target_class_id returns UNLABELED (a str) only for the case handled above; a real
-        # target reaching here always carries its own int class id.
+        # target_class_id is the one decision: it answers None for another subject and for a
+        # geometry no box can be read from, so these assert what it decided rather than re-ask.
         assert isinstance(cid, int)
+        assert box_derivable(a.geometry), (
+            "target_class_id already returned None for a geometry no box can be read from"
+        )
         box = bbox_of(a.geometry)
         boxes.append([box.x1, box.y1, box.x2, box.y2])
         labels.append(cid + 1)
     return boxes, labels, n_unlabeled
 
 
-def first_labels_json(labels_dir) -> Path | None:
-    """The first ``.json`` file in ``labels_dir``, sorted: the file :func:`dir_label_format`
-    decides this directory's shape from, exposed separately so a refusal naming a dataset-level
-    COCO export can point at the actual file, not just the directory.
+def ground_truth_shape(ground_truth) -> str:
+    """Which of :data:`~tcip_mcp.pipelines.data.selection.GROUND_TRUTH_SHAPES` lives at
+    ``ground_truth``: the one sniff the platform makes, over the place a config names.
 
-    Raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument` when that first file is
-    present but will not read: trying the next file instead would read a directory as unlabeled
-    that in fact holds a document nobody can make sense of, the opposite of what "the first" here
-    is supposed to name. Reads through the unchecked ``load_json_document``, not
-    ``load_label_document``: this directory's shape (json or a dataset-level COCO export) is not
-    yet decided here, only ``dir_label_format``'s own ``detect_json_format`` call decides it, so
-    this precondition read must not apply the per-image version ceiling to a file that may turn
-    out COCO-shaped.
+    What each name it finds there means is
+    :func:`~tcip_mcp.pipelines.data.selection.shape_of`, the one rule, asked of the place itself
+    and of what the place holds; this function's own job is which names to ask about.
+
+    A ``.csv`` is a table, one row per sample. A directory holding per-image label documents is
+    the document shape and one holding ``<stem>.png`` rasters the mask shape. A dataset-level COCO
+    document anywhere among those documents refuses by name, naming the import door as the
+    remedy: training reads one ground-truth record per sample, and an assembled export shadowing
+    the per-image documents beside it would train on a source nobody chose. Every document the
+    directory admits is classified, not only the first, so which name an export happens to sort
+    under decides nothing. A directory holding neither documents nor masks reads as the document
+    shape, whose own admission then names what is missing image by image.
+
+    A present, unreadable document raises
+    :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than reading as no ground
+    truth: an unreadable document is not the same fact as an absent one.
     """
-    from tcip_annotation.json_io import load_json_document, prediction_documents
+    from tcip_annotation.json_io import prediction_documents
+    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK, TABLE, shape_of
 
-    candidates = prediction_documents(labels_dir)
-    if not candidates:
-        return None
-    jp = candidates[0]
-    load_json_document(jp)
-    return jp
+    path = Path(ground_truth)
+    if shape_of(str(path), None) == TABLE:
+        if not path.is_file():
+            raise ValueError(
+                f"{path} names a ground-truth table that does not exist; name where this run's "
+                "ground truth actually lives.")
+        return TABLE
+    if not path.is_dir():
+        raise ValueError(
+            f"{ground_truth!r} is neither a .csv table nor a directory of ground truth: a run "
+            "reads one label document per image, one <stem>.png mask per image, or one row of a "
+            "table, and this names none of them.")
+    documents = prediction_documents(path)
+    if documents:
+        assembled = sorted(str(d) for d in documents if _is_assembled_coco(d))
+        if assembled:
+            raise ValueError(
+                f"{path} holds {len(assembled)} dataset-level COCO document(s) ({assembled[:5]}): "
+                f"training reads one ground-truth record per image, so if the per-image documents "
+                f"here are the real label source, move the export out of {path}; if the export is "
+                "the label source, import it into per-image documents first.")
+        return DOCUMENT
+    held = {shape_of(str(p), None) for p in path.iterdir() if p.is_file()}
+    return MASK if MASK in held else DOCUMENT
 
 
-def dir_label_format(labels_dir) -> str | None:
-    """``"json"``/``"coco"`` if this dir's first ``.json`` file declares that shape, else
-    ``None``.
+def _is_assembled_coco(document: Path) -> bool:
+    """Whether one candidate document is a dataset-level COCO export rather than a per-image
+    label document.
 
-    Used to route a JSON label store onto the COCO training path. Decides the first file's shape
-    through ``format_io``'s own per-file detection (COCO markers checked first, the same priority
-    a dataset-level COCO reads with everywhere else), rather than a second, disagreeing
-    ``ANNOTATIONS_KEY``-only test; the old ``objects`` schema, which that detection raises on, is
-    treated the same as any other unrecognized shape here: ``None``, never a raise. A ``.json``
-    that is not one of these shapes is not claimed, an unrecognized store must not be read as an
-    all-empty one. A present, unreadable first file raises
-    :class:`~tcip_annotation.json_io.UnreadableLabelDocument`, from :func:`first_labels_json` or
-    from this function's own re-check of the same file, uncaught here: an unreadable document is
-    not the same fact as an unrecognized one.
+    Through ``format_io``'s own classification, the one place a document's shape is read from its
+    keys. An unrecognized shape is not an export (the admission below reports what it finds in
+    it), and the old ``objects`` schema, which that classification raises on, is not one either.
     """
     from tcip_annotation.format_io import detect_json_format
 
-    jp = first_labels_json(labels_dir)
-    if jp is None:
-        return None
     try:
-        return detect_json_format(jp)
+        return detect_json_format(document) == "coco"
     except ValueError:
-        return None
+        return False
 
 
 def admitted_records(
-    records: Mapping[str, tuple[str, str | None]], *, labels_dir, subject: str | None = None,
-    date, coco: dict | None = None, attribute: str | None = None,
+    records: Mapping[str, tuple[str | None, str | None]], *, labels_dir,
+    subject: str | None = None, date, attribute: str | None = None,
     id_map: dict[str, int] | None = None, contradicted_out: set[str] | None = None,
 ) -> tuple[list[str], dict[str, int]]:
     """The keys of ``records`` the label store accounts for, plus the partition that produced them.
 
     ``records`` maps a caller's own key to ``(label document path, logical image name)``, the two
     facts every admission verdict below rests on; a ``None`` image name is a key with no image at
-    all. The one admission, so a caller enumerating a directory (:func:`trainable_stems`) and a
-    caller holding samples that each name their own two paths
-    (:func:`refuse_inadmissible_samples`) reach the same verdict from one implementation rather
-    than one of them rebuilding the other's paths from a stem.
+    all and a ``None`` document is a key the label store holds nothing for. The one admission, so
+    a caller enumerating a directory (:func:`admitted_documents`) and a caller holding samples
+    that each name their own two paths (:func:`refuse_inadmissible_samples`) reach the same
+    verdict from one implementation rather than one of them rebuilding the other's paths from a
+    stem.
 
-    See :func:`trainable_stems` for what each count means and why the branches order the way they
-    do; this is that function's body with the directory listing lifted out of it.
+    See :func:`admitted_documents` for what each count means and why the branches order the way
+    they do; this is that function's body with the directory listing lifted out of it.
 
     The same pairs answer the confirmed-negative read's own contradiction check, so a positive
     labelled under a name of its own contradicts a stale negative recorded for its image rather
@@ -265,7 +235,7 @@ def admitted_records(
                                          label_paths={
                                              image_name: label_path
                                              for label_path, image_name in records.values()
-                                             if image_name is not None
+                                             if image_name is not None and label_path is not None
                                          })
     if contradicted_out is not None:
         contradicted_out.update(contradicted)
@@ -273,22 +243,11 @@ def admitted_records(
               "skipped_unconfirmed_empty": 0, "skipped_incomplete_attribute": 0,
               "quarantined_stale_definition": 0}
 
-    coco_names: set[str] | None = None
-    coco_annotated: set[str] = set()
     incomplete_names: set[str] = set()
-    if coco is not None:
-        # assemble_coco already applied this rail to build ``images``; intersecting with it *is*
-        # the rail, so the two can never disagree about which samples exist.
-        by_id = {e.get("id"): str(e.get("file_name", "")) for e in coco.get("images", [])}
-        coco_names = set(by_id.values())
-        coco_annotated = {by_id.get(a.get("image_id"), "") for a in coco.get("annotations", [])}
-        # Read from to_coco_dataset's own record, never re-derived: an absence from ``images`` is
-        # otherwise indistinguishable from an empty label nobody confirmed.
-        incomplete_names = {str(n) for n in coco.get("excluded_incomplete_attribute", [])}
-    elif attribute is not None and id_map is not None:
-        # Direct-JSON path: the same rail, through the same reader the loader uses.
+    if attribute is not None and id_map is not None:
+        # The attribute-completeness rail, through the same reader the loader uses.
         for label_path, image_name in records.values():
-            if image_name is None or not Path(label_path).is_file():
+            if image_name is None or label_path is None or not Path(label_path).is_file():
                 continue
             _boxes, _labels, n_unlabeled = json_det_targets(
                 label_path, subject, attribute, id_map)
@@ -297,7 +256,7 @@ def admitted_records(
 
     keep: list[str] = []
     for key, (label_path, image_name) in records.items():
-        if image_name is None:
+        if image_name is None or label_path is None:
             counts["skipped_unannotated"] += 1
             continue
         if image_name in incomplete_names:
@@ -305,39 +264,12 @@ def admitted_records(
             # never for whichever category its absence downstream happens to resemble.
             counts["skipped_incomplete_attribute"] += 1
             continue
-        if coco_names is not None:
-            if image_name not in coco_names:
-                # assemble_coco already dropped it, but not why: check quarantine here too, or a
-                # stale confirmation reads as "nobody ever looked" instead of "looked, but stale".
-                if image_name in quarantined:
-                    counts["quarantined_stale_definition"] += 1
-                    continue
-                # "Annotate this" and "confirm this empty one" are different jobs.
-                has_record, _ = _label_record_state(label_path, subject)
-                counts["skipped_unconfirmed_empty" if has_record
-                       else "skipped_unannotated"] += 1
-            elif image_name in quarantined and image_name not in contradicted:
-                # A stale-stamped complete or negative is quarantined even with real content,
-                # unless that content also contradicts a stored negative claim outright.
-                counts["quarantined_stale_definition"] += 1
-            elif image_name in coco_annotated:
-                keep.append(key)
-                counts["annotated"] += 1
-            elif image_name in negatives:
-                # Re-checked against the store, never inferred from the document's own silence.
-                keep.append(key)
-                counts["confirmed_negative"] += 1
-            elif image_name in quarantined:
-                counts["quarantined_stale_definition"] += 1
-            else:
-                counts["skipped_unconfirmed_empty"] += 1
-            continue
-        has_record, has_objects = _label_record_state(label_path, subject)
+        has_record, holds_subject = _label_record_state(label_path, subject)
         if not has_record:
             counts["skipped_unannotated"] += 1
         elif image_name in quarantined and image_name not in contradicted:
             counts["quarantined_stale_definition"] += 1
-        elif has_objects:
+        elif holds_subject:
             keep.append(key)
             counts["annotated"] += 1
         elif image_name in negatives:
@@ -350,19 +282,24 @@ def admitted_records(
     return keep, counts
 
 
-def trainable_stems(
-    labels_dir, images_dir, stems=None, *, subject: str | None = None, date,
-    coco: dict | None = None,
+def admitted_documents(
+    labels_dir, images_dir, members=None, *, subject: str | None = None, date,
     attribute: str | None = None, id_map: dict[str, int] | None = None,
     contradicted_out: set[str] | None = None,
-) -> tuple[list[str], dict[str, int]]:
-    """The stems that may train, plus the partition that produced them.
+) -> tuple[list[Admitted], dict[str, int]]:
+    """The members a directory of per-image label documents admits, resolved, plus the partition
+    that produced them.
 
     A sample is admitted only when the label store actually accounts for it *for this subject*:
 
-    - it has ≥1 annotation of ``subject``, or
+    - its document carries ≥1 annotation of ``subject``, whatever geometry that annotation has,
+      or
     - it has none and a human marked that image negative for ``subject``
       (``confirmed_negative_names``, the Complete in ``.tcip/state/image_status.json``).
+
+    Which geometries a run can actually read is the selected loader's own question, asked there:
+    a document carrying the subject only in a geometry that loader does not read is refused by it
+    by name, never admitted here as though the image were empty.
 
     An image with no label file, or an empty label file nobody confirmed, is unannotated, not a
     negative.
@@ -393,13 +330,11 @@ def trainable_stems(
     for a caller to surface as its own warning: the exclusion here is silent about admission only,
     never about the disagreement.
 
-    A stale-stamped *complete* confirmation is quarantined ahead of the two annotated branches
-    below (``coco_annotated`` and ``has_objects``), never admitted by its real content the way an
+    A stale-stamped *complete* confirmation is quarantined ahead of the ``has_objects`` branch
+    below, never admitted by its real content the way an
     unconfirmed image with the same content would be: a human's assertion under a since-changed
     schema is exactly what this count exists to hold back, whether or not the label file happens
-    to carry boxes. Two asymmetries follow from this and stay unresolved by design: a stale
-    finished status with no label file at all counts the quarantine first on the COCO path but
-    ``skipped_unannotated`` first on the direct-JSON path (see the branches below); and a
+    to carry boxes. One asymmetry follows and stays unresolved by design: a
     selection's ``calibration`` members are re-admitted by the door that builds a loader over them
     (``evaluate_model``, through :func:`refuse_inadmissible_samples`), while a door that only
     resolves an operating point over them measures a stale finished image as it always has.
@@ -410,28 +345,35 @@ def trainable_stems(
     would leave its real, unlabelled objects to train as background). It lives here, in the one
     partition that already decides admission, rather than as a second filter over this function's
     output: a filter downstream cannot record *why* a stem left, and applying the rail there
-    instead corrupts these counts outright. Both label paths reach the same verdict from one
-    implementation:
-    the COCO path reads the ``excluded_incomplete_attribute`` names ``to_coco_dataset`` already
-    computed during assembly (never re-deriving them, and never mistaking that absence for
-    "empty label file nobody confirmed"), and the direct-JSON path applies the rail through
+    instead corrupts these counts outright. The rail is applied through
     ``json_det_targets``, the same reader the loader itself uses. ``attribute``/``id_map`` unset
     (every non-attribute run) applies no such rail.
 
     The verdicts themselves are :func:`admitted_records`; this is its directory-shaped caller,
-    pairing each candidate stem with its label document under ``labels_dir`` and the real on-disk
-    image name the listing holds for it.
+    pairing each candidate stem with the document that directory actually holds for it and the
+    real on-disk image name the listing holds for it. A stem the directory holds no document for
+    is paired with ``None``: nothing constructs a candidate path beside an image, so a file whose
+    name is reserved for a bucket's own provenance stamp is never read as that image's label.
     """
-    from tcip_mcp.dataset_layout import label_filename
+    from tcip_annotation.json_io import prediction_documents
+    from tcip_mcp.pipelines.image_utils import refuse_incomplete_band_group, source_path_of
 
-    names = image_name_map(images_dir)
-    candidates = list(stems) if stems is not None else sorted(names)
-    labels_p = Path(labels_dir)
-    return admitted_records(
-        {stem: (str(labels_p / label_filename(stem)), names.get(stem)) for stem in candidates},
-        labels_dir=labels_dir, subject=subject, date=date, coco=coco,
+    sources = list_logical_images(images_dir)
+    documents = {p.stem: p for p in prediction_documents(labels_dir)}
+    candidates = list(members) if members is not None else sorted(sources)
+    keep, counts = admitted_records(
+        {stem: (str(documents[stem]) if stem in documents else None,
+                logical_image_name(sources[stem]) if stem in sources else None)
+         for stem in candidates},
+        labels_dir=labels_dir, subject=subject, date=date,
         attribute=attribute, id_map=id_map, contradicted_out=contradicted_out,
     )
+    return [
+        Admitted(member=stem,
+                 source=source_path_of(refuse_incomplete_band_group(sources[stem])),
+                 ground_truth=str(documents[stem]))
+        for stem in keep
+    ], counts
 
 
 def admission_date(labels_dir) -> str | None:
@@ -441,110 +383,290 @@ def admission_date(labels_dir) -> str | None:
     :func:`~tcip_mcp.dataset_layout.annotation_date`, the declared inverse of the
     ``annotations/<date>/`` layout: pointing a producer at one of those directories is how a
     caller states which date it means, and a tree that is not one of them answers ``None`` rather
-    than a segment its path happens to spell. The one resolution, so the directory a loader
-    admits from and the sample a producer records read one bucket rather than two keys that can
-    disagree.
+    than a segment its path happens to spell. The one resolution, so the directory an admission
+    reads and the sample it records name one bucket rather than two keys that can disagree.
     """
     from tcip_mcp.dataset_layout import annotation_date
 
     return annotation_date(labels_dir)
 
 
-def directory_samples(
-    assignment: dict[str, str], *, images_dir, labels_dir, subject: str,
-    group_of: "Callable[[str], str]", digests: dict[str, str] | None = None,
-) -> list["Sample"]:
-    """The admitted stems of one labeled directory as explicit samples, one per stem.
+@dataclass(frozen=True)
+class Admitted:
+    """One admitted member, as the producer resolved it.
 
-    ``assignment`` maps each admitted stem to the side the draw put it on; ``group_of`` gives its
-    group key; ``digests`` carries each stem's ground-truth digest at draw time when the caller
-    computed them. Each sample's ``source`` is resolved through
-    :func:`~tcip_mcp.pipelines.image_utils.resolve_image_source`, so a grouped capture is named by
-    its ``.bandgroup`` manifest and an ambiguous stem refuses here rather than picking a file.
-
-    Each sample's ground truth is its own ``<labels_dir>/<stem>`` label document, the one shape
-    geometry ground truth has: the dataset-level COCO a loader may read is assembled from those
-    documents (:func:`assemble_coco`) rather than standing in for them.
-
-    Each sample also records the ``image_status.json`` bucket its admission read
-    (:func:`~tcip_mcp.dataset_layout.status_bucket` over ``subject`` and this directory's own
-    :func:`admission_date`), so a selection spanning three capture dates says per sample which
-    human confirmations answered for it. That fact is not derivable later: a consumer holding the
-    sample must be told the key a writer stated rather than re-spelling one from a path.
-
-    The one place a directory becomes samples. ``draw_splits`` and ``auto_train_val``'s own drawn
-    split both call it, so a run that drew its split and a run that bound a recorded one hold the
-    same membership shape and read through the same paths.
+    ``member`` is the name a membership record names it by, the image stem for ground truth that
+    is one file per sample and the row key for a table. ``source`` is the image source the
+    admission resolved for it, already a path (a ``.bandgroup`` manifest for a grouped capture),
+    and ``ground_truth`` the file that answers for it, with ``row_key`` naming its row when one
+    file answers for many. The producer resolves both once, here, and hands the record on: nothing
+    downstream reconstructs a path from a name or enumerates the image directory again.
     """
-    from tcip_mcp.dataset_layout import label_filename, status_bucket
-    from tcip_mcp.pipelines.data.selection import Sample
-    from tcip_mcp.pipelines.image_utils import resolve_image_source, source_path_of
 
-    labels_p = Path(labels_dir)
+    member: str
+    source: str
+    ground_truth: str
+    row_key: str | None = None
+
+
+def samples_over(
+    records: "Sequence[Admitted]", assignment: dict[str, str],
+    group_of: "Callable[[str], str]", *, confirmation_bucket: str | None = None,
+    digests: Mapping[str, str] | None = None,
+) -> list["Sample"]:
+    """Admitted records as explicit samples, one per record: the one place anything becomes a
+    sample.
+
+    ``assignment`` maps each member to the side it landed on, ``group_of`` gives its group key,
+    and ``digests`` its ground-truth digest when the caller computed one. Nothing is resolved or
+    reconstructed here: each sample carries the source and the ground truth the admission already
+    resolved for that member.
+
+    ``confirmation_bucket`` is the ``image_status.json`` key a document admission read
+    (:func:`~tcip_mcp.dataset_layout.status_bucket`), so a selection spanning three capture dates
+    says per sample which human confirmations answered for it; it rides only on a sample whose
+    ground truth is its own document, since a mask and a row are admitted by existing beside their
+    image with no human confirmation store to name.
+
+    The drawn split, the bound run's own record and ``freeze_selection`` all produce their samples
+    here, so every route holds one membership shape and reads through the same recorded paths.
+    """
+    from tcip_mcp.pipelines.data.selection import DOCUMENT, Sample, shape_of
+
     digests = digests or {}
-    bucket = status_bucket(subject, admission_date(labels_dir))
     return [
         Sample(
-            source=source_path_of(resolve_image_source(images_dir, stem)),
-            ground_truth=str(labels_p / label_filename(stem)),
-            group=group_of(stem), side=side, confirmation_bucket=bucket,
-            ground_truth_digest=digests.get(stem),
+            source=record.source, ground_truth=record.ground_truth, row_key=record.row_key,
+            group=group_of(record.member), side=assignment[record.member],
+            confirmation_bucket=(
+                confirmation_bucket
+                if shape_of(record.ground_truth, record.row_key) == DOCUMENT else None),
+            ground_truth_digest=digests.get(record.member),
         )
-        for stem, side in sorted(assignment.items())
+        for record in sorted(records, key=lambda r: r.member)
+        if record.member in assignment
     ]
 
 
+def foreground_counts(
+    members: "Mapping[str, Sample | Admitted]", scope: "ClassScope",
+) -> dict[str, int]:
+    """Each admitted member's own foreground count, under the key its caller already holds it by,
+    for a draw that balances sides by how much ground truth each member carries.
+
+    A member is an :class:`Admitted` record or the :class:`~tcip_mcp.pipelines.data.selection.Sample`
+    it became: each names its own ground truth and, where one ground truth answers for many, the
+    row it reads, which is all a count needs, so a caller that has not assigned sides yet counts
+    over its records rather than building a sample list it will build again once it has.
+
+    A label document carries a count of its own annotations of ``scope``'s subject (scoped to its
+    attribute when one is named), read from the path the sample records rather than from a name
+    recomposed under a directory. A mask raster and a table row are admitted by existing beside
+    their image, so every admitted one carries ground truth and counts as one: there is no denser
+    or sparser member to balance, and counting zero for them would read every member as
+    background.
+
+    The caller's own index is the result's index: a lock keyed by member name and a draw keyed by
+    source identity each read their counts back under the key they handed in, so no caller
+    re-keys this map.
+    """
+    from tcip_mcp.pipelines.data.selection import DOCUMENT, shape_of
+    from tcip_mcp.pipelines.data.splits import count_label_lines
+
+    return {
+        key: (count_label_lines(member.ground_truth, subject=scope.subject,
+                                attribute=scope.attribute)
+              if shape_of(member.ground_truth, member.row_key) == DOCUMENT else 1)
+        for key, member in members.items()
+    }
+
+
+def is_mask(path: Path) -> bool:
+    """Whether one entry is a mask: a file named ``<stem>.png``, and nothing else.
+
+    The one mask predicate. The admission that enumerates a directory and the re-admission that
+    checks a recorded sample's own path both ask it, so a directory named ``a.1.png`` cannot be
+    admitted by one and refused by the other.
+    """
+    return path.is_file() and path.suffix.lower() == ".png"
+
+
+def admitted_masks(labels_dir, images_dir, members=None) -> tuple[list[Admitted], dict[str, int]]:
+    """The members a mask directory admits, resolved, plus the partition that produced them.
+
+    A sample needs a mask, and a mask is exactly ``<stem>.png`` under ``labels_dir``
+    (:func:`is_mask`): an all-background mask is an explicit annotation, so the file's existence
+    is the rail, and an image with no mask is unannotated rather than a negative. A same-stem
+    file in any other format refuses by name rather than leaving its image to train as entirely
+    background.
+    """
+    from tcip_mcp.pipelines.image_utils import refuse_incomplete_band_group, source_path_of
+
+    labels_p = Path(labels_dir)
+    entries = list(labels_p.iterdir()) if labels_p.is_dir() else []
+    masks = {p.stem: p for p in entries if is_mask(p)}
+    sources = list_logical_images(images_dir)
+    candidates = list(members) if members is not None else sorted(sources)
+    unreadable = sorted(
+        p.name for p in entries
+        if p.is_file() and not is_mask(p) and p.stem in candidates and p.stem not in masks
+    )
+    if unreadable:
+        raise ValueError(
+            f"{labels_p} holds {unreadable} beside an image of the same stem, and a "
+            f"mask is read only as <stem>.png; nothing here reads another format, and "
+            f"training the image without its mask would train it as entirely background."
+        )
+    admitted = [
+        Admitted(member=stem,
+                 source=source_path_of(refuse_incomplete_band_group(sources[stem])),
+                 ground_truth=str(masks[stem]))
+        for stem in candidates if stem in masks and stem in sources
+    ]
+    return admitted, {"annotated": len(admitted),
+                      "skipped_unannotated": len(candidates) - len(admitted)}
+
+
+def ground_truth_table(csv_path) -> dict[str, str]:
+    """One ground-truth table as ``{row key: value}``, the row key being the image stem its first
+    column names and the value its second, both as written.
+
+    The one reader of a ground-truth table: the admission, the loaders and the producer all read
+    the rows through it rather than each parsing the file. A key naming more than one row refuses
+    by name, since a sample recorded by row key would otherwise read whichever row came last.
+    """
+    import csv as _csv
+
+    rows: dict[str, str] = {}
+    repeated: list[str] = []
+    with open(csv_path, newline="") as handle:
+        reader = _csv.reader(handle)
+        next(reader, None)  # the header row
+        for row in reader:
+            if len(row) < 2:
+                continue
+            key = row[0].strip()
+            if key in rows:
+                repeated.append(key)
+            rows[key] = row[1].strip()
+    if repeated:
+        raise ValueError(
+            f"{csv_path} names {sorted(set(repeated))[:5]} on more than one row: a sample "
+            "recorded by row key would read whichever row came last. Give each image one row."
+        )
+    return rows
+
+
+def holds_row(table: Mapping[str, str], row_key: str | None) -> bool:
+    """Whether a ground-truth table holds the row one member names.
+
+    The one row predicate. The admission that reads a whole table, the re-admission that checks a
+    recorded sample's own row and the loader that reads its value all ask it, so no two of them
+    can spell a key differently and disagree about whether the row is there.
+    """
+    return row_key is not None and row_key in table
+
+
+def admitted_rows(csv_path, images_dir, members=None) -> tuple[list[Admitted], dict[str, int]]:
+    """The rows a ground-truth table admits, resolved, plus the partition that produced them.
+
+    A row is admitted when the table holds it (:func:`holds_row`) and the image it names exists
+    under ``images_dir`` (:func:`~tcip_mcp.pipelines.image_utils.list_logical_images`, so a
+    grouped capture is admitted by its ``.bandgroup`` manifest): a row naming no image has nothing
+    to train, and an image no row names has no ground truth. The one table admission; the
+    re-admission over a recorded sample asks the same table the same question.
+    """
+    from tcip_mcp.pipelines.image_utils import refuse_incomplete_band_group, source_path_of
+
+    table = ground_truth_table(csv_path)
+    sources = list_logical_images(images_dir)
+    candidates = list(members) if members is not None else sorted(table)
+    admitted = [
+        Admitted(member=key,
+                 source=source_path_of(refuse_incomplete_band_group(sources[key])),
+                 ground_truth=str(csv_path), row_key=key)
+        for key in candidates if holds_row(table, key) and key in sources
+    ]
+    return admitted, {
+        "annotated": len(admitted),
+        "skipped_no_image": sum(1 for k in candidates if holds_row(table, k) and k not in sources),
+        "skipped_no_row": sum(1 for k in candidates if not holds_row(table, k)),
+    }
+
+
 def refuse_inadmissible_samples(
-    samples: "Sequence[Sample]", *, attribute: str | None, id_map: dict[str, int] | None,
+    samples: "Sequence[Sample]", scope: "ClassScope | None" = None,
 ) -> None:
     """Refuse a recorded sample the platform's own admission would no longer admit, naming which.
+
+    ``scope`` is the class space those samples were admitted under, whole
+    (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`, reachable as ``Selection.scope`` and
+    ``Admission.scope``): a caller holding one hands it over rather than splitting it into the
+    fields this re-admission happens to read, and the normalizing of an empty attribute to "no
+    attribute" is the scope's, not each caller's.
+
+    One re-admission over recorded samples, dispatching once on each sample's own shape: the label
+    store and its confirmations for a document, the mask's own existence for a mask raster, the
+    row's own presence in its table for a table row. Each is the admission that named the sample
+    in the first place, re-run over the paths the sample recorded rather than over a directory
+    listing, so a sample whose ground truth is named unlike its image is admitted on what it
+    carries rather than refused for a file nobody said had to exist.
 
     A selection records which samples train; it does not freeze what their ground truth says. A
     label that held this subject at draw time can be emptied afterwards, and an empty label nobody
     confirmed is unannotated, never a negative, so training it would put a real object's pixels in
-    the background class with no human having said the image is empty. Withdrawing a confirmation,
-    deleting a label file, or removing an attribute assessment reaches the same place.
-
-    So every recorded sample is checked against :func:`admitted_records`, the same admission the
-    draw itself ran. Nothing is rediscovered: each sample is checked by the two paths it records,
-    its own ground-truth document and its own source, never by a stem looked up in a directory
-    listing, so a sample whose ground truth is named unlike its image is admitted on what it
-    carries rather than refused for a file nobody said had to exist. The subject and capture date
-    come from the confirmation bucket the producer stamped on it
+    the background class with no human having said the image is empty. A mask deleted since, or a
+    row dropped from its table, reaches the same place. The subject and capture date a document
+    sample is checked under come from the confirmation bucket the producer stamped on it
     (:func:`~tcip_mcp.dataset_layout.bucket_subject_date`, the declared inverse), so a selection
     spanning three dates is checked against three buckets rather than one date substituted for all
-    of them. A recorded source that no longer resolves
+    of them. Every sample's recorded source is resolved once here
     (:func:`~tcip_mcp.pipelines.image_utils.resolve_source_path`, which also catches a band group
-    missing a sibling) refuses here by name, where the sample's own path is in hand.
+    missing a sibling).
 
     Membership is never changed here: a sample the admission no longer holds refuses the run by
     name rather than being dropped from it, since a run that quietly trains on fewer samples than
     the record says is a different run than the record describes.
     """
     from tcip_mcp.dataset_layout import bucket_subject_date
+    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK, ClassScope
     from tcip_mcp.pipelines.image_utils import BandGroupIncomplete, resolve_source_path
 
-    by_scope: dict[tuple[str, str], list[Sample]] = {}
-    for sample in samples:
-        key = (str(Path(sample.ground_truth).parent), sample.confirmation_bucket)
-        by_scope.setdefault(key, []).append(sample)
-
+    scope = scope or ClassScope()
     refused: list[str] = []
     unresolved: list[str] = []
     reasons: dict[str, int] = {}
-    for (labels_dir, bucket), here in sorted(by_scope.items()):
+    tables: dict[str, dict[str, str]] = {}
+    documents: dict[tuple[str, str], dict[str, tuple[str, str | None]]] = {}
+    for sample in samples:
+        try:
+            image_name: str | None = logical_image_name(resolve_source_path(sample.source))
+        except (FileNotFoundError, BandGroupIncomplete):
+            unresolved.append(sample.source)
+            continue
+        if sample.shape == DOCUMENT:
+            bucket = sample.confirmation_bucket
+            assert bucket is not None, "a label-document sample always states the bucket it read"
+            documents.setdefault(
+                (sample.ground_truth_scope, bucket), {}
+            )[sample.identity] = (sample.ground_truth, image_name)
+        elif sample.shape == MASK:
+            if not is_mask(Path(sample.ground_truth)):
+                refused.append(sample.identity)
+                reasons["ground_truth_gone"] = reasons.get("ground_truth_gone", 0) + 1
+        else:
+            table = sample.ground_truth
+            if table not in tables:
+                tables[table] = (ground_truth_table(table)
+                                 if Path(table).is_file() else {})
+            if not holds_row(tables[table], sample.row_key):
+                refused.append(sample.identity)
+                reasons["row_gone"] = reasons.get("row_gone", 0) + 1
+    for (labels_dir, bucket), records in sorted(documents.items()):
         subject, date = bucket_subject_date(bucket)
-        records: dict[str, tuple[str, str | None]] = {}
-        for sample in here:
-            try:
-                image_name = logical_image_name(resolve_source_path(sample.source))
-            except (FileNotFoundError, BandGroupIncomplete):
-                unresolved.append(sample.source)
-                continue
-            records[sample.identity] = (sample.ground_truth, image_name)
         admitted, counts = admitted_records(
             records, labels_dir=labels_dir, subject=subject, date=date,
-            attribute=attribute, id_map=id_map,
+            attribute=scope.attribute, id_map=scope.id_map,
         )
         for name, value in counts.items():
             if name.startswith(("skipped_", "quarantined_")):
@@ -557,30 +679,51 @@ def refuse_inadmissible_samples(
                if unresolved else "")
     raise ValueError(
         f"{len(refused) + len(unresolved)} of this selection's samples are no longer admissible "
-        f"({(refused + unresolved)[:5]}): {named}.{sources} The data moved under the selection "
-        "since it was drawn: a label emptied with nobody confirming that image negative, a label "
-        "file deleted, an image moved, a confirmation invalidated by a schema edit, or an instance "
-        "left unassessed for this run's attribute. Finish the annotation or confirmation those "
-        "name, or draw the selection again over the current data."
+        f"({sorted(refused)[:5] + unresolved[:5]}): {named}.{sources} The data moved under the "
+        "selection since it was drawn: a label emptied with nobody confirming that image "
+        "negative, a mask or a label file deleted, a row dropped from its table, an image moved, "
+        "a confirmation invalidated by a schema edit, or an instance left unassessed for this "
+        "run's attribute. Restore what those name, finish the annotation or confirmation, or "
+        "draw the selection again over the current data."
     )
 
 
-def require_samples(stems: list[str], counts: dict[str, int], labels_dir) -> None:
-    """Refuse an empty sample set, naming why each image was dropped.
+def require_admitted(admitted: "Admission") -> None:
+    """Refuse an empty admission, naming why nothing was admitted and what would fix it.
 
-    Filtering to the label store can legitimately empty a dataset, an images_dir where nothing is
-    annotated yet. Building it anyway would train on nothing and report success.
+    The one refusal for every ground-truth shape, called by whoever needs a non-empty membership:
+    filtering to what actually answers for an image can legitimately empty a dataset, and building
+    it anyway would train on nothing and report success. A draw spanning several places calls it
+    once over what they admitted between them, since one empty date directory beside a full one is
+    not an empty draw. The counts are the admission's own partition, read defensively because this
+    is the refusal path and a missing key here would replace the explanation with a bare KeyError.
     """
-    if stems:
+    if admitted.records:
         return
+    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
+
+    shape, counts = admitted.shape, admitted.counts
+    ground_truth, images_dir = admitted.ground_truth, admitted.images_dir
+    if shape == MASK:
+        raise ValueError(
+            f"no trainable samples: none of the {counts.get('skipped_unannotated', 0)} image(s) "
+            f"in {images_dir} have a <stem>.png mask in {ground_truth}. An image with no mask "
+            f"would train as entirely background, so nothing here admits one. Write the masks, or "
+            f"point data.labels_dir at the directory holding them."
+        )
+    if shape != DOCUMENT:
+        raise ValueError(
+            f"no trainable samples in {ground_truth}: {counts.get('skipped_no_image', 0)} row(s) "
+            f"name an image that is not under {images_dir}. A row naming no image has nothing to "
+            f"train. Fix the row keys, or point data.images_dir at the directory holding those "
+            f"images."
+        )
     quarantined = counts.get("quarantined_stale_definition", 0)
     quarantine_note = (
         f" {quarantined} more were confirmed complete or negative but quarantined because the "
         f"subject's attribute schema changed since, re-confirm them or revert the schema edit."
         if quarantined else ""
     )
-    # Read defensively: this is the refusal path, and a counts dict missing a key here would
-    # replace the explanation with a bare KeyError.
     incomplete = counts.get("skipped_incomplete_attribute", 0)
     incomplete_note = (
         f" {incomplete} more carry at least one instance never assessed for this run's attribute, "
@@ -590,7 +733,8 @@ def require_samples(stems: list[str], counts: dict[str, int], labels_dir) -> Non
         if incomplete else ""
     )
     raise ValueError(
-        f"no trainable samples in {labels_dir}: {counts.get('skipped_unannotated', 0)} image(s) "
+        f"no trainable samples in {ground_truth}: "
+        f"{counts.get('skipped_unannotated', 0)} image(s) "
         f"have no label record and {counts.get('skipped_unconfirmed_empty', 0)} have an empty one "
         f"nobody confirmed. An empty label file is a negative only once a human marks that image "
         f"Complete; until then it reads as unannotated. Annotate some images, or mark the "
@@ -599,30 +743,26 @@ def require_samples(stems: list[str], counts: dict[str, int], labels_dir) -> Non
 
 
 def _label_record_state(label_path: str | Path, subject: str | None) -> tuple[bool, bool]:
-    """``(a record exists, it has ≥1 detection/seg target of ``subject``)`` for one label document.
+    """``(a record exists, it carries ``subject``)`` for one label document.
 
-    ``has_objects`` is subject-scoped *and box/polygon-bearing*: the unified file holds every subject,
-    so "annotated" for a given subject's run means it carries an annotation of that subject whose
-    geometry is a real detection/seg target, the same membership ``to_coco_dataset``/``target_class_id``
-    apply (a box/polygon is a target; a geometry-less image-level label and a ``Point`` are not). Counting an
-    image whose only annotations are non-targets as annotated would keep it on the direct-json path
-    and train it as a zero-object negative, diverging from the COCO path and fabricating a negative no
-    human confirmed.
+    The unified file holds every subject, so "annotated" for a given subject's run means it
+    carries an annotation of that subject, whatever geometry that annotation has: a box, a
+    polygon, a point or no geometry at all. Which of those a run can actually read is the selected
+    loader's own question, asked there by name, so admission never reads a document that carries
+    the subject as though the image were empty. The predicate is
+    :func:`~tcip_mcp.dataset_layout.annotations_hold_subject`, the same one the contradicted-
+    negative read asks, so the two cannot disagree about what "carries the subject" means.
     """
     from tcip_annotation import json_io
-    from tcip_annotation.state import Point
+    from tcip_mcp.dataset_layout import annotations_hold_subject
 
     path = Path(label_path)
     if not path.is_file():
         return False, False
     anns = json_io.read_annotations(str(path))
-
-    def _is_target(a) -> bool:
-        return a.geometry is not None and not isinstance(a.geometry, Point)
-
     if subject is None:
-        return True, any(_is_target(a) for a in anns)
-    return True, any(a.subject == subject and _is_target(a) for a in anns)
+        return True, bool(anns)
+    return True, annotations_hold_subject(anns, subject)
 
 
 def _raw_status_store(labels_dir) -> object:
@@ -715,7 +855,7 @@ def stale_finished_names(
     a labels directory to derive it from (the status route holds ``root``;
     :func:`confirmed_negative_records` already resolves its own and calls :func:`_stale_finished`
     without going through this wrapper, so the partition it feeds
-    (:func:`trainable_stems`) still reads each store once, as today).
+    (:func:`admitted_documents`) still reads each store once, as today).
 
     Reads the status store, then the digest store and the registry through
     :func:`_stale_finished`, in a call of its own: never the same snapshot
@@ -756,30 +896,29 @@ def confirmed_negative_names(
 
 
 def _exclude_contradicted(
-    records: dict[str, dict[str, str]], subject: str, labels_dir,
+    records: dict[str, dict[str, str]], subject: str,
     contradicted_out: set[str] | None,
-    label_paths: Mapping[str, str] | None = None,
+    label_paths: Mapping[str, str],
 ) -> dict[str, dict[str, str]]:
     """Drops a name whose label document holds ``subject``, the disagreement ``scripts.doctor``'s
     ``check_negatives`` flags, through the same ``annotations_hold_subject`` predicate. Not
     lost: its label document carries real content, so a trainable-stems enumeration over the same
     directory admits it by that content instead.
 
-    ``label_paths`` maps an image name to the label document that answers for it, for a caller
-    holding samples that each recorded their own two paths. Without it the document is the one
-    the directory layout puts beside that image name, which is what a directory-shaped caller
-    means; with it, a positive labelled under a name of its own is read where it actually is
-    rather than looked for beside the image and missed, which would leave a stale negative
-    quarantining a sample the label contradicts.
+    ``label_paths`` maps an image name to the label document that answers for it, as the record
+    that named both holds them: a positive labelled under a name of its own is read where it
+    actually is rather than recomposed beside the image and missed, which would leave a stale
+    negative quarantining a sample its own label contradicts. A name the caller named no document
+    for is not contradicted by anything, since nothing here goes looking for one.
     """
     from tcip_annotation import json_io
-    from tcip_mcp.dataset_layout import annotations_hold_subject, label_filename
-
-    named = label_paths or {}
+    from tcip_mcp.dataset_layout import annotations_hold_subject
 
     def _label_holds_subject(name: str) -> bool:
-        recorded = named.get(name)
-        label = Path(recorded) if recorded else Path(labels_dir) / label_filename(Path(name).stem)
+        recorded = label_paths.get(name)
+        if recorded is None:
+            return False
+        label = Path(recorded)
         return label.is_file() and annotations_hold_subject(
             json_io.read_annotations(str(label)), subject
         )
@@ -821,7 +960,7 @@ def confirmed_negative_records(
     negative alike, through :func:`_stale_finished`. ``quarantined_out`` (a set, mutated in place)
     therefore carries every stale finished name the bucket holds, a stale complete confirmation
     included even though a complete is never part of this function's own return value; see
-    :func:`trainable_stems`'s ``quarantined_stale_definition`` count, which counts from this wider
+    :func:`admitted_documents`'s ``quarantined_stale_definition`` count, which counts from this wider
     set. This function's own return value excludes only the stale *negatives* among them, and the
     contradicted ones: :func:`_exclude_contradicted` runs over every original negative, stale or
     not, so a negative both stale-stamped and contradicted lands in ``contradicted_out`` too,
@@ -845,8 +984,10 @@ def confirmed_negative_records(
     loop harvested. With no locatable dataset root, no store, or no confirmations for this subject,
     it returns nothing.
 
-    ``label_paths`` maps an image name to the document that answers for it, for a caller whose
-    samples each recorded their own; see :func:`_exclude_contradicted`, the one reader of it.
+    ``label_paths`` maps an image name to the document that answers for it, as the records that
+    named both hold them; see :func:`_exclude_contradicted`, the one reader of it. A caller that
+    names none states that no document is known for these names, and no name is then contradicted:
+    nothing here composes a path beside an image to go looking for one.
     """
     from tcip_mcp.dataset_layout import (
         dataset_root_of, is_confirmed_negative, status_confirmations, status_bucket, status_of,
@@ -867,7 +1008,7 @@ def confirmed_negative_records(
         raise ValueError(
             f"confirmed_negative_names needs an explicit subject to read the negative bucket "
             f"for {labels_dir}, and this dataset has human-confirmed negatives that would be "
-            f"silently dropped. Thread the run's subject through build_dataset / assemble_coco."
+            f"silently dropped. Thread the run's subject through the admission that named them."
         )
     bucket_key = status_bucket(subject, date)
     bucket = statuses.get(bucket_key)
@@ -884,41 +1025,120 @@ def confirmed_negative_records(
     # Runs over the original negatives, not a stale-excluded remainder, so a negative both
     # stale-stamped and contradicted is named in contradicted_out too.
     without_contradicted = _exclude_contradicted(
-        negatives, subject, labels_dir, contradicted_out, label_paths)
+        negatives, subject, contradicted_out, label_paths or {})
     return {name: r for name, r in without_contradicted.items() if name not in stale}
 
 
-def assemble_coco(
-    labels_dir, images_dir, stems=None, *, subject: str, attribute: str | None = None,
-    id_map: dict[str, int], date,
-) -> dict:
-    """Assemble a dataset-level COCO dict from the name-based per-image JSON, scoped to ``subject``.
+@dataclass(frozen=True)
+class Admission:
+    """What one place holding ground truth admits, and the facts every loader over it is built
+    from.
 
-    Pairs each stem's ``<labels_dir>/<stem>.json`` with its image's on-disk file name, the same
-    name the dataset resolves at read time, so the COCO ``file_name`` keys line up. ``id_map`` is
-    the run's ``assign_class_ids`` map; this is the single delegation to ``json_io.to_coco_dataset``,
-    so the COCO categories, the loader targets, and the contract dims all rest on one name→id map.
-    Stems whose image is missing are skipped. This is how per-image JSON reaches training: a COCO
-    handed to a loader as ``coco_data``. ``date`` is the confirmation bucket's own date, stated by
-    the caller and passed straight through, so the assembled COCO's negatives and the partition's
-    come from one key.
+    ``shape`` is what that ground truth is, read off the place itself
+    (:func:`ground_truth_shape`), never off the task a run states. ``records`` is the admitted
+    set as the producer resolved it, each :class:`Admitted` carrying its member name, its image
+    source and its own ground truth. :meth:`samples` turns a side assignment over those records
+    into explicit samples, the one shape every loader here is built from, so a directory or a
+    table a caller names is the producer's interface and never a second membership
+    representation, and nothing downstream resolves a source or composes a path again.
+
+    ``subject``/``date``/``id_map`` are the scope a document admission read confirmations and
+    class ids under, and are ``None`` for a shape no confirmation store and no registry answers
+    for: a mask raster and a table row carry their own classes.
     """
-    from tcip_annotation import json_io
 
-    labels_dir = Path(labels_dir)
-    images_dir = Path(images_dir)
-    if stems is None:
-        stems = sorted(p.stem for p in json_io.prediction_documents(labels_dir))
-    # Real on-disk names: to_coco_dataset matches these against the confirmed-negative store, and a
-    # constructed name would silently match nothing for an uppercase extension.
-    names = image_name_map(images_dir)
-    entries: list[tuple[str, str]] = []
-    for stem in stems:
-        file_name = names.get(stem)
-        if file_name is None:
-            continue
-        entries.append((str(labels_dir / f"{stem}.json"), file_name))
-    return json_io.to_coco_dataset(
-        entries, subject=subject, id_map=id_map, attribute=attribute,
-        confirmed_negative_names=confirmed_negative_names(labels_dir, subject=subject, date=date),
-    )
+    shape: str
+    images_dir: str
+    ground_truth: str
+    records: list[Admitted]
+    counts: dict[str, int]
+    subject: str | None = None
+    attribute: str | None = None
+    date: str | None = None
+    id_map: dict[str, int] | None = None
+
+    @property
+    def scope(self) -> "ClassScope":
+        """The class space these records were admitted under, empty for ground truth no registry
+        scopes."""
+        from tcip_mcp.pipelines.data.selection import ClassScope
+
+        return ClassScope(subject=self.subject, attribute=self.attribute, id_map=self.id_map)
+
+    def samples(
+        self, assignment: dict[str, str], group_of: "Callable[[str], str]",
+        digests: Mapping[str, str] | None = None,
+    ) -> list["Sample"]:
+        """The admitted records this assignment names, as samples on the sides it gives them."""
+        from tcip_mcp.dataset_layout import status_bucket
+
+        bucket = status_bucket(self.subject, self.date) if self.subject else None
+        return samples_over(self.records, assignment, group_of,
+                            confirmation_bucket=bucket, digests=digests)
+
+    def every_sample(self) -> list["Sample"]:
+        """Every admitted record as a sample, all on the training side, each its own group.
+
+        What a door measuring or counting over a whole place is built from: it holds out nothing,
+        so there is one side, and it groups nothing, so each member is its own group. Stated
+        here so an evaluation, a calibration and a preflight cannot spell that assignment three
+        ways; a route that does hold a side out states its own assignment through :meth:`samples`.
+        """
+        return self.samples({record.member: "train" for record in self.records},
+                            lambda member: member)
+
+    def one_sample(self) -> "Sample":
+        """The single admitted sample, for the within-image route that splits one source's own
+        tile lattice. Its group is its member identity: that route draws over tiles, so nothing
+        here groups one source with another."""
+        from tcip_mcp.pipelines.data.splits import member_identity
+
+        member = self.records[0].member
+        return self.samples({member: "train"},
+                            lambda stem: member_identity(self.date, stem))[0]
+
+
+def admit(
+    images_dir, ground_truth, *, subject: str | None = None, attribute: str | None = None,
+    members: list[str] | None = None, contradicted_out: set[str] | None = None,
+) -> Admission:
+    """The membership one place holding ground truth admits, through the admission its own shape
+    reads.
+
+    The one enumeration of a directory or a table the platform makes: every loader, every
+    evaluation door and every draw is built from the samples this returns, so nothing downstream
+    enumerates a place a second time. It dispatches once on :func:`ground_truth_shape` and no
+    further: the label store and its human confirmations for per-image documents, the mask's own
+    existence beside the image for mask rasters, the row's own presence beside a resolvable image
+    for a table.
+
+    Raises rather than degrading on anything it cannot read: a place that names no ground truth
+    this platform reads, or a directory holding a dataset-level COCO, refuses here by name. An
+    empty admission is not one of those, since a draw spanning several places may legitimately
+    find one of them empty; whoever needs a non-empty membership says so
+    (:func:`require_admitted`).
+    """
+    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
+
+    # An empty subject or attribute is "no subject" and "no attribute", the same fact as unset.
+    subject, attribute = subject or None, attribute or None
+    shape = ground_truth_shape(ground_truth)
+    if shape == MASK:
+        records, counts = admitted_masks(ground_truth, images_dir, members)
+    elif shape != DOCUMENT:
+        records, counts = admitted_rows(ground_truth, images_dir, members)
+    else:
+        date = admission_date(ground_truth)
+        # The single name->id map this run admits under, and the one its loaders read.
+        _registry, id_map = resolve_registry_id_map(ground_truth, subject, attribute)
+        records, counts = admitted_documents(
+            ground_truth, images_dir, members, subject=subject, date=date,
+            attribute=attribute, id_map=id_map, contradicted_out=contradicted_out,
+        )
+        return Admission(
+            shape=shape, images_dir=str(images_dir), ground_truth=str(ground_truth),
+            records=records, counts=counts, subject=subject, attribute=attribute,
+            date=date, id_map=id_map,
+        )
+    return Admission(shape=shape, images_dir=str(images_dir), ground_truth=str(ground_truth),
+                     records=records, counts=counts)

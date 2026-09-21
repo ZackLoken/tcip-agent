@@ -340,14 +340,14 @@ def orthomosaic_plant_counts(
             raise CountDeliveryRefused(f"canopy_subject delivery refused: {exc}") from exc
 
     from tcip_annotation.json_io import UnreadableLabelDocument, detection_annotations
-    from tcip_annotation.state import Point, bbox_of
+    from tcip_annotation.state import bbox_of, box_derivable
 
     boxes: list[list[float]] = []
     try:
         for f in pred_files:
             for a in detection_annotations(str(f)):
                 # detection_annotations already excludes a None or Point geometry
-                assert a.geometry is not None and not isinstance(a.geometry, Point)
+                assert box_derivable(a.geometry)
                 b = bbox_of(a.geometry)
                 boxes.append([b.x1, b.y1, b.x2, b.y2])
     except UnreadableLabelDocument as exc:

@@ -21,6 +21,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 import tcip_store as ts
+from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_web.app import app
 
 from tests.test_selection_binding import DATES, OTHER_SUBJECT, SUBJECT, _draw, \
@@ -111,40 +112,22 @@ def test_selection_compatibility_admits_a_draw_splits_selection_with_no_empty_si
 def test_preflight_reports_the_conflict_issues_even_when_the_manifest_is_unreadable(
     tmp_path: Path,
 ):
-    """The val_images_dir and drawn-key conflicts don't need the selection to answer, so an
-    unreadable selection_dir must never suppress them: preflight names both conflicts and the
+    """The drawn-key conflicts don't need the selection to answer, so an
+    unreadable selection_dir must never suppress them: preflight names the conflict and the
     read failure, not only the read failure."""
     from tcip_mcp.tools.training_tools import preflight_config
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
-    config["data"]["val_images_dir"] = str(root / "images" / DATES[1])
-    config["data"]["split"] = {"selection_dir": str(tmp_path / "nope"), "seed": 7}
+    config["data"]["split"] = {"selection_dir": str(tmp_path / "nope"), "seed": 7,
+                               "group_by": "stem"}
 
     result = preflight_config(config)
 
     conflict_issues = [i for i in result["issues"] if "conflicts with" in i]
     read_issues = [i for i in result["issues"] if "no selection recorded" in i]
-    assert len(conflict_issues) == 2
+    assert len(conflict_issues) == 1
     assert len(read_issues) == 1
-
-
-def test_preflight_reports_the_task_cannot_bind_explanation_without_reading_the_selection(
-    tmp_path: Path,
-):
-    """The task check doesn't need the selection either: a task outside detection/instance_seg
-    names why it cannot bind one even when the selection_dir names nothing readable."""
-    from tcip_mcp.tools.training_tools import preflight_config
-
-    root = _two_subject_two_date_dataset(tmp_path / "ds")
-    config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
-    config["model_source"]["task"] = "classification"
-    config["data"]["task"] = "classification"
-    config["data"]["split"] = {"selection_dir": str(tmp_path / "nope")}
-
-    result = preflight_config(config)
-
-    assert any("cannot bind to one" in i for i in result["issues"])
 
 
 # -- read_selection_checked ------------------------------------------------------
@@ -183,6 +166,39 @@ def test_list_split_choices_answers_only_as_recorded_without_images_or_labels_di
 
     assert result["selections"] == []
     assert result["as_recorded"]["case"] == "drawn"
+
+
+def test_list_split_choices_offers_a_table_selection_for_a_table_configuration(
+    tmp_path: Path, monkeypatch,
+):
+    """The picker anchors on the image location and resolves the ground truth through the task's
+    own key, so an ordinary images-plus-table configuration finds the selections drawn over that
+    dataset. Requiring a directory key would return nothing for every table run."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.tools.data_tools import draw_splits
+    from tcip_mcp.tools.training_tools import list_split_choices
+    from tests.test_mask_and_table_membership import _table_dataset
+
+    root = tmp_path / "ds"
+    images_dir, csv_path = _table_dataset(root)
+    drawn = draw_splits(str(root), output_path=str(root / "splits" / "rows"),
+                        ground_truth=str(csv_path), seed=4, train_ratio=0.5, val_ratio=0.25,
+                        calibration_ratio=0.25, group_by="stem")
+    assert "error" not in drawn, drawn
+
+    create_experiment("exp-table-picker", {
+        "model_source": {"builder": "m:f", "task": "classification"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
+                 "task": "classification"},
+    })
+
+    result = list_split_choices("exp-table-picker")
+
+    offered = {choice["selection_dir"]: choice for choice in result["selections"]}
+    assert str(root / "splits" / "rows") in offered, result
+    assert offered[str(root / "splits" / "rows")]["enabled"] is True, offered
 
 
 def test_list_split_choices_route_404s_for_an_unknown_experiment(
@@ -274,12 +290,12 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     assert elsewhere_entry["enabled"] is True
     assert elsewhere_entry["train"] > 0 and elsewhere_entry["val"] > 0
 
-    # A partition drawn for another subject is a real offer: choosing it drops the recorded
+    # A partition drawn for another subject is a real offer: choosing it empties the recorded
     # scope, since a bound run reads subject, attribute and class map off the selection.
     other_subject_entry = by_dir[str(other_subject_dir)]
     assert other_subject_entry["enabled"] is True
     chosen = candidate_config_with_selection(picked_cfg, str(other_subject_dir))
-    assert "subject" not in chosen["data"] and "id_map" not in chosen["data"]
+    assert ClassScope.recorded_in(chosen["data"]) == ClassScope()
 
     broken_entry = by_dir[str(broken_dir)]
     assert broken_entry["enabled"] is False
@@ -363,7 +379,7 @@ def test_list_split_choices_as_recorded_reports_moved_directories_like_preflight
     result = list_split_choices("exp-moved-dirs")
 
     assert result["as_recorded"]["compatible"] is False
-    assert "Directory not found" in result["as_recorded"]["reason"]
+    assert "Not found: data.images_dir" in result["as_recorded"]["reason"]
 
 
 def test_list_split_choices_as_recorded_reports_a_version_refused_own_binding(
@@ -690,7 +706,7 @@ def test_relaunch_route_launches_with_a_chosen_manifest_and_refreshes_the_pristi
 ) -> None:
     """A launch with a chosen partition submits a string the server itself listed; on the
     pristine branch the existing first-run refresh stores that candidate, data.split replaced
-    wholesale and val_images_dir removed, as the experiment's own config."""
+    wholesale and the recorded class scope dropped, as the experiment's own config."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     monkeypatch.setattr(
@@ -713,7 +729,7 @@ def test_relaunch_route_launches_with_a_chosen_manifest_and_refreshes_the_pristi
     _draw(root, chosen)
 
     cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
-    cfg["data"]["val_images_dir"] = str(root / "images" / DATES[1])
+    cfg["data"]["subject"] = SUBJECT
     create_experiment("exp-choose-partition", cfg)
 
     resp = client.post("/api/training/runs", json={
@@ -723,7 +739,7 @@ def test_relaunch_route_launches_with_a_chosen_manifest_and_refreshes_the_pristi
 
     snapshot = read_member(config_key("exp-choose-partition"))
     assert snapshot["data"]["split"] == {"selection_dir": str(chosen)}
-    assert "val_images_dir" not in snapshot["data"]
+    assert ClassScope.recorded_in(snapshot["data"]) == ClassScope()
 
 
 def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_directory(
@@ -799,7 +815,7 @@ def test_a_chosen_selection_binds_and_the_runs_own_split_record_names_it(tmp_pat
     data_cfg = {"split": {"selection_dir": str(chosen)}}
     train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
     create_experiment("exp-bound-split-record", {})
-    persist_run_partition("exp-bound-split-record", train_ds, val_ds, data_cfg,
+    persist_run_partition("exp-bound-split-record", data_cfg,
                           partition=partition)
 
     split_record = read_run_partition("exp-bound-split-record")

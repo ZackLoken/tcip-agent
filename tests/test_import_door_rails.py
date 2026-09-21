@@ -526,7 +526,8 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     hpo_result = tt.run_hyperparameter_search(
         base_config={"model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                                       "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-                     "data": {"images_dir": str(root / "images"), "labels_dir": str(root / "annotations")}},
+                     "data": {"images_dir": str(root / "images"),
+                              "labels_dir": str(root / "annotations"), "subject": "bud"}},
         n_trials=1,
     )
     study = hpo_result["study_name"]

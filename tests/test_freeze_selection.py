@@ -27,8 +27,7 @@ BUILDER = "tests.bespoke_models:build_bespoke_detection"
 
 def _real_drawn_experiment(
     root: Path, experiment_id: str, *, date: str = DATES[0], subject: str = SUBJECT,
-    attribute: str | None = None, val_images_dir: str | None = None,
-    val_labels_dir: str | None = None, auto_val: bool = True,
+    attribute: str | None = None, auto_val: bool = True,
 ) -> dict:
     """Draws a real train/val split over ``root``'s own fixture dataset (through auto_train_val,
     the identical function a training run's own draw calls) and persists it as ``experiment_id``'s
@@ -40,10 +39,6 @@ def _real_drawn_experiment(
     labels_dir = root / "annotations" / date
     data_cfg: dict = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                       "subject": subject, "attribute": attribute, "auto_val": auto_val}
-    if val_images_dir is not None:
-        data_cfg["val_images_dir"] = val_images_dir
-    if val_labels_dir is not None:
-        data_cfg["val_labels_dir"] = val_labels_dir
     # data_cfg keeps the caller's raw attribute; the registry lookup needs "no attribute" as None.
     _reg, id_map = resolve_registry_id_map(str(labels_dir), subject, attribute or None)
 
@@ -53,8 +48,8 @@ def _real_drawn_experiment(
     }
     create_experiment(experiment_id, config)
 
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-    persist_run_partition(experiment_id, train_ds, val_ds, data_cfg,
+    _train_ds, _val_ds, partition = auto_train_val("detection", data_cfg, None)
+    persist_run_partition(experiment_id, data_cfg,
                           dataset_id=None, dataset_fingerprint=None, partition=partition)
     return data_cfg
 
@@ -97,6 +92,37 @@ def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
     assert len(train_ds) > 0 and len(val_ds) > 0
 
 
+def test_freeze_selection_names_the_sources_the_run_read_not_the_configs_own(tmp_path: Path):
+    """The frozen selection is composed from the run's own record alone. A durable config edited
+    to name another images directory holding identically named files changes nothing: freezing a
+    partition against pixels the run never saw would bind a later run to a different dataset."""
+    import tcip_store as ts
+    from PIL import Image
+
+    from tcip_mcp.experiments import config_key, read_member
+    from tcip_mcp.tools.data_tools import freeze_selection
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    data_cfg = _real_drawn_experiment(root, "exp-elsewhere")
+    trained_images = Path(data_cfg["images_dir"])
+
+    other = root / "images" / "other"
+    other.mkdir(parents=True)
+    for image in trained_images.iterdir():
+        Image.new("RGB", (16, 16), (200, 10, 10)).save(other / image.name)
+    config = read_member(config_key("exp-elsewhere"), {})
+    config["data"]["images_dir"] = str(other)
+    ts.replace(config_key("exp-elsewhere"), config)
+
+    result = freeze_selection("exp-elsewhere", output_path=str(tmp_path / "frozen"))
+
+    assert "error" not in result, result
+    frozen = read_selection(tmp_path / "frozen")
+    assert frozen.samples
+    for sample in frozen.samples:
+        assert Path(sample.source).parent == trained_images
+
+
 def test_freeze_selection_from_an_empty_string_attribute_run_binds(tmp_path: Path):
     """A run whose durable config carries ``data.attribute=""`` (an explicit empty string, not
     ``None``) freezes a selection a later, attribute-unscoped run still binds to: the frozen
@@ -124,6 +150,46 @@ def test_freeze_selection_from_an_empty_string_attribute_run_binds(tmp_path: Pat
     assert len(train_ds) > 0 and len(val_ds) > 0
 
 
+def test_freeze_selection_keeps_two_scopes_same_named_members_apart(tmp_path: Path):
+    """A record holding two ground-truth scopes holds one member name twice, and the frozen
+    selection carries both: composing the scopes into one map keyed by bare name would drop one
+    date's member and bind a later run to half the partition its record describes."""
+    from tcip_mcp.dataset_layout import status_bucket
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.pipelines.data.selection import Sample
+    from tcip_mcp.pipelines.data.split_construction import _recorded_partition
+    from tcip_mcp.tools.data_tools import freeze_selection
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    train, val = [], []
+    for date in DATES:
+        images_dir, labels_dir = root / "images" / date, root / "annotations" / date
+        stems = sorted(p.stem for p in labels_dir.glob("*.json"))[:2]
+        for index, stem in enumerate(stems):
+            sample = Sample(source=str(images_dir / f"{stem}.jpg"),
+                            ground_truth=str(labels_dir / f"{stem}.json"), group=stem,
+                            side="train" if index == 0 else "val",
+                            confirmation_bucket=status_bucket(SUBJECT, date))
+            (train if index == 0 else val).append(sample)
+    assert {s.member_stem for s in train} == {s.member_stem for s in train[:1]}, (
+        "both dates must contribute the same member name for this to bite")
+
+    data_cfg = {"subject": SUBJECT, "id_map": {SUBJECT: 0},
+                "split": {"resolved_group_by": "stem"}}
+    create_experiment("exp-two-scope", {"data": data_cfg})
+    persist_run_partition("exp-two-scope", data_cfg,
+                          partition=_recorded_partition(train, val, train + val))
+
+    result = freeze_selection("exp-two-scope", output_path=str(tmp_path / "frozen"))
+
+    assert "error" not in result, result
+    assert (result["train"], result["val"]) == (len(train), len(val))
+    frozen = read_selection(tmp_path / "frozen")
+    assert len(frozen.samples) == len(train) + len(val)
+    assert {s.ground_truth for s in frozen.samples} == {
+        s.ground_truth for s in train + val}
+
+
 def test_freeze_selection_carries_an_explicit_group_key_map_onto_its_samples(tmp_path: Path):
     """The run drew under an agent-supplied map; the frozen selection records each sample's own
     key from it, so a later bind groups by what was drawn rather than re-resolving a policy.
@@ -146,7 +212,7 @@ def test_freeze_selection_carries_an_explicit_group_key_map_onto_its_samples(tmp
         "data": {**data_cfg, "id_map": id_map},
     })
     train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-    persist_run_partition("exp-explicit-map", train_ds, val_ds, data_cfg, partition=partition)
+    persist_run_partition("exp-explicit-map", data_cfg, partition=partition)
 
     result = freeze_selection("exp-explicit-map")
     assert "error" not in result, result
@@ -187,7 +253,7 @@ def _bound_run(root: Path, tmp_path: Path, experiment_id: str, **split_extra) ->
         "data": {**data_cfg, "id_map": id_map},
     })
     train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-    persist_run_partition(experiment_id, train_ds, val_ds, data_cfg, partition=partition)
+    persist_run_partition(experiment_id, data_cfg, partition=partition)
 
 
 def test_freeze_selection_refuses_a_bound_run(tmp_path: Path):
@@ -248,21 +314,85 @@ def test_freeze_selection_refuses_no_group_by(tmp_path: Path):
     assert "error" in result and "group_by" in result["error"]
 
 
-def test_freeze_selection_refuses_no_dataset_hash(tmp_path: Path):
-    """A split record with no dataset_hash at all: freeze_selection cannot check the labels have
-    not moved, so it refuses rather than skipping the check."""
+def test_freeze_selection_refuses_a_scope_with_no_recorded_member_digests(tmp_path: Path):
+    """A split record whose scope carries no label_digests block: freeze_selection cannot say
+    which file each member's ground truth was, nor that it has not moved, so it refuses rather
+    than skipping the check."""
     import tcip_store as ts
     from tcip_mcp.experiments import split_key
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _real_drawn_experiment(root, "exp-no-hash")
+    data_cfg = _real_drawn_experiment(root, "exp-no-digests")
 
-    split = ts.read(split_key("exp-no-hash"))
-    ts.replace(split_key("exp-no-hash"), {**split, "dataset_hash": None})
+    split = ts.read(split_key("exp-no-digests"))
+    scope = data_cfg["labels_dir"]
+    members = {**split["members"], scope: {**split["members"][scope], "label_digests": {}}}
+    ts.replace(split_key("exp-no-digests"), {**split, "members": members})
 
-    result = freeze_selection("exp-no-hash")
-    assert "error" in result and "dataset_hash" in result["error"]
+    result = freeze_selection("exp-no-digests")
+    assert "error" in result and "no ground-truth path, digest" in result["error"]
+
+
+def test_freeze_selection_refuses_a_member_whose_ground_truth_moved(tmp_path: Path):
+    """The staleness check is per member, against the digest the run's own producer recorded for
+    it: a label edited after the run names that member and refuses, since a selection composed
+    from it would bind a later run to ground truth this run never saw."""
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.tools.data_tools import freeze_selection
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    data_cfg = _real_drawn_experiment(root, "exp-moved")
+
+    moved = Path(data_cfg["labels_dir"]) / "a.json"
+    json_io.write_annotations(moved, [
+        Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20)),
+        Annotation(subject=SUBJECT, geometry=BBox(30, 30, 50, 50)),
+    ], 64, 64, keep_empty=True)
+
+    result = freeze_selection("exp-moved")
+    assert "error" in result and "changed since" in result["error"]
+    assert "'a'" in result["error"]
+
+
+def test_freeze_selection_reads_a_member_replaced_by_another_extension_as_moved(tmp_path: Path):
+    """The record names the file each member's ground truth was, so a member's document replaced
+    by one of another extension carrying the identical bytes reads as moved rather than as
+    unchanged: a later bind would otherwise be composed from a path nothing holds."""
+    from tcip_mcp.tools.data_tools import freeze_selection
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    data_cfg = _real_drawn_experiment(root, "exp-renamed")
+
+    document = Path(data_cfg["labels_dir"]) / "a.json"
+    document.with_suffix(".txt").write_bytes(document.read_bytes())
+    document.unlink()
+
+    result = freeze_selection("exp-renamed")
+    assert "error" in result and "changed since" in result["error"]
+    assert "'a'" in result["error"]
+
+
+def test_freeze_selection_accepts_a_labels_dir_spelled_with_forward_slashes(tmp_path: Path):
+    """The record's own scopes and paths are what freezing composes from, so a config spelling its
+    labels directory another equivalent way is never compared against them and never refuses for
+    a spelling the data does not turn on."""
+    from tcip_mcp.experiments import config_key
+    import tcip_store as ts
+    from tcip_mcp.tools.data_tools import freeze_selection
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    data_cfg = _real_drawn_experiment(root, "exp-slashes")
+
+    config = ts.read(config_key("exp-slashes"))
+    respelled = {**config["data"],
+                 "labels_dir": data_cfg["labels_dir"].replace("\\", "/") + "/"}
+    ts.replace(config_key("exp-slashes"), {**config, "data": respelled})
+
+    result = freeze_selection("exp-slashes", str(tmp_path / "frozen-slashes"))
+    assert "error" not in result, result
+    assert result["train"] and result["val"]
 
 
 def test_freeze_selection_refuses_a_record_with_no_per_scope_membership(tmp_path: Path):
@@ -292,24 +422,6 @@ def test_freeze_selection_refuses_a_record_with_no_per_scope_membership(tmp_path
     assert "draw_splits" in result["error"]
 
 
-def test_freeze_selection_refuses_a_run_whose_members_span_another_scope(tmp_path: Path):
-    """A run validated against a second directory the caller named records members whose ground
-    truth lives under it. Freezing re-produces every member under the run's own data.labels_dir,
-    so the record's own scopes are what the refusal rests on, not a marker naming the route."""
-    from tcip_mcp.tools.data_tools import freeze_selection
-
-    root = _two_subject_two_date_dataset(tmp_path / "ds")
-    val_images, val_labels = root / "images" / DATES[1], root / "annotations" / DATES[1]
-
-    _real_drawn_experiment(root, "exp-two-scopes", val_images_dir=str(val_images),
-                           val_labels_dir=str(val_labels))
-
-    result = freeze_selection("exp-two-scopes")
-    assert "error" in result
-    assert str(val_labels) in result["error"]
-    assert str(root / "annotations" / DATES[0]) in result["error"]
-
-
 def test_freeze_selection_refuses_an_empty_val_side(tmp_path: Path):
     from tcip_mcp.tools.data_tools import freeze_selection
 
@@ -318,22 +430,6 @@ def test_freeze_selection_refuses_an_empty_val_side(tmp_path: Path):
 
     result = freeze_selection("exp-no-val")
     assert "error" in result and "validation" in result["error"]
-
-
-def test_freeze_selection_refuses_a_task_it_does_not_admit(tmp_path: Path):
-    from tcip_mcp.tools.data_tools import freeze_selection
-
-    root = _two_subject_two_date_dataset(tmp_path / "ds")
-    images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": SUBJECT}
-    create_experiment("exp-wrong-task", {
-        "model_source": {"builder": BUILDER, "task": "semantic_seg"}, "data": data_cfg,
-    })
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-    persist_run_partition("exp-wrong-task", train_ds, val_ds, data_cfg, partition=partition)
-
-    result = freeze_selection("exp-wrong-task")
-    assert "error" in result and "semantic_seg" in result["error"]
 
 
 def test_freeze_selection_refuses_a_config_missing_id_map(tmp_path: Path):
@@ -346,7 +442,7 @@ def test_freeze_selection_refuses_a_config_missing_id_map(tmp_path: Path):
         "model_source": {"builder": BUILDER, "task": "detection"}, "data": data_cfg,
     })
     train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-    persist_run_partition("exp-no-id-map", train_ds, val_ds, data_cfg, partition=partition)
+    persist_run_partition("exp-no-id-map", data_cfg, partition=partition)
 
     result = freeze_selection("exp-no-id-map")
     assert "error" in result and "id_map" in result["error"]

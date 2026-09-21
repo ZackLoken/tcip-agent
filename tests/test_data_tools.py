@@ -1126,16 +1126,20 @@ def test_read_selection_refuses_a_sample_missing_its_own_ground_truth(tmp_path: 
         read_selection(out)
 
 
-def test_read_selection_refuses_a_sample_naming_no_confirmation_bucket(tmp_path: Path):
+def test_read_selection_refuses_a_label_document_sample_with_no_confirmation_bucket(
+    tmp_path: Path,
+):
     """Which human confirmations admitted a sample is a per-sample fact a later admission check
-    reads back; a sample carrying none names no bucket to re-check it against."""
+    reads back, and a label document's admission always reads one, so a sample naming its own
+    document and no bucket names nothing to re-check it against. A mask or a table row is
+    admitted by existing, so neither carries one and neither is refused for it."""
     out = tmp_path / "m"
     write_selection(out, _one_sample_selection())
     document = ts.read(selection_key(out))
     document["samples"][0].pop("confirmation_bucket")
     ts.replace(selection_key(out), document)
 
-    with pytest.raises(ValueError, match=r"carries no \['confirmation_bucket'\]"):
+    with pytest.raises(ValueError, match="no confirmation_bucket"):
         read_selection(out)
 
 

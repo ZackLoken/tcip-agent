@@ -599,7 +599,7 @@ def _bind_dataset_run(
     data_cfg = {"split": {"selection_dir": str(manifest_dir)}}
     train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
     create_experiment(experiment_id, {})
-    persist_run_partition(experiment_id, train_ds, val_ds, data_cfg, partition=partition)
+    persist_run_partition(experiment_id, data_cfg, partition=partition)
 
 
 def test_prioritize_review_queue_marks_a_flat_images_tree_dataset_correctly(tmp_path, monkeypatch):

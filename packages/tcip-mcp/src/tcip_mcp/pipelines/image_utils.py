@@ -32,7 +32,8 @@ __all__ = [
     "bucket_logical_identities", "capture_kind", "crop_pad_tile", "display_source_path",
     "flat_image_key", "image_dimensions", "list_logical_images", "load_image", "load_multiband",
     "logical_image_name", "pad_tile", "pil_to_tensor", "place_logical_image",
-    "resolve_image_source", "stem_collision_key", "stem_of", "to_pil_if_faithful",
+    "refuse_incomplete_band_group", "resolve_image_source", "stem_collision_key", "stem_of",
+    "to_pil_if_faithful",
 ]
 
 
@@ -163,6 +164,26 @@ def capture_kind(source: "Path | BandGroupRef") -> str:
     return "image"
 
 
+def refuse_incomplete_band_group(source: "Path | BandGroupRef") -> "Path | BandGroupRef":
+    """``source`` itself, refusing a grouped capture whose manifest names a band that is gone.
+
+    The one completeness check. Every resolution that hands a logical image onward asks it, the
+    scan-and-look-up one below, the recorded-path one beside it and the producer's own admission,
+    so a stale manifest is named at the point the source is resolved rather than surfacing as a
+    bare decode error inside a stacking loop, and no route can admit a capture another would
+    refuse.
+    """
+    if isinstance(source, BandGroupRef):
+        missing = [name for name, p in source.bands.items() if not p.is_file()]
+        if missing:
+            raise BandGroupIncomplete(
+                f"band group {source.stem!r} ({source.manifest_path}) references missing band(s) "
+                f"{sorted(missing)}: delete the manifest to let a later detection pass re-group "
+                "the surviving siblings, or restore the missing file(s)."
+            )
+    return source
+
+
 def resolve_image_source(images_dir: str | Path, stem: str) -> "Path | BandGroupRef":
     """``list_logical_images(images_dir)[stem]``: never a second implementation of "what images
     live here."
@@ -170,22 +191,13 @@ def resolve_image_source(images_dir: str | Path, stem: str) -> "Path | BandGroup
     Raises ``FileNotFoundError`` for an unknown stem, and ``AmbiguousImageStem`` (propagated from
     ``list_logical_images``, uncaught here) when ``images_dir`` holds a collision, whether or not
     ``stem`` is one of the colliding keys: the directory is unlistable, so no single stem in it
-    resolves cleanly. For a ``BandGroupRef`` whose manifest references a sibling file that no
-    longer exists, raises ``BandGroupIncomplete`` here (the resolver) rather than letting a bare
-    decode error surface later inside a stacking loop.
+    resolves cleanly. A grouped capture missing a band refuses through
+    :func:`refuse_incomplete_band_group`.
     """
     src = list_logical_images(images_dir).get(stem)
     if src is None:
         raise FileNotFoundError(f"No image for stem: {stem}")
-    if isinstance(src, BandGroupRef):
-        missing = [name for name, p in src.bands.items() if not p.is_file()]
-        if missing:
-            raise BandGroupIncomplete(
-                f"band group {stem!r} ({src.manifest_path}) references missing band(s) "
-                f"{sorted(missing)}: delete the manifest to let a later detection pass re-group "
-                "the surviving siblings, or restore the missing file(s)."
-            )
-    return src
+    return refuse_incomplete_band_group(src)
 
 
 def resolve_source_path(source: str | Path) -> "Path | BandGroupRef":
@@ -193,11 +205,9 @@ def resolve_source_path(source: str | Path) -> "Path | BandGroupRef":
     rather than a directory and a stem.
 
     A ``.bandgroup`` path resolves to the grouped capture it stands for, checked for its sibling
-    bands the way :func:`resolve_image_source` checks one it found by scanning, so a stale
-    manifest raises :class:`BandGroupIncomplete` here rather than as a bare decode error inside a
-    stacking loop. Any other path is the image itself, refused by name when it is not on disk: a
-    selection naming a source that has moved is not the same fact as a directory that no longer
-    lists it.
+    bands through :func:`refuse_incomplete_band_group`, the same check every other resolution
+    asks. Any other path is the image itself, refused by name when it is not on disk: a selection
+    naming a source that has moved is not the same fact as a directory that no longer lists it.
     """
     path = Path(source)
     if path.suffix.lower() != MANIFEST_EXT:
@@ -206,15 +216,7 @@ def resolve_source_path(source: str | Path) -> "Path | BandGroupRef":
         return path
     if not path.is_file():
         raise FileNotFoundError(f"No band group manifest at the recorded source path: {path}")
-    ref = read_band_group_manifest(path)
-    missing = [name for name, p in ref.bands.items() if not p.is_file()]
-    if missing:
-        raise BandGroupIncomplete(
-            f"band group {ref.stem!r} ({path}) references missing band(s) {sorted(missing)}: "
-            "delete the manifest to let a later detection pass re-group the surviving siblings, "
-            "or restore the missing file(s)."
-        )
-    return ref
+    return refuse_incomplete_band_group(read_band_group_manifest(path))
 
 
 def source_path_of(source: "Path | BandGroupRef") -> str:
@@ -499,8 +501,9 @@ def pil_to_tensor(img) -> torch.Tensor:
     return torch.from_numpy(arr).permute(2, 0, 1).contiguous()
 
 
-def load_image(path: "str | Path | BandGroupRef", num_channels: int = 3):
-    """Open an image honoring ``num_channels``.
+def load_image(path: "str | Path | BandGroupRef", num_channels: int):
+    """Open an image at ``num_channels``, which every caller states: how many bands a read takes
+    is the reader's own fact, and a default here would answer for one that never said.
 
     Returns a ``PIL.Image`` wherever PIL has a faithful mode for the decoded pixels: photographic
     formats at 1/3/4 channels, and any array container (``.npy`` / ``.npz`` / GeoTIFF / a

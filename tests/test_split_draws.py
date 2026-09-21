@@ -215,21 +215,6 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
     assert list(tmp_path.glob("hpo_*")) == []
 
 
-def test_run_hyperparameter_search_refuses_split_draws_with_val_images_dir(tmp_path, real_hpo_base_config, monkeypatch):
-    import tcip_mcp.tools.training_tools as tt
-
-    ran = []
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
-
-    cfg = dict(real_hpo_base_config)
-    cfg["data"] = {**cfg["data"], "val_images_dir": str(tmp_path / "val")}
-    result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
-                        scheduler="none", split_draws=2)
-
-    assert "error" in result and "val_images_dir" in result["error"]
-    assert not ran
-
-
 def test_run_hyperparameter_search_refuses_split_draws_when_auto_val_is_off(tmp_path, real_hpo_base_config, monkeypatch):
     import tcip_mcp.tools.training_tools as tt
 
@@ -242,23 +227,6 @@ def test_run_hyperparameter_search_refuses_split_draws_when_auto_val_is_off(tmp_
                         scheduler="none", split_draws=2)
 
     assert "error" in result and "auto_val" in result["error"]
-    assert not ran
-
-
-def test_run_hyperparameter_search_refuses_split_draws_for_a_task_outside_the_drawn_path(
-    tmp_path, real_hpo_base_config, monkeypatch,
-):
-    import tcip_mcp.tools.training_tools as tt
-
-    ran = []
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
-
-    cfg = dict(real_hpo_base_config)
-    cfg["model_source"] = {**cfg["model_source"], "task": "ordinal"}
-    result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
-                        scheduler="none", split_draws=2)
-
-    assert "error" in result and "ordinal" in result["error"]
     assert not ran
 
 
@@ -658,8 +626,8 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection_and_s
 
 
 def test_run_hyperparameter_search_admits_split_draws_bound_with_auto_val_false(tmp_path, monkeypatch):
-    """A bound base_config reads neither val_images_dir nor auto_val (the selection branch binds
-    ahead of both), so auto_val=False no longer refuses it the way it refuses a drawn config."""
+    """A bound base_config does not read auto_val (the selection branch binds ahead of it), so
+    auto_val=False no longer refuses it the way it refuses a drawn config."""
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.tools.data_tools import draw_splits
 
@@ -762,7 +730,8 @@ def test_run_hyperparameter_search_admits_split_draws_with_a_native_search_alg(
 
 
 def test_run_hyperparameter_search_admits_split_draws_for_instance_seg(tmp_path, real_hpo_base_config, monkeypatch):
-    """instance_seg sits in STEM_TASKS beside detection; split_draws admits it the same way."""
+    """instance_seg reads the same ground truth detection does; split_draws admits it the same
+    way."""
     import tcip_mcp.tools.training_tools as tt
 
     cfg = dict(real_hpo_base_config)
@@ -1572,25 +1541,20 @@ def test_run_hyperparameter_search_admits_split_draws_over_a_two_source_tiled_co
 def test_run_hyperparameter_search_admits_split_draws_over_a_bespoke_dataset_source(
     tmp_path, monkeypatch,
 ):
-    """A bespoke dataset_source is excluded from this leg outright, whatever its own admitted
-    count: the builder here answers exactly one stem, the shape the built-in leg would refuse,
-    but the leg never counts a bespoke builder's admitted set at all, since it may depend on
-    the transforms it is built with and this door builds with none."""
+    """A bespoke dataset_source is excluded from this leg outright: the identical single-source
+    tiled config the built-in leg refuses is admitted with a builder named, because the
+    spatial-strip route serves datasets the platform builds itself, so a bespoke run never takes
+    it however few sources it admits. Its own samples still come from the platform's producer, so
+    every draw varies the same admitted set."""
     pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
     import tcip_mcp.tools.training_tools as tt
+    from tests.test_training_autoval import _big_single_source
 
-    cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {
-            "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-            "split": {"val_ratio": 0.2, "test_ratio": 0.1},
-            "dataset_source": {
-                "builder": "tests.test_dataset_source_seam:build_bespoke_ds",
-                "builder_kwargs": {"stems": ["only_one"]},
-            },
-        },
-    }
+    images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    cfg = _one_source_tiled_cfg(images_dir, labels_dir)
+    cfg["data"] = {**cfg["data"], "dataset_source": {
+        "builder": "tests.test_dataset_source_seam:build_bespoke_ds"}}
 
     def fake_search(**kw):
         return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
@@ -1601,13 +1565,13 @@ def test_run_hyperparameter_search_admits_split_draws_over_a_bespoke_dataset_sou
     result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2, trial_budget=2)
 
-    assert "error" not in result
+    assert "error" not in result, result
 
 
 def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
-    """A config an earlier leg already refuses (here, an explicit data.val_images_dir) reads
+    """A config an earlier leg already refuses (here, ``data.auto_val`` off) reads
     that leg's own reason, never this one's: the spatial-strip leg runs last and is never
     reached for a config an earlier leg already rejected."""
     import tcip_mcp.tools.training_tools as tt
@@ -1616,25 +1580,23 @@ def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
 
     cfg = dict(real_hpo_base_config)
-    cfg["data"] = {**cfg["data"], "val_images_dir": str(tmp_path / "val"),
+    cfg["data"] = {**cfg["data"], "auto_val": False,
                    "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2}}
     result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
 
-    assert "error" in result and "val_images_dir" in result["error"]
+    assert "error" in result and "auto_val" in result["error"]
     assert "spatial strip path" not in result["error"]
     assert not ran
 
 
-def test_run_hyperparameter_search_over_a_misrouted_coco_is_not_refused_by_this_leg(
+def test_a_misrouted_coco_is_named_by_the_producer_not_by_the_single_source_leg(
     tmp_path, monkeypatch,
 ):
-    """A dataset-level COCO document misrouted as data.labels_dir admits no stem (every image
-    reads as unannotated, not a document this leg's checked_label_format/build_full_admitted_
-    dataset calls fail on), so len(stems) != 1 and this leg answers no refusal of its own;
-    preflight_config reports the same admission gap in its own words, as a warning that never
-    blocks, and the sweep proceeds past this leg and past preflight to the search, with neither
-    this leg's single-source message nor an "error" key anywhere in the result."""
+    """A dataset-level COCO document misrouted as data.labels_dir is the producer's own refusal,
+    raised where the run admits and reported at preflight in those same words. This leg adds
+    nothing of its own: neither its single-source message nor a spatial-strip claim about a
+    membership nothing could admit."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import json
@@ -1650,8 +1612,10 @@ def test_run_hyperparameter_search_over_a_misrouted_coco_is_not_refused_by_this_
     cfg = _one_source_tiled_cfg(images_dir, labels_dir)
 
     preflight = tt.preflight_config(cfg)
-    assert preflight["valid"] is True
-    assert any("0 stem(s) admitted" in warning for warning in preflight["warnings"])
+    assert any("dataset-level COCO" in issue for issue in preflight["issues"]), preflight
+    assert not any("one trainable source" in issue or "spatial strip path" in issue
+                   for issue in preflight["issues"])
+    assert not any("stem(s) admitted" in warning for warning in preflight["warnings"])
 
     ran = []
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
@@ -1659,7 +1623,7 @@ def test_run_hyperparameter_search_over_a_misrouted_coco_is_not_refused_by_this_
     result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2, trial_budget=2)
 
-    assert "error" not in result
-    assert ran == [1]
-    assert "one trainable source" not in result["best_value_reason"]
-    assert "spatial strip path" not in result["best_value_reason"]
+    # The sweep refuses on the admission's own message, and searches nothing over data no run
+    # could admit.
+    assert any("dataset-level COCO" in issue for issue in result["issues"]), result
+    assert not ran

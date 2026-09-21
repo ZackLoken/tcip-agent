@@ -18,6 +18,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     evaluate,
     semantic_seg_metrics,
 )
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -97,7 +98,6 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
     import numpy as np
     from torch.utils.data import DataLoader
 
-    from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.training.collation import task_collate
     from tests import bespoke_models
 
@@ -113,9 +113,7 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
         m[IMG // 4:IMG // 2, IMG // 4:IMG // 2] = 1  # a foreground block
         Image.fromarray(m, mode="L").save(masks_dir / f"img{i}.png")
 
-    dataset = build_dataset(
-        "semantic_seg", images_dir=str(images_dir), masks_dir=str(masks_dir), num_classes=2
-    )
+    dataset = dataset_over("semantic_seg", str(images_dir), str(masks_dir), num_classes=2)
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("semantic_seg"))
     model = bespoke_models.build_bespoke_semantic_seg(num_classes=2)
 

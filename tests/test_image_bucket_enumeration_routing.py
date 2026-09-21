@@ -1,6 +1,6 @@
-"""Every raw directory walk over one bucket of ``images/`` routes through
-``list_logical_images``' own stem-collision refusal, raising ``AmbiguousImageStem`` the way
-every other reader of a bucket does, never picking one member of a stem-collided pair silently.
+"""Every walk over one bucket of ``images/`` routes through ``list_logical_images``' own
+stem-collision refusal, raising ``AmbiguousImageStem`` the way every other reader of a bucket
+does, never picking one member of a stem-collided pair silently.
 
 ``ingest_images`` itself refuses to create a stem-collided pair, so the pair a test needs here
 is built the only way one can actually reach disk: one real file ingested through that door,
@@ -57,17 +57,38 @@ def _ingested_bucket_of(tmp_path: Path, stems: list[str]) -> Path:
     return Path(result["image_root"]) / "undated"
 
 
-def test_preflight_channel_firewall_sample_refuses_a_stem_collision(tmp_path):
+SUBJECT = "leaf"
+
+
+def _labels_for(tmp_path: Path, *stems: str) -> Path:
+    """A labels directory holding one document per stem, so the producer admits this bucket: a
+    preflight reads the run's own admitted membership, never a directory listing of its own."""
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    labels_dir = tmp_path / "labels"
+    labels_dir.mkdir(exist_ok=True)
+    for stem in stems:
+        json_io.write_annotations(
+            labels_dir / f"{stem}.json",
+            [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 5, 5))], 16, 16, keep_empty=True)
+    return labels_dir
+
+
+def test_preflight_refuses_a_stem_collision(tmp_path):
+    """The run's own population is the one walk every preflight leg reads, so a collided bucket
+    is refused once, where that population is resolved."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
     bucket = _ingested_bucket(tmp_path)
     _collide(bucket)
+    labels_dir = _labels_for(tmp_path, "shoot_001")
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1, "in_chans": 3}, "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(tmp_path / "labels")},
+        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir), "subject": SUBJECT},
     }
     with pytest.raises(AmbiguousImageStem):
         preflight_config(cfg)
@@ -86,6 +107,7 @@ def test_preflight_channel_firewall_sample_reports_a_newer_written_bandgroup_man
     from tcip_mcp.tools.training_tools import preflight_config
 
     bucket = _ingested_bucket(tmp_path)
+    labels_dir = _labels_for(tmp_path, "shoot_001")
     key = band_group_manifest_key(bucket, "plotA")
     path = FileBackend().path_for(key)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -95,47 +117,10 @@ def test_preflight_channel_firewall_sample_reports_a_newer_written_bandgroup_man
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1, "in_chans": 3}, "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(tmp_path / "labels")},
+        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir), "subject": SUBJECT},
     }
     r = preflight_config(cfg)
     assert any("could not be read" in i and "schema_version 2" in i for i in r["issues"]), r["issues"]
-
-
-def test_preflight_split_policy_stems_refuses_a_stem_collision(tmp_path):
-    pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import preflight_config
-
-    bucket = _ingested_bucket(tmp_path)
-    _collide(bucket)
-
-    cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(tmp_path / "labels"),
-                 "split": {"group_by": "spatial_strip"}},
-    }
-    with pytest.raises(AmbiguousImageStem):
-        preflight_config(cfg)
-
-
-def test_reserve_calibration_feasibility_stems_refuses_a_stem_collision(tmp_path):
-    pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import preflight_config
-
-    bucket = _ingested_bucket(tmp_path)
-    _collide(bucket)
-    labels_dir = tmp_path / "labels"
-    labels_dir.mkdir()
-
-    cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
-                 "tiling": {"enabled": True},
-                 "split": {"reserve_calibration_fraction": 0.2}},
-    }
-    with pytest.raises(AmbiguousImageStem):
-        preflight_config(cfg)
 
 
 def test_doctor_image_stems_refuses_a_stem_collision(tmp_path):
@@ -211,11 +196,12 @@ def test_preflight_channel_firewall_sample_admits_a_clean_multi_image_bucket(tmp
     from tcip_mcp.tools.training_tools import preflight_config
 
     bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
+    labels_dir = _labels_for(tmp_path, "shoot_001", "shoot_002")
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1, "in_chans": 3}, "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(tmp_path / "labels")},
+        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir), "subject": SUBJECT},
     }
     r = preflight_config(cfg)
     assert not any("in_chans" in i for i in r["issues"]), r["issues"]
@@ -228,11 +214,12 @@ def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(tmp_path
     from tcip_mcp.tools.training_tools import preflight_config
 
     bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
+    labels_dir = _labels_for(tmp_path, "shoot_001", "shoot_002")
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(tmp_path / "labels"),
+        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir), "subject": SUBJECT,
                  "split": {"group_by": "stem"}},
     }
     r = preflight_config(cfg)
@@ -241,23 +228,22 @@ def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(tmp_path
 
 def test_reserve_calibration_feasibility_admits_a_clean_multi_image_bucket(tmp_path):
     """Both uncollided images are counted: the feasibility issue names the real count (2), the
-    direct evidence the listing reached every member rather than one raw-walked file."""
+    direct evidence the admission reached every member rather than one raw-walked file."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
     bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
-    labels_dir = tmp_path / "labels"
-    labels_dir.mkdir()
+    labels_dir = _labels_for(tmp_path, "shoot_001", "shoot_002")
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
+        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir), "subject": SUBJECT,
                  "tiling": {"enabled": True},
                  "split": {"reserve_calibration_fraction": 0.2}},
     }
     r = preflight_config(cfg)
-    assert any("2 source images" in i for i in r["issues"]), r["issues"]
+    assert any("2 admitted sources" in i for i in r["issues"]), r["issues"]
 
 
 def test_doctor_image_stems_admits_a_clean_multi_image_bucket(tmp_path):

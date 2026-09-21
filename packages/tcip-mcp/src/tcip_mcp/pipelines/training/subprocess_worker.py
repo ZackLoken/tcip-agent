@@ -37,7 +37,7 @@ def _patch_experiment_config(experiment_id: str, action: str,
     inside the same transaction before writing it back, a patch of that section, never a
     rewrite of the whole record. ``action`` names the operation for both the terminal refusal
     and its audit line, one string every caller of this run's provenance patches shares with
-    its own identity (``patch_experiment_config_tiling``, ``..._id_map``, ``..._split``). Never
+    its own identity (``patch_experiment_config_tiling``, ``..._scope``, ``..._split``). Never
     sinks the run if there is no experiment record to patch (experiment tracking is best-effort
     throughout this path, same as every other write in it); a terminal record's refusal is the
     one exception, since a lost provenance write there is itself a run failure, not a
@@ -89,19 +89,13 @@ def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict, *,
     _patch_experiment_config(experiment_id, "patch_experiment_config_tiling", mutate)
 
 
-def _patch_experiment_config_id_map(experiment_id: str, subject: str, attribute: str | None,
-                                    id_map: dict) -> None:
-    """Patch this run's resolved name->id map into the durable experiment record. Called from
-    ``run()`` right after the dataset is built (mirroring where the tiling patch fires), though
-    unlike tile geometry this fact is a pure function of ``data_cfg`` and would be resolvable
-    before the build too, the call site is chosen for symmetry with the tiling patch, not because
-    the dataset build is a precondition for it."""
-    def mutate(data_cfg: dict) -> None:
-        data_cfg["subject"] = subject
-        data_cfg["attribute"] = attribute
-        data_cfg["id_map"] = dict(id_map)
-
-    _patch_experiment_config(experiment_id, "patch_experiment_config_id_map", mutate)
+def _patch_experiment_config_scope(experiment_id: str, scope) -> None:
+    """Patch the class space this run's samples were admitted under into the durable experiment
+    record, through the one write of it
+    (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.onto`). Called from ``run()`` after the
+    loaders are built, mirroring where the tiling patch fires; unlike tile geometry this fact is
+    the producer's own and is already on the run's own ``data_cfg`` before the build."""
+    _patch_experiment_config(experiment_id, "patch_experiment_config_scope", scope.onto)
 
 
 def _is_selection_bound_split(split_cfg: object) -> bool:
@@ -124,70 +118,22 @@ def _patch_experiment_config_split(experiment_id: str, split_cfg: dict) -> None:
     _patch_experiment_config(experiment_id, "patch_experiment_config_split", mutate)
 
 
-def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dict] | None:
-    """This run's resolved name->id map, or ``None`` when there is nothing to
-    record. Returns ``(subject, attribute, id_map)``.
+def _admitted_class_space(data_cfg: dict):
+    """The class space this run's samples were admitted under, or ``None`` when its ground truth
+    carries its own classes and no map was admitted.
 
-    Resolved independently of the built dataset object's own attributes:
-    ``DetectionDataset`` only self-populates ``.id_map`` on its own direct-json build path; the
-    COCO-assembled ``auto_val`` default and ``TiledDetectionDataset`` both build through a
-    different internal path and expose neither ``.id_map`` nor ``.subject`` at all, so a
-    ``getattr``-off-the-dataset read was silently a no-op on the default and every tiled run.
-    ``assign_class_ids`` is a pure function of
-    ``(registry, subject, attribute)``, "same registry + scope -> identical map, every call"
-    (``subject_registry.py``), so re-resolving it here from ``data_cfg``'s own
-    subject/attribute/labels_dir, the same inputs ``auto_train_val`` already resolved it from
-    internally (``training_tools.py``'s own COCO-assembly branch calls this exact function),
-    reproduces the identical map without depending on which internal dataset shape got built.
-
-    A run bound to a selection is the exception to that re-resolution: its samples were admitted
-    under the map the selection recorded, which ``auto_train_val`` already wrote onto
-    ``data_cfg``, so this answers that map rather than reading the registry again. A live registry
-    whose declared order changed since the draw would otherwise stamp a checkpoint with a
-    vocabulary the model never trained in. A bound run reaching here with no recorded map raises
-    rather than falling back to the registry.
-
-    ``None`` when ``task`` isn't detection/instance_seg, no ``subject`` is configured, the run
-    trains from a bespoke ``dataset_source`` (that route's targets are not guaranteed to come
-    from this ``(labels_dir, subject, attribute)`` triple at all, since a bespoke builder owns its
-    class space entirely, so re-deriving here could stamp a map that is the wrong id space for
-    what the run actually trained on, exactly the class of error class-aware admission exists to
-    prevent; ``build_dataset`` itself only calls ``resolve_registry_id_map`` on the same
-    predicate, datasets.py's own ``dataset_source`` branch), or the one legitimate degraded case
-    ``resolve_registry_id_map`` itself names (an attribute scope with no ``subjects.json`` for this
-    labels dir), honest: no map recorded, decode falls through to its own live-registry
-    re-derivation.
+    Read off the run's own resolved data config through the one reader of it
+    (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.recorded_in`), which ``auto_train_val``
+    writes the admitted scope onto for every route, bound or drawn, built-in loader or bespoke
+    builder: the producer that admitted the samples is the one that states which vocabulary they
+    were admitted in. The registry is never read again here, and nothing is taken off the built
+    dataset object, so a ``subjects.json`` whose declared order changed since the admission
+    cannot stamp a checkpoint with a vocabulary the model never trained in.
     """
-    if task not in ("detection", "instance_seg") or not data_cfg.get("subject"):
-        return None
-    subject = data_cfg["subject"]
-    attribute = data_cfg.get("attribute")
-    split_cfg = data_cfg.get("split")
-    split_cfg = split_cfg if isinstance(split_cfg, dict) else {}
-    bound = split_cfg.get("selection_binding")
-    if isinstance(bound, dict):
-        # A bound run already holds the exact map its samples were admitted under; re-resolving
-        # from the live registry could stamp a different order than the model trained in.
-        recorded = data_cfg.get("id_map")
-        if not isinstance(recorded, dict) or not recorded:
-            raise ValueError(
-                f"the run bound to the selection at {bound.get('selection_dir')!r} carries no "
-                "data.id_map: a bound run trains in the class space its selection recorded, and "
-                "a checkpoint stamped from a live registry instead could speak a different "
-                "vocabulary."
-            )
-        return (subject, attribute, dict(recorded))
-    from tcip_mcp.pipelines.data.label_queries import targets_registry_derived
+    from tcip_mcp.pipelines.data.selection import ClassScope
 
-    if not targets_registry_derived(data_cfg):
-        return None
-    from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map
-
-    try:
-        _reg, id_map = resolve_registry_id_map(data_cfg.get("labels_dir", ""), subject, attribute)
-    except ValueError:
-        return None
-    return (subject, attribute, id_map) if id_map else None
+    scope = ClassScope.recorded_in(data_cfg)
+    return scope if scope.subject and scope.id_map else None
 
 
 def run(experiment_id: str, output_dir: str, resume_from: str) -> None:
@@ -279,26 +225,20 @@ def _prepare_run_context(experiment_id: str, output_dir: str, resume_from: str,
     if _is_selection_bound_split(split_cfg):
         _patch_experiment_config_split(experiment_id, split_cfg)
 
-    # Stamp this run's resolved name->id map onto config["data"] in place, data_cfg
-    # is the same dict object, so this lands on the checkpoint (generic_trainer persists run.config
-    # into every checkpoint; GenericPredictor reads it back as predictor.config) as well as the
-    # durable experiment record (_patch_experiment_config_id_map). Decode/record at inference time
-    # (inference_tools.py::run_inference) then prefers this recorded map over re-deriving from the
-    # inference dataset's live registry, so a subjects.json whose declared attribute-value order
-    # changes between train and inference can't silently mis-decode. See _resolve_run_id_map's own
-    # docstring for why this is resolved independently of train_ds's own attributes.
-    _resolved = _resolve_run_id_map(task, data_cfg)
-    if _resolved is not None:
-        _run_subject, _run_attribute, _run_id_map = _resolved
-        data_cfg["id_map"] = dict(_run_id_map)
-        _patch_experiment_config_id_map(experiment_id, _run_subject, _run_attribute, _run_id_map)
+    # The admitted class space already rides on data_cfg, and so onto the checkpoint
+    # (generic_trainer persists run.config into every one); this mirrors it to the durable record.
+    _scope = _admitted_class_space(data_cfg)
+    if _scope is not None:
+        _patch_experiment_config_scope(experiment_id, _scope)
 
-    # The effective input geometry is only knowable once the dataset is actually built, so it
-    # is stamped here (into the config every checkpoint embeds) and mirrored to the experiment.
+    # The effective input geometry is only knowable once the dataset is actually built, so it is
+    # stamped here (into the config every checkpoint embeds) and mirrored to the experiment.
     stamped = stamp_effective_data_geometry(data_cfg, train_ds)
-    _patch_experiment_config_tiling(experiment_id, stamped["tiling"],
-                                    replace=stamped["tiling_replaced"],
-                                    train_native_size=stamped["train_native_size"])
+    # None for a bespoke build: the platform did not build that dataset, so it records nothing.
+    if stamped is not None:
+        _patch_experiment_config_tiling(experiment_id, stamped["tiling"],
+                                        replace=stamped["tiling_replaced"],
+                                        train_native_size=stamped["train_native_size"])
 
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from torch.utils.data import DataLoader
@@ -331,7 +271,7 @@ def _prepare_run_context(experiment_id: str, output_dir: str, resume_from: str,
         logger.warning(
             "No validation loader for %s run %s: best-model selection and early "
             "stopping will fall back to training loss (no val mAP/composite). "
-            "Provide a val split (data.val_images_dir) or enable auto_val.",
+            "Bind a selection through data.split.selection_dir, or enable auto_val.",
             task, experiment_id,
         )
 
@@ -339,7 +279,7 @@ def _prepare_run_context(experiment_id: str, output_dir: str, resume_from: str,
     # own stated authority) rather than threaded across the process boundary; same deterministic
     # result the parent's own copy (used for the lineage record) already produced.
     ds_id, ds_fp = dataset_identity(data_cfg)
-    persist_run_partition(experiment_id, train_ds, val_ds, data_cfg,
+    persist_run_partition(experiment_id, data_cfg,
                            dataset_id=ds_id, dataset_fingerprint=ds_fp,
                            partition=partition)
 

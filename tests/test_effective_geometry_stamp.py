@@ -5,6 +5,7 @@ never survives an untiled run."""
 from __future__ import annotations
 
 import pytest
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 torch = pytest.importorskip("torch")
 
@@ -30,6 +31,26 @@ def test_stamp_tiled_run_fills_effective_geometry_into_tiling():
     assert "train_native_size" not in data_cfg
 
 
+def test_a_bespoke_run_records_no_geometry_at_all():
+    """The stamp reads a dataset's own tile attributes and probes its sources, so a dataset the
+    platform did not build is one it cannot measure, not one serving untiled frames. Recording
+    ``{"enabled": False}`` there would put a geometry nobody measured onto the checkpoint every
+    predictor and tiled-eval default reads back, so a bespoke run records nothing."""
+    from tcip_mcp.pipelines.training.generic_trainer import stamp_effective_data_geometry
+
+    data_cfg = {"dataset_source": {"builder": "my_module:build_ds"},
+                "tiling": {"enabled": True, "tile_size": 640}}
+
+    assert stamp_effective_data_geometry(data_cfg, _OpaqueStub()) is None
+    assert data_cfg["tiling"] == {"enabled": True, "tile_size": 640}  # untouched, not replaced
+    assert "train_native_size" not in data_cfg
+
+    # A platform-built dataset in the same shape still stamps: absence is the bespoke fact alone.
+    platform_cfg = {"tiling": {"enabled": True, "tile_size": 640}}
+    assert stamp_effective_data_geometry(platform_cfg, _OpaqueStub()) is not None
+    assert platform_cfg["tiling"] == {"enabled": False}
+
+
 def test_stamp_untiled_run_replaces_tiling_record_wholesale():
     """An untiled run must never carry a requested tile_size into its persisted config: a
     reader would take it for the frame the model trained on."""
@@ -51,7 +72,6 @@ def _detection_dataset(tmp_path, sizes):
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
-    from tcip_mcp.pipelines.data.datasets import DetectionDataset
 
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
@@ -62,7 +82,7 @@ def _detection_dataset(tmp_path, sizes):
         Image.new("RGB", (w, h)).save(images_dir / f"img{i}.png")
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
                                   [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], w, h)
-    return DetectionDataset(str(images_dir), str(labels_dir), subject="bud")
+    return dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
 
 
 def test_stamp_untiled_uniform_frames_record_train_native_size(tmp_path):

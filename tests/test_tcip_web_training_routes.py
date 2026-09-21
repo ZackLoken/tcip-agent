@@ -430,7 +430,7 @@ def test_relaunch_route_launches_a_pristine_config_as_its_own_first_run(
     cfg = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
                          "task": "regression", "in_chans": 3},
-        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path)},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
                      "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
@@ -519,7 +519,7 @@ def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
     cfg = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
                          "task": "regression", "in_chans": 3},
-        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path)},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
                      "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
@@ -566,7 +566,7 @@ def test_list_runs_route_names_the_run_s_selection_metric(
     cfg = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
                          "task": "regression", "in_chans": 3},
-        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path)},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
                      "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},

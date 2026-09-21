@@ -1,6 +1,6 @@
 ---
 name: annotation
-description: "Annotation and review workflows for TCIP's native per-image JSON labels, and the dataset-level COCO assembled from them. Covers engine-assisted auto-labeling (a method-neutral proposal seam; SAM is the built-in reference engine), review cycles with IoU matching, active learning scoring, and quality metrics. Load when labeling or reviewing image annotations, scoring unlabeled images for active learning, running engine-assisted auto-labeling, or preparing/QCing training data."
+description: "Annotation and review workflows for TCIP's native per-image JSON labels, and the dataset-level COCO exported from them. Covers engine-assisted auto-labeling (a method-neutral proposal seam; SAM is the built-in reference engine), review cycles with IoU matching, active learning scoring, and quality metrics. Load when labeling or reviewing image annotations, scoring unlabeled images for active learning, running engine-assisted auto-labeling, or preparing/QCing training data."
 ---
 
 # Annotation Workflow
@@ -13,9 +13,8 @@ The on-disk default for both GT and predictions is one per-image, COCO-shaped `.
 without reading any label document (its `assignments` regime reads back the proposal record
 `propose_annotations` staged in a prior run, not a label file); `run_inference` reads it only
 when it calibrates a confidence operating point. A dataset-level
-COCO training set is assembled from these per-image files (`tcip_annotation.json_io`'s
-`to_coco_dataset`, called from `pipelines/data/label_queries.py`'s `assemble_coco`), not authored
-directly. An unspecified format resolves to `.json`
+COCO document is an export built from these per-image files (`tcip_annotation.json_io`'s
+`to_coco_dataset`), never a shape anything here trains on. An unspecified format resolves to `.json`
 (`dataset_layout.py`'s `label_ext()`). A breeder can confirm every prediction a bucket's own
 validated count operating point pre-admits in one Review action; on a false positive this writes
 `accepted_by_rule` beside the person's `accepted_by` on the ground-truth record it adds, while a
@@ -29,11 +28,10 @@ was.
 | json | One `.json` per image (canonical) | Pixel coordinates | an `annotations` key, no `images`/`categories` key |
 | coco | Single `.json` for the dataset | Pixel coordinates | an `images`/`categories` key |
 
-These are import and export shapes. Training never reads a dataset-level COCO file: geometry
-ground truth is the per-image document, and the dataset-level COCO a loader may read is the one
-`assemble_coco` builds from those documents in memory. An external COCO export becomes per-image
-documents on the way in, and one left sitting in a run's `labels_dir` is refused by name rather
-than shadowing the per-image files beside it.
+These are import and export shapes. Nothing here trains or calibrates on a dataset-level COCO
+file: geometry ground truth is the per-image document, and every loader reads each sample's own.
+An external COCO export becomes per-image documents on the way in, and one left sitting in a run's
+`labels_dir` is refused by name rather than shadowing the per-image files beside it.
 
 Both are read by `format_io.load_annotations` / written by `save_annotations`; the read side is
 wrapped for the agent by `annotation_tools.read_annotations`, a library call, not a tool of its

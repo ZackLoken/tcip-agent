@@ -22,15 +22,14 @@ their *declared order*, deterministically and re-derivably, so the loader that b
 the model that predicts, and the code that later decodes a prediction all agree by construction.
 Ordering is the declared ``values`` order and never sorted: ordinal values carry rank, which
 sorting would corrupt. The registry file's order could change between training and decode, so a run
-*records* the map it used (``subprocess_worker.py::run`` resolves it via
-``_resolve_run_id_map`` right after the dataset is built and stamps it onto ``config["data"]
-["id_map"]``, which travels onto the checkpoint via the run's own config object, and, best-effort,
-onto the durable experiment record via ``_patch_experiment_config_id_map``) and decode reads that
+*records* the map it used: the producer that admitted its samples states the scope on the run's own
+data config, which travels onto the checkpoint via the run's own config object and, best-effort,
+onto the durable experiment record. Decode reads that
 recorded map first (``inference_tools.resolve_decode_id_map``, the one resolution both writers
 that persist predictions to disk, ``inference_tools.run_inference`` and the web GUI's inference worker,
 call), falling back to a fresh derivation from the inference dataset's registry only for a
-checkpoint with no recorded map, a bespoke ``dataset_source`` with no registry scope, or a run
-trained from a pre-built COCO source whose id space isn't registry-derived.
+checkpoint with no recorded map, a run whose ground truth carries its own classes and which no
+registry scopes.
 """
 
 from __future__ import annotations

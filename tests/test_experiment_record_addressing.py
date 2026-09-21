@@ -102,11 +102,14 @@ def test_a_run_partition_is_read_from_the_store_the_experiment_module_resolves(
     monkeypatch.setattr(experiments, "EXPERIMENTS_DIR", elsewhere)
     experiment_id = "exp-015-chestnut-burr-det"
     experiments.create_experiment(experiment_id, {"model_source": {"builder": "m:f"}})
+    labels_dir = str(tmp_path / "annotations")
     store.replace(experiments.split_key(experiment_id),
-                  {"train": ["img_001"], "group_by": "stem"})
+                  {"members": {labels_dir: {"train": ["img_001"], "val": []}},
+                   "group_by": "stem"})
 
     # A hit here proves _train_disjointness resolved the relocated store, not the default one.
-    checked = _train_disjointness(experiment_id, {"img_002"}, {"img_003"})
+    checked = _train_disjointness(experiment_id, {"img_002"}, {"img_003"},
+                                  calibration_labels_dir=labels_dir)
     assert checked["unresolvable"] is False
     assert checked["checked"] is True
     assert checked["leaked_stems"] == []

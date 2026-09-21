@@ -20,13 +20,13 @@ pytest.importorskip("torchvision")
 from torch import nn  # noqa: E402
 from torch.utils.data import DataLoader  # noqa: E402
 
-from tcip_mcp.pipelines.data.datasets import build_dataset  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
 from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 from tcip_mcp.pipelines.training.optimizer_factory import (  # noqa: E402
     compute_lr_scale, snapshot_optimizer_state, restore_optimizer_state,
 )
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 IMG = 64
 BASE_BB_LR = 1e-3
@@ -138,7 +138,7 @@ def _classification_loader(tmp_path: Path, n: int = 6, batch_size: int = 2) -> D
         w = csv.writer(f)
         w.writerow(("stem", "label"))
         w.writerows(rows)
-    ds = build_dataset("classification", images_dir=str(images_dir), csv_path=str(csv_path), num_classes=2)
+    ds = dataset_over("classification", str(images_dir), str(csv_path), num_classes=2)
     return DataLoader(ds, batch_size=batch_size, collate_fn=task_collate("classification"))
 
 

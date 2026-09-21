@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 
 import tcip_store
-from tcip_annotation.state import Annotation, BBox, Point, Polygon
+from tcip_annotation.state import Annotation, BBox, Point, polygonal
 
 from tcip_mcp.pipelines.reference_grid import Cell
 
@@ -51,7 +51,7 @@ def _annotation_record(a: Annotation) -> dict:
         geom = ["bbox", round(g.x1, 2), round(g.y1, 2), round(g.x2, 2), round(g.y2, 2)]
     elif isinstance(g, Point):
         geom = ["point", round(g.x, 2), round(g.y, 2)]
-    elif isinstance(g, Polygon):
+    elif polygonal(g):
         geom = ["polygon", [[[round(x, 2), round(y, 2)] for x, y in ring] for ring in g.rings]]
     else:
         geom = None

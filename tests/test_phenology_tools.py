@@ -38,6 +38,7 @@ from tests._binding_fixtures import write_bound_sidecar
 pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
 
 from tests._population import mapped_plants
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
 def _plant_csv(path: Path) -> None:
@@ -1919,7 +1920,6 @@ def test_calibrate_scalar_operating_point_ordinal_e2e(
     pytest.importorskip("torchvision")
     from torch.utils.data import DataLoader
 
-    from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import create_run
@@ -1935,7 +1935,7 @@ def test_calibrate_scalar_operating_point_ordinal_e2e(
     csv_path = tmp_path / "ranks.csv"
     _write_csv(csv_path, rows, ("stem", "rank"))
 
-    dataset = build_dataset("ordinal", images_dir=str(images_dir), csv_path=str(csv_path), num_ranks=3)
+    dataset = dataset_over("ordinal", str(images_dir), str(csv_path), num_ranks=3)
     loader = DataLoader(dataset, batch_size=5, collate_fn=task_collate("ordinal"))
     model_source = _model_source("build_bespoke_ordinal", num_ranks=3)
     # Seeded through the trainer's own config key so this run's init and shuffling repeat.
@@ -1984,7 +1984,6 @@ def test_calibrate_scalar_operating_point_regression_e2e(
     pytest.importorskip("torchvision")
     from torch.utils.data import DataLoader
 
-    from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import create_run
@@ -2000,7 +1999,7 @@ def test_calibrate_scalar_operating_point_regression_e2e(
     csv_path = tmp_path / "values.csv"
     _write_csv(csv_path, rows, ("stem", "value"))
 
-    dataset = build_dataset("regression", images_dir=str(images_dir), csv_path=str(csv_path))
+    dataset = dataset_over("regression", str(images_dir), str(csv_path))
     loader = DataLoader(dataset, batch_size=5, collate_fn=task_collate("regression"))
     model_source = _model_source("build_bespoke_regressor")
     # Seeded through the trainer's own config key so this run's init and shuffling repeat.

@@ -16,7 +16,9 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 from torch.utils.data import DataLoader  # noqa: E402
 
-from tcip_mcp.pipelines.data.split_construction import auto_train_val  # noqa: E402
+from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
+    auto_train_val, recorded_side,
+)
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
 from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
@@ -55,6 +57,27 @@ def _detection_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"), ti
     return images_dir, labels_dir, all_stems
 
 
+@pytest.mark.parametrize("labels_dir", [None, "absent"])
+def test_auto_train_val_refuses_a_missing_location_in_preflights_own_words(
+    tmp_path: Path, labels_dir: str | None,
+):
+    """A run reads its samples out of the places its config names, so a missing or unset location
+    refuses through the one missing-key refusal preflight states, naming the key. An unset value
+    never reaches a path as an empty string or a ``None``."""
+    images_dir, real_labels, _stems = _detection_dataset(tmp_path / "ds")
+    data_cfg: dict = {"images_dir": str(images_dir), "subject": "bud"}
+    if labels_dir == "absent":
+        data_cfg["labels_dir"] = str(tmp_path / "gone")
+
+    with pytest.raises(ValueError, match="data.labels_dir"):
+        auto_train_val("detection", data_cfg, None)
+
+    # Admits valid work: the same config naming a real location trains.
+    data_cfg["labels_dir"] = str(real_labels)
+    train_ds, _val_ds, _partition = auto_train_val("detection", data_cfg, None)
+    assert train_ds.num_samples
+
+
 def test_auto_train_val_detection_splits(tmp_path: Path):
     images_dir, labels_dir, all_stems = _detection_dataset(tmp_path / "ds")
     data_cfg = {
@@ -70,7 +93,8 @@ def test_auto_train_val_detection_splits(tmp_path: Path):
     # The loaders index by each sample's own source, so a drawn run and a bound one key alike;
     # the run's recorded partition is what names members as bare stems.
     assert sorted(Path(s).stem for s in train_ds.stems + val_ds.stems) == sorted(all_stems)
-    assert sorted(partition["train"] + partition["val"]) == sorted(all_stems)
+    assert sorted(recorded_side(partition, "train") + recorded_side(partition, "val")) == \
+        sorted(all_stems)
     assert val_ds.transforms is None
 
 
@@ -106,10 +130,14 @@ def test_auto_train_val_malformed_val_ratio_degrades(tmp_path: Path):
     # Still the producer's own samples, indexed by source identity, with every admitted stem
     # recorded as trained: a failed draw drops the validation side, never the membership.
     assert sorted(Path(s).stem for s in train_ds.stems) == sorted(all_stems)
-    assert partition["train"] == sorted(all_stems) and partition["val"] == []
+    assert recorded_side(partition, "train") == sorted(all_stems)
+    assert recorded_side(partition, "val") == []
 
 
-def test_auto_train_val_ordinal_returns_none(tmp_path: Path):
+def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(tmp_path: Path):
+    """An ordinal run's ground truth is a table, so the platform's own producer names one sample
+    per admitted row and the draw partitions those samples: the run gets a real validation loader
+    and a recorded partition, and each loader reads the row its own sample names."""
     images_dir = tmp_path / "images"
     rows = []
     for i in range(4):
@@ -121,67 +149,21 @@ def test_auto_train_val_ordinal_returns_none(tmp_path: Path):
         w.writerow(("stem", "rank"))
         w.writerows(rows)
 
-    data_cfg = {"images_dir": str(images_dir), "csv_path": str(csv_path), "auto_val": True}
-    _ds, val_ds, _ = auto_train_val("ordinal", data_cfg, None)
-    assert val_ds is None
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(csv_path), "auto_val": True,
+                "split": {"val_ratio": 0.5, "seed": 1}}
+    train_ds, val_ds, partition = auto_train_val("ordinal", data_cfg, None)
 
-
-def test_auto_train_val_ordinal_explicit_val_csv_path(tmp_path: Path):
-    train_images = tmp_path / "train_images"
-    train_rows = []
-    for i in range(4):
-        _save_png(train_images / f"img{i}.png")
-        train_rows.append((f"img{i}", i % 2))
-    train_csv = tmp_path / "train_ranks.csv"
-    with open(train_csv, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(("stem", "rank"))
-        w.writerows(train_rows)
-
-    val_images = tmp_path / "val_images"
-    val_rows = []
-    for i in range(2):
-        _save_png(val_images / f"vimg{i}.png")
-        val_rows.append((f"vimg{i}", i % 2))
-    val_csv = tmp_path / "val_ranks.csv"
-    with open(val_csv, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(("stem", "rank"))
-        w.writerows(val_rows)
-
-    data_cfg = {"images_dir": str(train_images), "csv_path": str(train_csv),
-                "val_images_dir": str(val_images), "val_csv_path": str(val_csv)}
-    train_ds, val_ds, _ = auto_train_val("ordinal", data_cfg, None)
     assert val_ds is not None
-    assert val_ds.num_samples == 2
-    assert train_ds.num_samples == 4
-
-
-def test_auto_train_val_ordinal_val_images_dir_without_val_csv_path_degrades(tmp_path: Path):
-    """val_images_dir alone isn't enough for a CSV-driven task, unlike the geometry tasks (which
-    fall back to the train labels/masks dir): reusing the train CSV here would build a val_ds that
-    reads rows for images not present in val_images_dir, failing later inside a training loop
-    instead of now. Must degrade to (train_ds, None), not raise, and not silently build a
-    mismatched val_ds."""
-    train_images = tmp_path / "train_images"
-    rows = []
-    for i in range(4):
-        _save_png(train_images / f"img{i}.png")
-        rows.append((f"img{i}", i % 2))
-    train_csv = tmp_path / "ranks.csv"
-    with open(train_csv, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(("stem", "rank"))
-        w.writerows(rows)
-
-    val_images = tmp_path / "val_images"
-    val_images.mkdir(parents=True, exist_ok=True)
-
-    data_cfg = {"images_dir": str(train_images), "csv_path": str(train_csv),
-                "val_images_dir": str(val_images)}
-    train_ds, val_ds, _ = auto_train_val("ordinal", data_cfg, None)
-    assert val_ds is None
-    assert train_ds.num_samples == 4
+    assert train_ds.num_samples + val_ds.num_samples == 4
+    # Each side reads the rows its own samples name, keyed by their own sources.
+    assert set(train_ds._stems).isdisjoint(val_ds._stems)
+    assert recorded_side(partition, "train") and recorded_side(partition, "val")
+    assert sorted(recorded_side(partition, "train") + recorded_side(partition, "val")) == \
+        [f"img{i}" for i in range(4)]
+    assert sorted(partition) == [str(csv_path)]
+    by_row = dict(rows)
+    for key, rank in zip(train_ds._stems, train_ds._ranks):
+        assert rank == by_row[train_ds.member_stem_of(key)]
 
 
 def test_auto_train_val_tiny_dataset_guard(tmp_path: Path):
@@ -428,6 +410,59 @@ def test_reserve_calibration_fraction_unset_is_byte_identical(tmp_path: Path):
     assert manifest["train_region"] and manifest["val_region"] and manifest["test_region"]
 
 
+def test_a_single_source_spatial_run_builds_its_loaders_at_the_stated_band_count(tmp_path: Path):
+    """The sizes a run's config states reach the one-source spatial route too: a run configured
+    for one channel indexes its tile lattice and reads its tiles at one channel, rather than
+    probing its own source back to three."""
+    images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "auto_val": True, "num_channels": 1,
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
+    }
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    assert val_ds is not None
+    assert data_cfg["split"]["resolved_group_by"] == "spatial_strip"
+    assert train_ds.expected_channels == val_ds.expected_channels == 1
+    image, _target = train_ds[0]
+    assert image.shape[0] == 1
+
+
+def _multiband_source(images_dir: Path, labels_dir: Path, stem: str, bands: int) -> None:
+    """One annotated raster of ``bands`` bands, written the way the multi-band readers expect."""
+    import numpy as np
+    import tifffile
+
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    array = np.zeros((24, 40, bands), dtype=np.uint8)
+    array[12:18, 28:34, :] = 255
+    tifffile.imwrite(str(images_dir / f"{stem}.tif"), array)
+    json_io.write_annotations(
+        str(labels_dir / f"{stem}.json"),
+        [Annotation(subject="bud", geometry=BBox(28, 12, 34, 18))], 40, 24, keep_empty=True)
+
+
+def test_a_runs_band_count_is_read_over_every_source_and_a_disagreement_refuses(tmp_path: Path):
+    """The band count is one fact per run, read over every source it holds: sources that agree
+    size both loaders at the count they carry, whichever side each landed on, and one source of
+    another count refuses by name rather than leaving a side to be read at the other's count."""
+    images_dir, labels_dir = tmp_path / "ds" / "images", tmp_path / "ds" / "labels"
+    for stem in ("a", "b"):
+        _multiband_source(images_dir, labels_dir, stem, 5)
+    split = {"group_by": "stem", "val_ratio": 0.5, "seed": 1}
+    base_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud"}
+
+    train_ds, val_ds, _ = auto_train_val("detection", {**base_cfg, "split": dict(split)}, None)
+    assert val_ds is not None
+    assert train_ds.expected_channels == val_ds.expected_channels == 5
+
+    _multiband_source(images_dir, labels_dir, "c", 3)
+    with pytest.raises(ValueError, match="different band counts"):
+        auto_train_val("detection", {**base_cfg, "split": dict(split)}, None)
+
+
 def test_reserve_calibration_fraction_adds_a_disjoint_calibration_region(tmp_path: Path):
     """Admits valid work: an explicitly reserved calibration region is real, non-empty geometry,
     disjoint from train/val/test."""
@@ -462,9 +497,9 @@ def test_reserve_calibration_fraction_raises_on_unresolvable_extent(tmp_path: Pa
     admitted through the producer the run itself admits through, so the split is derived over the
     dataset the run would build."""
     from tcip_mcp.pipelines.data.split_construction import (
-        admit_geometry, spatial_single_source_split,
+        loader_sizes, spatial_single_source_split,
     )
-    from tcip_mcp.tools.training_tools import _dataset_source_kwargs
+    from tests._producer_fixtures import admit_over
 
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
@@ -475,12 +510,13 @@ def test_reserve_calibration_fraction_raises_on_unresolvable_extent(tmp_path: Pa
         str(labels_dir / "mosaic.json"),
         [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))], 0, 0, keep_empty=True)
 
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud"}
     tiling = {"enabled": True, "tile_size": 128, "overlap": 0.2}
     split_cfg = {"val_ratio": 0.2, "test_ratio": 0.1, "reserve_calibration_fraction": 0.15}
-    admitted = admit_geometry("detection", data_cfg, _dataset_source_kwargs("detection", data_cfg))
+    admitted = admit_over(images_dir, labels_dir, subject="bud")
     with pytest.raises(ValueError, match="reserve_calibration_fraction"):
-        spatial_single_source_split(admitted, data_cfg, tiling, split_cfg, None)
+        spatial_single_source_split(
+            admitted.one_sample(), admitted.scope, tiling, split_cfg, None,
+            loader_sizes("detection", {}, admitted.every_sample()))
 
 
 def test_single_tiled_source_raises_on_an_unreadable_label_regardless_of_reserve(

@@ -17,8 +17,9 @@ torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.data import datasets as datasets_module
-from tcip_mcp.pipelines.data.datasets import DetectionDataset, TiledDetectionDataset
+from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 from tcip_mcp.pipelines.image_utils import crop_pad_tile, load_image, pil_to_tensor
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -73,9 +74,15 @@ def _tiff_project(tmp_path: Path, height: int = 200, width: int = 200, dtype=np.
 
 
 def _tiled(images_dir, labels_dir, **kwargs) -> TiledDetectionDataset:
-    base = DetectionDataset(images_dir=str(images_dir), labels_dir=str(labels_dir),
-                            subject="bud")
+    base = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
     return TiledDetectionDataset(base, tile_size=64, overlap=0.2, **kwargs)
+
+
+def _only_source(ds) -> str:
+    """The one sample key this dataset indexes by, its sample's own source identity."""
+    keys = sorted(set(ds.stems))
+    assert len(keys) == 1, keys
+    return keys[0]
 
 
 # -- keep_regions ---------------------------------------------------------
@@ -137,7 +144,8 @@ def test_tile_entries_matches_index_order_and_getitem(tmp_path):
     assert len(entries) == len(ds)
     assert all(isinstance(s, str) and isinstance(tx, int) and isinstance(ty, int)
                for s, tx, ty in entries)
-    assert entries[0] == ("img0", 0, 0)
+    assert entries[0] == (_only_source(ds), 0, 0)
+    assert ds.member_stem_of(entries[0][0]) == "img0"
     assert entries == [(e["stem"], e["tile_x"], e["tile_y"]) for e in ds._index]
 
 
@@ -145,8 +153,8 @@ def test_source_frames_for_a_photographic_source(tmp_path):
     images_dir, labels_dir = _jpeg_project(tmp_path)
     ds = _tiled(images_dir, labels_dir)
     assert ds.source_frames == {
-        "img0": {"width": 200, "height": 200, "channels": 3, "dtype_itemsize": None,
-                 "windowed": False},
+        _only_source(ds): {"width": 200, "height": 200, "channels": 3, "dtype_itemsize": None,
+                           "windowed": False},
     }
 
 
@@ -154,8 +162,8 @@ def test_source_frames_for_a_windowed_raster(tmp_path):
     images_dir, labels_dir, _arr = _tiff_project(tmp_path)
     ds = _tiled(images_dir, labels_dir)
     assert ds.source_frames == {
-        "img0": {"width": 200, "height": 200, "channels": 3, "dtype_itemsize": 1,
-                 "windowed": True},
+        _only_source(ds): {"width": 200, "height": 200, "channels": 3, "dtype_itemsize": 1,
+                           "windowed": True},
     }
 
 
@@ -166,8 +174,7 @@ def test_photographic_construction_opens_no_raster_backend(tmp_path, monkeypatch
     """A directory of JPEGs must index from header probes alone: opening each one through the
     raster layer would decode every frame at construction."""
     images_dir, labels_dir = _jpeg_project(tmp_path)
-    base = DetectionDataset(images_dir=str(images_dir), labels_dir=str(labels_dir),
-                            subject="bud")
+    base = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
 
     def _refuse(*_a, **_k):
         raise AssertionError("construction must not open a raster backend for photographic sources")
@@ -182,7 +189,7 @@ def test_windowed_construction_registers_the_source_in_the_pool(tmp_path):
     ds = _tiled(images_dir, labels_dir)
     tiff = str(images_dir / "img0.tif")
     assert any(key[0] == tiff for key in raster_source._POOL)
-    assert ds.source_frames["img0"]["windowed"] is True
+    assert ds.source_frames[_only_source(ds)]["windowed"] is True
 
 
 def test_an_unopenable_windowed_layout_refuses_at_construction(tmp_path):
@@ -256,7 +263,7 @@ def test_a_decoder_disagreeing_with_its_header_refuses(tmp_path, monkeypatch):
 def test_a_uint16_windowed_tile_stays_ndarray_and_scales_by_its_dtype(tmp_path):
     images_dir, labels_dir, arr = _tiff_project(tmp_path, dtype=np.uint16)
     ds = _tiled(images_dir, labels_dir)
-    assert ds.source_frames["img0"]["dtype_itemsize"] == 2
+    assert ds.source_frames[_only_source(ds)]["dtype_itemsize"] == 2
     img_tensor, _target = ds[0]
     expected = torch.from_numpy(
         arr[0:64, 0:64].astype(np.float32) / 65535.0).permute(2, 0, 1)

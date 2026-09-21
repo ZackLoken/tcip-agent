@@ -108,12 +108,12 @@ def _assert_one_home(
 
 def test_split_construction_functions_have_one_home():
     """``auto_train_val``, ``spatial_single_source_split``, ``dataset_identity``,
-    ``persist_run_partition``, ``checked_label_format``, ``build_full_admitted_dataset`` and
+    ``persist_run_partition`` and
     ``spatial_split_raster_identity`` moved out of ``training_tools.py`` into
     ``pipelines/data/split_construction.py`` (beside ``splits.py``), public and unaliased."""
     _assert_one_home(
         {"auto_train_val", "spatial_single_source_split", "dataset_identity",
-         "persist_run_partition", "checked_label_format", "build_full_admitted_dataset",
+         "persist_run_partition",
          "spatial_split_raster_identity"},
         _module_path("tools/training_tools.py"),
         _module_path("pipelines/data/split_construction.py"),
@@ -185,17 +185,16 @@ def test_train_run_class_has_one_home():
 
 
 def test_label_query_functions_have_one_home():
-    """The label-store/registry query library (``image_name_map`` through ``assemble_coco``)
-    moved out of ``datasets.py`` into ``pipelines/data/label_queries.py``. A name a consumer
+    """The label-store/registry query library moved out of ``datasets.py`` into
+    ``pipelines/data/label_queries.py``. A name a consumer
     outside the library reads (``datasets.py`` itself, or an outside-layer tool/pipeline module)
     lost its underscore; a helper only ``label_queries.py`` calls internally kept its private
     name."""
     _assert_one_home(
-        {"image_name_map", "authored_frame", "resolved_subjects_path", "resolve_registry_id_map",
-         "coco_det_targets", "json_det_targets", "first_labels_json", "dir_label_format",
-         "trainable_stems", "require_samples", "_label_record_state", "_raw_status_store",
-         "confirmed_negative_names", "_exclude_contradicted", "confirmed_negative_records",
-         "assemble_coco"},
+        {"authored_frame", "resolved_subjects_path", "resolve_registry_id_map",
+         "json_det_targets", "ground_truth_shape", "admit", "samples_over",
+         "admitted_documents", "require_admitted", "_label_record_state", "_raw_status_store",
+         "confirmed_negative_names", "_exclude_contradicted", "confirmed_negative_records"},
         _module_path("pipelines/data/datasets.py"),
         _module_path("pipelines/data/label_queries.py"),
     )

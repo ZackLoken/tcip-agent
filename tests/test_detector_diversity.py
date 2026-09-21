@@ -14,6 +14,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 from tcip_mcp.pipelines.components.necks import FPN, PAN  # noqa: E402
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
 def _features():
@@ -81,7 +82,6 @@ def test_detection_anchor_count_with_p2():
 def test_detection_anchor_free_e2e(tmp_path: Path):
     from torchvision.utils import save_image
     from torch.utils.data import DataLoader
-    from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import create_run
@@ -102,7 +102,7 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
             keep_empty=True,
         )
 
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir), subject="bud")
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
     model_source = {

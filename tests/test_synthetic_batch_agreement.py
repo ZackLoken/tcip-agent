@@ -18,6 +18,7 @@ import torch  # noqa: E402
 from tcip_mcp.pipelines.components.heads import OrdinalHead  # noqa: E402
 from tcip_mcp.pipelines.model_contract import check_model_contract, overfit_check  # noqa: E402
 from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
 class _DetectionTargetRecorder(torch.nn.Module):
@@ -63,7 +64,6 @@ def _real_detection_item(tmp_path):
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
-    from tcip_mcp.pipelines.data.datasets import DetectionDataset
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
     images_dir.mkdir()
@@ -73,7 +73,7 @@ def _real_detection_item(tmp_path):
     Image.new("RGB", (96, 48)).save(images_dir / "a.png")
     json_io.write_annotations(str(labels_dir / "a.json"),
                               [Annotation(subject="bud", geometry=BBox(4, 6, 40, 19))], 96, 48)
-    return DetectionDataset(str(images_dir), str(labels_dir), subject="bud")[0]
+    return dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")[0]
 
 
 def _real_detection_target(tmp_path):
@@ -84,7 +84,6 @@ def _real_ordinal_items(tmp_path):
     """Two ``(image, target)`` items from a real ``OrdinalDataset`` over a skewed, sparsely
     populated rank column."""
     from PIL import Image
-    from tcip_mcp.pipelines.data.datasets import OrdinalDataset
 
     images_dir = tmp_path / "ordinal_images"
     images_dir.mkdir()
@@ -92,7 +91,7 @@ def _real_ordinal_items(tmp_path):
         Image.new("RGB", (96, 48)).save(images_dir / f"{name}.png")
     csv_path = tmp_path / "ranks.csv"
     csv_path.write_text("image_stem,rank\na,0\nb,3\n")
-    dataset = OrdinalDataset(str(images_dir), str(csv_path))
+    dataset = dataset_over('ordinal', str(images_dir), str(csv_path))
     return [dataset[0], dataset[1]]
 
 

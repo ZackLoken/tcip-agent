@@ -155,7 +155,9 @@ def test_confirmed_negative_excludes_a_name_the_label_file_now_contradicts(
 ) -> None:
     """A stored negative and a label file that now carries the subject disagree about the same
     image; the name is excluded from the negative set (never trained as an empty image on the
-    store's say-so) and reported through ``contradicted_out`` rather than silently dropped."""
+    store's say-so) and reported through ``contradicted_out`` rather than silently dropped. The
+    document that answers for the image is named by the caller, the way a run's own records name
+    it, since nothing here goes looking for one beside the image."""
     labels = tmp_path / "annotations"
     labels.mkdir()
     write_annotations(str(labels / "img_bush.json"), [_box("bush", 5, 9, 640, 480)], 900, 500)
@@ -168,7 +170,8 @@ def test_confirmed_negative_excludes_a_name_the_label_file_now_contradicts(
 
     contradicted: set[str] = set()
     negatives = confirmed_negative_names(
-        labels, subject="subject_a", date=None, contradicted_out=contradicted)
+        labels, subject="subject_a", date=None, contradicted_out=contradicted,
+        label_paths={"img_bush.jpg": str(labels / "img_bush.json")})
     assert negatives == set()
     assert contradicted == {"img_bush.jpg"}
 
@@ -176,10 +179,10 @@ def test_confirmed_negative_excludes_a_name_the_label_file_now_contradicts(
 def test_a_contradicted_negative_still_trains_on_its_actual_content(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """The exclusion never drops the image: its label file holds real content, so a trainable-stems
-    enumeration over the same directory admits it by that content, the rail admitting valid work
-    rather than silently shrinking the run's negative count."""
-    from tcip_mcp.pipelines.data.label_queries import trainable_stems
+    """The exclusion never drops the image: its label file holds real content, so an admission
+    over the same directory admits it by that content, the rail admitting valid work rather than
+    silently shrinking the run's negative count."""
+    from tcip_mcp.pipelines.data.label_queries import admitted_documents
 
     labels = tmp_path / "annotations"
     labels.mkdir()
@@ -195,9 +198,9 @@ def test_a_contradicted_negative_still_trains_on_its_actual_content(
     )
 
     contradicted: set[str] = set()
-    stems, counts = trainable_stems(
+    records, counts = admitted_documents(
         labels, images, subject="subject_a", date=None, contradicted_out=contradicted)
-    assert stems == ["img_bush"]
+    assert [record.member for record in records] == ["img_bush"]
     assert counts["annotated"] == 1
     assert counts["confirmed_negative"] == 0
     assert contradicted == {"img_bush.jpg"}

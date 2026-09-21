@@ -43,11 +43,11 @@ import tcip_mcp.pipelines.components.backbones  # noqa: F401,E402
 import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
 import tcip_mcp.pipelines.components.heads  # noqa: F401,E402
 import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
-from tcip_mcp.pipelines.data.datasets import build_dataset  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate
 from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 from torch.utils.data import DataLoader  # noqa: E402
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
 def _classification_data(tmp_path: Path, n: int = 6):
@@ -86,7 +86,7 @@ def test_seeded_train_reproducible(tmp_path):
     images_dir, csv_path = _classification_data(tmp_path)
 
     def run_once(out):
-        ds = build_dataset("classification", images_dir=images_dir, csv_path=csv_path, num_classes=2)
+        ds = dataset_over("classification", images_dir, csv_path, num_classes=2)
         loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
         run = create_run(_cfg([{"freeze_to": -1, "epochs": 1}], seed=7), str(out), id="auto-run-51")
         run = train(run, loader, task="classification")
@@ -97,7 +97,7 @@ def test_seeded_train_reproducible(tmp_path):
 
 def test_resume_continues_epochs(tmp_path):
     images_dir, csv_path = _classification_data(tmp_path)
-    ds = build_dataset("classification", images_dir=images_dir, csv_path=csv_path, num_classes=2)
+    ds = dataset_over("classification", images_dir, csv_path, num_classes=2)
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
     cfg = _cfg([{"freeze_to": -1, "epochs": 2}])
 
@@ -115,7 +115,7 @@ def test_resume_continues_epochs(tmp_path):
 
 def test_resume_skips_completed_stage_and_restores_optimizer(tmp_path):
     images_dir, csv_path = _classification_data(tmp_path)
-    ds = build_dataset("classification", images_dir=images_dir, csv_path=csv_path, num_classes=2)
+    ds = dataset_over("classification", images_dir, csv_path, num_classes=2)
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
     cfg = _cfg([{"freeze_to": -1, "epochs": 1}, {"freeze_to": 0, "epochs": 1}])
 
@@ -143,7 +143,7 @@ def test_resume_restores_rng_state_not_just_reseeds(tmp_path):
     images_dir, csv_path = _classification_data(tmp_path)
 
     def build_loader():
-        ds = build_dataset("classification", images_dir=images_dir, csv_path=csv_path, num_classes=2)
+        ds = dataset_over("classification", images_dir, csv_path, num_classes=2)
         return DataLoader(ds, batch_size=2, shuffle=True, collate_fn=task_collate("classification"))
 
     cfg = _cfg([{"freeze_to": -1, "epochs": 2}], seed=11)
@@ -175,7 +175,7 @@ def test_resume_from_checkpoint_without_rng_state_degrades_gracefully(tmp_path):
     crash, and must honestly record rng_state_restored=False rather than claiming a restore
     that didn't happen."""
     images_dir, csv_path = _classification_data(tmp_path)
-    ds = build_dataset("classification", images_dir=images_dir, csv_path=csv_path, num_classes=2)
+    ds = dataset_over("classification", images_dir, csv_path, num_classes=2)
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
     cfg = _cfg([{"freeze_to": -1, "epochs": 2}])
 
@@ -245,7 +245,7 @@ def test_resume_from_non_resumable_checkpoint_fails_loudly(tmp_path):
     # Resuming a checkpoint without optimizer state (e.g. model_best.pt) must fail
     # loudly, not silently restart from scratch.
     images_dir, csv_path = _classification_data(tmp_path)
-    ds = build_dataset("classification", images_dir=images_dir, csv_path=csv_path, num_classes=2)
+    ds = dataset_over("classification", images_dir, csv_path, num_classes=2)
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
     cfg = _cfg([{"freeze_to": -1, "epochs": 1}])
 

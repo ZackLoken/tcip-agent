@@ -103,12 +103,22 @@ Tailor the architecture to the data in hand (CLAUDE.md: derive, don't pin):
 Three seams support bespoke work; the platform guarantees integrity around it:
 
 - `pipelines.data.datasets.build_dataset(task, dataset_source, **kwargs)` builds from a
-  `dataset_source` when the task string isn't one of the known loaders: an *importable* builder you
-  wrote (`{"builder": "my_module:build_ds", "builder_kwargs": {...}, "source_files": [...],
-  "task": "..."}`, mirroring `model_source`). It receives the run's data context (`images_dir` /
-  `labels_dir` / `stems` / `transforms` / `task`) merged with `builder_kwargs` (which win on
-  conflict) and must return a torch `Dataset`. Registry-free, imported like any module, never
-  `exec`'d.
+  `dataset_source`: an *importable* builder you wrote (`{"builder": "my_module:build_ds",
+  "builder_kwargs": {...}, "source_files": [...], "task": "..."}`, mirroring `model_source`). It
+  receives the samples the platform's own producer named for the side being built and the class
+  map they were admitted under (`samples` / `id_map` / `transforms` / `task`), plus your own
+  `builder_kwargs`, and must return a torch `Dataset`. Never a directory, a document path or a
+  format flag, on any route including your own `ctx.build_dataset` call, which is this same
+  factory: the platform names the samples and your builder builds over them, so a strip split
+  over your own samples composes the tiled wrapper inside `train(ctx)`. `builder_kwargs`
+  configure your builder and may not restate `samples`, `id_map`, `task` or `transforms`; a
+  builder that did would train on membership or a class space the run's own record does not
+  describe, so the seam refuses it by name, as it refuses any kwarg beyond those four. `id_map` is
+  `None` where the ground truth carries its own classes and no map was admitted (a mask raster, a
+  table row): derive the class space from the ground truth you were handed. A task with no
+  built-in loader is not a task with no producer: the platform admits by the shape of the ground
+  truth `data.labels_dir` points at, whatever the task, so your builder receives the same samples
+  a built-in loader would. Registry-free, imported like any module, never `exec`'d.
 - `pipelines.model_build.build_model(config)` builds from a `model_source`: an *importable*
   builder you wrote (`{"builder": "my_module:build_net", "builder_kwargs": {...},
   "source_files": [...], "task": "detection", "in_chans": 3}`). It is imported, never `exec`'d.

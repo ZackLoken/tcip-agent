@@ -474,7 +474,7 @@ def test_classification_metrics():
 
 
 def test_ordinal_metrics():
-    m = ordinal_metrics(torch.tensor([0, 1, 2]), torch.tensor([0, 2, 2]))
+    m = ordinal_metrics(torch.tensor([0, 1, 2]), torch.tensor([0, 2, 2]), 3)
     assert m["mae"] == pytest.approx(1 / 3)
     assert m["rank_acc"] == pytest.approx(2 / 3)
     assert m["quadratic_weighted_kappa"] == pytest.approx(0.8)
@@ -488,14 +488,14 @@ def test_regression_metrics():
 
 
 def test_quadratic_weighted_kappa_perfect_agreement_is_one():
-    kappa = quadratic_weighted_kappa(torch.tensor([0, 1, 2, 1]), torch.tensor([0, 1, 2, 1]))
+    kappa = quadratic_weighted_kappa(torch.tensor([0, 1, 2, 1]), torch.tensor([0, 1, 2, 1]), 3)
     assert kappa == pytest.approx(1.0)
 
 
 def test_quadratic_weighted_kappa_hand_computed():
     # true=[0,2,2], pred=[0,1,2]: one item off by one rank out of three, worked out by hand
     # against the expected-disagreement-under-independence formula -> kappa = 1 - 1/5.
-    kappa = quadratic_weighted_kappa(torch.tensor([0, 1, 2]), torch.tensor([0, 2, 2]))
+    kappa = quadratic_weighted_kappa(torch.tensor([0, 1, 2]), torch.tensor([0, 2, 2]), 3)
     assert kappa == pytest.approx(0.8)
 
 
@@ -505,7 +505,7 @@ def test_quadratic_weighted_kappa_reads_a_fractional_prediction_at_its_nearest_r
     rank 1 would report a disagreement the model does not have."""
     fractional = torch.tensor([0.4, 1.6, 2.4, 2.6])
     gt = torch.tensor([0, 2, 2, 3])
-    assert quadratic_weighted_kappa(fractional, gt) == pytest.approx(1.0)
+    assert quadratic_weighted_kappa(fractional, gt, 4) == pytest.approx(1.0)
 
 
 def test_quadratic_weighted_kappa_scores_a_single_rank_guess_at_chance():
@@ -515,11 +515,11 @@ def test_quadratic_weighted_kappa_scores_a_single_rank_guess_at_chance():
     gt = torch.tensor([0, 0, 0, 0, 0, 0, 0, 3, 3, 3])
     always_majority = torch.zeros(10)
     assert int((always_majority == gt).sum()) == 7
-    assert quadratic_weighted_kappa(always_majority, gt) == pytest.approx(0.0, abs=1e-9)
+    assert quadratic_weighted_kappa(always_majority, gt, 4) == pytest.approx(0.0, abs=1e-9)
 
 
 def test_quadratic_weighted_kappa_empty_is_none():
-    assert quadratic_weighted_kappa(torch.tensor([]), torch.tensor([])) is None
+    assert quadratic_weighted_kappa(torch.tensor([]), torch.tensor([]), 3) is None
 
 
 def test_quadratic_weighted_kappa_degenerate_single_rank_is_none():
@@ -675,7 +675,7 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts():
         elif task == "ordinal":
             model = bespoke_models.build_bespoke_ordinal(num_ranks=3)
             imgs = torch.stack([torch.rand(3, img_size, img_size) for _ in range(2)])
-            loader = [(imgs, {"ranks": torch.tensor([0, 2]), "num_ranks": torch.tensor(3)})]
+            loader = [(imgs, {"ranks": torch.tensor([0, 2])})]
         elif task == "regression":
             model = bespoke_models.build_bespoke_regressor()
             imgs = torch.stack([torch.rand(3, img_size, img_size) for _ in range(2)])
@@ -781,6 +781,8 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     import tcip_mcp.pipelines.model_build as model_build
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.training.eval_runners import (
         evaluation_results_key, run_full_frame_evaluation,
     )
@@ -819,9 +821,12 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
                         selection_dir=str(tmp_path / "manifest"), evaluated_stem_count=3)
     test_result = ts.read(evaluation_results_key(test_out))
 
-    images_dir = tmp_path / "ff_images"
+    images_dir, ff_labels = tmp_path / "ff_images", tmp_path / "ff_labels"
     images_dir.mkdir()
+    ff_labels.mkdir()
     Image.new("RGB", (32, 32)).save(images_dir / "a.png")
+    json_io.write_annotations(str(ff_labels / "a.json"),
+                              [Annotation(subject="bud", geometry=BBox(4, 4, 12, 12))], 32, 32)
 
     class _StubPredictor:
         def predict_tiled(self, path, **kw):
@@ -831,7 +836,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     ff_out = tmp_path / "ff_eval"
     run_full_frame_evaluation(
         stub_verified_checkpoint(str(tmp_path / "ff.pt")), str(images_dir),
-        str(tmp_path / "no_labels"), str(ff_out), tile_size=32, overlap=0.0)
+        str(ff_labels), str(ff_out), subject="bud", tile_size=32, overlap=0.0)
     ff_result = ts.read(evaluation_results_key(ff_out))
 
     for field in common_fields:
@@ -951,10 +956,10 @@ def test_run_test_evaluation_hands_back_the_file_it_wrote(tmp_path, monkeypatch)
 torchvision = pytest.importorskip("torchvision")
 from torch.utils.data import DataLoader  # noqa: E402
 
-from tcip_mcp.pipelines.data.datasets import build_dataset  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate
 from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 IMG = 64
 
@@ -985,8 +990,7 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
                                   [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
                                   IMG, IMG, keep_empty=True)
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="bud")
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
@@ -1022,8 +1026,7 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
                                   [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
                                   IMG, IMG, keep_empty=True)
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="bud")
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
@@ -1053,7 +1056,7 @@ def test_validate_classification_metrics(tmp_path):
         w = csv.writer(f)
         w.writerow(("stem", "label"))
         w.writerows(rows)
-    ds = build_dataset("classification", images_dir=str(images_dir), csv_path=str(csv_path), num_classes=2)
+    ds = dataset_over("classification", str(images_dir), str(csv_path), num_classes=2)
     loader = DataLoader(ds, batch_size=3, collate_fn=task_collate("classification"))
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_classifier",

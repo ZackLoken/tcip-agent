@@ -307,11 +307,12 @@ def _worker(job: InferenceJob) -> None:
             resolve_decode_id_map, run_scope, unmapped_classified_run,
         )
 
-        subject, attribute = run_scope(predictor)
+        scope = run_scope(predictor)
+        subject, attribute = scope.subject, scope.attribute
         id_map = resolve_decode_id_map(predictor, job.images_dir)
         # A classified run resolving no map fails with the composed remedy, never a silent decode.
         classified_refusal = unmapped_classified_run(
-            {"subject": subject, "attribute": attribute}, id_map, images_dir=job.images_dir)
+            scope, id_map, images_dir=job.images_dir)
         if classified_refusal is not None:
             terminal_status = "failed"
             job.error = classified_refusal

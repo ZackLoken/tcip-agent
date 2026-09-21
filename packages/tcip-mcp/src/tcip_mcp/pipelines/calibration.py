@@ -87,10 +87,12 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     directory under ``label_dirs.calibration``. ``evidence`` also carries ``calibration_stems``
     (the swept stem list, every calibration) and, under a selection, ``excluded``
     (``selection_calibration_universe``'s own ``excluded_training_stems``/
-    ``excluded_unassigned_stems``).
+    ``excluded_validation_stems``).
     """
     from tcip_annotation.json_io import require_reference_ground_truth
-    from tcip_mcp.pipelines.data.label_queries import json_det_targets, resolve_registry_id_map
+    from tcip_mcp.pipelines.data.label_queries import (
+        foreground_counts, json_det_targets, resolve_registry_id_map,
+    )
     from tcip_mcp.pipelines.data.splits import (
         cal_holdout_scope_root, count_label_lines, label_image_stems,
         resolve_locked_cal_holdout_split, same_directory,
@@ -101,7 +103,7 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     )
     from tcip_mcp.pipelines.resolution import dataset_hash
     from tcip_mcp.pipelines.training.evaluation import build_coco_image_record
-    from tcip_mcp.tools.inference_tools import _recorded_training_id_map
+    from tcip_mcp.tools.inference_tools import run_scope
 
     labels_p = Path(labels_dir)
     require_reference_ground_truth(labels_p)
@@ -111,10 +113,11 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
             "keys the selection recorded on its own samples govern the locked draw; pass neither "
             "beside it."
         )
-    # The run's subject + single id map (from predictor.config): calibration GT reads through the
-    # same loader-side reader the training targets use, so the swept count can't diverge from training.
+    # The run's own recorded class space, through the one reader of it: calibration GT reads
+    # under the same scope the training targets did, so the swept count cannot diverge from it.
+    _checkpoint_scope = run_scope(predictor)
+    _subject, _attribute = _checkpoint_scope.subject, _checkpoint_scope.attribute
     _data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
-    _subject, _attribute = _data_cfg.get("subject"), _data_cfg.get("attribute")
     _checkpoint_selection_dir = (
         (_data_cfg.get("split") or {}).get("selection_binding") or {}).get("selection_dir")
     if (selection_dir is not None and _checkpoint_selection_dir is not None
@@ -125,11 +128,6 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
             "under a different selection would check its selection disjointness against a side "
             "the checkpoint was never trained or chosen with."
         )
-    # Prefers the training run's own recorded map over a fresh registry read: the model only
-    # speaks its training vocabulary, so an edited subjects.json must not silently relabel the GT.
-    # The shared labels-intersect-images scan redraw_calibration_holdout also uses: a stem
-    # whose image was deleted/renamed never enters the split universe here.
-    stems, stem_to_image = label_image_stems(labels_dir, images_dir)
     excluded = None
     selection_sha256 = None
     selection_id_map: dict[str, int] | None = None
@@ -141,7 +139,7 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                 "would address that no selection-restricted calibration ever draws."
             )
         from tcip_mcp.pipelines.data.selection import read_selection
-        from tcip_mcp.pipelines.data.splits import resolve_selection_calibration_universe
+        from tcip_mcp.pipelines.data.splits import selection_calibration_universe
         from tcip_mcp.pipelines.image_utils import resolve_source_path
         from tcip_mcp.pipelines.resolution import selection_digest
 
@@ -157,29 +155,40 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                 "reference drawn for another class space."
             )
         selection_id_map = dict(selection.id_map) if selection.id_map else None
-        stems, group_by, group_key_map, excluded, _subject, _attribute, universe_samples = \
-            resolve_selection_calibration_universe(selection, labels_dir, stems)
-        # Each stem's own recorded source and ground truth, never the directory listing's: two
+        stems, group_by, group_key_map, excluded, universe_samples = \
+            selection_calibration_universe(selection, labels_dir)
+        # Each stem's own recorded source and ground truth, never a directory listing's: two
         # directories can hold identically named files.
         stem_to_image = {s: resolve_source_path(universe_samples[s].source) for s in stems}
         gt_path_of = {s: universe_samples[s].ground_truth for s in stems}
     else:
+        # The shared labels-intersect-images scan redraw_calibration_holdout also uses: a stem
+        # whose image was deleted or renamed never enters the whole-directory universe.
+        from tcip_mcp.dataset_layout import label_filename
+
+        stems, stem_to_image = label_image_stems(labels_dir, images_dir)
         group_by = group_by or "tile_prefix"
-        gt_path_of = {s: str(labels_p / f"{s}.json") for s in stems}
+        # The one caller here holding a name rather than a record composes its path once, here.
+        gt_path_of = {s: str(labels_p / label_filename(s)) for s in stems}
     _cal_id_map = None
     if _subject:
         # A selection states the exact map its samples were admitted under; it wins over both the
         # checkpoint's stamp and a fresh registry read for a selection-restricted measurement.
-        _cal_id_map = selection_id_map or _recorded_training_id_map(predictor)
+        _cal_id_map = selection_id_map or _checkpoint_scope.id_map
         if _cal_id_map is None:
             # No try/except: resolve_registry_id_map's only exception is its own deliberate
             # ValueError, which must reach the caller rather than degrade to a single-class read.
             _reg, _cal_id_map = resolve_registry_id_map(labels_dir, _subject, _attribute)
     dh = dataset_hash(labels_dir, stems=(stems if selection_dir is not None else None))
-    annotation_counts = {
-        s: count_label_lines(labels_dir, s, subject=_subject, attribute=_attribute)
-        for s in stems
-    }
+    # The one per-sample counter where this door holds the draw's own samples; the whole-directory
+    # universe above holds names, and counts each member's document by the path it composed.
+    if selection_dir is not None:
+        annotation_counts = foreground_counts(universe_samples, _checkpoint_scope)
+    else:
+        annotation_counts = {
+            s: count_label_lines(gt_path_of[s], subject=_subject, attribute=_attribute)
+            for s in stems
+        }
     # Detector-cap censoring: derive the collection-pass cap from this split's own density (same
     # formula tcip calibrate-operating-point uses), not the caller's possibly-unrelated max_dets.
     density_cap = derive_max_dets_from_counts(list(annotation_counts.values()))
@@ -232,10 +241,10 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                       for (x1, y1, x2, y2), lab in zip(gboxes, glabels)]
             else:
                 from tcip_annotation import json_io
-                from tcip_annotation.state import Point, bbox_of
+                from tcip_annotation.state import bbox_of, box_derivable
                 gt = []
                 for a in json_io.read_annotations(gt_path):
-                    if a.geometry is None or isinstance(a.geometry, Point):
+                    if not box_derivable(a.geometry):
                         continue
                     bx = bbox_of(a.geometry)
                     gt.append({"category_id": 1,

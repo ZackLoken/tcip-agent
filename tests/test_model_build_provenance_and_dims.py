@@ -85,11 +85,12 @@ def _agent_package(root: Path, name: str, modules: dict) -> Path:
     return pkg
 
 
-def test_contract_dims_take_the_registry_count_without_the_loader_background_offset(tmp_path):
-    """A registry-scoped detection config smokes at the class count the loader derives from the
-    same map, with no background class added: the +1 is the loader's own offset on the labels it
-    builds, so applying it here too would prove the model against a head one class wider than the
-    one that trains."""
+def test_contract_dims_take_the_admitted_count_without_the_loader_background_offset(tmp_path):
+    """A scoped detection config smokes at the class count the run was admitted under, with no
+    background class added: the +1 is the loader's own offset on the labels it builds, so applying
+    it here too would prove the model against a head one class wider than the one that trains."""
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
     dataset_root = tmp_path / "currant_2026"
     labels_dir = dataset_root / "annotations"
     labels_dir.mkdir(parents=True)
@@ -100,10 +101,12 @@ def test_contract_dims_take_the_registry_count_without_the_loader_background_off
         "data": {"subject": "leaf", "attribute": "condition", "labels_dir": str(labels_dir),
                  "tiling": {"enabled": True, "tile_size": 640}},
     }
-    dims = resolve_contract_dims(cfg, "detection")
-
     _registry, id_map = resolve_registry_id_map(str(labels_dir), "leaf", "condition")
     assert len(id_map) == 3  # the three condition values this registry declares
+    scope = ClassScope(subject="leaf", attribute="condition", id_map=id_map)
+
+    dims = resolve_contract_dims(cfg, "detection", scope=scope)
+
     assert dims == {"in_chans": 5, "num_classes": len(id_map), "img_size": 640}
     assert dims["num_classes"] != cfg["model_source"]["builder_kwargs"]["num_classes"]
 
@@ -111,6 +114,8 @@ def test_contract_dims_take_the_registry_count_without_the_loader_background_off
 def test_contract_dims_count_only_the_subject_for_a_single_class_scope(tmp_path):
     """An instance_seg scope with no attribute trains one class, the subject itself. The resolved
     count stays at that one class rather than gaining a background slot."""
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
     dataset_root = tmp_path / "chestnut_2026"
     labels_dir = dataset_root / "annotations"
     labels_dir.mkdir(parents=True)
@@ -120,10 +125,12 @@ def test_contract_dims_count_only_the_subject_for_a_single_class_scope(tmp_path)
         "model_source": {"builder_kwargs": {"num_classes": 9}},
         "data": {"subject": "bud", "labels_dir": str(labels_dir)},
     }
-    dims = resolve_contract_dims(cfg, "instance_seg")
-
     _registry, id_map = resolve_registry_id_map(str(labels_dir), "bud", None)
     assert len(id_map) == 1
+
+    dims = resolve_contract_dims(cfg, "instance_seg",
+                                 scope=ClassScope(subject="bud", id_map=id_map))
+
     assert dims["num_classes"] == len(id_map)
 
 

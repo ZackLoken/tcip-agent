@@ -141,8 +141,17 @@ def seeded_loader_kwargs(seed: int | None, num_workers: int | None = None) -> di
     return kwargs
 
 
-def stamp_effective_data_geometry(data_cfg: dict, train_ds: Any) -> dict:
-    """Record the input geometry ``train_ds`` actually serves into ``data_cfg``, in place.
+def stamp_effective_data_geometry(data_cfg: dict, train_ds: Any) -> dict | None:
+    """Record the input geometry ``train_ds`` actually serves into ``data_cfg``, in place, or
+    ``None`` for a dataset the platform did not build.
+
+    A run whose loaders came from a bespoke ``data.dataset_source`` builder stamps nothing and
+    answers ``None``: this reads a dataset's own tile attributes and probes its sources, and a
+    bespoke dataset that exposes none of them is a dataset this function cannot measure, not one
+    serving untiled frames. Stamping ``{"enabled": False}`` there would record a geometry nobody
+    measured onto the checkpoint every predictor and every tiled-eval default reads back. The
+    fact's absence is the honest record, and every reader of the stamp already reads it with a
+    default.
 
     ``data_cfg`` is the live ``config["data"]`` dict the run persists (checkpoints embed the
     run config by reference; an HPO trial's resolved-config snapshot is written from the
@@ -168,6 +177,10 @@ def stamp_effective_data_geometry(data_cfg: dict, train_ds: Any) -> dict:
     "train_native_size": [w, h] | None}``, so a caller can mirror the identical stamp into a
     durable experiment record instead of re-deriving it.
     """
+    from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
+
+    if data_cfg.get(DATASET_SOURCE_KEY):
+        return None
     eff_tile = getattr(train_ds, "tile_size", None)
     if eff_tile is not None:
         tiling = data_cfg.setdefault("tiling", {})
@@ -194,7 +207,7 @@ def _uniform_native_size(train_ds: Any) -> tuple[int, int] | None:
         return None
     from tcip_mcp.pipelines.image_utils import image_dimensions
 
-    channels = getattr(train_ds, "expected_channels", 3)
+    channels = train_ds.expected_channels
     size: tuple[int, int] | None = None
     for stem in stems:
         try:
@@ -491,21 +504,18 @@ def apply_stage_freeze(
     return trainable
 
 
-def _expected_in_chans(config: dict) -> int:
-    """Input channels the model expects: ``model_source.in_chans``, falling back to
-    ``model_source.builder_kwargs.in_chans`` (:func:`declared_in_chans`), else 3."""
-    in_chans = declared_in_chans(config.get(MODEL_SOURCE_KEY))
-    return in_chans if in_chans is not None else 3
-
-
 def _validate_input_channels(config: dict, loader: DataLoader) -> None:
-    """Fail loudly if the data's channel count doesn't match the model's expected ``in_chans``.
+    """Fail loudly if the data's channel count doesn't match the model's declared ``in_chans``.
 
     Catches an N-channel/RGB mismatch up front with a clear message instead of an opaque
-    conv-shape error deep in the first forward pass. Reads the bespoke ``model_source``
-    (which declares ``in_chans``).
+    conv-shape error deep in the first forward pass. The width is the bespoke ``model_source``'s
+    own declaration (:func:`declared_in_chans`), and a build that declares none states no width
+    to check against: the run's loaders are built at the band count its own sources carry, so
+    there is nothing here to disagree with.
     """
-    expected = _expected_in_chans(config)
+    expected = declared_in_chans(config.get(MODEL_SOURCE_KEY))
+    if expected is None:
+        return
     batch = next(iter(loader), None)
     if batch is None:
         return
@@ -888,8 +898,12 @@ def train(
                 extra_val_metrics = " ".join(
                     f"{k}={v:.4f}" for k, v in val_metrics.items()
                     if k != "val_loss" and _is_scalar_metric(v))
-                logger.info("Epoch %d stage %d loss=%.4f val_loss=%.4f lr=%.2e%s",
-                    run.current_epoch, stage_idx, avg_loss, val_metrics.get("val_loss", 0), current_lr,
+                # A task whose evaluation reports no loss at all carries val_loss=None, which a
+                # float format raises on: say what it is rather than print a 0 nobody measured.
+                val_loss = val_metrics.get("val_loss")
+                logger.info("Epoch %d stage %d loss=%.4f val_loss=%s lr=%.2e%s",
+                    run.current_epoch, stage_idx, avg_loss,
+                    f"{val_loss:.4f}" if _is_scalar_metric(val_loss) else val_loss, current_lr,
                     f" {extra_val_metrics}" if extra_val_metrics else "")
 
                 # Best model checkpoint, selected by the selection objective.

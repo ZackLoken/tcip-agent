@@ -1,6 +1,7 @@
 """Training-run cancellation (cancel_run / cancel_training; graceful stop)."""
 
 import pytest
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 torch = pytest.importorskip("torch")
 
@@ -24,7 +25,6 @@ def test_cancel_before_training_yields_cancelled(tmp_path):
     from PIL import Image
     from torch.utils.data import DataLoader
 
-    from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import create_run
@@ -37,8 +37,7 @@ def test_cancel_before_training_yields_cancelled(tmp_path):
         rows.append(f"img{i},{i % 2}")
     (tmp_path / "labels.csv").write_text("\n".join(rows) + "\n")
 
-    ds = build_dataset("classification", images_dir=str(images_dir),
-                       csv_path=str(tmp_path / "labels.csv"), num_classes=2)
+    ds = dataset_over("classification", str(images_dir), str(tmp_path / "labels.csv"), num_classes=2)
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",

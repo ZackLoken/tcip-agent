@@ -24,7 +24,7 @@ import csv
 import hashlib
 import logging
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -615,45 +615,59 @@ def ground_truth_digest(path: Path) -> str:
     return _digest_bytes(_label_bytes(path))
 
 
-def label_digests(labels_dir: str | Path, stems: list[str]) -> dict[str, str]:
-    """Each stem's own content-addressed digest, ``sha256(label bytes)[:16]``, the same
-    empty-bytes-for-a-missing-file convention :func:`dataset_hash` folds into its one combined
-    hash, surfaced here per stem instead: a withdrawn label reads as the digest of empty bytes,
-    not as an absent key. Streams one label's bytes at a time; a caller wanting both this and
-    :func:`dataset_hash` over the same stems calls :func:`dataset_hash_and_label_digests` instead,
-    which reads each label once for both.
+def ground_truth_digests(paths: Iterable[str]) -> dict[str, str]:
+    """Each named file's own digest, keyed by its path and read once per file however many
+    members that file answers for.
+
+    The one reading a record's writer and a record's reader share: a draw stamping a digest per
+    member, a partition recording what each member's ground truth read as at run time, and the
+    check asking whether any of them moved since all take their digests here, so one file cannot
+    be hashed twice in a pass or two ways across passes.
     """
-    labels_dir = Path(labels_dir)
-    return {stem: ground_truth_digest(labels_dir / f"{stem}.json") for stem in sorted(stems)}
+    return {path: ground_truth_digest(Path(path)) for path in dict.fromkeys(paths)}
 
 
-def dataset_hash_and_label_digests(
-    labels_dir: str | Path, stems: list[str],
-) -> tuple[str, dict[str, str]]:
-    """:func:`dataset_hash` and :func:`label_digests` over the same stem set, in one pass: each
-    label's bytes read once and folded into both the combined hash and its own per-stem digest,
-    rather than through two separate calls that would each open every file. ``draw_splits`` calls
-    this for a members block's ``dataset_hash``/``label_digests`` pair.
+def members_moved_since(
+    ground_truth: Mapping[str, str], at_run: Mapping[str, str], members: list[str],
+) -> list[str]:
+    """Which of ``members`` no longer digest to what ``at_run`` recorded for them.
+
+    ``ground_truth`` is the record's own per-member path, the file the run actually read
+    (``split.json``'s ``label_digests.ground_truth``), so the digest is recomputed over that same
+    file rather than over whatever a directory now holds under the member's name: a member whose
+    ground truth is named unlike its image, or replaced by a file of another extension, is still
+    compared against what it was, and nothing here has to know which shape it is holding. A member
+    whose file is gone digests as empty bytes, the same "a withdrawn ground truth is not an absent
+    key" convention :func:`dataset_hash` folds into its combined hash, so it reads as moved.
+
+    The one comparison between a run's own recorded per-member digests and what those members read
+    as now, so a calibration asking "did the ground truth move under this run" and a freeze asking
+    "may I compose a selection from this run's members" answer from one reading rather than two. A
+    member ``at_run`` does not name is not compared: the record is what says which members this
+    run held, so a name it never recorded has no recorded digest to have moved from. A member
+    ``at_run`` names and ``ground_truth`` does not refuses: the record would otherwise be asked
+    where that member's ground truth was, and it does not say.
     """
-    labels_dir = Path(labels_dir)
-    stems = sorted(stems)
-    h = hashlib.sha256()
-    per_stem: dict[str, str] = {}
-    for stem in stems:
-        b = _label_bytes(labels_dir / f"{stem}.json")
-        h.update(stem.encode("utf-8"))
-        h.update(b"\0")
-        h.update(b)
-        h.update(b"\0")
-        per_stem[stem] = _digest_bytes(b)
-    return h.hexdigest()[:16], per_stem
+    named = sorted(set(members) & set(at_run))
+    unnamed = [member for member in named if member not in ground_truth]
+    if unnamed:
+        raise ValueError(
+            f"the record digests {len(unnamed)} member(s) ({unnamed[:5]}) but names no path for "
+            "them, so which file those digests were taken over is not on record and no comparison "
+            "here can be vouched for."
+        )
+    digest_of = ground_truth_digests(ground_truth[member] for member in named)
+    return [member for member in named
+            if digest_of[ground_truth[member]] != at_run[member]]
+
+
 
 
 def selection_digest(selection: Any) -> str:
     """The one digest a selection earns: sha256 over the document it is written as.
 
     Called at bind time (``split_construction``, stamping ``split.json``'s
-    ``label_digests.selection_sha256``) and at calibration time (``inference_tools``'s
+    ``selection_binding.selection_sha256``) and at calibration time (``inference_tools``'s
     ``selection_sha256``, and the operator script that passes the same fact) so the two sides that
     must agree on a selection's identity can never spell the digest differently.
     """

@@ -26,12 +26,12 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 from torch.utils.data import DataLoader
 
-from tcip_mcp.pipelines.data.datasets import build_dataset  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
 from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 IMG = 64
 
@@ -98,9 +98,7 @@ def test_detection_e2e(tmp_path: Path):
             keep_empty=True,
         )
 
-    dataset = build_dataset(
-        "detection", images_dir=str(images_dir), labels_dir=str(labels_dir), subject="bud"
-    )
+    dataset = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
 
     model_source = _model_source("build_bespoke_detection", num_classes=1,
@@ -126,9 +124,7 @@ def test_instance_seg_e2e(tmp_path: Path):
             keep_empty=True,
         )
 
-    dataset = build_dataset(
-        "instance_seg", images_dir=str(images_dir), labels_dir=str(labels_dir), subject="bud"
-    )
+    dataset = dataset_over("instance_seg", str(images_dir), str(labels_dir), subject="bud")
     # Guard the polygon -> mask rasterization path (datasets.py). With the mask_rcnn
     # detector these masks now reach the Mask R-CNN mask loss during training.
     assert dataset[0][1]["masks"].shape[0] > 0
@@ -158,9 +154,7 @@ def test_semantic_seg_e2e(tmp_path: Path):
         m[IMG // 4 : IMG // 2, IMG // 4 : IMG // 2] = 1  # a foreground block
         Image.fromarray(m, mode="L").save(masks_dir / f"img{i}.png")
 
-    dataset = build_dataset(
-        "semantic_seg", images_dir=str(images_dir), masks_dir=str(masks_dir), num_classes=2
-    )
+    dataset = dataset_over("semantic_seg", str(images_dir), str(masks_dir), num_classes=2)
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("semantic_seg"))
 
     model_source = _model_source("build_bespoke_semantic_seg", num_classes=2)
@@ -185,9 +179,7 @@ def test_ordinal_e2e(tmp_path: Path):
     csv_path = tmp_path / "ranks.csv"
     _write_csv(csv_path, rows, ("stem", "rank"))
 
-    dataset = build_dataset(
-        "ordinal", images_dir=str(images_dir), csv_path=str(csv_path), num_ranks=3
-    )
+    dataset = dataset_over("ordinal", str(images_dir), str(csv_path), num_ranks=3)
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("ordinal"))
 
     model_source = _model_source("build_bespoke_ordinal", num_ranks=3)
@@ -208,7 +200,7 @@ def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
     csv_path = tmp_path / "ranks.csv"
     _write_csv(csv_path, rows, ("stem", "rank"))
 
-    dataset = build_dataset("ordinal", images_dir=str(images_dir), csv_path=str(csv_path))
+    dataset = dataset_over("ordinal", str(images_dir), str(csv_path))
     assert dataset.num_classes == 7
 
     loader = DataLoader(dataset, batch_size=7, collate_fn=task_collate("ordinal"))
@@ -230,7 +222,7 @@ def test_ordinal_num_ranks_mismatch_raises(tmp_path: Path):
     _write_csv(csv_path, rows, ("stem", "rank"))
 
     with pytest.raises(ValueError, match="num_ranks"):
-        build_dataset("ordinal", images_dir=str(images_dir), csv_path=str(csv_path), num_ranks=5)
+        dataset_over("ordinal", str(images_dir), str(csv_path), num_ranks=5)
 
 
 def test_classification_derives_num_classes_from_data(tmp_path: Path):
@@ -244,7 +236,7 @@ def test_classification_derives_num_classes_from_data(tmp_path: Path):
     csv_path = tmp_path / "labels.csv"
     _write_csv(csv_path, rows, ("stem", "label"))
 
-    dataset = build_dataset("classification", images_dir=str(images_dir), csv_path=str(csv_path))
+    dataset = dataset_over("classification", str(images_dir), str(csv_path))
     assert dataset.num_classes == 4
 
 
@@ -259,8 +251,7 @@ def test_classification_num_classes_mismatch_raises(tmp_path: Path):
     _write_csv(csv_path, rows, ("stem", "label"))
 
     with pytest.raises(ValueError, match="num_classes"):
-        build_dataset(
-            "classification", images_dir=str(images_dir), csv_path=str(csv_path), num_classes=2)
+        dataset_over("classification", str(images_dir), str(csv_path), num_classes=2)
 
 
 def test_regression_e2e(tmp_path: Path):
@@ -272,9 +263,7 @@ def test_regression_e2e(tmp_path: Path):
     csv_path = tmp_path / "values.csv"
     _write_csv(csv_path, rows, ("stem", "value"))
 
-    dataset = build_dataset(
-        "regression", images_dir=str(images_dir), csv_path=str(csv_path)
-    )
+    dataset = dataset_over("regression", str(images_dir), str(csv_path))
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("regression"))
 
     model_source = _model_source("build_bespoke_regressor")
@@ -299,8 +288,7 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     csv_path = tmp_path / "ranks.csv"
     _write_csv(csv_path, rows, ("stem", "rank"))
 
-    dataset = build_dataset(
-        "ordinal", images_dir=str(images_dir), csv_path=str(csv_path), num_ranks=3)
+    dataset = dataset_over("ordinal", str(images_dir), str(csv_path), num_ranks=3)
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("ordinal"))
     model_source = _model_source("build_bespoke_ordinal", num_ranks=3)
     run = create_run(_train_config(model_source), str(tmp_path / "out"), id="auto-run-21")
@@ -332,7 +320,7 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     csv_path = tmp_path / "values.csv"
     _write_csv(csv_path, rows, ("stem", "value"))
 
-    dataset = build_dataset("regression", images_dir=str(images_dir), csv_path=str(csv_path))
+    dataset = dataset_over("regression", str(images_dir), str(csv_path))
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("regression"))
     model_source = _model_source("build_bespoke_regressor")
     run = create_run(_train_config(model_source), str(tmp_path / "out"), id="auto-run-22")

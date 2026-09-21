@@ -2121,11 +2121,21 @@ REGISTERED = {
         f".tcip/experiments/{EXPERIMENT}/env.json", pin=_pin_platform_root,
         root_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_split": Registered(
-        # every key split_construction.persist_run_partition always writes, not only the three
-        # a drawn run happens to vary
-        {"train": ["img_001"], "val": ["img_002"], "seed": 42, "dataset_hash": "9f2c1b0a4d6e8f31",
-         "dataset_id": "a1", "dataset_fingerprint": "7ac1", "group_by": "stem_prefix",
-         "labels_dirs": ["ü/annotations/2026-03-04"]},
+        # every key split_construction.persist_run_partition writes for a run whose producer
+        # named its members, not only the ones a drawn run happens to vary
+        {"seed": 42, "dataset_id": "a1", "dataset_fingerprint": "7ac1",
+         "group_by": "stem_prefix",
+         "members": {"ü/annotations/2026-03-04": {
+             "train": ["img_001"], "val": ["img_002"],
+             "group_key_map": {"img_001": "img", "img_002": "img"},
+             "sources": {"img_001": "ü/images/img_001.jpg",
+                         "img_002": "ü/images/img_002.jpg"},
+             "label_digests": {
+                 "at_split": {"img_001": "d1", "img_002": "d2"},
+                 "at_run": {"img_001": "d1", "img_002": "d2"},
+                 "ground_truth": {"img_001": "ü/annotations/2026-03-04/img_001.json",
+                                  "img_002": "ü/annotations/2026-03-04/img_002.json"}},
+         }}},
         lambda root: experiments.split_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/split.json", pin=_pin_platform_root,
         root_of=lambda root: Path(experiments.experiments_scope())),

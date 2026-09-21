@@ -147,8 +147,11 @@ Draw a leakage-free train/val/calibration selection with `draw_splits` (group-aw
 sibling tiles of one source image in the same split; there is no held-out test list, and no
 launch path honours one). It copies nothing: a selection lists, per sample, the image source, the
 label document, a group key and a side, so a draw spanning capture dates trains in place. Nothing
-is written without `output_path` (a stats dict only). Writing a selection requires `subject` and
-all three ratios stated non-zero: its samples are drawn through the same admission a training run
+is written without `output_path` (a stats dict only). Writing a selection requires all three
+ratios stated non-zero, and `subject` whenever its ground truth is per-image label documents,
+whose admission is subject-scoped; a selection over `<stem>.png` masks or a `.csv` table of one
+row per image takes none, since each is admitted by existing. Its samples are
+drawn through the same admission a training run
 uses, and a run names it with `data.split.selection_dir` to train against that exact partition
 instead of drawing its own; the `calibration` side is never bound to a loader, so a run's own
 selection (`val`) side is never what the checkpoint is later validated against (see the

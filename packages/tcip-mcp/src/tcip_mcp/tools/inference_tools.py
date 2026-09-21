@@ -29,6 +29,7 @@ from tcip_mcp.project_paths import resolve_output_path
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.resolution import Acknowledgement
 
 logger = logging.getLogger(__name__)
@@ -145,96 +146,75 @@ that ceiling for a store declared frozen."""
 _RASTER_PASS_PROGRESS_SCHEMA_VERSION = 1
 
 
-def _recorded_training_id_map(predictor) -> dict | None:
-    """The training run's own recorded name->id map (``config["data"]["id_map"]``), or ``None``
-    when the checkpoint carries none. The one read :func:`resolve_decode_id_map` and calibration's
-    own GT-side id-map resolution (:func:`~tcip_mcp.pipelines.calibration.calibrate_operating_point`)
-    both share, so a checkpoint's
-    recorded vocabulary is preferred identically wherever an id_map is derived for it, never
-    re-checked independently by each caller."""
-    data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
-    recorded = data_cfg.get("id_map")
-    if isinstance(recorded, dict) and recorded:
-        return {str(k): int(v) for k, v in recorded.items()}
-    return None
-
-
-def run_scope(predictor) -> tuple[str | None, str | None]:
-    """A run's own recorded ``(subject, attribute)``, the same pair the training run stamps onto
-    its experiment config and every publishing door stamps onto the bucket's own
-    ``operating_point.json``.
+def run_scope(predictor) -> "ClassScope":
+    """A run's own recorded class space, the one the training run stamps onto its experiment
+    config and every publishing door stamps onto the bucket's own ``operating_point.json``: its
+    subject, its attribute and the name->id map its loaders read targets under, whole
+    (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`).
 
     Refuses by name a run that declares an attribute with no subject: a value with no object class
-    names nothing a reader could hold predictions to. Every door that publishes a bucket or reads a
-    checkpoint's scope calls this one function rather than re-reading ``config["data"]`` on its own.
+    names nothing a reader could hold predictions to. Every door holding a loaded predictor reads
+    its scope here rather than re-reading ``config["data"]`` on its own, and a door holding only a
+    recorded data config reads it through
+    :meth:`~tcip_mcp.pipelines.data.selection.ClassScope.recorded_in`, the one read of those keys
+    this refusal wraps.
     """
-    data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
-    subject, attribute = data_cfg.get("subject"), data_cfg.get("attribute")
-    if attribute is not None and subject is None:
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
+    scope = ClassScope.recorded_in((getattr(predictor, "config", {}) or {}).get("data") or {})
+    if scope.attribute is not None and scope.subject is None:
         raise ValueError(
-            f"{getattr(predictor, 'path', predictor)!r} declares attribute {attribute!r} with no "
-            "subject: a value with no object class names nothing a reader could hold predictions "
-            "to. Retrain with data.subject stated beside data.attribute."
+            f"{getattr(predictor, 'path', predictor)!r} declares attribute {scope.attribute!r} "
+            "with no subject: a value with no object class names nothing a reader could hold "
+            "predictions to. Retrain with data.subject stated beside data.attribute."
         )
-    return subject, attribute
+    return scope
 
 
 def unmapped_classified_run(
-    data_cfg: dict, id_map: dict | None, *, images_dir: str | None,
+    scope: "ClassScope", id_map: dict | None, *, images_dir: str | None,
 ) -> str | None:
     """The composed refusal for a run that declared an attribute and resolved no ``id_map`` to
     decode predictions with, or ``None`` when there is nothing to refuse (a mapped run, or a run
     with no attribute at all).
 
-    The remedy names the run's own shape, decided by :func:`~tcip_mcp.pipelines.data.label_queries.
-    targets_registry_derived`: a registry-derived run with an ``images_dir`` whose dataset holds
-    no ``subjects.json`` is told to run ``write_subject_registry`` for that dataset; a registry-derived run
-    called with no ``images_dir`` at all (an ``image_paths``-only call) is told to pass one, since
-    no dataset can otherwise be named to decode it against; any other run (a bespoke
-    ``dataset_source``, a COCO-sourced run, or one with no registry to derive from) is told to
-    state ``data.id_map`` in its launch config beside ``data.subject``/``data.attribute`` and
-    retrain, the one route onto a bespoke run's checkpoint. The raster regime, which has no
-    ``images_dir`` concept at all, always calls this with ``images_dir=None``; a raster run's own
-    targets are never registry-derived, so its message always resolves to the retrain remedy.
+    An attribute run's class space is always the one the platform's own admission derived from
+    ``(labels_dir, subject, attribute)``, whatever built its loaders, so the remedy names what is
+    missing to read that registry back: an ``images_dir`` whose dataset holds no ``subjects.json``
+    is told to run ``write_subject_registry`` for that dataset; a retired registry beside it is
+    named to be renamed; and a call with no ``images_dir`` at all (an ``image_paths``-only call,
+    and every raster call) is told to pass one, since no dataset can otherwise be named to decode
+    it against. A run whose launch config recorded no ``id_map`` and names no attribute reaches
+    none of this.
     """
     if id_map is not None:
         return None
-    attribute = data_cfg.get("attribute")
+    attribute = scope.attribute
     if attribute is None:
         return None
-    subject = data_cfg.get("subject")
-    from tcip_mcp.pipelines.data.label_queries import targets_registry_derived
-
-    if targets_registry_derived(data_cfg):
-        if images_dir is None:
-            return (
-                f"this run decoded along attribute {attribute!r} of subject {subject!r} from a "
-                "registry-derived dataset, but no images_dir was given to read the decoding "
-                "dataset's subjects.json from. Pass images_dir naming the dataset whose "
-                "subjects.json decodes this run."
-            )
-        from tcip_mcp.dataset_layout import dataset_root_of
-        from tcip_mcp.subject_registry import retired_document
-
-        root = dataset_root_of(images_dir)
-        stale = retired_document(root) if root is not None else None
-        if stale is not None:
-            return (
-                f"this run decoded along attribute {attribute!r} of subject {subject!r} from a "
-                f"registry-derived dataset, but {images_dir!r} resolves only the retired "
-                f"registry at {stale}. Rename it to subjects.json by hand, then retry."
-            )
+    subject = scope.subject
+    if images_dir is None:
         return (
             f"this run decoded along attribute {attribute!r} of subject {subject!r} from a "
-            f"registry-derived dataset, but {images_dir!r} holds no subjects.json to decode it "
-            "with. Run write_subject_registry for that dataset, then retry."
+            "registry-derived dataset, but no images_dir was given to read the decoding "
+            "dataset's subjects.json from. Pass images_dir naming the dataset whose "
+            "subjects.json decodes this run."
+        )
+    from tcip_mcp.dataset_layout import dataset_root_of
+    from tcip_mcp.subject_registry import retired_document
+
+    root = dataset_root_of(images_dir)
+    stale = retired_document(root) if root is not None else None
+    if stale is not None:
+        return (
+            f"this run decoded along attribute {attribute!r} of subject {subject!r} from a "
+            f"registry-derived dataset, but {images_dir!r} resolves only the retired "
+            f"registry at {stale}. Rename it to subjects.json by hand, then retry."
         )
     return (
-        f"this run decoded along attribute {attribute!r} of subject {subject!r}, but its launch "
-        "config recorded no id_map to decode predictions with. State data.id_map in the launch "
-        "config beside data.subject and data.attribute and retrain: the launch config is the one "
-        "producer of a map on a bespoke run's checkpoint, and re-registering the model does not "
-        "add one, since the predictor never reads the registry entry's own config."
+        f"this run decoded along attribute {attribute!r} of subject {subject!r} from a "
+        f"registry-derived dataset, but {images_dir!r} holds no subjects.json to decode it "
+        "with. Run write_subject_registry for that dataset, then retry."
     )
 
 
@@ -246,15 +226,14 @@ def resolve_decode_id_map(predictor, images_dir: str | None, *,
     ``run_inference`` and the web GUI's inference worker (``tcip_web.routes.inference``), never a
     second implementation (CLAUDE.md: "when two code paths must agree, call one from the other").
 
-    Prefers the *training* run's own recorded map (stamped onto ``config["data"]["id_map"]`` by
-    ``subprocess_worker.py::run`` right after the dataset is built, so it travels on the checkpoint
-    the same way ``subject``/``attribute`` already do) over re-deriving one from the inference
-    dataset's live registry, the model can only speak the vocabulary it was trained on, so the
-    training map is the correct decode map by definition, and it is immune to a ``subjects.json``
-    whose declared attribute-value order was edited after training. A checkpoint with no recorded
-    map (a bespoke ``dataset_source`` with no registry scope, or a run trained from a pre-built COCO
-    source whose id space isn't registry-derived, ``_resolve_run_id_map`` deliberately does not
-    record one for either) falls through to the live-registry derivation, the same honest,
+    Prefers the *training* run's own recorded map (the scope its producer admitted under, written
+    onto ``config["data"]["id_map"]``, so it travels on the checkpoint the same way
+    ``subject``/``attribute`` already do) over re-deriving one from the inference dataset's live
+    registry: the model can only speak the vocabulary it was trained on, so the training map is
+    the correct decode map by definition, and it is immune to a ``subjects.json`` whose declared
+    attribute-value order was edited after training. A checkpoint with no recorded map (a run
+    whose ground truth carries its own classes, a mask raster or a table row, which no registry
+    scopes) falls through to the live-registry derivation, the same honest,
     order-invariant-for-single-class degraded path this already was.
 
     A registry read that fails for a real reason (corrupted file, an id-space mismatch) propagates
@@ -268,10 +247,10 @@ def resolve_decode_id_map(predictor, images_dir: str | None, *,
     (block calibration reads it from the training experiment's ``config.json``, and refuses without
     it) passes it here rather than restating the prefer-recorded-else-derive rule around its own.
     """
-    recorded = _recorded_training_id_map(predictor)
-    if recorded is not None:
-        return recorded
-    subject, attribute = scope if scope is not None else run_scope(predictor)
+    recorded = run_scope(predictor)
+    if recorded.id_map is not None:
+        return recorded.id_map
+    subject, attribute = scope if scope is not None else (recorded.subject, recorded.attribute)
     if not (subject and images_dir):
         return None
 
@@ -466,10 +445,8 @@ def run_inference(
             checkpoint was chosen on. A checkpoint bound to a different selection than the one
             named here is refused by name. The selection states its own subject and attribute, and
             the scope is read from it rather than restated here. The response carries
-            ``n_excluded_training_stems``, ``n_excluded_validation_stems`` and
-            ``n_excluded_unassigned_stems``, the present stems the selection's universe left out
-            (its train side, its val side, and stems the draw never assigned), beside
-            ``n_excluded_incomplete_attribute``.
+            ``n_excluded_training_stems`` and ``n_excluded_validation_stems``, the members the
+            selection put elsewhere under this scope, beside ``n_excluded_incomplete_attribute``.
         experiment_id: The run that produced the checkpoint, by its record id (one run's immutable
             record, ``tcip_mcp.experiments``), for provenance. Best-effort resolved
             (checkpoint's own stamp, then the registry) when omitted; a raw/foreign checkpoint
@@ -831,10 +808,10 @@ def _run_inference_verified(
 
     # A classified run with no id_map cannot decode its own predictions: refuse before either
     # pass runs, so no calibration evidence is spent on a run that would refuse at the write.
-    _subject, _attribute = run_scope(predictor)
+    _scope = run_scope(predictor)
+    _subject, _attribute = _scope.subject, _scope.attribute
     _door_id_map = resolve_decode_id_map(predictor, images_dir)
-    _refusal = unmapped_classified_run(
-        {"subject": _subject, "attribute": _attribute}, _door_id_map, images_dir=images_dir)
+    _refusal = unmapped_classified_run(_scope, _door_id_map, images_dir=images_dir)
     if _refusal is not None:
         return {"error": _refusal}
 
@@ -951,7 +928,6 @@ def _run_inference_verified(
             extra["n_excluded_training_stems"] = len(manifest_excluded["excluded_training_stems"])
             extra["n_excluded_validation_stems"] = len(
                 manifest_excluded["excluded_validation_stems"])
-            extra["n_excluded_unassigned_stems"] = len(manifest_excluded["excluded_unassigned_stems"])
         # The full curve can be large, persist it and return the path (provenance emits has_gate_evidence).
         # The record's own body is its identity, so a curve differing from a prior one is never lost.
         curve_body = {
@@ -2150,10 +2126,10 @@ def _export_predictions_raster(
 
     # No images_dir for a raster source; resolved ahead of the pass (never after it) so a
     # classified run with no id_map refuses before the expensive tiled pass runs.
-    raster_subject, raster_attribute = run_scope(predictor)
+    raster_scope = run_scope(predictor)
+    raster_subject, raster_attribute = raster_scope.subject, raster_scope.attribute
     id_map = resolve_decode_id_map(predictor, None)
-    raster_refusal = unmapped_classified_run(
-        {"subject": raster_subject, "attribute": raster_attribute}, id_map, images_dir=None)
+    raster_refusal = unmapped_classified_run(raster_scope, id_map, images_dir=None)
     if raster_refusal is not None:
         return {"error": raster_refusal}
 

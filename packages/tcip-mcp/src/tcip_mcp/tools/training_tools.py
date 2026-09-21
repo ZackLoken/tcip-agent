@@ -90,8 +90,8 @@ _SELECTION_CONFLICT_KEYS = (
 
 
 def _split_selection_drawn_conflicts(split_cfg: dict) -> list[str]:
-    """Every key under ``data.split`` that ``data.split.selection_dir`` conflicts with, beside
-    ``data.val_images_dir`` (checked separately, its own refusal): a drawn split's own parameters
+    """Every key under ``data.split`` that ``data.split.selection_dir`` conflicts with: a drawn
+    split's own parameters
     (:data:`_SELECTION_CONFLICT_KEYS`). ``seed`` is admitted, not a conflict, only when
     ``data.split.redraw_within_selection`` is true (:func:`_redraw_flag_issue` covers the flag's
     own remaining requirement, that a redraw states a seed at all): a seed left over from a
@@ -123,74 +123,133 @@ def _redraw_flag_issue(split_cfg: dict) -> str | None:
     return None
 
 
-def _data_dir_issues(data_cfg: dict, task: str) -> list[str]:
-    """Every objection ``preflight_config``'s known-loader branch raises about the data
-    locations ``task``'s loader reads (:func:`_dataset_source_kwargs` is the one statement of
-    which keys each task reads): a required key missing, or naming a path that does not exist.
-    Detection and instance segmentation read ``images_dir`` and ``labels_dir``; semantic
-    segmentation reads ``images_dir`` and its mask directory; classification, ordinal and
-    regression read ``images_dir`` and, when given, a ``csv_path`` file, never a labels
-    directory. The one implementation ``preflight_config`` and the data picker's "As recorded"
-    listing both call, so a relaunch whose recorded directories moved shows the same words
-    before Start that ``launch_training`` would refuse it with. A no-op for a bespoke
-    ``data.dataset_source`` config: the known-loader presence check does not apply when the
-    agent's own builder owns loading. A no-op for a config bound to a selection too: each
-    sample names its own source and label path, so the run reads no directory to discover
-    membership in, and the selection's own reader states what is missing.
-    """
-    from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
+def _data_dir_issues(data_cfg: dict) -> list[str]:
+    """Every objection ``preflight_config`` raises about the data locations this run's own
+    producer reads: a required key missing, or naming a path that does not exist.
 
-    if data_cfg.get(DATASET_SOURCE_KEY) is not None:
-        return []
+    A run of any task needs ``data.images_dir`` and ``data.labels_dir``, the place its ground
+    truth lives, whatever shape that ground truth turns out to be, and that holds whether its
+    loaders are the built-in ones or a bespoke ``data.dataset_source`` builder: the platform's own
+    producer names the samples either way, so it needs the same data to read. A no-op for a config
+    bound to a selection: each sample names its own source and ground truth, so the run reads no
+    place to discover membership in, and the selection's own reader states what is missing.
+
+    The one implementation ``preflight_config`` and the data picker's "As recorded" listing both
+    call, so a relaunch whose recorded directories moved shows the same words before Start that
+    ``launch_training`` would refuse it with.
+    """
     split_cfg = data_cfg.get("split")
     if isinstance(split_cfg, dict) and split_cfg.get("selection_dir"):
         return []
     issues: list[str] = []
-    kwargs = _dataset_source_kwargs(task, data_cfg)
-    required_dirs = ["images_dir"]
-    if task in ("detection", "instance_seg"):
-        required_dirs.append("labels_dir")
-    elif task == "semantic_seg":
-        required_dirs.append("masks_dir")
-    for key in required_dirs:
-        path = kwargs.get(key)
+    for name in ("images_dir", "labels_dir"):
+        path = data_cfg.get(name)
         if not path:
-            issues.append(f"Missing 'data.{key}'")
-        elif not Path(path).is_dir():
-            issues.append(f"Directory not found: data.{key} = '{path}'")
-    csv_path = kwargs.get("csv_path")
-    if csv_path and not Path(csv_path).is_file():
-        issues.append(f"File not found: data.csv_path = '{csv_path}'")
+            issues.append(f"Missing 'data.{name}'")
+        elif not Path(path).exists():
+            # Named without claiming a shape: what ground truth is there is the producer's own
+            # read, and a config pointing at nothing is the only fact this check has.
+            issues.append(f"Not found: data.{name} = '{path}'")
     return issues
 
 
-def _selection_dir_conflicts(config: dict) -> tuple[list[str], bool]:
+class RunPopulation(NamedTuple):
+    """What a run would train and validate over: its own samples, the class space they were
+    admitted under, what the admission dropped, and what it refused or warned about."""
+
+    samples: list
+    scope: Any
+    counts: dict[str, int]
+    issues: list[str]
+    warnings: list[str]
+
+
+def _run_population(data_cfg: dict, selection) -> RunPopulation:
+    """The samples this run would train and validate over, as the producer names them, with the
+    class space it admitted them under.
+
+    One population, resolved the way the run itself resolves it: the recorded train and val
+    samples of the selection it is bound to, or the producer's own admission over the locations
+    its config names (:func:`~tcip_mcp.pipelines.data.label_queries.admit`). A bound run admits
+    nothing out of a directory, because its membership is already decided.
+
+    The samples themselves, never a mapping keyed by their bare names: a selection spanning two
+    capture dates holds two samples of one name, and a population keyed by name would report a
+    run smaller than the one that trains, and a source of that run as outside it. Every preflight
+    leg that needs a source to probe, a member name to group or a count to report reads this one
+    population, so a preflight cannot describe a dataset the run would not train on, and admits
+    once: a leg needing the admitted samples takes them from here.
+
+    Its ``issues`` are the admission's own refusals, in the words the run would refuse with (a
+    label document that will not decode, a dataset-level export where per-image documents belong,
+    a document directory with no subject to admit under): a preflight that swallowed them would
+    report valid over data the launch then refuses. Its ``warnings`` name a confirmed negative
+    whose label now holds annotations, which admission excludes silently. A bucket naming two
+    files under one stem propagates (:class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem`):
+    which of them a member means is not a question this or any other reader answers by picking
+    one.
+    """
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
+    if selection is not None:
+        return RunPopulation(
+            [s for s in selection.samples if s.side in ("train", "val")],
+            selection.scope, {}, [], [])
+    images_dir, labels_dir = data_cfg.get("images_dir"), data_cfg.get("labels_dir")
+    empty = RunPopulation([], ClassScope(), {}, [], [])
+    if not images_dir or not labels_dir:
+        return empty  # _data_dir_issues already named the missing key
+
+    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_store import SchemaVersionRefused
+
+    from tcip_mcp.pipelines.data.label_queries import admit
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
+
+    contradicted: set[str] = set()
+    try:
+        admitted = admit(images_dir, labels_dir, subject=data_cfg.get("subject"),
+                         attribute=data_cfg.get("attribute"), contradicted_out=contradicted)
+    except UnreadableLabelDocument as exc:
+        # A run over this ground truth fails on the same file, so this blocks, not warns.
+        return empty._replace(issues=[f"data.labels_dir: {exc}"])
+    except SchemaVersionRefused as exc:
+        return empty._replace(
+            issues=[f"a .bandgroup manifest under {images_dir} could not be read: {exc}"])
+    except AmbiguousImageStem:
+        raise
+    except (OSError, ValueError) as exc:
+        # The launch admits through this same producer, so whatever refuses it refuses there too.
+        return empty._replace(issues=[f"data: {exc}"])
+    warnings: list[str] = []
+    if contradicted:
+        warnings.append(
+            f"data: {sorted(contradicted)} are recorded negative for the subject but their label "
+            "file now holds subject annotations; the stored negative is stale, they train on "
+            "their labelled content instead, and the confirmation needs re-review."
+        )
+    return RunPopulation(
+        admitted.every_sample(), admitted.scope, admitted.counts, [], warnings)
+
+
+def _selection_dir_conflicts(config: dict) -> list[str]:
     """Every objection a ``data.split.selection_dir`` binding raises from ``config``'s own fields
-    alone, computed without reading any selection: the ``data.val_images_dir`` conflict, the
-    drawn-split key conflicts (:data:`_SELECTION_CONFLICT_KEYS`), a ``redraw_within_selection``
-    flag with no seed beside it (:func:`_redraw_flag_issue`), and the task check (only detection
-    and instance_seg read the per-image label documents a selection's samples name).
+    alone, computed without reading any selection: the drawn-split key conflicts
+    (:data:`_SELECTION_CONFLICT_KEYS`), and a ``redraw_within_selection`` flag with no seed beside
+    it (:func:`_redraw_flag_issue`).
+
     ``preflight_config`` and :func:`selection_compatibility` both compute these before attempting
     to read a selection at all, so a moved or absent selection never suppresses an objection the
-    config alone already carries.
-
-    Returns ``(issues, task_binds)``; when the task cannot bind a selection at all, reading one to
-    check its sides would name nothing new, so the caller stops there.
+    config alone already carries. Whether the task can bind at all is not a config-only question:
+    it is whether the selection's samples carry the ground truth that task reads, which
+    :func:`_selection_dependent_issues` answers with the selection in hand.
     """
-    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
-
-    model_source = config.get(MODEL_SOURCE_KEY)
     data_cfg_raw = config.get("data")
     data_cfg: dict = data_cfg_raw if isinstance(data_cfg_raw, dict) else {}
     split_cfg_raw = data_cfg.get("split")
     split_cfg: dict = split_cfg_raw if isinstance(split_cfg_raw, dict) else {}
 
     issues: list[str] = []
-    if data_cfg.get("val_images_dir"):
-        issues.append(
-            "data.split.selection_dir conflicts with data.val_images_dir: two membership "
-            "sources for one run's validation split."
-        )
     conflicts = _split_selection_drawn_conflicts(split_cfg)
     if conflicts:
         issues.append(
@@ -200,50 +259,34 @@ def _selection_dir_conflicts(config: dict) -> tuple[list[str], bool]:
     flag_issue = _redraw_flag_issue(split_cfg)
     if flag_issue:
         issues.append(flag_issue)
-
-    task_for_selection = (model_source.get("task") if isinstance(model_source, dict) else None) \
-        or data_cfg.get("task", "detection")
-    if task_for_selection not in ("detection", "instance_seg"):
-        issues.append(
-            f"data.split.selection_dir names a selection, and only detection and instance_seg "
-            f"read the per-image label documents a selection's samples name; "
-            f"task={task_for_selection!r} cannot bind to one."
-        )
-        return issues, False
-    return issues, True
+    return issues
 
 
-def _selection_dependent_issues(
-    selection, selection_dir: str, data_cfg: dict | None = None,
-) -> list[str]:
+def _selection_dependent_issues(selection, selection_dir: str) -> list[str]:
     """Every objection that needs the selection itself, read at ``selection_dir``, to answer.
 
     A selection states its own subject, attribute and class map, and each of its samples states
     its own source and ground truth, so a bound run reads its scope off the selection rather than
-    restating it. What remains: the selection names a subject to admit under; its train and val
-    sides are both populated, since a run needs both loaders; and, when ``data_cfg`` is given, the
-    config states no scope of its own that disagrees with the selection's, the refusal the bind
-    itself raises (:func:`~tcip_mcp.pipelines.data.split_construction.
-    _refuse_scope_disagreement`, called here rather than restated, so a launch cannot fail on a
-    disagreement this never named). Called only once :func:`_selection_dir_conflicts`' task check
-    has passed and the selection has been read successfully; :func:`selection_compatibility`
-    composes both for a caller with one selection in hand, and ``preflight_config`` calls this
-    directly so a failed read never hides the other check's issues.
+    restating it and nothing here compares one against the other. What remains: it names a subject
+    when the ground truth is a label document
+    (:func:`~tcip_mcp.pipelines.data.selection.unscoped_document_issue`, the one statement every
+    reader of a selection's scope asks), and its train and val sides are both populated, since a
+    run needs both loaders. Whether the selected loader can read the ground truth these samples
+    name is that loader's own refusal, raised when it is built over them.
+
+    The bind raises these same objections by calling this function
+    (:func:`~tcip_mcp.pipelines.data.split_construction.auto_train_val`), so a launch refuses a
+    selection in the words the preflight that offered it used.
+    :func:`selection_compatibility` composes this with the config-only checks for a caller with
+    one selection in hand, and ``preflight_config`` calls this directly so a failed read never
+    hides the other check's issues.
     """
-    from tcip_mcp.pipelines.data.split_construction import _refuse_scope_disagreement
+    from tcip_mcp.pipelines.data.selection import unscoped_document_issue
 
     issues: list[str] = []
-    if data_cfg is not None:
-        try:
-            _refuse_scope_disagreement(data_cfg, selection, selection_dir)
-        except ValueError as exc:
-            issues.append(str(exc))
-    if not selection.subject:
-        issues.append(
-            f"the selection at {selection_dir} records no subject: a run reads the subject it "
-            "admits under off the selection, and one drawn without a subject names no class "
-            "space to train over."
-        )
+    unscoped = unscoped_document_issue(selection, selection_dir)
+    if unscoped:
+        issues.append(unscoped)
     counts = selection.counts()
     if not counts["train"] or not counts["val"]:
         issues.append(
@@ -255,27 +298,15 @@ def _selection_dependent_issues(
 
 def _redraw_starvation_issues(config: dict, selection, selection_dir: str) -> list[str]:
     """Whether ``data.split.redraw_within_selection`` on ``config`` would starve a side, checked
-    over ``selection`` before any run starts: its own train-plus-val samples, grouped by the keys
-    the draw recorded on them, named by
-    :func:`~tcip_mcp.pipelines.data.splits.redraw_starved_issue` when fewer than two foreground
-    groups result, over the same subject- and attribute-scoped per-sample annotation counts the
-    child's own redraw counts at run time.
+    over ``selection`` before any run starts: the one refusal the child's own redraw raises at run
+    time (:func:`~tcip_mcp.pipelines.data.splits.redraw_starved_issue`), called here over the same
+    record rather than restated.
     """
-    from pathlib import Path as _Path
-
-    from tcip_mcp.pipelines.data.splits import count_label_lines, redraw_starved_issue
+    from tcip_mcp.pipelines.data.splits import redraw_starved_issue
 
     split_cfg = (config.get("data") or {}).get("split") or {}
-    pool = selection.on("train") + selection.on("val")
-    foreground = [
-        s.group for s in pool
-        if count_label_lines(_Path(s.ground_truth).parent, _Path(s.ground_truth).stem,
-                             subject=selection.subject, attribute=selection.attribute) > 0
-    ]
     starved = redraw_starved_issue(
-        [s.group for s in pool], foreground,
-        selection_dir=selection_dir, seed=split_cfg.get("seed"),
-    )
+        selection, selection_dir=selection_dir, seed=split_cfg.get("seed"))
     return [starved] if starved else []
 
 
@@ -291,30 +322,25 @@ def selection_compatibility(config: dict, selection, selection_dir: str) -> list
     :func:`preflight_config`: that function imports the config's builder and scans its labels, a
     cost neither caller here means to pay for a compatibility read.
     """
-    issues, task_binds = _selection_dir_conflicts(config)
-    if not task_binds:
-        return issues
-    data_cfg = config.get("data")
-    issues.extend(_selection_dependent_issues(
-        selection, selection_dir, data_cfg if isinstance(data_cfg, dict) else None))
+    issues = _selection_dir_conflicts(config)
+    issues.extend(_selection_dependent_issues(selection, selection_dir))
     return issues
 
 
 def candidate_config_with_selection(config: dict, selection_dir: str) -> dict:
     """The launch config choosing ``selection_dir`` over ``config``'s own "As recorded" data
     section would build: ``data.split`` replaced wholesale by ``{"selection_dir": selection_dir}``,
-    with ``data.val_images_dir`` dropped, since a chosen partition supplies its own validation
-    source, and the recorded class scope (``subject``, ``attribute``, ``id_map``) dropped too,
-    since a bound run reads its scope off the selection. Keeping the previous scope would make
-    choosing a partition drawn for another subject refuse at the bind for a disagreement the
-    breeder never stated. The one implementation the data picker's own compatibility check
-    (:func:`list_split_choices`) and the relaunch route's launch build both call, so an offer is
-    exactly what would launch.
+    and the recorded class scope emptied, since a bound run reads its scope off the selection and
+    the bind overwrites whatever the config carried: an offer that still showed the previous
+    subject would describe a run in a vocabulary it will not train in. The one implementation the
+    data picker's own compatibility check (:func:`list_split_choices`) and the relaunch route's
+    launch build both call, so an offer is exactly what would launch.
     """
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
     data_cfg_raw = config.get("data")
     data_cfg: dict = {**data_cfg_raw} if isinstance(data_cfg_raw, dict) else {}
-    for stale in ("val_images_dir", "subject", "attribute", "id_map"):
-        data_cfg.pop(stale, None)
+    ClassScope().onto(data_cfg)
     data_cfg["split"] = {"selection_dir": selection_dir}
     return {**config, "data": data_cfg}
 
@@ -396,51 +422,80 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
         issues.append("Missing 'data' section")
     elif not isinstance(data_cfg, dict):
         issues.append("'data' must be a dict")
-    elif data_cfg.get(DATASET_SOURCE_KEY) is not None:
-        # Bespoke dataset seam (mirrors model_source): the agent's builder owns loading, so the
-        # known-loader directories aren't required, only the builder must import.
-        dataset_source = data_cfg[DATASET_SOURCE_KEY]
-        if not isinstance(dataset_source, dict) or not dataset_source.get("builder"):
-            issues.append("data.dataset_source must be a dict with a 'builder' (module:function)")
-        else:
-            from tcip_mcp.pipelines.model_build import import_source_builder
-            try:
-                import_source_builder(dataset_source)
-            except Exception as exc:
-                issues.append(f"data.dataset_source.builder not importable: {exc}")
     else:
-        issues.extend(_data_dir_issues(data_cfg, _resolved_task(config)))
+        if data_cfg.get(DATASET_SOURCE_KEY) is not None:
+            # Bespoke dataset seam (mirrors model_source): the builder must import. The data the
+            # platform's own producer reads is still required, and _data_dir_issues says so.
+            dataset_source = data_cfg[DATASET_SOURCE_KEY]
+            if not isinstance(dataset_source, dict) or not dataset_source.get("builder"):
+                issues.append(
+                    "data.dataset_source must be a dict with a 'builder' (module:function)")
+            else:
+                from tcip_mcp.pipelines.model_build import import_source_builder
+                try:
+                    import_source_builder(dataset_source)
+                except Exception as exc:
+                    issues.append(f"data.dataset_source.builder not importable: {exc}")
+        issues.extend(_data_dir_issues(data_cfg))
 
-    # Channel firewall: probe one sample raster and check its band count against the declared
-    # in_chans, so a channel-wrong train is caught here rather than deep in the training subprocess.
-    # Only fires when a raster is actually readable, never a false-fail on an empty/absent dir.
-    if isinstance(model_source, dict) and isinstance(data_cfg, dict) and data_cfg:
+    data_cfg_dict: dict = data_cfg if isinstance(data_cfg, dict) else {}
+    split_cfg_raw = data_cfg_dict.get("split")
+    split_cfg_dict: dict = split_cfg_raw if isinstance(split_cfg_raw, dict) else {}
+
+    # A bound selection is read once, before anything below reads a population: its own samples
+    # are this run's membership, so nothing here admits out of the config's directories.
+    selection_dir = split_cfg_dict.get("selection_dir")
+    selection = None
+    if selection_dir:
+        from tcip_mcp.pipelines.data.selection import read_selection
+
+        # Config-only issues fire before the read, so a moved selection never hides them.
+        issues.extend(_selection_dir_conflicts(config))
+        try:
+            selection = read_selection(selection_dir)
+        except ValueError as exc:
+            issues.append(str(exc))
+        else:
+            issues.extend(_selection_dependent_issues(selection, selection_dir))
+            if split_cfg_dict.get("redraw_within_selection"):
+                warnings.append(
+                    "data.split.redraw_within_selection=true: this run redraws train and "
+                    "val inside the selection's own train and val samples at this seed; "
+                    "the selection's calibration side stays untouched."
+                )
+                issues.extend(_redraw_starvation_issues(config, selection, selection_dir))
+
+    # The run's own membership and sources, resolved once: every leg below reads it rather than
+    # listing a directory or admitting again of its own.
+    run = _run_population(data_cfg_dict, selection)
+    population, sample_counts = run.samples, run.counts
+    issues.extend(run.issues)
+    warnings.extend(run.warnings)
+
+    # Channel firewall: the run's own band count, read the way the run reads it, against the
+    # declared in_chans, so a channel-wrong train is caught here and not in the subprocess.
+    if isinstance(model_source, dict) and population:
         from tcip_mcp.pipelines.model_build import declared_in_chans
         declared = declared_in_chans(model_source)
-        images_dir = data_cfg.get("images_dir")
-        if declared is not None and images_dir and Path(images_dir).is_dir():
-            from tcip_store import SchemaVersionRefused
-
-            from tcip_mcp.pipelines.image_utils import list_logical_images
+        if declared is not None:
+            from tcip_annotation.json_io import UnreadableLabelDocument
+            from tcip_mcp.pipelines.data.split_construction import loader_sizes
+            from tcip_mcp.pipelines.resolution import (
+                ResolvedBundle, default as _resolved_default, validate_resolved_bundle,
+            )
+            run_task = model_source.get("task") or data_cfg_dict.get("task", "detection")
             try:
-                logical = list_logical_images(images_dir)
-            except SchemaVersionRefused as exc:
-                issues.append(f"a .bandgroup manifest under {images_dir} could not be read: {exc}")
-                logical = {}
-            sample = logical[sorted(logical)[0]] if logical else None
-            if sample is not None:
-                from tcip_mcp.pipelines.derivations import probe_channels
-                from tcip_mcp.pipelines.resolution import (
-                    ResolvedBundle, default as _resolved_default, validate_resolved_bundle,
-                )
-                try:
-                    probed = int(probe_channels(sample))
-                except Exception:
-                    probed = None
-                if probed is not None:
-                    b = ResolvedBundle(trait="", dataset_hash=None, params={
-                        "in_chans": _resolved_default("in_chans", declared)})
-                    issues.extend(validate_resolved_bundle(b, probed_channels=probed))
+                sizes = loader_sizes(run_task, data_cfg_dict, population,
+                                     data_cfg_dict.get(DATASET_SOURCE_KEY) or None)
+            except (ValueError, UnreadableLabelDocument) as exc:
+                # The run reads its own sources this way and refuses on the same fact.
+                issues.append(f"data: {exc}")
+                sizes = {}
+            channels = sizes.get("num_channels")
+            if channels is not None:
+                b = ResolvedBundle(trait="", dataset_hash=None, params={
+                    "in_chans": _resolved_default("in_chans", declared)})
+                issues.extend(validate_resolved_bundle(b, probed_channels=int(channels)))
 
     # Normalization provenance: per-band builder_kwargs statistics must carry which images produced them.
     image_stats_containment: str | None = None
@@ -466,152 +521,59 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                     "a non-empty 'windows' list and a 'pixel_fraction', naming which images they "
                     "were derived from (see derivations.image_stats_provenance)."
                 )
-            else:
-                images_dir = data_cfg.get("images_dir") if isinstance(data_cfg, dict) else None
-                if images_dir and Path(images_dir).is_dir():
-                    from tcip_mcp.pipelines.image_utils import list_logical_images
-                    known = set()
-                    for src_img in list_logical_images(images_dir).values():
-                        ref_path = src_img if isinstance(src_img, Path) else src_img.manifest_path
-                        known.add(str(Path(ref_path).resolve()))
-                    bad = sorted({
-                        label for label, _ in sampling_record.windows
-                        if str(Path(label).resolve()) not in known
-                    })
-                    image_stats_containment = "checked"
-                    if bad:
-                        issues.append(
-                            f"model_source.image_stats_sampling names path(s) {bad} outside "
-                            f"data.images_dir={images_dir!r}."
-                        )
-                else:
-                    # A bespoke dataset_source run legitimately has no data.images_dir to check
-                    # window paths against; say so rather than silently skip or pass.
-                    image_stats_containment = "not_checked"
-
-    # Split-policy validation: mirrors the channel firewall above, only fires when a
-    # grouping policy is actually declared, probes the dataset's stems the same way the channel
-    # check probes a sample image, and never false-fails on an empty/absent/unreadable dir. Catches
-    # an unrecognized ``group_by`` or an incomplete ``group_key_map`` here, at preflight, rather
-    # than deep in ``auto_train_val`` where it would otherwise raise.
-    data_cfg_dict: dict = data_cfg if isinstance(data_cfg, dict) else {}
-    split_cfg = data_cfg_dict.get("split")
-    split_cfg_dict: dict = split_cfg if isinstance(split_cfg, dict) else {}
-    if split_cfg_dict.get("group_by") or split_cfg_dict.get("group_key_map"):
-        images_dir = data_cfg_dict.get("images_dir")
-        if images_dir and Path(images_dir).is_dir():
-            from tcip_store import SchemaVersionRefused
-
-            from tcip_mcp.pipelines.image_utils import list_logical_images
-            try:
-                stems = sorted(list_logical_images(images_dir))
-            except SchemaVersionRefused as exc:
-                issues.append(f"a .bandgroup manifest under {images_dir} could not be read: {exc}")
-                stems = []
-            if stems:
-                from tcip_mcp.pipelines.data.label_queries import admission_date
-                from tcip_mcp.pipelines.data.splits import recorded_group_key_fn
-                try:
-                    # Through the producers' own derivation, over the capture date they admit
-                    # under: resolving a second spelling here refuses the map the draw requires.
-                    recorded_group_key_fn(
-                        split_cfg_dict.get("group_by", "tile_prefix"),
-                        date=admission_date(data_cfg_dict.get("labels_dir", "")), stems=stems,
-                        group_key_map=split_cfg_dict.get("group_key_map"))
-                except ValueError as exc:
-                    issues.append(f"data.split: {exc}")
-
-    # Config-only issues fire before the read, so a moved or absent selection never hides them.
-    selection_dir = split_cfg_dict.get("selection_dir")
-    if selection_dir:
-        from tcip_mcp.pipelines.data.selection import read_selection
-
-        conflict_issues, task_binds = _selection_dir_conflicts(config)
-        issues.extend(conflict_issues)
-        if task_binds:
-            try:
-                selection = read_selection(selection_dir)
-            except ValueError as exc:
-                issues.append(str(exc))
-            else:
-                issues.extend(_selection_dependent_issues(
-                    selection, selection_dir, data_cfg_dict))
-                if split_cfg_dict.get("redraw_within_selection"):
-                    warnings.append(
-                        "data.split.redraw_within_selection=true: this run redraws train and "
-                        "val inside the selection's own train and val samples at this seed; "
-                        "the selection's calibration side stays untouched."
+            elif population:
+                known = {str(Path(s.source).resolve()) for s in population}
+                bad = sorted({
+                    label for label, _ in sampling_record.windows
+                    if str(Path(label).resolve()) not in known
+                })
+                image_stats_containment = "checked"
+                if bad:
+                    issues.append(
+                        f"model_source.image_stats_sampling names path(s) {bad} outside this "
+                        f"run's own {len(known)} source(s)."
                     )
-                    issues.extend(
-                        _redraw_starvation_issues(config, selection, selection_dir))
+            else:
+                # A run whose membership resolved to nothing here has no sources to check the
+                # window paths against; say so rather than silently skip or pass.
+                image_stats_containment = "not_checked"
+
+    # Split-policy validation over the run's own members: an unrecognized ``group_by`` or an
+    # incomplete ``group_key_map`` is caught here rather than deep in ``auto_train_val``.
+    if population and (split_cfg_dict.get("group_by") or split_cfg_dict.get("group_key_map")):
+        from tcip_mcp.pipelines.data.label_queries import admission_date
+        from tcip_mcp.pipelines.data.splits import recorded_group_key_fn
+        try:
+            # Through the producers' own derivation, over the capture date they admit
+            # under: resolving a second spelling here refuses the map the draw requires.
+            recorded_group_key_fn(
+                split_cfg_dict.get("group_by", "tile_prefix"),
+                date=admission_date(data_cfg_dict.get("labels_dir", "")),
+                stems=sorted({s.member_stem for s in population}),
+                group_key_map=split_cfg_dict.get("group_key_map"))
+        except ValueError as exc:
+            issues.append(f"data.split: {exc}")
 
     # Four-way spatial split feasibility (reserve_calibration_fraction, opt-in): must refuse by
     # name when infeasible, not silently degrade to no validation (see the helper's own docstring).
     reserve_cal_frac = split_cfg_dict.get("reserve_calibration_fraction")
     if reserve_cal_frac:
         issues.extend(_reserve_calibration_feasibility_issues(
-            model_source, data_cfg_dict, split_cfg_dict, reserve_cal_frac, smoke=smoke))
+            model_source, data_cfg_dict, split_cfg_dict, reserve_cal_frac,
+            run=run, smoke=smoke))
 
-    # Trainable-sample coverage: DetectionDataset/InstanceSegDataset compute trainable_stems'
-    # own partition and keep none of it, so a run whose label store admits
-    # only a fraction of its annotated images (an unconfirmed-empty backlog, a stale-schema
-    # quarantine, incomplete attribute coverage) would otherwise read "valid, no warnings" while
-    # training on far fewer images than the operator expects. Never gating,
-    # a real project legitimately has unconfirmed/unannotated images, and only fires for the known
-    # loaders (a dataset_source's own admission logic is the agent's to report, not this rail's).
-    task_for_coverage = (model_source.get("task") if isinstance(model_source, dict) else None) \
-        or (data_cfg.get("task", "detection") if isinstance(data_cfg, dict) else "detection")
-    if (isinstance(data_cfg, dict) and data_cfg.get(DATASET_SOURCE_KEY) is None
-            and task_for_coverage in ("detection", "instance_seg")):
-        images_dir, labels_dir = data_cfg.get("images_dir"), data_cfg.get("labels_dir")
-        if images_dir and labels_dir and Path(images_dir).is_dir() and Path(labels_dir).is_dir():
-            contradicted_negatives: set[str] = set()
-            from tcip_annotation.json_io import UnreadableLabelDocument
-            try:
-                from tcip_mcp.pipelines.data.label_queries import (
-                    admission_date, trainable_stems,
-                )
-                stems, sample_counts = trainable_stems(
-                    labels_dir, images_dir, subject=data_cfg.get("subject"),
-                    date=admission_date(labels_dir),
-                    contradicted_out=contradicted_negatives)
-            except UnreadableLabelDocument as exc:
-                stems, sample_counts = [], {}
-                # A run over this labels_dir fails on the same file, so this blocks, not warns.
-                issues.append(f"data.labels_dir: {exc}")
-            except (OSError, ValueError):
-                stems, sample_counts = [], {}
-            if contradicted_negatives:
-                warnings.append(
-                    f"data: {sorted(contradicted_negatives)} are recorded negative for the "
-                    "subject but their label file now holds subject annotations; the stored "
-                    "negative is stale, they train on their labelled content instead, and the "
-                    "confirmation needs re-review."
-                )
-            if sample_counts:
-                dropped = {k: v for k, v in sample_counts.items()
-                          if k not in ("annotated", "confirmed_negative") and v}
-                total = sum(sample_counts.values())
-                n_dropped = sum(dropped.values())
-                if n_dropped and total:
-                    warnings.append(
-                        f"data: {n_dropped}/{total} candidate images ({n_dropped / total:.0%}) will "
-                        f"not train, {dict(sorted(dropped.items()))}. {len(stems)} stem(s) admitted.")
-
-        # A validation build from val_labels_dir (or labels_dir as its fallback) re-raises an
-        # unreadable label instead of degrading to no validation, so it blocks here too.
-        val_images_dir = data_cfg.get("val_images_dir")
-        if val_images_dir:
-            val_labels_dir = data_cfg.get("val_labels_dir") or labels_dir
-            if val_labels_dir and Path(val_labels_dir).is_dir():
-                from tcip_annotation.json_io import (
-                    UnreadableLabelDocument as _ULD, prediction_documents, read_annotations,
-                )
-                for label_path in prediction_documents(val_labels_dir):
-                    try:
-                        read_annotations(str(label_path))
-                    except _ULD as exc:
-                        issues.append(f"data.val_labels_dir: {exc}")
+    # Trainable-sample coverage, never gating: a run admitting a fraction of its annotated images
+    # would otherwise read "valid, no warnings" while training on far fewer than expected.
+    if sample_counts:
+        dropped = {k: v for k, v in sample_counts.items()
+                   if k not in ("annotated", "confirmed_negative") and v}
+        total = sum(sample_counts.values())
+        n_dropped = sum(dropped.values())
+        if n_dropped and total:
+            warnings.append(
+                f"data: {n_dropped}/{total} candidate images ({n_dropped / total:.0%}) will "
+                f"not train, {dict(sorted(dropped.items()))}. "
+                f"{len(population)} stem(s) admitted.")
 
     # Training keys, read where train() reads them: the top level.
     batch_size = config.get("batch_size", 2)
@@ -670,7 +632,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
             ms = config.get(MODEL_SOURCE_KEY) or {}
             task = ms.get("task") or (config.get("data") or {}).get("task", "detection")
-            dims = resolve_contract_dims(config, task)
+            dims = resolve_contract_dims(config, task, scope=run.scope)
             model = build_model(config)
             report = check_model_contract(model, task, **dims)
             batch, why_no_batch = None, None
@@ -1283,8 +1245,8 @@ def list_split_choices(experiment_id: str) -> dict:
     its labels): every check here is :func:`selection_compatibility` over a selection this reader
     read itself, through :func:`~tcip_mcp.pipelines.data.selection.read_selection_checked`, no
     second presence test anywhere. A candidate selection is checked against the config
-    :func:`candidate_config_with_selection` builds (``data.split`` replaced wholesale,
-    ``val_images_dir`` dropped), the identical shape the launch route builds, so an offer is
+    :func:`candidate_config_with_selection` builds (``data.split`` replaced wholesale),
+    the identical shape the launch route builds, so an offer is
     exactly what would launch; "As recorded" is checked against the stored config unchanged
     (plus the directory-presence issues :func:`preflight_config` would raise, so a snapshot
     whose recorded directories moved shows the same words before Start that a launch would
@@ -1359,7 +1321,7 @@ def list_split_choices(experiment_id: str) -> dict:
             "compatible": True, "reason": None,
         }
 
-    dir_issues = _data_dir_issues(data_cfg, _resolved_task(config))
+    dir_issues = _data_dir_issues(data_cfg)
     if dir_issues:
         as_recorded["compatible"] = False
         combined_reason = list(dir_issues)
@@ -1368,11 +1330,13 @@ def list_split_choices(experiment_id: str) -> dict:
             combined_reason.insert(0, str(prior_reason))
         as_recorded["reason"] = "; ".join(combined_reason)
 
-    # A bound config names no directories, so its own selection's first sample source anchors
-    # the sibling search the way an unbound config's images_dir does.
+    # A bound config names no locations, so its own selection's first sample source anchors the
+    # sibling search the way an unbound config's images_dir does.
     if own_selection is not None and own_selection.samples:
         root_anchor = str(Path(own_selection.samples[0].source).parent)
     elif data_cfg.get("images_dir") and data_cfg.get("labels_dir"):
+        # The images anchor the dataset; data.labels_dir says where its ground truth lives, a
+        # directory of per-image files or a table alike.
         root_anchor = str(data_cfg["images_dir"])
     else:
         return {"as_recorded": as_recorded, "selections": []}
@@ -2232,9 +2196,8 @@ def run_hyperparameter_search(
             samples at its own seed, calibration untouched, rather than training every trial on
             the selection's one recorded partition; refused before minting when those samples
             resolve to fewer than two foreground groups (a redraw could only starve a side).
-            Otherwise refused, before minting the sweep, when
-            ``base_config`` names ``data.val_images_dir`` (nothing to redraw), ``data.auto_val``
-            is off or ``task`` sits outside the drawn path's own tasks, ``search_alg`` is not a
+            Otherwise refused, before minting the sweep, when ``data.auto_val``
+            is off, ``search_alg`` is not a
             native one (``random``/``grid``/``variant_generator``: only the native generator
             pairs a grid axis), ``scheduler`` is not ``none`` (a pruned draw is not comparable
             with a completed one), ``split_draw_seeds`` is given at a length other than
@@ -2293,8 +2256,8 @@ def run_hyperparameter_search(
         # A bound base_config admitted to split_draws redraws inside its manifest from here on.
         base_config = _base_config_for_split_draws(base_config, split_draws)
 
-        # Checked ahead of preflight, so its own reason is what a bound/val_images_dir/task
-        # refusal reads as, not whatever preflight would have hit first.
+        # Checked ahead of preflight, so its own reason is what a bound or auto_val refusal
+        # reads as, not whatever preflight would have hit first.
         hpo_task = _resolved_task(base_config)
         draws_refusal = _split_draws_refusal(
             base_config, param_space, hpo_task, search_alg, scheduler,
@@ -2859,8 +2822,8 @@ def _split_draws_refusal(
     ``run_hyperparameter_search`` has already set ``data.split.redraw_within_selection`` on its
     own copy (:func:`_base_config_for_split_draws`) before this call, so every trial redraws train
     and val inside the selection's own train-plus-val samples instead of running on its one
-    recorded partition. A bound config reads neither ``val_images_dir`` nor ``auto_val`` (the
-    selection branch binds ahead of both), so those two legs are skipped for it; in their place,
+    recorded partition. A bound config does not read ``auto_val`` (the
+    selection branch binds ahead of it), so that leg is skipped for it; in its place,
     the selection's own foreground-groups check runs once here so a sweep whose every trial would
     starve a side is refused before minting rather than after every trial fails the same way.
 
@@ -2872,22 +2835,14 @@ def _split_draws_refusal(
     """
     if split_draws <= 1:
         return None
-    from tcip_mcp.pipelines.data.split_construction import STEM_TASKS
     from tcip_mcp.pipelines.training.hpo import SPLIT_DRAW_SEED_KEY, _NATIVE_SEARCH, _NO_SCHEDULER
 
     data_cfg = base_config.get("data") or {}
     split_cfg = data_cfg.get("split") or {}
     bound = bool(split_cfg.get("selection_dir"))
-    if not bound:
-        if data_cfg.get("val_images_dir"):
-            return ("split_draws redraws the split, and base_config names data.val_images_dir: "
-                    "an explicit validation source draws nothing.")
-        if not data_cfg.get("auto_val", True):
-            return ("split_draws needs a drawn validation split, and base_config sets "
-                     "data.auto_val=False.")
-    if task not in STEM_TASKS:
-        return (f"split_draws needs a drawn validation split, and task={task!r} sits outside "
-                f"the drawn path's own tasks ({sorted(STEM_TASKS)}).")
+    if not bound and not data_cfg.get("auto_val", True):
+        return ("split_draws needs a drawn validation split, and base_config sets "
+                "data.auto_val=False.")
     if (search_alg or "").lower() not in _NATIVE_SEARCH:
         native = sorted(x for x in _NATIVE_SEARCH if isinstance(x, str) and x)
         return (f"split_draws pairs a grid axis through Ray's own BasicVariantGenerator, which "
@@ -2951,18 +2906,18 @@ def _unbound_single_source_spatial_issue(task: str, data_cfg: dict, split_draws:
     never by ``data.split.seed``, or trains with no validation, or fails outright on a reserved
     calibration fraction; no draw of that path holds a different partition out.
 
-    Only for a built-in detection build: a bespoke ``dataset_source`` is excluded, since its
-    builder owns its own admission and this leg cannot name what it would admit. Counts the stems
-    ``base_config`` admits through the producer the run itself admits through
-    (:func:`~tcip_mcp.pipelines.data.split_construction.admit_geometry`), never a second
+    Only for a built-in detection build: a bespoke ``dataset_source`` is excluded because the
+    spatial-strip route serves datasets the platform built itself, so a bespoke run never takes
+    it however few sources it admits. Counts the members ``base_config`` admits through the
+    producer the run itself admits through
+    (:func:`~tcip_mcp.pipelines.data.label_queries.admit`), never a second
     admission, inside one handler answering no refusal on any exception: a dataset-level COCO
     misrouted as ``data.labels_dir``, or an unreadable label document, is a caller-config error
     the trial or the preflight that follows reports in its own words, never this leg's to fold in.
     ``None`` when ``task`` is not ``"detection"``, ``data.tiling`` is absent, not a mapping, or
     disabled, a bespoke ``dataset_source`` is named, the admitted count could not be resolved, or
-    more than one source is admitted: a built-in detection build never admits zero
-    (``require_samples`` raises inside the split's own degrading handler), so this leg never
-    names a path a run does not take.
+    the admitted count is not exactly one: a run admitting none refuses in the split's own words,
+    so this leg never names a path a run does not take.
     """
     if task != "detection":
         return None
@@ -2974,14 +2929,14 @@ def _unbound_single_source_spatial_issue(task: str, data_cfg: dict, split_draws:
     if not isinstance(tiling, dict) or not tiling or not tiling.get("enabled", True):
         return None
 
-    from tcip_mcp.pipelines.data.split_construction import admit_geometry
+    from tcip_mcp.pipelines.data.label_queries import admit
 
-    src = _dataset_source_kwargs(task, data_cfg)
     try:
-        admitted = admit_geometry(task, data_cfg, src)
+        admitted = admit(data_cfg.get("images_dir", ""), data_cfg.get("labels_dir", ""),
+                         subject=data_cfg.get("subject"), attribute=data_cfg.get("attribute"))
     except Exception:
         return None
-    if len(admitted.stems) != 1:
+    if len(admitted.records) != 1:
         return None
     return (
         f"split_draws={split_draws} redraws the split, and base_config admits one trainable "
@@ -3019,8 +2974,7 @@ _SEED_AXIS_REMEDY = (
     "picks the best by mean over draws. The paired path's own conditions apply, bound and "
     "unbound alike: a config bound to a selection redraws train and val inside the selection's "
     "own train and val samples (the selection must be readable and resolve at least two "
-    "foreground groups across them); an unbound config names no "
-    "data.val_images_dir and keeps auto_val on; the task is one with drawn splits; search_alg "
+    "foreground groups across them); an unbound config keeps auto_val on; search_alg "
     "is one the native generator builds (random, grid, variant_generator, or unset); scheduler "
     "prunes nothing (none, fifo, or unset); split_draw_seeds is one per draw and distinct; no "
     "baseline_params names the seed under a warm start; no other data.* axis is in param_space; "
@@ -3030,10 +2984,9 @@ _SEED_AXIS_REMEDY = (
     "single-source spatial-strip path pairs no distinct partition with any draw). A single fixed "
     "seed belongs in "
     "base_config's own data.split.seed: the drawn path's partition depends on it, and the "
-    "single-source spatial path's, a config with "
-    "data.val_images_dir's, or a selection-bound config's without redraw_within_selection never "
-    "does (the spatial path still records the config's value on the split record, a different "
-    "fact, not claimed here)."
+    "single-source spatial path's, or a selection-bound config's without redraw_within_selection, "
+    "never does (the spatial path still records the config's value on the split record, a "
+    "different fact, not claimed here)."
 )
 
 
@@ -3292,55 +3245,30 @@ def _ensure_experiment(
     return fresh_id, fresh_output_dir
 
 
-def _dataset_source_kwargs(task: str, data_cfg: dict) -> dict:
-    """The ``build_dataset`` kwargs for a run's data config.
-
-    One definition shared by the training path and the preflight smoke, so the batch the contract
-    is proved against is built from the same keys as the batch the run will train on.
-
-    No capture date rides here. Which human-confirmation bucket admitted a sample is a per-sample
-    fact the producer states on it (``directory_samples``), never a scalar on the run: one date
-    per config is the one-date-per-run limit, and a run whose samples span three dates answers
-    from three buckets. A directory build resolves the one bucket that directory carries through
-    ``label_queries.admission_date``, the declared inverse of the ``annotations/<date>/`` layout.
-    """
-    from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
-
-    if task in ("detection", "instance_seg"):
-        kw = {"images_dir": data_cfg.get("images_dir", ""),
-              "labels_dir": data_cfg.get("labels_dir", "")}
-        # The run's subject (and optional attribute): required to read name-based labels and to
-        # derive the single assign_class_ids map. Threaded so every train/val build uses one map.
-        if data_cfg.get("subject"):
-            kw["subject"] = data_cfg["subject"]
-        if data_cfg.get("attribute"):
-            kw["attribute"] = data_cfg["attribute"]
-    elif task == "semantic_seg":
-        kw = {"images_dir": data_cfg.get("images_dir", ""),
-              "masks_dir": data_cfg.get("masks_dir", data_cfg.get("labels_dir", ""))}
-    else:
-        kw = {"images_dir": data_cfg.get("images_dir", "")}
-        if data_cfg.get("csv_path"):
-            kw["csv_path"] = data_cfg["csv_path"]
-    if data_cfg.get(DATASET_SOURCE_KEY):
-        # Bespoke seam (mirrors model_source): route build_dataset to the agent's builder for a task the known loaders don't cover, threaded through src so the split machinery still passes it (with stems) to every train/val build below.
-        kw["dataset_source"] = data_cfg[DATASET_SOURCE_KEY]  # left names build_dataset's param
-    return kw
-
-
 def _one_real_batch(task: str, config: dict, n: int = 2):
     """``(batch, reason_it_failed)``, one collated ``(images, targets)`` from the run's dataset.
 
     Lets the model contract smoke a task it has no synthetic schema for, without the platform
-    enumerating tasks. Built through the same source kwargs and augmentation the run itself uses,
-    so a batch that smokes here is the batch that trains. Best-effort by design: a config that
-    cannot yield a batch returns ``(None, reason)`` and the caller decides what that means, this
-    function never decides whether a run proceeds. The reason is returned rather than only logged,
-    so a caller that blocks can say what actually failed.
+    enumerating tasks. The batch comes off the run's own training loader, resolved through
+    :func:`~tcip_mcp.pipelines.data.split_construction.auto_train_val`, the one function the run
+    itself resolves membership with: a bound run smokes its selection's train side alone, a drawn
+    one smokes the side its draw assigned, and a bespoke builder is handed exactly what it will be
+    handed at launch. Re-admitting a location here instead would smoke a batch holding the
+    validation and calibration members the run never trains on, which is not the batch whose
+    measurement boundary this proves.
+
+    ``auto_train_val`` is resolved over a deep copy of the config: it writes a binding block and
+    the resolved split policy onto the data section it is given, and a preflight read must leave
+    the caller's config exactly as it found it. Best-effort by design: a config that cannot yield
+    a batch returns ``(None, reason)`` and the caller decides what that means, this function never
+    decides whether a run proceeds. The reason is returned rather than only logged, so a caller
+    that blocks can say what actually failed.
     """
     data_cfg = config.get("data") or {}
     try:
-        from tcip_mcp.pipelines.data.datasets import build_dataset
+        import copy
+
+        from tcip_mcp.pipelines.data.split_construction import auto_train_val
         from tcip_mcp.pipelines.training.collation import task_collate
 
         transforms = None
@@ -3348,10 +3276,11 @@ def _one_real_batch(task: str, config: dict, n: int = 2):
             from tcip_mcp.pipelines.data.augmentations import build_augmentation
             transforms = build_augmentation(config["augmentation"])
 
-        src = _dataset_source_kwargs(task, data_cfg)
-        ds = build_dataset(task, **src, transforms=transforms, tiling=data_cfg.get("tiling"))
-        assert isinstance(ds, Sized), "every build_dataset task backend defines __len__"
-        items = [ds[i] for i in range(min(n, len(ds)))]
+        train_ds, _val_ds, _partition = auto_train_val(
+            task, copy.deepcopy(data_cfg), transforms)
+        assert isinstance(train_ds, Sized), "every build_dataset task backend defines __len__"
+        indexable: Any = train_ds
+        items = [indexable[i] for i in range(min(n, len(train_ds)))]
         if not items:
             return None, "the dataset built but is empty"
         return task_collate(task)(items), None
@@ -3362,7 +3291,7 @@ def _one_real_batch(task: str, config: dict, n: int = 2):
 
 def _reserve_calibration_feasibility_issues(
     model_source: dict | None, data_cfg: dict, split_cfg: dict, reserve_cal_frac: float, *,
-    smoke: bool,
+    run: RunPopulation, smoke: bool,
 ) -> list[str]:
     """Named ``preflight_config`` issues for an explicitly-requested
     ``reserve_calibration_fraction`` that cannot be honored, so the launch refuses here rather
@@ -3372,17 +3301,16 @@ def _reserve_calibration_feasibility_issues(
     consumer is the Review tab reading a ``ResolvedBundle``'s sweep failures, and this refusal
     fires at training-launch time, with neither in scope).
 
-    Structurally inapplicable configs (not detection, tiling disabled, a multi-stem dataset that
-    would use the group-balanced split instead) are always flagged, cheaply, from the images
-    directory's own listing, no admission or dataset build needed. The single-source geometry
-    :func:`~tcip_mcp.pipelines.data.split_construction.spatial_single_source_split` itself would derive
-    (extent, strip-layout feasibility, an empty side after real filtering) is checked by actually
-    calling it over the membership the run's own producer admits
-    (:func:`~tcip_mcp.pipelines.data.split_construction.admit_geometry`), so the feasibility
-    reported here is the feasibility of the dataset the run will build, and so gated on
-    ``smoke=True`` like this function's other dataset/model-touching checks (a plain, non-smoke
-    ``preflight_config`` call still catches the structurally-inapplicable cases above, just not
-    this geometry).
+    Structurally inapplicable configs (not detection, tiling disabled, a multi-member dataset that
+    would use the group-balanced split instead) are always flagged from ``run``, the run's own
+    admitted samples and class space as the caller already resolved them. The single-source geometry
+    :func:`~tcip_mcp.pipelines.data.split_construction.spatial_single_source_split` itself would
+    derive (extent, strip-layout feasibility, an empty side after real filtering) is checked by
+    actually calling it over that same single sample, so the feasibility reported here is the
+    feasibility of the dataset the run will build and nothing is admitted a second time, and so
+    gated on ``smoke=True`` like this function's other dataset/model-touching checks (a plain,
+    non-smoke ``preflight_config`` call still catches the structurally-inapplicable cases above,
+    just not this geometry).
     """
     task = (model_source.get("task") if isinstance(model_source, dict) else None) \
         or (data_cfg.get("task", "detection") if isinstance(data_cfg, dict) else "detection")
@@ -3395,30 +3323,28 @@ def _reserve_calibration_feasibility_issues(
         ]
 
     images_dir, labels_dir = data_cfg.get("images_dir"), data_cfg.get("labels_dir")
-    if not images_dir or not labels_dir or not Path(images_dir).is_dir() or not Path(labels_dir).is_dir():
+    if not images_dir or not labels_dir:
         return []  # the existing images_dir/labels_dir structural checks already cover this
 
-    from tcip_mcp.pipelines.image_utils import list_logical_images
-
-    stems = sorted(list_logical_images(images_dir))
-    if len(stems) >= 2:
+    if len(run.samples) >= 2:
         return [
             f"data.split.reserve_calibration_fraction={reserve_cal_frac} has no effect: "
-            f"{len(stems)} source images resolve to the group-balanced multi-stem split, not the "
-            "single-source spatial-strip split a calibration region reserves from."
+            f"{len(run.samples)} admitted sources resolve to the group-balanced multi-member "
+            "split, not the single-source spatial-strip split a calibration region reserves from."
         ]
-    if len(stems) != 1 or not smoke:
+    if len(run.samples) != 1 or not smoke:
         return []
 
     from tcip_annotation.json_io import UnreadableLabelDocument
 
     try:
         from tcip_mcp.pipelines.data.split_construction import (
-            admit_geometry, spatial_single_source_split,
+            loader_sizes, spatial_single_source_split,
         )
 
-        admitted = admit_geometry("detection", data_cfg, _dataset_source_kwargs("detection", data_cfg))
-        spatial_single_source_split(admitted, dict(data_cfg), tiling_cfg, dict(split_cfg), None)
+        spatial_single_source_split(
+            run.samples[0], run.scope, tiling_cfg, dict(split_cfg), None,
+            loader_sizes(task, data_cfg, run.samples[:1]))
     except (ValueError, UnreadableLabelDocument) as exc:
         return [f"data.split.reserve_calibration_fraction: {exc}"]
     except Exception as exc:  # noqa: BLE001, an unrelated build failure isn't this check's own
@@ -3446,7 +3372,6 @@ def evaluate_model(
     trait: str | None = None,
     subject: str | None = None,
     attribute: str | None = None,
-    date: str | None = None,
     selection_dir: str | None = None,
 ) -> dict:
     """Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json.
@@ -3510,11 +3435,6 @@ def evaluate_model(
         subject: Name-based GT scope. Caller-supplied wins; else resolved from the producing
             run's own config so the eval reads GT through the same id map the run trained with.
         attribute: Attribute scope for the same name-based GT resolution as ``subject``.
-        date: The capture date this split's confirmed negatives were recorded under, the bucket
-            key the delivery-grade path reads them by. A GT dir under ``annotations/<date>/``
-            states that date; a split tree or a curated dataset carries none and leaves this
-            unset. Never recovered from ``labels_dir``; a selection needs none, its samples having
-            been admitted under their own dates at the draw.
         selection_dir: Score the checkpoint over this selection's ``calibration`` samples whose
             label documents live under ``labels_dir`` instead of the whole directory, refusing by
             name the way the calibration door does (detection/instance_seg only, and not combined
@@ -3559,46 +3479,39 @@ def evaluate_model(
     except UnregisteredCheckpoint as exc:
         return {"error": str(exc)}
 
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
     # A bare checkpoint path (run is None) carries its own stamped config["data"] too, read off
     # the object already loaded, so both paths agree without a second read.
-    if run is not None:
-        run_data_cfg = run.config.get("data", {}) or {}
-    else:
-        run_data_cfg = checkpoint.data_config
+    run_data_cfg = (run.config.get("data") or {}) if run is not None else checkpoint.data_config
     run_tiling = run_data_cfg.get("tiling")
-    # The eval scope's subject/attribute: caller-supplied wins, else the producing run's config, so
-    # the name-based GT reads through the same id map the run trained with.
-    if subject is None:
-        subject = run_data_cfg.get("subject")
-    if attribute is None:
-        attribute = run_data_cfg.get("attribute")
+    # Caller-supplied subject/attribute win, else the run's own recorded class space through the
+    # one reader of it, so the name-based GT reads under the space the run trained in.
+    recorded_scope = ClassScope.recorded_in(run_data_cfg)
+    subject = subject or recorded_scope.subject
+    attribute = attribute or recorded_scope.attribute
 
     selection_stems: list[str] | None = None
     selection_samples: dict[str, Any] = {}
-    selection_id_map: dict[str, int] | None = None
+    selection_scope = None
     if selection_dir is not None:
-        if task not in ("detection", "instance_seg"):
-            return {"error": f"selection_dir names a selection, and only detection and "
-                             f"instance_seg read the per-image label documents a selection's "
-                             f"samples name; task={task!r} cannot bind to one."}
         if use_tiled_inference:
             return {"error": "selection_dir is not combined with use_tiled_inference: that "
                              "delivery-grade path scans images_dir/labels_dir on its own, never "
                              "narrowed to a selection's samples."}
         from tcip_mcp.pipelines.data.selection import read_selection
-        from tcip_mcp.pipelines.data.splits import (
-            label_image_stems, resolve_selection_calibration_universe,
-        )
+        from tcip_mcp.pipelines.data.splits import selection_calibration_universe
 
         selection = read_selection(selection_dir)
-        present, _ = label_image_stems(labels_dir, images_dir)
         try:
-            (selection_stems, _group_by, _group_key_map, _excluded, subject, attribute,
-             selection_samples) = resolve_selection_calibration_universe(
-                selection, labels_dir, present, min_foreground_groups={"calibration": 1})
+            (selection_stems, _group_by, _group_key_map, _excluded,
+             selection_samples) = selection_calibration_universe(
+                selection, labels_dir, min_foreground_groups={"calibration": 1})
         except ValueError as exc:
             return {"error": str(exc)}
-        selection_id_map = dict(selection.id_map) if selection.id_map else None
+        # The selection's own class space governs a selection-restricted measurement.
+        selection_scope = selection.scope
+        subject, attribute = selection_scope.subject, selection_scope.attribute
 
     # Delivery-grade full-frame path: conf_threshold/global_nms_iou/max_dets pass through exactly
     # as given, run_full_frame_evaluation resolves its own sentinels (a direct caller's record).
@@ -3615,7 +3528,7 @@ def evaluate_model(
                 conf_threshold=conf_threshold, iou_threshold=iou_threshold,
                 tile_size=tcfg.get("tile_size"), overlap=tcfg.get("overlap"),
                 global_nms_iou=global_nms_iou, postprocess=postprocess,
-                max_dets=max_dets, trait=trait, date=date,
+                max_dets=max_dets, trait=trait,
             )
         except (ValueError, UnreadableLabelDocument) as exc:
             return {"error": str(exc)}
@@ -3626,37 +3539,34 @@ def evaluate_model(
     if task != "detection":
         tiling = None
 
-    # One kwargs-builder shared with the training path (_dataset_source_kwargs), not a second
-    # hand-rolled copy: two independent implementations of "which data_cfg keys does this task
-    # read" would let classification/ordinal/regression drift out of sync with training. labels_dir
-    # doubles as the CSV path for the non-geometry tasks, the same
-    # single "wherever this task's GT lives" slot it already serves for masks_dir/semantic_seg.
-    data_cfg = {"images_dir": images_dir, "labels_dir": labels_dir, "masks_dir": labels_dir,
-                "csv_path": labels_dir, "subject": subject, "attribute": attribute}
-    ds_kwargs = _dataset_source_kwargs(task, data_cfg)
     universe: list[Any] = []
     if selection_stems is not None:
         from tcip_mcp.pipelines.data.label_queries import refuse_inadmissible_samples
 
         universe = [selection_samples[s] for s in selection_stems]
-        # A sample-built loader indexes exactly what it is handed, so a label emptied since the
+        # A loader indexes exactly what it is handed, so a label emptied since the
         # draw measures as an image with no objects unless the admission refuses it here.
         try:
-            refuse_inadmissible_samples(
-                universe, attribute=attribute or None, id_map=selection_id_map)
+            refuse_inadmissible_samples(universe, selection_scope)
         except ValueError as exc:
             return {"error": str(exc)}
 
     evaluated_stem_count = None
     try:
         if selection_stems is not None:
-            # Built from the universe's own recorded samples, so the pixels measured are the ones
-            # the draw held out rather than whatever a same-named file holds today.
+            # The universe's own recorded samples under the class space the selection recorded:
+            # the pixels measured are the ones the draw held out, in the run's own vocabulary.
             dataset = build_dataset(
-                task, samples=universe, subject=subject, attribute=attribute,
-                id_map=selection_id_map, tiling=tiling)
+                task, samples=universe, tiling=tiling, scope=selection_scope)
         else:
-            dataset = build_dataset(task, **ds_kwargs, tiling=tiling)
+            # Through the producer, over the ground truth this door was pointed at, so the door
+            # and a run over the same data admit one membership.
+            from tcip_mcp.pipelines.data.label_queries import admit, require_admitted
+
+            admitted = admit(images_dir, labels_dir, subject=subject, attribute=attribute)
+            require_admitted(admitted)
+            dataset = build_dataset(
+                task, samples=admitted.every_sample(), tiling=tiling, scope=admitted.scope)
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Failed to build dataset: {exc}"}
 

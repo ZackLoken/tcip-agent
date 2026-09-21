@@ -19,6 +19,7 @@ from PIL import Image, ImageDraw
 
 pytest.importorskip("torch")
 import torch  # noqa: E402
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -98,10 +99,9 @@ def test_load_image_frame_matches_get_image_dimensions(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------
 
 def test_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
-    from tcip_mcp.pipelines.data.datasets import DetectionDataset
 
     images_dir, labels_dir, _ = _make_orient6_dataset(tmp_path)
-    ds = DetectionDataset(str(images_dir), str(labels_dir), subject="bud")
+    ds = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
     img_t, target = ds[0]
 
     assert img_t.shape[1:] == (UP_H, UP_W)  # [C, H, W] upright, not the raw sensor frame
@@ -121,10 +121,10 @@ def test_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------
 
 def test_tiled_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
-    from tcip_mcp.pipelines.data.datasets import DetectionDataset, TiledDetectionDataset
+    from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
     images_dir, labels_dir, _ = _make_orient6_dataset(tmp_path)
-    base = DetectionDataset(str(images_dir), str(labels_dir), subject="bud")
+    base = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
     tiled = TiledDetectionDataset(base, tile_size=64, overlap=0.25, skip_empty=True)
     assert tiled.num_samples > 0
 
@@ -151,7 +151,6 @@ def test_tiled_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
 
 def test_train_and_eval_read_paths_share_one_frame(tmp_path: Path) -> None:
     from tcip_annotation.utils import get_image_dimensions
-    from tcip_mcp.pipelines.data.datasets import DetectionDataset
     from tcip_mcp.pipelines.image_utils import load_image
 
     images_dir, labels_dir, _ = _make_orient6_dataset(tmp_path)
@@ -159,7 +158,7 @@ def test_train_and_eval_read_paths_share_one_frame(tmp_path: Path) -> None:
 
     train_frame = load_image(p, 3).size          # training loader read
     eval_frame = get_image_dimensions(p)          # eval / viz / GUI read
-    ds_frame = DetectionDataset(str(images_dir), str(labels_dir), subject="bud")[0][0].shape[1:]
+    ds_frame = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")[0][0].shape[1:]
 
     assert train_frame == eval_frame == (UP_W, UP_H)
     assert tuple(ds_frame) == (UP_H, UP_W)  # (H, W) == upright

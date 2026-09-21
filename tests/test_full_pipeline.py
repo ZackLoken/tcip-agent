@@ -16,6 +16,7 @@ torchvision = pytest.importorskip("torchvision")
 from torchvision.utils import save_image
 
 from tests import bespoke_models  # noqa: E402
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -24,18 +25,22 @@ from tests import bespoke_models  # noqa: E402
 
 @pytest.fixture()
 def tiny_classification_data(tmp_path):
-    """Create a minimal 2-class image classification dataset."""
+    """A minimal 2-class image classification dataset: images plus their ground-truth table."""
     images_dir = tmp_path / "cls_images"
+    images_dir.mkdir(parents=True)
+    rows = ["stem,label"]
     for cls_name, cls_idx in [("healthy", 0), ("diseased", 1)]:
-        cls_dir = images_dir / cls_name
-        cls_dir.mkdir(parents=True)
         for i in range(6):
             if cls_idx == 0:
                 img = torch.rand(3, 64, 64) * 0.3  # dark-ish
             else:
                 img = torch.rand(3, 64, 64) * 0.3 + 0.7  # bright-ish
-            save_image(img, str(cls_dir / f"{i:03d}.png"))
-    return str(images_dir)
+            stem = f"{cls_name}_{i:03d}"
+            save_image(img, str(images_dir / f"{stem}.png"))
+            rows.append(f"{stem},{cls_idx}")
+    csv_path = tmp_path / "cls_labels.csv"
+    csv_path.write_text("\n".join(rows) + "\n", encoding="utf-8", newline="\n")
+    return str(images_dir), str(csv_path)
 
 
 @pytest.fixture()
@@ -70,10 +75,10 @@ class TestFullClassificationPipeline:
         assert len(pred_keys) > 0
 
         # --- Step 3: Build dataset + dataloader ---
-        from tcip_mcp.pipelines.data.datasets import build_dataset
         from tcip_mcp.pipelines.training.collation import task_collate
 
-        dataset = build_dataset("classification", images_dir=tiny_classification_data)
+        images_dir, csv_path = tiny_classification_data
+        dataset = dataset_over("classification", images_dir, csv_path)
         assert dataset.num_classes == 2
         assert dataset.num_samples == 12
 
@@ -142,7 +147,7 @@ class TestFullClassificationPipeline:
         predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.1)
 
         # Pick some test images
-        test_images = sorted(Path(tiny_classification_data).rglob("*.png"))[:4]
+        test_images = sorted(Path(images_dir).rglob("*.png"))[:4]
         results = predictor.predict_batch([str(p) for p in test_images])
 
         assert len(results) == 4
@@ -232,7 +237,6 @@ class TestDetectionPipelineRealData:
     """End-to-end: build → train → infer → export CSV using real bud images (nested schema)."""
 
     def test_build_train_infer_export(self, detection_output_dir, tmp_path):
-        from tcip_mcp.pipelines.data.datasets import build_dataset
         from tcip_mcp.pipelines.training.generic_trainer import train
         from tcip_mcp.pipelines.training.collation import task_collate
         from tcip_mcp.pipelines.training.run_registry import create_run
@@ -253,12 +257,7 @@ class TestDetectionPipelineRealData:
         assert date is not None
         images_dir = SAMPLE_PROJECT / "images" / date
         labels_dir = SAMPLE_PROJECT / "annotations" / date
-        dataset = build_dataset(
-            "detection",
-            images_dir=str(images_dir),
-            labels_dir=str(labels_dir),
-            subject="bud",
-        )
+        dataset = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
         # num_classes is derived from the dataset's subjects.json via assign_class_ids (single-class
         # bud here), and num_samples from the bud-annotated images on this date.
         assert dataset.num_classes == 1

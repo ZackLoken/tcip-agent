@@ -14,7 +14,7 @@ from tcip_mcp.pipelines.data.splits import (
     cal_holdout_split,
     count_lines,
     group_balanced_split,
-    image_extent_from_labels,
+    label_document_extent,
     resolve_group_key_fn,
     resolve_locked_cal_holdout_split,
     spatial_strip_identity,
@@ -103,26 +103,31 @@ def test_group_split_calibration_side_gets_its_stated_minimum():
 def test_refuse_insufficient_foreground_groups_admits_a_sufficient_tree():
     from tcip_mcp.pipelines.data.splits import refuse_insufficient_foreground_groups
 
-    refuse_insufficient_foreground_groups(4, {"train": 1, "val": 1, "calibration": 2})
+    refuse_insufficient_foreground_groups(
+        4, {"train": 1, "val": 1, "calibration": 2}, remedy="annotate more.")
 
 
 def test_refuse_insufficient_foreground_groups_names_the_sides_and_the_shortfall():
     from tcip_mcp.pipelines.data.splits import refuse_insufficient_foreground_groups
 
     with pytest.raises(ValueError) as exc_info:
-        refuse_insufficient_foreground_groups(2, {"train": 1, "val": 1, "calibration": 2})
+        refuse_insufficient_foreground_groups(
+            2, {"train": 1, "val": 1, "calibration": 2}, remedy="annotate more.")
     message = str(exc_info.value)
     assert "train=1" in message and "val=1" in message and "calibration=2" in message
     assert "2 foreground group" in message
 
 
-def test_refuse_insufficient_foreground_groups_remedy_names_no_ratio_escape():
-    """The remedy names annotating or confirming more foreground; writing a selection requires
-    every side's ratio non-zero, so no side can be dropped by zeroing its ratio."""
+def test_refuse_insufficient_foreground_groups_carries_the_callers_own_remedy():
+    """The caller states what to add, since what counts as foreground differs by the ground
+    truth a draw reads; writing a selection requires every side's ratio non-zero, so no side can
+    be dropped by zeroing its ratio and no remedy offers that."""
     from tcip_mcp.pipelines.data.splits import refuse_insufficient_foreground_groups
 
     with pytest.raises(ValueError) as exc_info:
-        refuse_insufficient_foreground_groups(2, {"train": 1, "val": 1, "calibration": 2})
+        refuse_insufficient_foreground_groups(
+            2, {"train": 1, "val": 1, "calibration": 2},
+            remedy="annotate or confirm more foreground groups of this subject.")
     message = str(exc_info.value)
     assert "drop a side" not in message
     assert "annotate or confirm more foreground groups" in message
@@ -145,8 +150,13 @@ def test_selection_calibration_universe_floor_remedy_names_the_ratio_and_the_dir
         for stem, side in (("a", "train"), ("b", "val"), ("c", "calibration"))
     ))
 
+    # The one calibration member's document carries no foreground of the draw's own subject, so
+    # the universe holds no foreground group and the floor refuses.
+    from tcip_annotation import json_io
+
+    json_io.write_annotations(labels_dir / "c.json", [], 16, 16, keep_empty=True)
     with pytest.raises(ValueError) as exc_info:
-        selection_calibration_universe(selection, labels_dir, {"c"}, foreground_stems=set())
+        selection_calibration_universe(selection, labels_dir)
     message = str(exc_info.value)
     assert "whole directory" not in message
     assert "calibration_ratio" in message
@@ -425,7 +435,9 @@ def test_stem_of_spatial_identity_passes_through_a_non_spatial_string():
     assert stem_of_spatial_identity("plain_stem_0_0") == "plain_stem_0_0"
 
 
-def test_image_extent_from_labels(tmp_path):
+def test_label_document_extent_reads_the_frame_off_the_document_it_is_handed(tmp_path):
+    """The extent comes from the path a sample records, never from a name composed under a
+    directory: a split derived here reads the same file the loader will."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
@@ -435,8 +447,8 @@ def test_image_extent_from_labels(tmp_path):
         str(labels_dir / "mosaic1.json"),
         [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 4000, 3000,
     )
-    assert image_extent_from_labels(labels_dir, "mosaic1") == (4000, 3000)
-    assert image_extent_from_labels(labels_dir, "missing") is None
+    assert label_document_extent(labels_dir / "mosaic1.json") == (4000, 3000)
+    assert label_document_extent(labels_dir / "missing.json") is None
 
 
 # -- scope normalization ---------------------------------------------------------
@@ -478,7 +490,8 @@ def test_count_label_lines_reads_an_empty_attribute_as_unset(tmp_path):
     json_io.write_annotations(
         labels_dir / "a.json", [Annotation(subject="leaf", geometry=BBox(1, 1, 5, 5))], 32, 32)
 
-    assert count_label_lines(labels_dir, "a", subject="leaf", attribute="") == 1
-    assert count_label_lines(labels_dir, "a", subject="", attribute="") == 1
-    assert count_label_lines(labels_dir, "a", subject="leaf", attribute="condition") == 0
+    document = labels_dir / "a.json"
+    assert count_label_lines(document, subject="leaf", attribute="") == 1
+    assert count_label_lines(document, subject="", attribute="") == 1
+    assert count_label_lines(document, subject="leaf", attribute="condition") == 0
 

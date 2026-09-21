@@ -73,9 +73,8 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
     through :func:`~tcip_mcp.tools.training_tools.split_dir_identity`, so a symlinked or
     differently cased spelling of an offered directory is admitted, not just an exact string
     match; the path itself is never resolved as one the server follows. The launch config then
-    carries ``data.split`` replaced wholesale by ``{"selection_dir": chosen}`` with any
-    ``data.val_images_dir`` removed; ``auto_train_val`` clears the previous binding's own stamps
-    on its way to a fresh one.
+    carries ``data.split`` replaced wholesale by ``{"selection_dir": chosen}``;
+    ``auto_train_val`` clears the previous binding's own stamps on its way to a fresh one.
 
     The launch is wrapped in ``declare_launcher("gui")``, so the run's status record stamps
     ``launched_by: {"launcher": "gui"}``: the fact this route started it, true of whatever client

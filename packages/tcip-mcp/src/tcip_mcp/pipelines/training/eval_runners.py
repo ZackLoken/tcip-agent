@@ -151,7 +151,7 @@ def run_full_frame_evaluation(
     tile_size: int | None = None, overlap: float | None = None,
     global_nms_iou: float | None = None,
     max_dets: int | None = None, postprocess: str = "nms", device: str | None = None,
-    trait: str | None = None, date: str | None = None,
+    trait: str | None = None,
 ) -> dict:
     """Delivery-grade detection eval: tiled inference reconstructed to full frame,
     matched to full-frame GT.
@@ -181,10 +181,13 @@ def run_full_frame_evaluation(
     legitimate fact, not a missing derivation; only ``tile_size``'s absence changes the object
     count's scale.
 
-    ``date`` is the capture date the GT's confirmed negatives were recorded under, the key the
-    same negative rail reads them by. It is stated by the caller, never taken from ``labels_dir``:
-    a key a writer stated and a date a path spells are different facts, and a delivery-grade number
-    scored against a set that silently lost its human-confirmed empties is a wrong number.
+    The measured set is the detection loader a run over ``images_dir``/``labels_dir`` would
+    build, over the platform's own admission: the capture date whose confirmed negatives count is
+    the one that admission reads, the targets scored are the ones that run trains on, read under
+    its own class map, and a document carrying the subject only in geometry a detector cannot
+    read refuses by name in the loader's words rather than scoring as an empty frame. There is no
+    unlabelled regime here: a measurement is against a reference, so ground truth the admission
+    refuses refuses the measurement.
 
     This is a box metric (``iou_type="bbox"``): it requests boxes-only tiled inference
     (``predict_tiled(require_masks=False)``), so an instance_seg checkpoint is gated here on its
@@ -197,7 +200,6 @@ def run_full_frame_evaluation(
     this evaluation's identity tuple; ``extra["operating_point"]`` is their provenance, the same
     mapping vocabulary a prediction bucket's sidecar carries, composed from the same locals.
     """
-    from tcip_mcp.pipelines.data.label_queries import json_det_targets, resolve_registry_id_map
     from tcip_mcp.pipelines.inference.predictor import (
         build_predictor, explicit_edge_provenance, resolve_tile_regime,
     )
@@ -252,53 +254,36 @@ def run_full_frame_evaluation(
         )
     tile_size, overlap = tile_param.value, resolved_overlap
 
-    img_dir, lbl_dir = Path(images_dir), Path(labels_dir)
-    # GT category ids come from the run's single assign_class_ids map (json_det_targets), so
-    # delivery-grade GT never diverges from training; not caught here, so its own ValueError propagates.
-    _gt_id_map = None
-    if subject:
-        _reg, _gt_id_map = resolve_registry_id_map(lbl_dir, subject, attribute)
-    # Same negative rail training uses: an image with no label record has no GT, so scoring it
-    # would turn every correct detection into a false positive and drag down this delivery number.
-    from tcip_mcp.pipelines.data.label_queries import image_name_map, trainable_stems
+    # The loader a run over this same ground truth builds, over the samples the producer admits.
+    from tcip_mcp.pipelines.data.datasets import DetectionDataset, build_dataset
+    from tcip_mcp.pipelines.data.label_queries import admit, require_admitted
 
-    names = image_name_map(img_dir)
     contradicted_negatives: set[str] = set()
-    if lbl_dir.is_dir():
-        keep, sample_counts = trainable_stems(
-            lbl_dir, img_dir, subject=subject, date=date, contradicted_out=contradicted_negatives)
-        paths = [img_dir / names[s] for s in keep if s in names]
-    else:
-        # No label store, so no rail to apply and no ground truth either; reuses names (already
-        # the shared bucket enumeration) rather than a second, raw directory walk.
-        sample_counts = {}
-        paths = sorted(img_dir / filename for filename in names.values())
+    admitted = admit(images_dir, labels_dir, subject=subject, attribute=attribute,
+                     contradicted_out=contradicted_negatives)
+    require_admitted(admitted)
+    measured = build_dataset(
+        "detection", scope=admitted.scope, samples=admitted.every_sample())
+    assert isinstance(measured, DetectionDataset), "a detection build over samples is one of these"
+    sample_counts = admitted.counts
+    # The admission held out every image carrying an instance unlabeled for `attribute`, so this
+    # is that one partition's count, never a second exclusion pass over the same documents.
+    n_excluded_incomplete = sample_counts.get("skipped_incomplete_attribute", 0)
     per_image: list[dict] = []
-    n_excluded_incomplete = 0
-    for p in paths:
-        gt = []
-        gt_file = lbl_dir / f"{p.stem}.json"
-        if gt_file.is_file() and _gt_id_map is not None:
-            # Same loader-side reader + id map the training targets use (1-indexed to match the
-            # predictor's torchvision labels), so this delivery-grade GT can't diverge from training.
-            gboxes, glabels, n_unlabeled = json_det_targets(str(gt_file), subject, attribute, _gt_id_map)
-            # An instance unlabeled for `attribute` gives this image incomplete GT for this scope;
-            # excluded from delivery-grade scoring entirely, never scored against its labeled subset.
-            if n_unlabeled:
-                n_excluded_incomplete += 1
-                continue
-            for (x1, y1, x2, y2), lab in zip(gboxes, glabels):
-                gt.append({"category_id": int(lab),
-                           "bbox": xywh(x1, y1, x2, y2), "iscrowd": 0})
+    for key in measured.stems:
+        gboxes, glabels = measured.det_targets(key)
+        gt = [{"category_id": int(lab), "bbox": xywh(x1, y1, x2, y2), "iscrowd": 0}
+              for (x1, y1, x2, y2), lab in zip(gboxes, glabels)]
         # require_masks=False: this gate matches boxes to full-frame GT and never reads masks, so
         # a tile-trained instance_seg checkpoint evaluates exactly as a detector does here.
-        r = predictor.predict_tiled(str(p), tile_size=tile_size, overlap=overlap,
-                                    global_nms_iou=global_nms_iou, postprocess=postprocess,
+        r = predictor.predict_tiled(measured.sample_sources[key], tile_size=tile_size,
+                                    overlap=overlap, global_nms_iou=global_nms_iou,
+                                    postprocess=postprocess,
                                     require_masks=False, tile_resize=tile_resize)
         w, h = int(r["width"]), int(r["height"])
         dt = [{"category_id": int(lab), "bbox": xywh(*b), "score": float(s)}
               for b, s, lab in zip(r["boxes"], r["scores"], r["labels"])]
-        rec = build_coco_image_record(w, h, gt, dt, image_id=p.stem)
+        rec = build_coco_image_record(w, h, gt, dt, image_id=measured.member_stem_of(key))
         # cap_hit is read off the result, with the direct computation as the fallback for a
         # predictor that does not stamp it.
         rec["cap_hit"] = r.get("cap_hit", len(dt) >= max_dets)
