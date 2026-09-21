@@ -37,7 +37,9 @@ from tcip_annotation.json_io import (
     read_annotations,
     write_annotations,
 )
-from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
+from tcip_annotation.state import (
+    Annotation, BBox, Polygon, bbox_of, box_derivable, polygonal,
+)
 
 AnnotFormat = Literal["coco", "json"]
 
@@ -120,7 +122,7 @@ def detect_json_format(path: Path) -> AnnotFormat | None:
     missing candidate is not evidence of a broken document, only an absent one, and stays
     ``detect_format``'s own "cannot determine" refusal rather than an unreadable-document one.
     Public: a caller with a single file already in hand and no directory to search (this
-    module's own ``load_annotations`` claim check, ``label_queries.dir_label_format``) reaches
+    module's own ``load_annotations`` claim check, ``label_queries.ground_truth_shape``) reaches
     this single-file classification directly rather than through ``detect_format``'s own
     directory-or-raise contract, which does not fit either caller's shape.
 
@@ -331,7 +333,7 @@ def write_coco(
     for img_id, (file_name, (anns, img_w, img_h)) in enumerate(images_annotations.items(), start=1):
         coco["images"].append({"id": img_id, "file_name": file_name, "width": img_w, "height": img_h})
         for a in anns:
-            if a.geometry is None or isinstance(a.geometry, Point) or a.subject not in id_map:
+            if not box_derivable(a.geometry) or a.subject not in id_map:
                 continue
             if not geometry_extent_ok(a.geometry):
                 # The same drop the per-image export applies: a geometry the stored 2-decimal
@@ -344,7 +346,7 @@ def write_coco(
                 "bbox": [round(box.x1, 2), round(box.y1, 2), round(bw, 2), round(bh, 2)],
                 "area": round(bw * bh, 2),
             }
-            if isinstance(a.geometry, Polygon):
+            if polygonal(a.geometry):
                 rec["segmentation"] = [[round(float(c), 2) for xy in ring for c in xy]
                                        for ring in a.geometry.rings if len(ring) >= 3]
             if a.attributes:

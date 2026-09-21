@@ -18,7 +18,9 @@ from dataclasses import replace
 from typing import Optional
 
 from tcip_annotation.json_io import write_annotations
-from tcip_annotation.state import Annotation, AnnotationState, BBox, Point, Polygon
+from tcip_annotation.state import (
+    Annotation, AnnotationState, BBox, Point, Polygon, polygonal,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +80,7 @@ class AnnotationEngine:
                 # spatial-index entry (bbox_of refuses one because a *training/delivery* box must
                 # never be fabricated, a different concern from finding the shape under a cursor).
                 s._poly_bboxes.append((geom.x, geom.y, geom.x, geom.y))
-            elif isinstance(geom, Polygon) and geom.rings:
+            elif polygonal(geom) and geom.rings:
                 xs = [p[0] for ring in geom.rings for p in ring]
                 ys = [p[1] for ring in geom.rings for p in ring]
                 s._poly_bboxes.append((min(xs), min(ys), max(xs), max(ys)))

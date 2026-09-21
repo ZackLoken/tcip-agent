@@ -160,21 +160,36 @@ def test_json_det_targets_yields_no_box_for_a_point(tmp_path: Path) -> None:
     assert n_unlabeled == 0  # a point is not an unlabeled instance either: it is not an instance
 
 
-def test_a_point_only_image_is_not_a_trainable_sample(tmp_path: Path) -> None:
-    """``_label_record_state``'s ``has_objects`` is target membership, not mere annotatedness: a
-    point-only image kept on the direct-json path would train as a zero-object negative no human
-    confirmed: the exact fabrication the function's docstring exists to prevent."""
+def test_a_point_only_document_carries_the_subject_and_the_detection_loader_refuses_it(
+    tmp_path: Path,
+) -> None:
+    """Admission asks whether the document carries the subject at all, so a point-only document
+    does: it is real ground truth, not an empty image. Which geometries answer for a measurement
+    is the selected loader's own fact, so the detection loader refuses that sample by name rather
+    than training it as a zero-object negative no human confirmed."""
     from tcip_mcp.pipelines.data.label_queries import _label_record_state
 
-    labels = tmp_path / "annotations"
+    from tests._producer_fixtures import dataset_over
+
+    images, labels = tmp_path / "images", tmp_path / "annotations"
+    images.mkdir()
     labels.mkdir()
+    for stem in ("IMG_0001", "IMG_0002"):
+        Image.new("RGB", (100, 80)).save(images / f"{stem}.png")
     json_io.write_annotations(labels / "IMG_0001.json",
                               [Annotation(subject="bud", geometry=Point(20.0, 20.0))], 100, 80)
     json_io.write_annotations(labels / "IMG_0002.json",
                               [Annotation(subject="bud", geometry=BOX)], 100, 80)
 
-    assert _label_record_state(labels / "IMG_0001.json", "bud") == (True, False)
+    assert _label_record_state(labels / "IMG_0001.json", "bud") == (True, True)
     assert _label_record_state(labels / "IMG_0002.json", "bud") == (True, True)
+
+    with pytest.raises(ValueError, match="only in geometries a detection loader does not read"):
+        dataset_over("detection", images, labels, subject="bud")
+
+    # Admits valid work: the document carrying a box still trains.
+    ds = dataset_over("detection", images, labels, subject="bud", members=["IMG_0002"])
+    assert [Path(s).stem for s in ds.stems] == ["IMG_0002"]
 
 
 # ── IoU matching ─────────────────────────────────────────────────────────────

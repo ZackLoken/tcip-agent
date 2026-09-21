@@ -799,9 +799,8 @@ def test_to_coco_dataset_excludes_the_whole_image_when_any_instance_is_unlabeled
     assert [i["file_name"] for i in coco["images"]] == ["IMG_B.JPG"]
     assert len(coco["annotations"]) == 1
     assert coco["annotations"][0]["category_id"] == 0  # "open", from IMG_B only
-    # Names, not just a count: the downstream partition (trainable_stems) needs to know which
-    # images left, or it attributes their absence to whichever category it resembles and reports
-    # a false reason.
+    # Names, not just a count: the downstream partition needs to know which images left, or it
+    # attributes their absence to whichever category it resembles and reports a false reason.
     assert coco["excluded_incomplete_attribute"] == ["IMG_A.JPG"]
 
     undecodable_path = tmp_path / "IMG_C.json"
