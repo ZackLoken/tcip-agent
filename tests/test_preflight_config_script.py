@@ -16,7 +16,8 @@ from pathlib import Path
 
 def _fixture_config(tmp_path: Path) -> Path:
     """A structurally valid config: a real, importable builder (never called, since no --smoke
-    is passed here) and real, empty images/labels directories."""
+    is passed here), real, empty images/labels directories, and the subject the admission over a
+    per-image label tree is scoped by."""
     imgs = tmp_path / "images"
     lbls = tmp_path / "labels"
     imgs.mkdir()
@@ -24,7 +25,7 @@ def _fixture_config(tmp_path: Path) -> Path:
     config = {
         "model_source": {"builder": "tcip_mcp.pipelines.model_build:build_model",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
     }
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(config), encoding="utf-8")

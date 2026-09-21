@@ -103,9 +103,10 @@ The selection states its own subject and attribute and the scope is read from it
 restated, and `selection_dir` conflicts with an explicit `group_by`/`group_key_map`, whose
 default becomes `None` for this reason (resolved to `tile_prefix` when neither was given): the
 group keys the selection recorded on its own samples govern the locked draw.
-`redraw_calibration_holdout` additionally requires `labels_dir`, `subject` and `images_dir`
-alongside `selection_dir`: it refuses by name without one, since a labels-only universe can
-include a stem whose image is gone.
+`redraw_calibration_holdout` additionally requires `labels_dir` and `images_dir` alongside
+`selection_dir`: it refuses by name without one, since a labels-only universe can include a stem
+whose image is gone. It reads the scope off the selection, so a selection over masks or rows,
+which no subject scopes, redraws without one.
 
 A calibration under a named selection also earns a `selection_disjointness` check: whether the
 cal/holdout stems it drew also sit on the checkpoint being calibrated's own selection (`val`)

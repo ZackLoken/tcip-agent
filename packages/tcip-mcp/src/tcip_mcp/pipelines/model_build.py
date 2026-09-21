@@ -24,7 +24,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.selection import ClassScope
 
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, store
 from tcip_store.file_backend import RootedFileLocator
@@ -159,7 +162,7 @@ def declared_in_chans(model_source: dict | None) -> int | None:
     """The channel count ``model_source`` declares: its own ``in_chans``, falling back to
     ``builder_kwargs.in_chans``. ``None`` when neither declares it (the caller's own default,
     never baked in here), so every reader of this fact (``resolve_contract_dims`` in this module,
-    ``generic_trainer._expected_in_chans``, ``GenericPredictor.__init__`` and
+    ``generic_trainer._validate_input_channels``, ``GenericPredictor.__init__`` and
     ``training_tools.preflight_config``'s channel firewall) agrees on where it lives.
     """
     if not isinstance(model_source, dict):
@@ -201,19 +204,22 @@ def build_model(config_or_ckpt: dict) -> Any:
     raise ValueError("Config has no 'model_source'.")
 
 
-def resolve_contract_dims(config: dict, task: str) -> dict:
+def resolve_contract_dims(config: dict, task: str, *, scope: "ClassScope") -> dict:
     """Resolve the ``(in_chans, num_classes, img_size)`` the smoke contract must forward at.
 
     Read from the same config the builder reads, never the contract's tiny 64px default: a model
     with a minimum-spatial-size assumption must be smoked at the size it will actually see, or a
     valid model false-fails. ``img_size`` is the tile edge when detection tiling is on (the real
     training input), else a safe non-tiny fallback that clears typical stride-32 backbones.
-    ``in_chans`` comes from ``model_source`` / ``builder_kwargs``. ``num_classes`` is reconciled with
-    the dataset's ``subjects.json``: a detection/instance_seg scope resolves it through the same
-    ``assign_class_ids`` map the loader uses (so the smoke forwards at the count that will actually
-    train), and fails open to the head's ``builder_kwargs`` count when no registry/subject is in
-    scope (a bespoke ``dataset_source`` or a registry-less build). The +1 background offset lives
-    only in the loader, never here.
+    ``in_chans`` comes from ``model_source`` / ``builder_kwargs``.
+
+    ``scope`` is the class space this run's own samples were admitted under, handed over by the
+    caller that holds it: the producer's own for a preflight, and the run config's recorded one
+    for a run already bound (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.recorded_in`).
+    Its map is the count the run will actually train at, so the smoke forwards at that count
+    rather than at a second reading of the registry. Ground truth carrying its own classes scopes
+    no map, and so does a bespoke build with no subject; both fall to the head's own
+    ``builder_kwargs`` count. The +1 background offset lives only in the loader, never here.
     """
     ms = config.get(MODEL_SOURCE_KEY) or {}
     bk = ms.get("builder_kwargs") if isinstance(ms, dict) else None
@@ -227,20 +233,7 @@ def resolve_contract_dims(config: dict, task: str) -> dict:
 
     in_chans = declared_in_chans(ms) if isinstance(ms, dict) else None
     in_chans = in_chans if in_chans is not None else 3
-    num_classes = _int(bk.get("num_classes"), 1)
-
-    data = config.get("data") or {}
-    # Precondition check, not a broad except: a config with no subject in scope (a bespoke
-    # dataset_source, or a registry-less build) legitimately fails open to the head's declared
-    # count below, that is the one real "no registry in scope" case. A subject that is given but
-    # whose read fails for a real reason (corrupted subjects.json, an attribute needing a registry
-    # that isn't there) must not be silently swallowed into the same fallback.
-    if task in ("detection", "instance_seg") and data.get("subject"):
-        from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map
-
-        _reg, id_map = resolve_registry_id_map(
-            data.get("labels_dir", ""), data.get("subject"), data.get("attribute"))
-        num_classes = len(id_map)
+    num_classes = len(scope.id_map) if scope.id_map else _int(bk.get("num_classes"), 1)
 
     img_size = 224  # safe non-tiny default (7x7 at stride 32); overridden by the real tile edge below
     tiling = (config.get("data") or {}).get("tiling")

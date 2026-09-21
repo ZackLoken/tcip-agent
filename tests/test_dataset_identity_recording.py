@@ -15,6 +15,7 @@ import pytest
 import tcip_store as ts
 import tcip_mcp.experiments as exp
 from tcip_mcp.experiments import compare_experiments, create_experiment, update_lineage
+from tcip_mcp.pipelines.data.split_construction import recorded_side
 
 
 @pytest.fixture
@@ -23,7 +24,11 @@ def exp_dir(tmp_path, monkeypatch):
     return tmp_path / "experiments"
 
 
-def _make_dataset(root: Path) -> None:
+SUBJECT = "bud"
+
+
+def _make_dataset(root: Path) -> tuple[Path, Path]:
+    """One labelled image under one capture date; answers ``(images_dir, labels_dir)``."""
     from PIL import Image
 
     from tcip_annotation import json_io
@@ -31,13 +36,15 @@ def _make_dataset(root: Path) -> None:
     from tcip_mcp import subject_registry
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
 
-    (root / "images" / "2-11-26").mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (32, 32)).save(root / "images" / "2-11-26" / "img_000.jpg")
-    (root / "annotations" / "2-11-26").mkdir(parents=True, exist_ok=True)
-    json_io.write_annotations(str(root / "annotations" / "2-11-26" / "img_000.json"),
-                              [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
+    images_dir, labels_dir = root / "images" / "2-11-26", root / "annotations" / "2-11-26"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (32, 32)).save(images_dir / "img_000.jpg")
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    json_io.write_annotations(str(labels_dir / "img_000.json"),
+                              [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 9, 9))], 32, 32)
     subject_registry.write_registry(root / "subjects.json",
-                                  SubjectRegistry(subjects=(Subject(name="bud"),)))
+                                  SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    return images_dir, labels_dir
 
 
 def test_create_experiment_records_identity_in_lineage(exp_dir):
@@ -127,16 +134,24 @@ def test_dataset_identity_fingerprint_io_error_degrades_to_none(tmp_path, monkey
     assert ds_id is None  # no dataset.json registered in this fixture
 
 
-def test_persist_run_partition_records_identity(exp_dir):
-    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
+def test_persist_run_partition_records_identity(tmp_path, exp_dir):
+    """The dataset identity rides beside the membership the producer named, in one record.
 
-    create_experiment("e1", {})
+    The membership comes from ``auto_train_val``'s own partition, the only thing this writer
+    records members from: it reads no loader, so a run's members are what a producer admitted.
+    """
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
 
-    class _DS:
-        stems = ["a", "b"]
+    images_dir, labels_dir = _make_dataset(tmp_path)
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                "subject": SUBJECT}
+    create_experiment("e1", {"data": data_cfg})
+    _train_ds, _val_ds, partition = auto_train_val("detection", data_cfg, None)
 
-    persist_run_partition("e1", _DS(), None, {"labels_dir": ""},
-                            dataset_id="x", dataset_fingerprint="yz")
+    persist_run_partition("e1", data_cfg, dataset_id="x", dataset_fingerprint="yz",
+                          partition=partition)
     split = ts.read(exp.split_key("e1"))
     assert split["dataset_id"] == "x" and split["dataset_fingerprint"] == "yz"
-    assert split["train"] == ["a", "b"]  # membership still recorded beside the identity
+    assert split["members"] == partition  # membership beside the identity
+    assert recorded_side(split["members"], "train"), (
+        "the fixture admits samples, so the record names them")

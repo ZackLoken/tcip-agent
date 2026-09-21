@@ -170,7 +170,7 @@ def test_load_canopy_segments_refuses_a_geometry_less_annotation(tmp_path: Path)
         Annotation(subject="canopy", geometry=None, created_by="user:breeder"),
     ])
 
-    with pytest.raises(CanopySegmentRefusal, match="no geometry"):
+    with pytest.raises(CanopySegmentRefusal, match="image-level label, which names no region"):
         load_canopy_segments(
             data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
 

@@ -18,6 +18,7 @@ from tcip_mcp.experiments import artifacts_key, env_key, lineage_key  # noqa: E4
 from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope  # noqa: E402
 from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
 def _audit_events(root, tool="training_run"):
@@ -209,7 +210,6 @@ def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
     import csv
     from PIL import Image
     from torch.utils.data import DataLoader
-    from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import create_run as gt_create_run
@@ -228,7 +228,7 @@ def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
         w.writerows(rows)
 
     def build_loader():
-        ds = build_dataset("classification", images_dir=str(images_dir), csv_path=str(csv_path), num_classes=2)
+        ds = dataset_over("classification", str(images_dir), str(csv_path), num_classes=2)
         return DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
 
     cfg = {

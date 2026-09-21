@@ -140,18 +140,14 @@ def test_registry_lists_only_entries_this_experiment_produced(tmp_path, monkeypa
 
 def test_split_reports_a_bound_selection_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    from types import SimpleNamespace
-
     from tcip_mcp.experiments import compare_experiments, create_experiment
     from tcip_mcp.pipelines.data.split_construction import persist_run_partition
 
     create_experiment("exp-bound-split", {"model_source": {"builder": "m:f"}})
-    train_ds = SimpleNamespace(stems=["a", "b"])
-    val_ds = SimpleNamespace(stems=["c"])
     data_cfg = {"split": {
         "selection_binding": {"selection_dir": "splits/2024-01-01"}, "resolved_seed": 7,
     }}
-    persist_run_partition("exp-bound-split", train_ds, val_ds, data_cfg)
+    persist_run_partition("exp-bound-split", data_cfg)
 
     c = compare_experiments(["exp-bound-split"])["experiments"][0]
     assert c["split"] == {
@@ -164,21 +160,16 @@ def test_split_reports_a_redrawn_bound_selection_distinctly(tmp_path, monkeypatc
     """A run bound to a manifest and one that redrew inside that same manifest at the same seed
     must never compare as the same data."""
     monkeypatch.chdir(tmp_path)
-    from types import SimpleNamespace
-
     from tcip_mcp.experiments import compare_experiments, create_experiment
     from tcip_mcp.pipelines.data.split_construction import persist_run_partition
 
-    train_ds = SimpleNamespace(stems=["a", "b"])
-    val_ds = SimpleNamespace(stems=["c"])
-
     create_experiment("exp-bound-plain", {"model_source": {"builder": "m:f"}})
-    persist_run_partition("exp-bound-plain", train_ds, val_ds, {"split": {
+    persist_run_partition("exp-bound-plain", {"split": {
         "selection_binding": {"selection_dir": "splits/2024-01-01"}, "resolved_seed": 7,
     }})
 
     create_experiment("exp-bound-redrawn", {"model_source": {"builder": "m:f"}})
-    persist_run_partition("exp-bound-redrawn", train_ds, val_ds, {"split": {
+    persist_run_partition("exp-bound-redrawn", {"split": {
         "selection_binding": {
             "selection_dir": "splits/2024-01-01",
             "redraw": {
@@ -197,15 +188,11 @@ def test_split_reports_a_redrawn_bound_selection_distinctly(tmp_path, monkeypatc
 
 def test_split_reports_a_drawn_seed_with_no_binding(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    from types import SimpleNamespace
-
     from tcip_mcp.experiments import compare_experiments, create_experiment
     from tcip_mcp.pipelines.data.split_construction import persist_run_partition
 
     create_experiment("exp-drawn-split", {"model_source": {"builder": "m:f"}})
-    train_ds = SimpleNamespace(stems=["a", "b"])
-    val_ds = SimpleNamespace(stems=["c"])
-    persist_run_partition("exp-drawn-split", train_ds, val_ds, {"split": {"seed": 99}})
+    persist_run_partition("exp-drawn-split", {"split": {"seed": 99}})
 
     c = compare_experiments(["exp-drawn-split"])["experiments"][0]
     assert c["split"] == {"case": "drawn", "seed": 99}

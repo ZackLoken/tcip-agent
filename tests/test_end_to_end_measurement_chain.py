@@ -134,7 +134,7 @@ def _train_on(selection_dir: Path, out_dir: Path, project_root: Path, experiment
     train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
 
     create_experiment(experiment_id, config)
-    persist_run_partition(experiment_id, train_ds, val_ds, data_cfg, partition=partition)
+    persist_run_partition(experiment_id, data_cfg, partition=partition)
 
     collate = task_collate("detection")
     loader = DataLoader(train_ds, batch_size=2, collate_fn=collate)

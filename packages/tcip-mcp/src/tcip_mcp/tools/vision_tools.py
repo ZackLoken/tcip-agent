@@ -14,7 +14,8 @@ from typing import TYPE_CHECKING, Callable, NamedTuple
 
 import tcip_store as ts
 
-from tcip_annotation import Annotation, Point, Polygon, bbox_of, load_annotations_any
+from tcip_annotation import Annotation, Point, bbox_of, load_annotations_any
+from tcip_annotation.state import box_derivable, polygonal
 from tcip_annotation.json_io import UnreadableLabelDocument
 from tcip_annotation.json_io import read_annotations as read_labels
 from tcip_annotation.sam_wrapper import column_label
@@ -179,7 +180,7 @@ def _boxable(anns: list[Annotation]) -> list[Annotation]:
     so it is skipped by the *draw* call the way a geometry-less label already is. Callers report how
     many they skipped (``_n_points``) rather than quietly shrinking the annotation count they show.
     """
-    return [a for a in anns if a.geometry is not None and not isinstance(a.geometry, Point)]
+    return [a for a in anns if box_derivable(a.geometry)]
 
 
 def _n_points(anns: list[Annotation]) -> int:
@@ -205,7 +206,7 @@ def _legend_name(a: Annotation, *, scope) -> str:
 
 def _box_dict(a: Annotation, index: Callable[[str], int], *, scope=None) -> dict:
     geometry = a.geometry
-    assert not isinstance(geometry, Point) and geometry is not None, \
+    assert box_derivable(geometry), \
         "every caller passes a _boxable-filtered or box-rendered annotation"
     b = bbox_of(geometry)
     d = {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2,
@@ -217,7 +218,7 @@ def _box_dict(a: Annotation, index: Callable[[str], int], *, scope=None) -> dict
 
 def _poly_dict(a: Annotation, index: Callable[[str], int], *, scope=None) -> dict:
     geometry = a.geometry
-    assert isinstance(geometry, Polygon), "called only for the segmentation task's own shapes"
+    assert polygonal(geometry), "called only for the segmentation task's own shapes"
     return {"rings": [[[p[0], p[1]] for p in ring] for ring in geometry.rings],
             "class_id": index(_legend_name(a, scope=scope))}
 
@@ -325,7 +326,7 @@ def _viz_annotations(
             summary += ": " + ", ".join(f"{v} {k}" for k, v in counts.most_common())
         summary += _point_note(n_points)
     else:
-        shapes = [a for a in anns if isinstance(a.geometry, Polygon)]
+        shapes = [a for a in anns if polygonal(a.geometry)]
         out = render_segmentations(read.pixels, [_poly_dict(a, index) for a in shapes],
                                    native_size=read.native_size, class_names=_name_map(idx))
         summary = f"Rendered {len(shapes)} segmentation masks on {img.name}" + _point_note(n_points)
@@ -384,7 +385,7 @@ def _viz_predictions(
             native_size=read.native_size, class_names=_name_map(idx))
         summary = f"Rendered {len(shapes)} predictions on {img.name}" + _point_note(n_points)
     else:
-        shapes = [a for a in preds if isinstance(a.geometry, Polygon)]
+        shapes = [a for a in preds if polygonal(a.geometry)]
         out = render_segmentations(
             read.pixels, [_poly_dict(a, index, scope=scope) for a in shapes],
             native_size=read.native_size, class_names=_name_map(idx))
@@ -499,13 +500,13 @@ def get_worst_predictions(
         return {"error": f"Labels directory not found: {labels_dir}"}
 
     from tcip_annotation.json_io import prediction_documents, read_annotations
-    from tcip_annotation.state import Point
+    from tcip_annotation.state import box_derivable
 
     def _boxes(path) -> list:
         """The annotations this count heuristic counts, a geometry-less label and a ``Point`` are
         not detections, so neither belongs in a box count on either side of the comparison."""
         return [a for a in read_annotations(str(path))
-                if a.geometry is not None and not isinstance(a.geometry, Point)]
+                if box_derivable(a.geometry)]
 
     scores: list[tuple[str, float]] = []
     for pred_file in prediction_documents(pred_path):
@@ -700,7 +701,7 @@ def _viz_dataset_sample(
                 out = render_detections(read.pixels, [_box_dict(a, index) for a in shapes],
                                         native_size=read.native_size, class_names=_name_map(idx))
             else:
-                shapes = [a for a in anns if isinstance(a.geometry, Polygon)]
+                shapes = [a for a in anns if polygonal(a.geometry)]
                 out = render_segmentations(read.pixels, [_poly_dict(a, index) for a in shapes],
                                            native_size=read.native_size,
                                            class_names=_name_map(idx))

@@ -911,13 +911,13 @@ def records_from_annotation(gt, preds, *, width: int, height: int, force_segm: b
     ``name_id`` entry: neither has a box to score, and emitting one would put a fabricated extent into
     a delivery-grade AP, as GT nothing can match, or as a detection matching nothing.
     """
-    from tcip_annotation.state import Point, Polygon, bbox_of
+    from tcip_annotation.state import bbox_of, box_derivable, polygonal
 
     def _scorable(a) -> bool:
-        return a.geometry is not None and not isinstance(a.geometry, Point)
+        return box_derivable(a.geometry)
 
     def _has_poly(anns):
-        return any(isinstance(a.geometry, Polygon) for a in anns)
+        return any(polygonal(a.geometry) for a in anns)
 
     use_segm = force_segm or _has_poly(gt) or _has_poly(preds)
     iou_type = "segm" if use_segm else "bbox"
@@ -943,7 +943,7 @@ def records_from_annotation(gt, preds, *, width: int, height: int, force_segm: b
         else:
             rec["area"] = float((box.x2 - box.x1) * (box.y2 - box.y1))
             rec["iscrowd"] = 0
-        if isinstance(a.geometry, Polygon):
+        if polygonal(a.geometry):
             rec["segmentation"] = [_poly_flat(ring) for ring in a.geometry.rings if len(ring) >= 3]
         elif use_segm:
             rec["segmentation"] = _box_seg(box.x1, box.y1, box.x2, box.y2)
@@ -1003,8 +1003,12 @@ def quadratic_weighted_kappa(
     floor. ``None`` when undefined: no items, or expected disagreement is zero (every populated
     true/predicted pair shares one rank, degenerate).
 
-    ``num_ranks`` derives from the data (``max(pred, gt) + 1``) when not given; pass it explicitly
-    when the caller knows the head's true rank count and the batch may not cover every rank.
+    ``num_ranks`` is the run's own rank count, and every caller that holds one passes it: a scale
+    derived from the scored set instead reads a half that never reaches the top rank as a narrower
+    scale than the model predicts on. It falls back to ``max(pred, gt) + 1`` for the one caller
+    that holds no count, the ordinal calibration gate's criterion toolkit
+    (:data:`~tcip_mcp.pipelines.operating_point.ORDINAL_CRITERIA`), whose items are scored rows
+    carrying no head and no run.
     """
     pred = pred_ranks.detach().cpu().round().long()
     gt = gt_ranks.detach().cpu().round().long()
@@ -1075,7 +1079,9 @@ def concordance_correlation_coefficient(pred_values: torch.Tensor, gt_values: to
     return (2.0 * covariance) / (pred_var + gt_var + (pred_mean.item() - gt_mean.item()) ** 2)
 
 
-def ordinal_metrics(pred_ranks: torch.Tensor, gt_ranks: torch.Tensor) -> dict:
+def ordinal_metrics(pred_ranks: torch.Tensor, gt_ranks: torch.Tensor, num_ranks: int) -> dict:
+    """Ordinal metrics over ``num_ranks``, the run's own rank count, which the scored half is
+    never asked for: it may not reach every rank."""
     pred = pred_ranks.detach().cpu().float()
     gt = gt_ranks.detach().cpu().float()
     if gt.numel() == 0:
@@ -1083,7 +1089,7 @@ def ordinal_metrics(pred_ranks: torch.Tensor, gt_ranks: torch.Tensor) -> dict:
     return {
         "mae": (pred - gt).abs().mean().item(),
         "rank_acc": (pred.round() == gt.round()).float().mean().item(),
-        "quadratic_weighted_kappa": quadratic_weighted_kappa(pred_ranks, gt_ranks),
+        "quadratic_weighted_kappa": quadratic_weighted_kappa(pred_ranks, gt_ranks, num_ranks),
     }
 
 
@@ -1177,6 +1183,11 @@ def evaluate(
     center-match at half the class-average size) governs the reported detection count and the f1 the
     selection composite optimizes; map50 stays a labeled comparability metric. Absent -> the
     IoU@``iou_threshold`` convention governs.
+
+    A class or rank count is read off the head the predictions come out of, which was sized from
+    the run's own ground truth, never off the half being scored: a validation half that reaches
+    only some of the classes would otherwise be scored in a narrower vocabulary than the run
+    trained in, and the two halves of one run in two.
     """
     is_detection = task in ("detection", "instance_seg")
     is_instance_seg = task == "instance_seg"
@@ -1292,16 +1303,15 @@ def evaluate(
             _rounded(compute_composite_objective(loss, governing_f1, m["map50"], score_weights)),
         ))
     elif task == "classification" and cls_p:
-        num_classes = getattr(model.heads[0], "num_classes", int(torch.cat(cls_g).max()) + 1)
-        result.update(_reported_metrics(
-            classification_metrics(torch.cat(cls_p), torch.cat(cls_g), num_classes)))
+        result.update(_reported_metrics(classification_metrics(
+            torch.cat(cls_p), torch.cat(cls_g), model.heads[0].num_classes)))
     elif task == "ordinal" and ord_p:
-        result.update(_reported_metrics(ordinal_metrics(torch.cat(ord_p), torch.cat(ord_g))))
+        result.update(_reported_metrics(ordinal_metrics(
+            torch.cat(ord_p), torch.cat(ord_g), model.heads[0].num_ranks)))
     elif task == "regression" and reg_p:
         result.update(_reported_metrics(regression_metrics(torch.cat(reg_p), torch.cat(reg_g))))
     elif task == "semantic_seg" and seg_p:
-        pred, gt = torch.cat(seg_p), torch.cat(seg_g)
-        num_classes = getattr(model.heads[0], "num_classes", int(gt.max()) + 1)
-        result.update(_reported_metrics(semantic_seg_metrics(pred, gt, num_classes)))
+        result.update(_reported_metrics(semantic_seg_metrics(
+            torch.cat(seg_p), torch.cat(seg_g), model.heads[0].num_classes)))
 
     return result

@@ -113,7 +113,7 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
     assert val_ds is not None
 
     create_experiment("exp_four_way", {})
-    persist_run_partition("exp_four_way", train_ds, val_ds, data_cfg)
+    persist_run_partition("exp_four_way", data_cfg)
     spatial = ts.read(split_key("exp_four_way"))["spatial"]
     cal_region = spatial["calibration_region"]
     assert cal_region, "the writer produced no calibration region to read back"
@@ -157,7 +157,7 @@ def test_persisted_split_record_spatial_block_carries_no_seed_while_top_level_se
     assert val_ds is not None
 
     create_experiment("exp_spatial_no_seed", {})
-    persist_run_partition("exp_spatial_no_seed", train_ds, val_ds, data_cfg)
+    persist_run_partition("exp_spatial_no_seed", data_cfg)
     record = ts.read(split_key("exp_spatial_no_seed"))
 
     assert record["seed"] == 7

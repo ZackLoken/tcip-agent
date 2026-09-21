@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import tifffile
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
 def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
@@ -66,50 +67,57 @@ def grouped_dataset(tmp_path: Path) -> Path:
 # ── datasets.py ─────────────────────────────────────────────────────────────────────────
 
 
-def test_image_name_map_uses_manifest_filename_for_a_group(grouped_dataset):
-    from tcip_mcp.pipelines.data.label_queries import image_name_map
+def test_a_group_is_named_by_its_manifest_wherever_a_name_is_read(grouped_dataset):
+    """The one naming primitive every by-name reader resolves a capture under: a grouped
+    capture answers with its own manifest filename, the file a name store holds it by, never
+    one of its sibling band files."""
     from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.pipelines.image_utils import list_logical_images, logical_image_name
 
-    names = image_name_map(image_dir(grouped_dataset, "2026-04-01"))
+    sources = list_logical_images(image_dir(grouped_dataset, "2026-04-01"))
+    names = {stem: logical_image_name(src) for stem, src in sources.items()}
     assert names["capture_001"] == "capture_001.bandgroup"
     assert names["plain_002"] == "plain_002.jpg"
 
 
 def test_detection_dataset_trains_on_a_grouped_capture(grouped_dataset):
+    """The grouped capture alone: this bucket also holds a plain RGB source, and one model reads
+    one band count, so a run over both refuses rather than reading either at the other's count."""
     torch = pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import image_dir, annotation_dir
-    from tcip_mcp.pipelines.data.datasets import DetectionDataset
 
-    ds = DetectionDataset(
-        images_dir=str(image_dir(grouped_dataset, "2026-04-01")),
-        labels_dir=str(annotation_dir(grouped_dataset, "2026-04-01")),
-        subject="bud",
-    )
-    ds.expected_channels = 2  # the group's own band count (probe_channels would derive this)
-    assert "capture_001" in ds.stems
-    idx = ds.stems.index("capture_001")
+    ds = dataset_over(
+        'detection', str(image_dir(grouped_dataset, "2026-04-01")),
+        str(annotation_dir(grouped_dataset, "2026-04-01")), subject="bud",
+        members=["capture_001"])
+    assert ds.expected_channels == 2  # derived from the group's own bands, not defaulted to RGB
+    assert "capture_001" in ds.record_stems
+    idx = ds.record_stems.index("capture_001")
     img, target = ds[idx]
     assert isinstance(img, torch.Tensor)
     assert img.shape[0] == 2  # Green + Red, stacked
     assert target["boxes"].shape[0] == 1
 
 
-def test_probe_num_channels_derives_2_for_the_grouped_sample(grouped_dataset):
-    from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.pipelines.data.datasets import _probe_num_channels
+def test_the_channel_probe_derives_2_for_the_grouped_sample(grouped_dataset):
+    from tcip_mcp.dataset_layout import annotation_dir, image_dir
+    from tcip_mcp.pipelines.data.datasets import _band_count
+    from tests._producer_fixtures import samples_over
 
-    n = _probe_num_channels(str(image_dir(grouped_dataset, "2026-04-01")), ["capture_001"])
-    assert n == 2
+    samples = samples_over(str(image_dir(grouped_dataset, "2026-04-01")),
+                           str(annotation_dir(grouped_dataset, "2026-04-01")), subject="bud",
+                           members=["capture_001"])
+    assert _band_count(samples) == 2
 
 
-def test_probe_num_channels_raises_on_a_stale_manifest_instead_of_silently_defaulting(tmp_path):
+def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaulting(tmp_path):
     """A broad ``except Exception: return default`` must not swallow ``BandGroupIncomplete``
     along with genuinely unexpected errors and silently default to 3 channels: a
-    confidently-wrong value on exactly the parameter 'derive, don't pin' exists to guard against.
-    No ``stems`` given, so the single-sample fallback (not the per-stem loop) is the path under
-    test."""
+    confidently-wrong value on exactly the parameter 'derive, don't pin' exists to guard
+    against."""
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, write_band_group_manifest
-    from tcip_mcp.pipelines.data.datasets import _probe_num_channels
+    from tcip_mcp.pipelines.data.datasets import _band_count
+    from tcip_mcp.pipelines.data.selection import Sample
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()
@@ -117,11 +125,13 @@ def test_probe_num_channels_raises_on_a_stale_manifest_instead_of_silently_defau
     band_b = images_dir / "cap_R.tif"
     tifffile.imwrite(str(band_a), np.full((8, 8), 1, dtype=np.uint16))
     tifffile.imwrite(str(band_b), np.full((8, 8), 2, dtype=np.uint16))
-    write_band_group_manifest(images_dir, "cap", {"Green": band_a, "Red": band_b})
+    manifest = write_band_group_manifest(images_dir, "cap", {"Green": band_a, "Red": band_b})
     band_b.unlink()  # the manifest now references a sibling that no longer exists
 
+    sample = Sample(source=str(manifest), ground_truth=str(tmp_path / "cap.json"),
+                    group="g", side="train", confirmation_bucket="bud")
     with pytest.raises(BandGroupIncomplete):
-        _probe_num_channels(str(images_dir), None)
+        _band_count([sample])
 
 
 # ── splits.py ───────────────────────────────────────────────────────────────────────────

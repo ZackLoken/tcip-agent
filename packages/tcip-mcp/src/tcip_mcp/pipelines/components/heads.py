@@ -98,7 +98,7 @@ class OrdinalHead(BaseHead):
 
     def forward(self, features: torch.Tensor, targets: Any = None) -> dict[str, torch.Tensor]:
         logits = self.classifiers(self.drop(features))
-        return {"logits": logits, "num_ranks": torch.tensor(self.num_ranks)}
+        return {"logits": logits}
 
     def compute_loss(self, outputs, targets):
         logits = outputs["logits"]  # [B, K-1]

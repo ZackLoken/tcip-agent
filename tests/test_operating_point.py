@@ -272,7 +272,10 @@ def test_resolve_operating_point_train_disjointness_fires(tmp_path, monkeypatch)
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    tcip_store.replace(split_key("exp1"), {"train": ["a_0_0", "a_0_1"], "group_by": "tile_prefix"})
+    labels_dir = str(tmp_path / "labels")
+    tcip_store.replace(split_key("exp1"), {
+        "members": {labels_dir: {"train": ["a_0_0", "a_0_1"], "val": []}},
+        "group_by": "tile_prefix"})
 
     # Calibration/holdout share tile group "a" (stem "a_0_2") with the training split above.
     cal = [{"width": 400, "height": 400, "image_id": "a_0_2", "gt": [_ann(100, 100)],
@@ -280,7 +283,8 @@ def test_resolve_operating_point_train_disjointness_fires(tmp_path, monkeypatch)
     hold = [{"width": 400, "height": 400, "image_id": "a_0_3", "gt": [_ann(100, 100 + 5)],
              "dt": [_ann(100, 100, score=0.9)]}]
     b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1", calibration_records=cal,
-                                holdout_records=hold, experiment_id="exp1")
+                                holdout_records=hold, experiment_id="exp1",
+                                calibration_labels_dir=labels_dir)
     conf = b.get("conf")
     assert conf.validated_against == "false"
     assert conf.gate_evidence["train_disjointness"]["leaked_groups"] == ["a"]
@@ -311,7 +315,10 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    tcip_store.replace(split_key("exp2"), {"train": ["z_0_0", "z_0_1"], "group_by": "tile_prefix"})
+    labels_dir = str(tmp_path / "labels")
+    tcip_store.replace(split_key("exp2"), {
+        "members": {labels_dir: {"train": ["z_0_0", "z_0_1"], "val": []}},
+        "group_by": "tile_prefix"})
 
     # Calibration/holdout use id prefixes "c"/"h", disjoint from training's "z" group.
     cal, hold = good_cal_holdout()
@@ -319,7 +326,8 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
     # only gates a bundle when tiled).
     b = resolve_operating_point("bud_opening", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold, tiled=False,
-                                staged_conf_floor=0.01, experiment_id="exp2")
+                                staged_conf_floor=0.01, experiment_id="exp2",
+                                calibration_labels_dir=labels_dir)
     conf = b.get("conf")
     assert conf.validated_against == "held_out_annotations"
     assert b.is_shippable
@@ -390,7 +398,7 @@ def test_resolve_operating_point_cal_rects_switches_to_geometric_check(tmp_path,
 # --- Selection-disjointness: a checkpoint's own held-out (val) side, not its train side -----
 
 def _persist_run_split(experiment_id, tmp_path, *, date, train, val,
-                       group_by=None, selection_dir=None, labels_dir=None, scoped=True):
+                       group_by=None, selection_dir=None, labels_dir=None):
     """A real ``split.json`` for one producing run, written through the platform's own
     ``persist_run_partition``, never composed by hand: ``train``/``val`` are bare stems under
     ``date``, ``group_by`` an already-resolved policy (``"spatial_strip"``/``"stem"``/a named
@@ -398,12 +406,9 @@ def _persist_run_split(experiment_id, tmp_path, *, date, train, val,
 
     The per-scope ``members`` block is built by :func:`_recorded_partition`, the producer every
     run's own record is written from, over samples naming that directory, so these records have
-    the shape a run written under the current tree has. ``scoped=False`` writes the record a run
-    from before that block existed left behind: the flat lists and one labels directory, with no
-    per-scope membership at all.
+    the shape a run written under the current tree has. A ``spatial_strip`` run records its own
+    region identities and no member block, the way the within-image route does.
     """
-    from types import SimpleNamespace
-
     from tcip_mcp.dataset_layout import status_bucket
     from tcip_mcp.experiments import create_experiment, experiment_exists
     from tcip_mcp.pipelines.data.selection import Sample
@@ -415,31 +420,29 @@ def _persist_run_split(experiment_id, tmp_path, *, date, train, val,
     split_cfg: dict = {}
     if group_by is not None:
         split_cfg["resolved_group_by"] = group_by
+    if group_by == "spatial_strip":
+        split_cfg["spatial_manifest"] = {"train_identities": list(train),
+                                         "val_identities": list(val)}
     if selection_dir is not None:
         split_cfg["selection_binding"] = {"selection_dir": selection_dir}
     here = Path(labels_dir) if labels_dir is not None else tmp_path / "annotations" / date
     data_cfg = {"labels_dir": str(here), "split": split_cfg}
-    train_ds = SimpleNamespace(stems=list(train))
-    val_ds = SimpleNamespace(stems=list(val))
+    group_of = (recorded_group_key_fn(group_by, date=date)
+                if group_by in ("tile_prefix", "stem")
+                else (lambda stem: member_identity(date, stem)))
 
-    partition = None
-    if scoped:
-        group_of = (recorded_group_key_fn(group_by, date=date)
-                    if group_by in ("tile_prefix", "stem")
-                    else (lambda stem: member_identity(date, stem)))
+    images = tmp_path / "images" / date if date is not None else tmp_path / "images"
 
-        images = tmp_path / "images" / date if date is not None else tmp_path / "images"
+    def _sample(stem: str, side: str) -> Sample:
+        return Sample(source=str(images / f"{stem}.png"),
+                      ground_truth=str(here / f"{stem}.json"), group=group_of(stem),
+                      side=side, confirmation_bucket=status_bucket("bud", date))
 
-        def _sample(stem: str, side: str) -> Sample:
-            return Sample(source=str(images / f"{stem}.png"),
-                          ground_truth=str(here / f"{stem}.json"), group=group_of(stem),
-                          side=side, confirmation_bucket=status_bucket("bud", date))
-
-        train_samples = [_sample(stem, "train") for stem in train]
-        val_samples = [_sample(stem, "val") for stem in val]
-        partition = _recorded_partition(
-            train_samples, val_samples, train_samples + val_samples)
-    persist_run_partition(experiment_id, train_ds, val_ds, data_cfg, partition=partition)
+    train_samples = [_sample(stem, "train") for stem in train]
+    val_samples = [_sample(stem, "val") for stem in val]
+    partition = (None if group_by == "spatial_strip" else _recorded_partition(
+        train_samples, val_samples, train_samples + val_samples))
+    persist_run_partition(experiment_id, data_cfg, partition=partition)
 
 
 def test_selection_disjointness_leaked_whole_directory_calibration_of_a_bound_checkpoint(

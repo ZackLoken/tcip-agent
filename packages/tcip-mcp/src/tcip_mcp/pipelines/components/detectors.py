@@ -79,9 +79,16 @@ def _normalization(adapter: Any, in_chans: int | None, image_mean, image_std,
     # The caller is authoritative: only they know the band count, and the probe is a registration-
     # order guess that is wrong for band-projection and neck-first adapters alike.
     if in_chans is None:
-        probed = _probe_in_chans(adapter)
-        in_chans = probed if probed is not None else 3
+        in_chans = _probe_in_chans(adapter)
     if image_mean is None and image_std is None:
+        if in_chans is None:
+            raise ValueError(
+                f"build_detector('{detector}', ...) cannot tell how many bands this backbone "
+                f"takes, and no image_mean/image_std were given: torchvision would normalize with "
+                f"3-element ImageNet statistics, which describe an image nobody here has "
+                f"confirmed is RGB. State in_chans, or pass per-band statistics derived with "
+                "pipelines.derivations.band_normalization_stats(...)."
+            )
         if in_chans == 3:
             return {}  # torchvision's own ImageNet default applies
         raise ValueError(
@@ -98,10 +105,13 @@ def _normalization(adapter: Any, in_chans: int | None, image_mean, image_std,
             f"{'image_mean' if image_mean is not None else 'image_std'}."
         )
     mean, std = [float(v) for v in image_mean], [float(v) for v in image_std]
-    if len(mean) != in_chans or len(std) != in_chans:
+    # With no in_chans stated and none probable, the statistics themselves state the band count.
+    bands = in_chans if in_chans is not None else len(mean)
+    if len(mean) != bands or len(std) != bands:
         raise ValueError(
-            f"build_detector('{detector}', ..., in_chans={in_chans}) got image_mean of length "
-            f"{len(mean)} and image_std of length {len(std)}; both must be {in_chans}."
+            f"build_detector('{detector}', ...) got image_mean of length {len(mean)} and "
+            f"image_std of length {len(std)}; both must be {bands}, the band count this detector "
+            "reads."
         )
     return {"image_mean": mean, "image_std": std}
 

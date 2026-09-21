@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 torch = pytest.importorskip("torch")
 import torch.nn as nn
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
 # ====================================================================
@@ -17,19 +18,20 @@ import torch.nn as nn
 
 class TestDatasets:
     def test_build_dataset_classification(self, tmp_path):
-        """Classification dataset from folder structure."""
-        from tcip_mcp.pipelines.data.datasets import build_dataset
-        # Create minimal folder-based classification data
-        for cls in ("a", "b"):
-            d = tmp_path / cls
-            d.mkdir()
-            # Create 2 tiny PNG files per class
-            for i in range(2):
-                img = torch.randint(0, 255, (3, 32, 32), dtype=torch.uint8)
-                from torchvision.utils import save_image
-                save_image(img.float() / 255.0, str(d / f"{i}.png"))
+        """Classification dataset from its ground-truth table, one row per image."""
+        from torchvision.utils import save_image
 
-        ds = build_dataset("classification", images_dir=str(tmp_path))
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        rows = ["stem,label"]
+        for i in range(4):
+            img = torch.randint(0, 255, (3, 32, 32), dtype=torch.uint8)
+            save_image(img.float() / 255.0, str(images_dir / f"img{i}.png"))
+            rows.append(f"img{i},{i % 2}")
+        csv_path = tmp_path / "labels.csv"
+        csv_path.write_text("\n".join(rows) + "\n", encoding="utf-8", newline="\n")
+
+        ds = dataset_over("classification", str(images_dir), str(csv_path))
         assert ds.num_classes == 2
         assert ds.num_samples == 4
         assert ds.task_type == "classification"
@@ -38,7 +40,6 @@ class TestDatasets:
         """Detection dataset from per-image JSON labels."""
         from tcip_annotation import json_io
         from tcip_annotation.state import Annotation, BBox
-        from tcip_mcp.pipelines.data.datasets import build_dataset
         imgs = tmp_path / "images"
         lbls = tmp_path / "labels"
         imgs.mkdir()
@@ -52,7 +53,7 @@ class TestDatasets:
                                    Annotation(subject="bud", geometry=BBox(16.0, 16.0, 22.4, 22.4))],
                                   64, 64, keep_empty=True)
 
-        ds = build_dataset("detection", images_dir=str(imgs), labels_dir=str(lbls), subject="bud")
+        ds = dataset_over("detection", str(imgs), str(lbls), subject="bud")
         assert ds.task_type == "detection"
         assert len(ds) == 1
 

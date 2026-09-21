@@ -76,7 +76,7 @@ def resolve_count_operating_point(
 
     Raises :class:`CalibrationUsageError` (a ``ValueError``) for every usage refusal above, for
     fewer than two labeled stems to split, and for whatever
-    :func:`~tcip_mcp.pipelines.data.splits.resolve_selection_calibration_universe` raises under
+    :func:`~tcip_mcp.pipelines.data.splits.selection_calibration_universe` raises under
     ``selection_dir``; a caller (the offline script, the audited door) can catch that one
     type for a clean exit without also swallowing ``require_reference_ground_truth``'s own bare
     ``ValueError``, a data-integrity refusal rather than a usage one.
@@ -94,13 +94,14 @@ def resolve_count_operating_point(
     from tcip_annotation.json_io import require_reference_ground_truth
     from tcip_mcp.model_registry import load_registered_checkpoint, resolve_model_identity
     from tcip_mcp.pipelines.data.datasets import build_dataset
-    from tcip_mcp.pipelines.data.splits import (
-        count_label_lines, resolve_locked_cal_holdout_split,
-    )
+    from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
     from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.operating_point import (
         attach_split_policy_provenance, derive_max_dets_from_counts, records_over_loader,
         resolve_operating_point, set_detector_operating_point,
+    )
+    from tcip_mcp.pipelines.data.label_queries import (
+        admit, foreground_counts, require_admitted,
     )
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS, dataset_hash
     from tcip_mcp.pipelines.training.collation import task_collate
@@ -116,40 +117,36 @@ def resolve_count_operating_point(
     tile_size = getattr(predictor, "train_tile_size", None)
 
     selection_sha256 = None
-    selection_samples: dict[str, Any] = {}
-    selection_id_map: dict[str, int] | None = None
+    # One membership and one class space for this pass, whichever named it: the selection's own
+    # held-out samples, or the producer's admission over the place this door was pointed at.
+    counted: dict[str, Any]
     if selection_dir:
         from tcip_mcp.pipelines.data.selection import read_selection
-        from tcip_mcp.pipelines.data.splits import (
-            label_image_stems, resolve_selection_calibration_universe,
-        )
+        from tcip_mcp.pipelines.data.splits import selection_calibration_universe
         from tcip_mcp.pipelines.resolution import selection_digest
 
         selection = read_selection(selection_dir)
         selection_sha256 = selection_digest(selection)
-        selection_id_map = dict(selection.id_map) if selection.id_map else None
-        # The universe is resolved from the selection's own samples, never from a directory
-        # admission run ahead of it: that probe reads one confirmation bucket for every sample.
-        present, _ = label_image_stems(labels_dir, images_dir)
         try:
-            (stems, group_by, group_key_map, _excluded, subject, attribute,
-             selection_samples) = resolve_selection_calibration_universe(
-                selection, labels_dir, present)
+            (stems, group_by, group_key_map, _excluded,
+             counted) = selection_calibration_universe(selection, labels_dir)
         except ValueError as exc:
             raise CalibrationUsageError(str(exc)) from exc
+        scope = selection.scope
     else:
-        probe = build_dataset("detection", images_dir=images_dir, labels_dir=labels_dir,
-                              subject=subject, attribute=attribute)
-        stems = sorted(getattr(probe, "stems", []))
+        # Through the producer, so this door and a run over the same data admit one membership.
+        admitted = admit(images_dir, labels_dir, subject=subject, attribute=attribute)
+        require_admitted(admitted)
+        stems = sorted(record.member for record in admitted.records)
+        counted = {s.member_stem: s for s in admitted.every_sample()}
+        scope = admitted.scope
     if len(stems) < 2:
         raise CalibrationUsageError(
             f"Need >=2 labeled stems to split cal/holdout; found {len(stems)}.")
 
     dh = dataset_hash(labels_dir, stems=(stems if selection_dir else None))
-    annotation_counts = {
-        s: count_label_lines(labels_dir, s, subject=subject, attribute=attribute)
-        for s in stems
-    }
+    # The one per-sample counter, over each member's own recorded ground truth.
+    annotation_counts = foreground_counts(counted, scope)
     # Density-derived collection cap (the same formula resolve_operating_point uses for the
     # shipped max_dets), so the sweep isn't measured against a constant below a dense scene's need.
     density_cap = derive_max_dets_from_counts(list(annotation_counts.values()))
@@ -170,14 +167,10 @@ def resolve_count_operating_point(
         predictor.model, score_thresh=0.01, detections_per_img=density_cap)
 
     def _records(sub: list[str]) -> list[dict]:
-        if selection_dir:
-            # The universe's own recorded samples: the measurement reads the pixels and the
-            # ground truth the draw held out, not a same-named file under the caller's directory.
-            ds = build_dataset("detection", samples=[selection_samples[s] for s in sub],
-                               subject=subject, attribute=attribute, id_map=selection_id_map)
-        else:
-            ds = build_dataset("detection", images_dir=images_dir, labels_dir=labels_dir,
-                               stems=sub, subject=subject, attribute=attribute)
+        # This pass's own recorded samples: the measurement reads the pixels and the ground truth
+        # its membership named, not a same-named file under the caller's directory.
+        ds = build_dataset("detection", tiling=None,
+                           samples=[counted[s] for s in sub], scope=scope)
         loader = DataLoader(ds, batch_size=4, collate_fn=task_collate("detection"))
         return records_over_loader(predictor.model, loader, predictor.device, "detection")
 

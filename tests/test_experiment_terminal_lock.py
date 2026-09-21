@@ -14,6 +14,7 @@ import pytest
 import tcip_store as ts
 from tcip_mcp import experiments as exp
 from tcip_mcp.audit import audit_log_key
+from tcip_mcp.pipelines.data.selection import ClassScope
 
 
 def _refusals(root):
@@ -43,7 +44,7 @@ def test_split_write_refused_against_a_watchdog_failed_record_leaves_it_failed(t
 
     with pytest.raises(ExperimentTerminal):
         persist_run_partition(
-            eid, _StemDataset(["img_001"]), _StemDataset(["img_002"]),
+            eid,
             {"labels_dir": ""},
         )
 
@@ -85,22 +86,40 @@ def test_update_status_refusal_audits_the_launch_root_not_the_current_one(tmp_pa
 
 
 def test_split_write_still_lands_against_a_running_record(tmp_path):
-    """The guard admits the ordinary case: a live run's own split write still succeeds."""
+    """The guard admits the ordinary case: a live run's own split write still succeeds.
+
+    The membership is the one a producer named, built here through ``_recorded_partition``, the
+    same function every route hands this writer: the record's members never come from a loader.
+    """
+    from tcip_mcp.dataset_layout import status_bucket
     from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
+    from tcip_mcp.pipelines.data.selection import Sample
+    from tcip_mcp.pipelines.data.split_construction import (
+        _recorded_partition, persist_run_partition, recorded_side,
+    )
 
     eid = "exp-021-chestnut-burr-det"
     create_experiment(eid, {"model_source": {"builder": "my_models:burr_det"}})
     update_status(eid, "running")
 
+    labels_dir = tmp_path / "annotations"
+
+    def _sample(stem: str, side: str) -> Sample:
+        return Sample(source=str(tmp_path / "images" / f"{stem}.png"),
+                      ground_truth=str(labels_dir / f"{stem}.json"), group=stem, side=side,
+                      confirmation_bucket=status_bucket("burr", None))
+
+    train = [_sample("img_001", "train"), _sample("img_003", "train")]
+    val = [_sample("img_002", "val")]
     persist_run_partition(
-        eid, _StemDataset(["img_001", "img_003"]), _StemDataset(["img_002"]),
-        {"labels_dir": ""},
+        eid,
+        {"labels_dir": str(labels_dir)},
+        partition=_recorded_partition(train, val, train + val),
     )
 
     manifest = ts.read(exp.split_key(eid, root=tmp_path))
-    assert manifest["train"] == ["img_001", "img_003"]
-    assert manifest["val"] == ["img_002"]
+    assert recorded_side(manifest["members"], "train") == ["img_001", "img_003"]
+    assert recorded_side(manifest["members"], "val") == ["img_002"]
     assert _refusals(tmp_path) == []
 
 
@@ -139,12 +158,13 @@ def test_tiling_patch_still_lands_against_a_running_record(tmp_path):
     assert config["data"]["tiling"]["tile_size"] == 224
 
 
-def test_id_map_patch_refused_against_a_terminal_record(tmp_path):
+def test_scope_patch_refused_against_a_terminal_record(tmp_path):
     from tcip_mcp.experiments import ExperimentTerminal, create_experiment, update_status
 
     import pytest
 
-    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_id_map
+    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_scope
 
     eid = "exp-024-persimmon-fruit-det"
     create_experiment(eid, {"model_source": {"builder": "my_models:fruit_det"}})
@@ -152,10 +172,10 @@ def test_id_map_patch_refused_against_a_terminal_record(tmp_path):
     update_status(eid, "failed", error="dataloader raised")
 
     with pytest.raises(ExperimentTerminal):
-        _patch_experiment_config_id_map(eid, "bud", None, {"bud": 0})
+        _patch_experiment_config_scope(eid, ClassScope("bud", None, {"bud": 0}))
 
     refusals = _refusals(tmp_path)
-    assert refusals and refusals[0]["arguments"]["op"] == "patch_experiment_config_id_map"
+    assert refusals and refusals[0]["arguments"]["op"] == "patch_experiment_config_scope"
 
 
 @pytest.mark.parametrize(
@@ -163,14 +183,14 @@ def test_id_map_patch_refused_against_a_terminal_record(tmp_path):
     [
         ("_patch_experiment_config_tiling", {"tiling_cfg": {"tile_size": 224}},
          "patch_experiment_config_tiling"),
-        ("_patch_experiment_config_id_map",
-         {"subject": "bud", "attribute": None, "id_map": {"bud": 0}},
-         "patch_experiment_config_id_map"),
+        ("_patch_experiment_config_scope",
+         {"scope": ClassScope("bud", None, {"bud": 0})},
+         "patch_experiment_config_scope"),
         ("_patch_experiment_config_split",
          {"split_cfg": {"selection_binding": {"date": "2024-01-01"}}},
          "patch_experiment_config_split"),
     ],
-    ids=["tiling", "id_map", "split"],
+    ids=["tiling", "scope", "split"],
 )
 def test_shared_patch_procedure_refuses_a_terminal_record_for_every_caller(
         tmp_path, caller_name, kwargs, op):
@@ -215,7 +235,7 @@ def test_split_write_raises_when_the_refusal_audit_append_fails(tmp_path, monkey
 
     with pytest.raises(ExperimentTerminal) as excinfo:
         persist_run_partition(
-            eid, _StemDataset(["img_001"]), _StemDataset(["img_002"]),
+            eid,
             {"labels_dir": ""},
         )
     assert isinstance(excinfo.value.__cause__, OSError)
@@ -248,12 +268,12 @@ def test_tiling_patch_raises_when_the_refusal_audit_append_fails(tmp_path, monke
     assert ts.read(exp.config_key(eid, root=tmp_path)) == config_before  # untouched
 
 
-def test_id_map_patch_raises_when_the_refusal_audit_append_fails(tmp_path, monkeypatch):
+def test_scope_patch_raises_when_the_refusal_audit_append_fails(tmp_path, monkeypatch):
     from tcip_mcp.experiments import ExperimentTerminal, create_experiment, update_status
 
     import pytest
 
-    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_id_map
+    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_scope
 
     eid = "exp-029-persimmon-fruit-det-2"
     create_experiment(eid, {"model_source": {"builder": "my_models:fruit_det"}})
@@ -266,7 +286,7 @@ def test_id_map_patch_raises_when_the_refusal_audit_append_fails(tmp_path, monke
     monkeypatch.setattr("tcip_mcp.audit.record_event_or_raise", _boom)
 
     with pytest.raises(ExperimentTerminal) as excinfo:
-        _patch_experiment_config_id_map(eid, "bud", None, {"bud": 0})
+        _patch_experiment_config_scope(eid, ClassScope("bud", None, {"bud": 0}))
     assert isinstance(excinfo.value.__cause__, OSError)
 
 

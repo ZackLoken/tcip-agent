@@ -171,10 +171,10 @@ def test_unstamped_confirmation_is_admitted_not_quarantined(tmp_path):
     assert quarantined == set()
 
 
-# (e) trainable_stems surfaces a quarantine event as its own count, distinct from unconfirmed-empty.
-def test_trainable_stems_reports_quarantined_stale_definition(tmp_path):
+# (e) the admission surfaces a quarantine event as its own count, distinct from unconfirmed-empty.
+def test_the_admission_reports_quarantined_stale_definition(tmp_path):
     from tcip_mcp.subject_registry import attribute_schema_digest
-    from tcip_mcp.pipelines.data.label_queries import trainable_stems
+    from tcip_mcp.pipelines.data.label_queries import admitted_documents
 
     root = _dataset(tmp_path, negative=False, subjects=(
         Subject(name="bud", attributes=(
@@ -189,7 +189,9 @@ def test_trainable_stems_reports_quarantined_stale_definition(tmp_path):
                  values=("closed", "partial", "open")),
     )))
 
-    stems, counts = trainable_stems(root / "annotations", root / "images", subject="bud", date=None)
+    records, counts = admitted_documents(
+        root / "annotations", root / "images", subject="bud", date=None)
+    stems = [record.member for record in records]
     assert stems == []
     assert counts["quarantined_stale_definition"] == 1
     assert counts["skipped_unconfirmed_empty"] == 0

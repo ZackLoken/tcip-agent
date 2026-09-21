@@ -18,6 +18,7 @@ from torch.utils.data import Dataset  # noqa: E402
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines.data.selection import read_selection
+from tcip_mcp.pipelines.data.split_construction import recorded_side
 from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, write_registry
 from tcip_mcp.tools.data_tools import draw_splits
 
@@ -102,12 +103,14 @@ def _tiled_dataset(root: Path) -> Path:
 
 
 class _RecordingDataset(Dataset):
-    """A bespoke dataset standing in for an agent's own builder: it records the samples and the
-    class map the seam handed it, so a test can state what a bound run actually threads through."""
+    """A bespoke dataset standing in for an agent's own builder: it records the samples, the class
+    map and any data location the seam handed it, so a test can state what a run actually threads
+    through and what it does not."""
 
-    def __init__(self, samples, id_map) -> None:
+    def __init__(self, samples, id_map, directories) -> None:
         self.seen_samples = list(samples)
         self.seen_id_map = id_map
+        self.seen_directories = directories
 
     def __len__(self) -> int:
         return len(self.seen_samples)
@@ -116,10 +119,18 @@ class _RecordingDataset(Dataset):
         return torch.zeros(3, 8, 8), {"boxes": torch.zeros(0, 4), "labels": torch.zeros(0)}
 
 
-def build_recording_dataset(samples=None, id_map=None, **_kwargs) -> _RecordingDataset:
-    """The ``dataset_source`` builder :func:`test_a_bound_run_threads_a_bespoke_dataset_source`
-    registers through the seam's dotted escape."""
-    return _RecordingDataset(samples or [], id_map)
+_RECORDED_BUILDS: list[_RecordingDataset] = []
+
+
+def build_recording_dataset(samples=None, id_map=None, **kwargs) -> _RecordingDataset:
+    """The ``dataset_source`` builder the bespoke-seam tests register through the seam's dotted
+    escape. Records every data-location key it was handed, so a test can state that none was, and
+    appends itself to :data:`_RECORDED_BUILDS` for a caller that cannot reach the built dataset."""
+    located = {k: v for k, v in kwargs.items()
+               if k in ("images_dir", "labels_dir", "csv_path", "coco_data", "stems")}
+    built = _RecordingDataset(samples or [], id_map, located)
+    _RECORDED_BUILDS.append(built)
+    return built
 
 
 def _draw(root: Path, out: Path, *, subject: str = SUBJECT, attribute: str | None = None,
@@ -163,10 +174,13 @@ def test_auto_train_val_binds_the_selections_own_partition(tmp_path: Path):
 
     binding = data_cfg["split"]["selection_binding"]
     assert binding["selection_dir"] == str(out)
-    assert binding["subject"] == SUBJECT
     assert binding["calibration_bound"] == len(held_out)
     assert "date" not in binding
-    assert partition["labels_dirs"]
+    # The class space is the run's own, recorded once on the data config, never restated here.
+    assert data_cfg["subject"] == SUBJECT
+    assert not {"subject", "attribute", "id_map"} & set(binding)
+    assert sorted(partition) == sorted(
+        {str(Path(s.ground_truth).parent) for s in drawn.samples})
 
 
 def _pixels_and_ground_truth(under: Path) -> dict[Path, int]:
@@ -225,8 +239,9 @@ def test_a_multi_date_selection_trains_without_copying_anything(tmp_path: Path):
 
     # Both dates reach the members the run actually recorded, from two label directories.
     partition = read_run_partition("exp-multi-date")
-    assert {Path(d).name for d in partition["labels_dirs"]} == set(DATES)
-    consumed = set(partition["train"]) | set(partition["val"])
+    assert {Path(d).name for d in partition["members"]} == set(DATES)
+    consumed = set(recorded_side(partition["members"], "train")) | set(
+        recorded_side(partition["members"], "val"))
     assert consumed == {Path(s.ground_truth).stem
                         for s in drawn.on("train") + drawn.on("val")}
     for date in DATES:
@@ -291,19 +306,23 @@ def test_a_bound_run_keeps_its_selections_class_map_when_the_registry_is_reorder
     assert ((checkpoint.get("config") or {}).get("data") or {})["id_map"] == drawn.id_map
 
 
-def test_a_bound_run_refuses_a_config_stating_another_scope(tmp_path: Path):
-    """A relaunched config carrying the previous run's own subject cannot quietly train in the
-    selection's instead: the two disagree about what this run trains, so it refuses and names
-    both rather than overwriting one with the other."""
+def test_a_bound_run_trains_in_the_selections_scope_over_a_stale_config_one(tmp_path: Path):
+    """A relaunched config carrying the previous run's own subject states nothing about this run:
+    the selection is what says which class space its samples were admitted under, so that scope
+    becomes the run's and the stale one is overwritten rather than compared against it."""
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    drawn = _draw(root, out)
     data_cfg = _run_data_cfg(root, out, subject=OTHER_SUBJECT)
 
-    with pytest.raises(ValueError, match="disagrees with the selection"):
-        auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _partition = auto_train_val("detection", data_cfg, None)
+
+    assert data_cfg["subject"] == drawn.subject == SUBJECT
+    assert data_cfg["id_map"] == drawn.id_map
+    assert train_ds.subject == SUBJECT and val_ds.subject == SUBJECT
+    assert sorted(train_ds.stems) == sorted(s.identity for s in drawn.on("train"))
 
 
 def test_a_selected_label_emptied_since_the_draw_refuses_the_run(tmp_path: Path):
@@ -341,7 +360,7 @@ def test_a_selected_label_a_human_confirmed_negative_still_trains(tmp_path: Path
 
     assert len(train_ds) == len(drawn.on("train"))
     assert len(val_ds) == len(drawn.on("val"))
-    assert Path(emptied.ground_truth).stem in set(partition["train"])
+    assert Path(emptied.ground_truth).stem in set(recorded_side(partition, "train"))
 
 
 def test_a_bound_run_admits_when_an_unselected_images_stem_turns_ambiguous(tmp_path: Path):
@@ -411,15 +430,16 @@ def test_a_positive_named_unlike_its_image_contradicts_a_stale_negative(tmp_path
         group="g", side="train", confirmation_bucket=bucket),
     ), subject=SUBJECT, id_map={SUBJECT: 0}))
 
-    refuse_inadmissible_samples(
-        read_selection(out).samples, attribute=None, id_map={SUBJECT: 0})
+    selection = read_selection(out)
+    refuse_inadmissible_samples(selection.samples, selection.scope)
 
 
 def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(tmp_path: Path):
-    """``row_key`` names one row inside a ground truth that answers for many samples. No geometry
-    loader reads a ground truth by row, and reading the file whole would take a document
-    answering for many samples for a per-image one, so the loader refuses by name rather than
-    training on whatever the whole file holds. The same selection without the row key builds.
+    """``row_key`` names one row inside a ground truth that answers for many samples. A geometry
+    loader reads a per-image document, and reading the file whole would take a document answering
+    for many samples for a per-image one, so it refuses by naming the ground truth it does read
+    rather than training on whatever the whole file holds. The same selection without the row key
+    builds.
 
     The record comes back through ``read_selection``, the platform's own reader: the field is part
     of the recorded shape, which is why a loader has to answer for it rather than ignore it.
@@ -429,7 +449,7 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
     from tcip_mcp.dataset_layout import status_bucket
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.data.selection import (
-        Sample, Selection, read_selection, write_selection,
+        ClassScope, Sample, Selection, read_selection, write_selection,
     )
 
     root = tmp_path / "ds"
@@ -451,12 +471,11 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
         ), subject=SUBJECT, id_map={SUBJECT: 0}))
         return read_selection(out)
 
-    with pytest.raises(ValueError, match="row inside their ground truth"):
-        build_dataset("detection", samples=_selection("a.jpg").samples,
-                      subject=SUBJECT, id_map={SUBJECT: 0})
+    scope = ClassScope(subject=SUBJECT, id_map={SUBJECT: 0})
+    with pytest.raises(ValueError, match="a detection loader does not read"):
+        build_dataset("detection", samples=_selection("a.jpg").samples, scope=scope)
 
-    admitted = build_dataset("detection", samples=_selection(None).samples,
-                             subject=SUBJECT, id_map={SUBJECT: 0})
+    admitted = build_dataset("detection", samples=_selection(None).samples, scope=scope)
     assert list(admitted.stems) == [str(images_dir / "a.jpg")]
 
 
@@ -567,6 +586,98 @@ def test_a_bound_run_threads_a_bespoke_dataset_source(tmp_path: Path):
     assert train_ds.seen_id_map == drawn.id_map
 
 
+@pytest.mark.parametrize("task", ["detection", "canopy_extent"])
+def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(tmp_path: Path, task):
+    """Two producers of one fact, compared against each other rather than against a fixture.
+
+    The same tree is trained twice through a bespoke builder, once bound to a selection drawn over
+    it and once unbound over the same directory; the builder records what it was handed each time.
+    The two runs partition the tree differently, which is what each route is for; what they may
+    not do is disagree about which samples that tree holds, where each one's ground truth is, or
+    what class map they were admitted under. Neither is handed a directory to go looking in.
+
+    Run for a task with a built-in loader and for one without: a task with no built-in loader is
+    not a task with no producer, so both routes name its samples the same way too.
+    """
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    drawn = _draw(root, out)
+    source = {"builder": f"{__name__}:build_recording_dataset", "task": task}
+
+    bound_cfg = _run_data_cfg(root, out)
+    bound_cfg["dataset_source"] = source
+    bound_train, bound_val, _partition = auto_train_val(task, bound_cfg, None)
+
+    unbound_cfg = {"images_dir": str(root / "images" / DATES[0]),
+                   "labels_dir": str(root / "annotations" / DATES[0]),
+                   "subject": SUBJECT, "dataset_source": source,
+                   "split": {"val_ratio": 0.5, "seed": 3}}
+    unbound_train, unbound_val, _unbound_partition = auto_train_val(
+        task, unbound_cfg, None)
+
+    assert bound_val is not None and unbound_val is not None, \
+        "each route draws both sides over the samples its producer named"
+
+    def handed(*datasets) -> list[tuple]:
+        """Every sample each builder was handed, with multiplicity, as the facts that must agree.
+
+        The side is normalized away and only that: which side a sample landed on is what the two
+        routes legitimately differ about, and everything else about a sample is what they may not.
+        """
+        seen: list[tuple] = []
+        for dataset in datasets:
+            for sample in dataset.seen_samples:
+                seen.append((sample.source, sample.ground_truth, sample.row_key, sample.rect,
+                             sample.group, sample.confirmation_bucket, sample.member_stem))
+        return sorted(seen)
+
+    # Comparable universes: the unbound run admits one date, so the bound run's members from the
+    # other one are not members the unbound run could have held.
+    bound_here = [s for s in handed(bound_train, bound_val)
+                  if Path(s[0]).parent.name == DATES[0]]
+    unbound_here = handed(unbound_train, unbound_val)
+    held_out = {s.identity for s in drawn.on("calibration")}
+    unbound_trained = [s for s in unbound_here if s[0] not in held_out]
+
+    assert bound_here and unbound_trained
+    assert len(bound_here) == len(set(bound_here)), "each sample is handed once, not repeated"
+    assert bound_here == unbound_trained
+    assert unbound_train.seen_id_map == bound_train.seen_id_map == drawn.id_map
+    # Nothing the builder can go looking in: a directory would let it read its own membership.
+    for dataset in (bound_train, bound_val, unbound_train, unbound_val):
+        assert dataset.seen_directories == {}
+
+
+def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(tmp_path: Path):
+    """The batch a preflight smokes comes off the run's own training loader, resolved the way the
+    run resolves it. A bound config names no directories at all, and re-admitting one here would
+    smoke a batch holding the validation and calibration members the run never trains on, which is
+    not the batch whose measurement boundary the contract proves."""
+    from tcip_mcp.tools.training_tools import _one_real_batch
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    drawn = _draw(root, out)
+    config = {"data": _run_data_cfg(root, out)}
+    config["data"]["dataset_source"] = {
+        "builder": f"{__name__}:build_recording_dataset", "task": "detection",
+    }
+
+    before = len(_RECORDED_BUILDS)
+    batch, why = _one_real_batch("detection", config)
+
+    assert why is None and batch is not None
+    smoked = _RECORDED_BUILDS[before]  # the training side, built first
+    assert sorted(s.identity for s in smoked.seen_samples) == sorted(
+        s.identity for s in drawn.on("train"))
+    held_out = {s.identity for s in drawn.on("val") + drawn.on("calibration")}
+    assert not held_out & {s.identity for s in smoked.seen_samples}
+    # The caller's own config is left exactly as it was found: preflight reads, never binds.
+    assert "selection_binding" not in config["data"]["split"]
+
+
 def test_auto_train_val_refuses_a_selection_with_an_empty_side(tmp_path: Path):
     from tcip_mcp.pipelines.data.selection import Selection, write_selection
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
@@ -597,18 +708,6 @@ def test_auto_train_val_refuses_a_selection_with_no_subject(tmp_path: Path):
         auto_train_val("detection", _run_data_cfg(root, out), None)
 
 
-def test_auto_train_val_selection_conflicts_with_val_images_dir(tmp_path: Path):
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
-
-    root = _two_subject_two_date_dataset(tmp_path / "ds")
-    out = tmp_path / "m"
-    _draw(root, out)
-    data_cfg = _run_data_cfg(root, out, val_images_dir=str(root / "images" / DATES[1]))
-
-    with pytest.raises(ValueError, match="val_images_dir"):
-        auto_train_val("detection", data_cfg, None)
-
-
 def test_auto_train_val_selection_conflicts_with_a_drawn_splits_own_parameters(tmp_path: Path):
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
@@ -622,14 +721,17 @@ def test_auto_train_val_selection_conflicts_with_a_drawn_splits_own_parameters(t
         auto_train_val("detection", data_cfg, None)
 
 
-def test_auto_train_val_selection_refuses_a_task_it_does_not_admit(tmp_path: Path):
+def test_auto_train_val_selection_refuses_a_task_reading_another_ground_truth(tmp_path: Path):
+    """What decides whether a task can bind a selection is the ground truth its samples name, not
+    the task's name: a selection of per-image label documents refuses a semantic segmentation run,
+    whose loader reads a mask raster, and names the ground truth that loader does read."""
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
 
-    with pytest.raises(ValueError, match="cannot bind to one"):
+    with pytest.raises(ValueError, match="a semantic_seg loader does not read"):
         auto_train_val("semantic_seg", _run_data_cfg(root, out), None)
 
 
@@ -720,17 +822,25 @@ def test_a_seed_without_the_redraw_flag_still_conflicts(tmp_path: Path):
         auto_train_val("detection", data_cfg, None)
 
 
-def test_redraw_starved_issue_names_the_selection_the_seed_and_both_counts():
-    """The pure check every pre-Start caller shares: fewer than two foreground groups among the
-    train-plus-val members is a redraw that can only leave a side empty, named with the selection,
-    the seed, and both group counts rather than a bare failure."""
+def test_redraw_starved_issue_names_the_selection_the_seed_and_both_counts(tmp_path: Path):
+    """The check every pre-Start caller shares, over a selection's own record: fewer than two
+    foreground groups among its train-plus-val members is a redraw that can only leave a side
+    empty, named with the selection, the seed and both group counts rather than a bare failure.
+    A selection whose members do hold two is admitted."""
+    from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.pipelines.data.splits import redraw_starved_issue
 
-    assert redraw_starved_issue(["a", "b"], ["a", "b"], selection_dir="/s", seed=3) is None
-    starved = redraw_starved_issue(["a", "b", "c"], ["a"], selection_dir="/s", seed=3)
+    drawn_dir = tmp_path / "drawn"
+    _draw(_two_subject_two_date_dataset(tmp_path / "ds"), drawn_dir)
+    assert redraw_starved_issue(
+        read_selection(drawn_dir), selection_dir=str(drawn_dir), seed=3) is None
+
+    _root, one_group = one_foreground_group_selection(tmp_path / "one")
+    starved = redraw_starved_issue(
+        read_selection(one_group), selection_dir=str(one_group), seed=3)
     assert starved is not None
-    assert "/s" in starved and "seed 3" in starved
-    assert "1 foreground group" in starved and "3 distinct group" in starved
+    assert f"{str(one_group)!r}" in starved and "seed 3" in starved
+    assert "1 foreground group" in starved and "2 distinct group" in starved
     assert "redraw_within_selection" in starved
 
 
@@ -803,19 +913,6 @@ def test_preflight_config_admits_a_bound_selection_with_no_issues(tmp_path: Path
     assert result["issues"] == []
 
 
-def test_preflight_config_flags_a_selection_conflict(tmp_path: Path):
-    from tcip_mcp.tools.training_tools import preflight_config
-
-    root = _two_subject_two_date_dataset(tmp_path / "ds")
-    out = tmp_path / "m"
-    _draw(root, out)
-    config = _preflight_config(root, out, val_images_dir=str(root / "images" / DATES[1]))
-
-    result = preflight_config(config)
-
-    assert any("val_images_dir" in i for i in result["issues"])
-
-
 def test_preflight_config_flags_a_selection_with_no_subject(tmp_path: Path):
     from tcip_mcp.pipelines.data.selection import Selection, write_selection
     from tcip_mcp.tools.training_tools import preflight_config
@@ -861,19 +958,22 @@ def test_persist_run_partition_carries_the_selection_binding(tmp_path: Path):
     train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
 
     create_experiment("exp-bound", {"data": data_cfg})
-    persist_run_partition("exp-bound", train_ds, val_ds, data_cfg, partition=partition)
+    persist_run_partition("exp-bound", data_cfg, partition=partition)
 
     record = ts.read(split_key("exp-bound"))
     assert record["selection_binding"]["selection_dir"] == str(out)
-    assert record["train"] == sorted({Path(s.ground_truth).stem for s in drawn.on("train")})
-    assert record["val"] == sorted({Path(s.ground_truth).stem for s in drawn.on("val")})
-    assert record["labels_dirs"] == partition["labels_dirs"]
+    members = record["members"]
+    assert recorded_side(members, "train") == sorted(
+        {Path(s.ground_truth).stem for s in drawn.on("train")})
+    assert recorded_side(members, "val") == sorted(
+        {Path(s.ground_truth).stem for s in drawn.on("val")})
+    assert sorted(members) == sorted(partition)
     # The selection's own named grouping policy, carried rather than collapsed into the finite
     # per-stem map beside it: a stem the map does not cover is what the policy answers for.
     assert record["group_by"] == drawn.group_by == "tile_prefix"
     for block in record["members"].values():
         assert block["group_key_map"]
-    assert record["label_digests"]["at_split"]
+        assert block["label_digests"]["at_split"]
     assert "redrawn_within_selection" not in record
 
 
@@ -897,10 +997,11 @@ def test_persist_run_partition_carries_no_stale_binding_when_this_run_did_not_bi
     train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
 
     create_experiment("exp-drawn", {"data": data_cfg})
-    persist_run_partition("exp-drawn", train_ds, val_ds, data_cfg, partition=partition)
+    persist_run_partition("exp-drawn", data_cfg, partition=partition)
 
     record = ts.read(split_key("exp-drawn"))
     assert "selection_binding" not in record
     # A drawn run records a partition of its own; what must not survive is the earlier binding.
     assert partition is not None
-    assert record["train"] and record["val"]
+    assert recorded_side(record["members"], "train")
+    assert recorded_side(record["members"], "val")

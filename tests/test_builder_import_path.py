@@ -118,7 +118,7 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
     cfg = {
         "model_source": {"builder": "agentpkg_launch.model:build", "task": "classification",
                          "in_chans": 3, "source_files": [str(model)]},
-        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path)},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
         "batch_size": 4, "stages": [{"freeze_to": 0, "epochs": 1}],
         "mixed_precision": False, "device": "cpu",
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},

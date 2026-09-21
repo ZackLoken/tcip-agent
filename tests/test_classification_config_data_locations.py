@@ -43,7 +43,7 @@ def test_a_classification_config_launches_with_images_and_csv_only(
     cfg = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_classifier",
                          "task": "classification", "in_chans": 3},
-        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path)},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
         "batch_size": 4, "stages": [{"freeze_to": 0, "epochs": 1}],
         "mixed_precision": False, "device": "cpu",
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
@@ -65,13 +65,14 @@ def test_a_classification_config_naming_a_missing_csv_is_refused_by_name(tmp_pat
     cfg = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_classifier",
                          "task": "classification", "in_chans": 3},
-        "data": {"images_dir": str(images_dir), "csv_path": str(tmp_path / "gone.csv")},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(tmp_path / "gone.csv")},
     }
 
     result = preflight_config(cfg)
 
     assert result["valid"] is False
-    assert any("data.csv_path" in issue for issue in result["issues"]), result["issues"]
+    assert any("Not found: data.labels_dir" in issue for issue in result["issues"]), \
+        result["issues"]
 
 
 def test_a_detection_config_still_needs_its_labels_directory(tmp_path: Path) -> None:

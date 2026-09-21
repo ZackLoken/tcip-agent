@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import ClassVar, NamedTuple
+from typing import ClassVar, NamedTuple, cast
 
 from shapely.geometry import Point as ShapelyPoint
 from shapely.ops import nearest_points
@@ -33,7 +33,9 @@ from tcip_annotation.json_io import (
     provenance_facts,
 )
 from tcip_annotation.matching import _rings_to_shapely, box_ring, point_in_polygon
-from tcip_annotation.state import Annotation, BBox, Point as AnnotationPoint, Polygon
+from tcip_annotation.state import (
+    Annotation, BBox, Polygon, box_derivable, polygonal,
+)
 
 from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
     GeoTransform,
@@ -84,9 +86,9 @@ def _polygon_of(geometry: BBox | Polygon) -> Polygon:
     :func:`tcip_annotation.matching.box_ring`, the one ring construction
     ``tcip_annotation.matching._to_shapely`` uses too, so the two conversions cannot
     independently drift on which corner comes first."""
-    if isinstance(geometry, Polygon):
+    if polygonal(geometry):
         return geometry
-    return Polygon(rings=[box_ring(geometry)])
+    return Polygon(rings=[box_ring(cast(BBox, geometry))])
 
 
 def load_canopy_segments(
@@ -150,16 +152,12 @@ def load_canopy_segments(
                 "not accepted"
             )
     for i, a in enumerate(annotations):
-        if a.geometry is None:
+        if not box_derivable(a.geometry):
+            named = "an image-level label" if a.geometry is None else type(a.geometry).__name__
             raise CanopySegmentRefusal(
-                f"canopy segment {i} of subject {subject!r} carries no geometry (an image-level "
-                "label), which names no region; delete this record or replace it with a boundary "
-                "(a box or a traced polygon)"
-            )
-        if isinstance(a.geometry, AnnotationPoint):
-            raise CanopySegmentRefusal(
-                f"canopy segment {i} of subject {subject!r} is a Point, which names no region; "
-                "delete this record or replace it with a boundary (a box or a traced polygon)"
+                f"canopy segment {i} of subject {subject!r} carries {named}, which names no "
+                "region; delete this record or replace it with a boundary (a box or a traced "
+                "polygon)"
             )
 
     facts = provenance_facts(annotations)
@@ -182,7 +180,7 @@ def load_canopy_segments(
     def _checked_polygon(a: Annotation) -> Polygon:
         # Every refusal above already ran over the same annotations; reaching here means none
         # of them had a None or Point geometry.
-        assert a.geometry is not None and not isinstance(a.geometry, AnnotationPoint)
+        assert box_derivable(a.geometry)
         return _polygon_of(a.geometry)
 
     return [

@@ -82,6 +82,8 @@ config = {
     #     dotted string ("module:function"), not a dict, see pipeline-design skill
     "data": {
         "images_dir": "data/images",
+        # where this run's ground truth lives, whatever shape it is: a directory of per-image
+        # label documents, a directory of <stem>.png masks, or a .csv table of one row per image
         "labels_dir": "data/labels/detect",
         "task": "detection"
     },
@@ -172,13 +174,24 @@ run_hyperparameter_search(base_config=config, n_trials=20, search_alg="optuna", 
 
 Use `draw_splits` to draw a train/val/calibration selection: `draw_splits` has no `test_ratio`
 parameter at all, no launch path honours a held-out test list (a separate, within-image
-mechanism, `reserve_calibration_fraction` on the spatial_strip route, not this one). Writing a
-selection (`output_path` given) requires `subject`: the samples are drawn through the same
-admission a training run uses, over the given subject (and `attribute`, if the run is
-attribute-scoped). `calibration_ratio` is a third side, held out from both training and
-checkpoint selection: it draws no loader, so `evaluate_model` and delivery calibration read it as
-their reference universe instead of the run's own `val`, keeping the checkpoint's own selection
-side out of the number that later validates it.
+mechanism, `reserve_calibration_fraction` on the spatial_strip route, not this one). The samples
+are drawn through the same admission a training run uses, and which admission that is depends on
+where the dataset's ground truth lives. Writing a selection over the per-image label tree
+(`output_path` given, no `ground_truth`) requires `subject`, since that admission is
+subject-scoped, and takes `attribute` when the run is attribute-scoped. `ground_truth` names a
+place explicitly instead of walking that tree, and the producer reads what is there: a directory
+of label documents (subject-scoped the same way), a directory of `<stem>.png` masks, or a `.csv`
+table of one row per image. A mask and a row are admitted by existing beside their image, and the
+class space a run binding such a selection trains in is derived from that ground truth by the
+loader that reads it.
+
+`calibration_ratio` is a third side, held out from both training and checkpoint selection: it
+draws no loader, so `evaluate_model` and delivery calibration read it as their reference universe
+instead of the run's own `val`, keeping the checkpoint's own selection side out of the number
+that later validates it. That universe is the selection's own held-out samples whatever shape
+their ground truth is; each calibration door refuses only what its own measurement cannot do (a
+count door needs detections to compare, a scalar door needs table rows), and no door refuses a
+shape on the universe's behalf.
 - A selection lists, per sample, the image source, the label document, a group key and a side.
   Every capture date the dataset holds enters one selection, so a trait needing examples from two
   dates trains in place: no derived folder, no copied imagery, and two dates holding a same-named
@@ -196,15 +209,25 @@ side out of the number that later validates it.
 - Reproducible with random seed
 
 A run names the selection it should train against with `data.split.selection_dir` (the
-`selection_dir` `draw_splits` returned): detection and instance_seg only. The selection states
-its own subject, attribute and class-id map, and the run reads them from it rather than restating
-them; `selection_dir` conflicts with `val_images_dir` and a
+`selection_dir` `draw_splits` returned). Any task can bind one whose samples carry the ground
+truth that task reads: a per-image label document for detection and instance_seg, a `<stem>.png`
+mask for semantic_seg, one table row for classification, ordinal and regression. A selection
+naming another shape refuses by name when the run's loader is built over its samples: which
+ground truth a loader reads is that loader's own fact. A selection of label
+documents states its own subject, attribute and class-id map, and the run reads them from it
+rather than restating them; a mask or table selection states none, and the class space its run
+trains in is derived from the ground truth the run was handed, once for the run, so both its
+loaders are built in one vocabulary.
+A caller wanting a fixed validation side draws a selection for it rather than naming a second
+directory pair: a selection carries validation membership, and a directory beside it would be a
+second membership source.
+`selection_dir` conflicts with a
 drawn split's own parameters (`group_by`, `group_key_map`, `val_ratio`, `seed`,
 `stratify_foreground`, `test_ratio`, `reserve_calibration_fraction`). The loaders read the
 selection's `train` and `val` samples as recorded, admitting nothing afresh; its `calibration`
 samples build neither loader. The run's `split.json` then records the bound membership plus a
-`selection_binding` block (counts and the directories the members live under, never a second copy
-of the sample list).
+`selection_binding` block (the selection's directory, the counts it bound, the dataset
+fingerprint it was drawn over and its digest, never a second copy of the sample list).
 
 `data.split.redraw_within_selection: true` beside `selection_dir` and `seed` admits `seed` (the
 one conflict key it lifts) and redraws train and val fresh inside the selection's own

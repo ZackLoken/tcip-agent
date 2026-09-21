@@ -516,8 +516,6 @@ def test_project_roots_names_a_run_output_dir_a_selection_and_a_prediction_bucke
     registered dataset roots: an experiment's own recorded run output directory, the selection
     a run bound to (its split.json's selection_binding.selection_dir), and a prediction bucket
     under a registered dataset's own predictions/ tree."""
-    from types import SimpleNamespace
-
     from tcip_store.layout_claims import PREDICTION_BUCKET, RUN, SPLITS
 
     from tcip_mcp.store_catalogue import project_roots
@@ -543,7 +541,7 @@ def test_project_roots_names_a_run_output_dir_a_selection_and_a_prediction_bucke
     split_dir = tmp_path / "splits" / "frozen-exp-1"
     split_dir.mkdir(parents=True)
     persist_run_partition(
-        "exp-1", SimpleNamespace(stems=["a"]), SimpleNamespace(stems=["b"]),
+        "exp-1",
         {"labels_dir": "", "split": {"selection_binding": {"selection_dir": str(split_dir)}}},
     )
 

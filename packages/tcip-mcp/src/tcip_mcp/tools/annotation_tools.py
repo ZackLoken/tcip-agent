@@ -14,13 +14,13 @@ from tcip_annotation import (
     Annotation,
     BBox,
     Point,
-    Polygon,
     compute_matches,
     detect_format,
     load_annotations_any,
     save_annotations_any,
 )
 from tcip_annotation.format_io import AnnotFormat
+from tcip_annotation.state import box_derivable, polygonal
 from tcip_annotation.json_io import (
     _PROV_KEYS, UnreadableLabelDocument, annotation_from_payload,
 )
@@ -76,7 +76,7 @@ def _ann_dict(a: Annotation) -> dict:
     d: dict = {"subject": a.subject, "attributes": dict(a.attributes)}
     if isinstance(a.geometry, BBox):
         d["bbox"] = [a.geometry.x1, a.geometry.y1, a.geometry.x2, a.geometry.y2]
-    elif isinstance(a.geometry, Polygon):
+    elif polygonal(a.geometry):
         d["rings"] = [[[p[0], p[1]] for p in ring] for ring in a.geometry.rings]
     elif isinstance(a.geometry, Point):
         d["point"] = [a.geometry.x, a.geometry.y]
@@ -260,7 +260,7 @@ def _add_geom(d: dict, a: Annotation) -> None:
     if isinstance(a.geometry, BBox):
         b = a.geometry
         d["box"] = [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1]
-    elif isinstance(a.geometry, Polygon):
+    elif polygonal(a.geometry):
         d["polygon_rings"] = [[[pt[0], pt[1]] for pt in ring] for ring in a.geometry.rings]
     elif isinstance(a.geometry, Point):
         d["point"] = [a.geometry.x, a.geometry.y]
@@ -409,7 +409,7 @@ def _evaluate_folder(
             # Same membership records_from_annotation applies when it builds the records this map
             # keys: a geometry-less label and a Point produce no scorable box, so neither may mint a
             # COCO category that no annotation ever lands in.
-            if a.geometry is None or isinstance(a.geometry, Point):
+            if not box_derivable(a.geometry):
                 continue
             if a.subject not in global_names:
                 global_names.append(a.subject)

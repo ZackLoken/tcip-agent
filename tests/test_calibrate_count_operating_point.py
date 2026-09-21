@@ -11,6 +11,8 @@ import pytest
 
 pytest.importorskip("torch")
 
+from tests._producer_fixtures import admission_of
+
 
 def _stub_predictor(monkeypatch) -> None:
     import tcip_mcp.model_registry as model_registry_mod
@@ -30,12 +32,13 @@ def _stub_predictor(monkeypatch) -> None:
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
                         lambda checkpoint=None, **kw: _Predictor())
 
-    class _Probe:
-        stems = ["a", "b"]
-
-    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", lambda *a, **kw: _Probe())
+    monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
+                        lambda *a, **kw: admission_of(["a", "b"]))
+    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
+                        lambda *a, samples=None, **kw: SimpleNamespace(
+                            stems=list(samples) if samples is not None else ["a", "b"]))
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines",
-                        lambda labels_dir, s, **kw: 1)
+                        lambda label_path, **kw: 1)
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
                         lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
     monkeypatch.setattr("torch.utils.data.DataLoader", lambda ds, **kw: ds)
@@ -43,6 +46,8 @@ def _stub_predictor(monkeypatch) -> None:
                         lambda model, loader, device, task: [])
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.attach_split_policy_provenance",
                         lambda b, locked: None)
+
+
 
 
 def _stub_dense_pass(monkeypatch, cal_stems, hold_stems, cal_records, hold_records) -> None:
@@ -68,24 +73,29 @@ def _stub_dense_pass(monkeypatch, cal_stems, hold_stems, cal_records, hold_recor
                         lambda checkpoint=None, **kw: _Predictor())
 
     all_stems = cal_stems + hold_stems
+    monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
+                        lambda *a, **kw: admission_of(all_stems))
 
-    def _build_dataset(*a, stems=None, **kw):
-        return SimpleNamespace(stems=stems if stems is not None else all_stems)
+    def _build_dataset(*a, samples=None, **kw):
+        return SimpleNamespace(stems=list(samples) if samples is not None else all_stems)
 
     monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", _build_dataset)
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines",
-                        lambda labels_dir, s, **kw: 1)
+                        lambda label_path, **kw: 1)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
         lambda stems, **kw: {"calibration": cal_stems, "holdout": hold_stems})
     monkeypatch.setattr("torch.utils.data.DataLoader", lambda ds, **kw: ds)
 
     def _records_over_loader(model, loader, device, task):
-        if list(loader.stems) == cal_stems:
+        # The stubbed factory hands the producer's own samples through as ``stems``; the door is
+        # asked for a side by the members those samples name.
+        served = sorted(getattr(s, "member_stem", s) for s in loader.stems)
+        if served == sorted(cal_stems):
             return cal_records
-        if list(loader.stems) == hold_stems:
+        if served == sorted(hold_stems):
             return hold_records
-        raise AssertionError(f"unexpected stems requested from records_over_loader: {loader.stems}")
+        raise AssertionError(f"unexpected members requested from records_over_loader: {served}")
 
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.records_over_loader",
                         _records_over_loader)

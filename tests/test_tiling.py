@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from tcip_mcp.pipelines.data import tiling
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -129,11 +130,9 @@ def _det_dataset(tmp_path: Path, n: int = 1, size: int = 128):
 
 def test_tiled_detection_dataset_wrapper(tmp_path):
     torch = pytest.importorskip("torch")
-    from tcip_mcp.pipelines.data.datasets import build_dataset
 
     images_dir, labels_dir = _det_dataset(tmp_path)
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
     assert len(ds) >= 1  # 128px image -> multiple tiles
     img, target = ds[0]
     assert tuple(img.shape) == (3, 64, 64)
@@ -147,7 +146,6 @@ def test_tiled_dataset_derives_sliver_and_keeps_empty_tiles(tmp_path):
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.pipelines.data.datasets import build_dataset
 
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
@@ -158,8 +156,7 @@ def test_tiled_dataset_derives_sliver_and_keeps_empty_tiles(tmp_path):
     json_io.write_annotations(str(labels_dir / "a.json"),
                               [Annotation(subject="bud", geometry=BBox(12.8, 12.8, 38.4, 38.4))],
                               256, 256, keep_empty=True)
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
     # class_avg_size is derived from the class-average box size. sliver_frac would be too, but a
     # single box is too few to measure a size spread from (derive_sliver_frac's own min_samples
     # guard), an honest "underivable", not a value dressed as derived, so it falls back to 0.5.
@@ -179,7 +176,6 @@ def test_tiled_dataset_derives_sliver_frac_with_enough_boxes(tmp_path):
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.derivations import derive_sliver_frac
 
     images_dir = tmp_path / "images"
@@ -193,8 +189,7 @@ def test_tiled_dataset_derives_sliver_frac_with_enough_boxes(tmp_path):
     anns = [Annotation(subject="bud", geometry=BBox(2.0, 2.0 + 5.0 * i, 2.0 + s, 2.0 + 5.0 * i + s))
             for i, s in enumerate(sizes)]
     json_io.write_annotations(str(labels_dir / "a.json"), anns, 256, 256, keep_empty=True)
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
     assert ds.sliver_frac_source == "GT characteristic-size spread (p10 / mean)"
     assert ds.sliver_frac == pytest.approx(derive_sliver_frac(sizes))
     assert ds.sliver_frac != 0.5  # genuinely derived, not the pinned constant it replaces
@@ -204,12 +199,10 @@ def test_tiled_dataset_collate_roundtrip(tmp_path):
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     from torch.utils.data import DataLoader
-    from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.training.collation import task_collate
 
     images_dir, labels_dir = _det_dataset(tmp_path)
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
     imgs, targets = next(iter(loader))
     assert isinstance(imgs, list) and isinstance(targets, list)
@@ -222,10 +215,10 @@ def test_build_dataset_no_tiling_unchanged(tmp_path):
     pytest.importorskip("torch")
     import csv
     from PIL import Image
-    from tcip_mcp.pipelines.data.datasets import build_dataset, DetectionDataset
+    from tcip_mcp.pipelines.data.datasets import DetectionDataset
 
     images_dir, labels_dir = _det_dataset(tmp_path, n=3, size=64)
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir), subject="bud")
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
     assert isinstance(ds, DetectionDataset)
     assert len(ds) == 3  # no tiling -> one sample per image
 
@@ -241,8 +234,7 @@ def test_build_dataset_no_tiling_unchanged(tmp_path):
         w = csv.writer(f)
         w.writerow(("stem", "label"))
         w.writerows(rows)
-    ds2 = build_dataset("classification", images_dir=str(cls_dir), csv_path=str(csv_path),
-                        num_classes=2, tiling={"enabled": True})
+    ds2 = dataset_over("classification", str(cls_dir), str(csv_path), num_classes=2, tiling={"enabled": True})
     assert ds2.num_samples == 2  # plain classification dataset
 
 
@@ -260,10 +252,10 @@ def test_keep_regions_none_is_byte_identical_to_before(tmp_path):
     """The default (no keep_regions) builds the exact same index as before this parameter
     existed: every current caller of TiledDetectionDataset omits it."""
     pytest.importorskip("torch")
-    from tcip_mcp.pipelines.data.datasets import DetectionDataset, TiledDetectionDataset
+    from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
     images_dir, labels_dir = _det_dataset(tmp_path, n=1, size=256)
-    base = DetectionDataset(str(images_dir), str(labels_dir), subject="bud")
+    base = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
     plain = TiledDetectionDataset(base, tile_size=64, overlap=0.2)
     explicit_none = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=None)
     assert plain.tile_entries == explicit_none.tile_entries
@@ -273,10 +265,10 @@ def test_keep_regions_none_is_byte_identical_to_before(tmp_path):
 
 def test_keep_regions_restricts_to_fully_inside_tiles(tmp_path):
     pytest.importorskip("torch")
-    from tcip_mcp.pipelines.data.datasets import DetectionDataset, TiledDetectionDataset
+    from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
     images_dir, labels_dir = _det_dataset(tmp_path, n=1, size=256)
-    base = DetectionDataset(str(images_dir), str(labels_dir), subject="bud")
+    base = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
     full = TiledDetectionDataset(base, tile_size=64, overlap=0.2)
     left_half = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=[(0, 0, 128, 256)])
 
@@ -291,10 +283,10 @@ def test_keep_regions_two_views_share_one_base_and_partition_disjointly(tmp_path
     """The mechanism a spatial train/val split uses: two TiledDetectionDataset instances over one
     shared base, complementary keep_regions, no tile common to both."""
     pytest.importorskip("torch")
-    from tcip_mcp.pipelines.data.datasets import DetectionDataset, TiledDetectionDataset
+    from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
     images_dir, labels_dir = _det_dataset(tmp_path, n=1, size=256)
-    base = DetectionDataset(str(images_dir), str(labels_dir), subject="bud")
+    base = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
     left = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=[(0, 0, 128, 256)])
     right = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=[(128, 0, 256, 256)])
 

@@ -8,6 +8,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from tcip_mcp.pipelines.data.selection import ClassScope
+
 
 # ── persist the training run's class id_map ──────────────────────────
 
@@ -26,78 +28,96 @@ def _write_classes_json(dataset_root, subject="bud", attribute=None, values=None
                    SubjectRegistry((Subject(subject, attributes=attrs),)))
 
 
-def test_resolve_run_id_map_works_with_no_dataset_object_at_all(tmp_path):
-    """id_map resolution must not depend on ``train_ds.id_map``/``.subject``, which is silently
-    absent for the COCO-assembled ``auto_val`` default and for every ``TiledDetectionDataset``
-    build (the shipped Phase-1 bud path). This test passes no dataset object at all (only the
-    ``data_cfg`` a real run always has), for both the plain-subject and the attribute-scoped
-    case."""
-    from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
+def _document_dataset(root, subject="bud", attribute=None, values=None):
+    """Two images and their own label documents, under a registry naming ``subject``."""
+    from pathlib import Path
 
-    proj1 = tmp_path / "proj1"
-    (proj1 / "labels").mkdir(parents=True)
-    _write_classes_json(proj1, subject="bud")
-    data_cfg = {"images_dir": str(proj1 / "images"), "labels_dir": str(proj1 / "labels"),
-               "subject": "bud"}
-    result = _resolve_run_id_map("detection", data_cfg)
-    assert result == ("bud", None, {"bud": 0})
+    from PIL import Image
 
-    proj2 = tmp_path / "proj2"
-    (proj2 / "labels").mkdir(parents=True)
-    _write_classes_json(proj2, subject="bud", attribute="opening",
-                        values=["closed", "open"])
-    data_cfg2 = {"images_dir": str(proj2 / "images"), "labels_dir": str(proj2 / "labels"),
-                "subject": "bud", "attribute": "opening"}
-    result2 = _resolve_run_id_map("detection", data_cfg2)
-    assert result2 == ("bud", "opening", {"closed": 0, "open": 1})
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    root = Path(root)
+    images_dir, labels_dir = root / "images", root / "annotations"
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir(parents=True)
+    _write_classes_json(root, subject=subject, attribute=attribute, values=values)
+    attrs = {attribute: values[0]} if attribute else {}
+    for stem in ("a", "b"):
+        Image.new("RGB", (32, 32), (10, 20, 30)).save(images_dir / f"{stem}.png")
+        json_io.write_annotations(
+            labels_dir / f"{stem}.json",
+            [Annotation(subject=subject, geometry=BBox(4, 4, 20, 20), attributes=attrs)],
+            32, 32, keep_empty=True)
+    return images_dir, labels_dir
 
 
-def test_resolve_run_id_map_none_for_non_detection_task_or_no_subject(tmp_path):
-    from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
+def test_the_class_space_recorded_is_the_one_the_run_admitted(tmp_path):
+    """The checkpoint records the vocabulary the run trained in: the producer writes the scope it
+    admitted under onto the run's own data config, and this reads that rather than the registry,
+    so a ``subjects.json`` whose declared order changed after the admission cannot restamp the
+    run with a vocabulary it never trained in."""
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tcip_mcp.pipelines.training.subprocess_worker import _admitted_class_space
 
-    assert _resolve_run_id_map("classification", {"subject": "bud", "labels_dir": "x"}) is None
-    assert _resolve_run_id_map("detection", {"labels_dir": "x"}) is None  # no subject
+    root = tmp_path / "plain"
+    images_dir, labels_dir = _document_dataset(root, subject="bud")
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+                "split": {"val_ratio": 0.5, "seed": 1}}
+    auto_train_val("detection", data_cfg, None)
 
+    assert _admitted_class_space(data_cfg) == ClassScope("bud", None, {"bud": 0})
 
-def test_resolve_run_id_map_none_for_a_bespoke_source(tmp_path):
-    """A run trained from a bespoke dataset_source doesn't necessarily get its targets from
-    (labels_dir, subject, attribute) at all: that builder owns its class space entirely.
-    Re-deriving via the registry anyway could stamp a map that is the wrong id space for what the
-    run actually trained on and record it as an authoritative fact, worse than recording nothing.
-    Must return None even with a real, resolvable registry present (build_dataset itself never
-    reaches the registry resolution on this same predicate, datasets.py's dataset_source
-    branch)."""
-    from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
-
-    proj = tmp_path / "proj"
-    (proj / "labels").mkdir(parents=True)
-    _write_classes_json(proj, subject="bud")
-
-    bespoke_cfg = {"images_dir": str(proj / "images"), "labels_dir": str(proj / "labels"),
-                   "subject": "bud", "dataset_source": "tests.bespoke_models:build_dataset"}
-    assert _resolve_run_id_map("detection", bespoke_cfg) is None
+    _write_classes_json(root, subject="bud", attribute="opening", values=["open", "closed"])
+    assert _admitted_class_space(data_cfg) == ClassScope("bud", None, {"bud": 0})
 
 
-def test_resolve_run_id_map_none_for_attribute_scope_with_no_registry(tmp_path):
-    """The one legitimate degraded case resolve_registry_id_map itself names: must not raise."""
-    from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
+def test_an_attribute_scoped_run_records_the_attributes_own_map(tmp_path):
+    """An attribute-scoped run's class space is its values, in declared order, admitted once."""
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tcip_mcp.pipelines.training.subprocess_worker import _admitted_class_space
 
-    labels_dir = tmp_path / "labels"
-    labels_dir.mkdir()  # no subjects.json
-    data_cfg = {"labels_dir": str(labels_dir), "subject": "bud", "attribute": "opening"}
-    assert _resolve_run_id_map("detection", data_cfg) is None
+    images_dir, labels_dir = _document_dataset(
+        tmp_path / "scoped", subject="bud", attribute="opening", values=["closed", "open"])
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+                "attribute": "opening", "split": {"val_ratio": 0.5, "seed": 1}}
+    auto_train_val("detection", data_cfg, None)
+
+    assert _admitted_class_space(data_cfg) == ClassScope("bud", "opening", {"closed": 0, "open": 1})
 
 
-def test_patch_experiment_config_id_map_merges_into_durable_config(tmp_path, monkeypatch):
+def test_a_run_whose_ground_truth_carries_its_own_classes_records_no_map(tmp_path):
+    """A mask raster scopes no class space and no registry answers for one, so nothing is
+    stamped and decode falls through to its own derivation rather than to a fabricated map."""
+    from PIL import Image
+
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tcip_mcp.pipelines.training.subprocess_worker import _admitted_class_space
+
+    root = tmp_path / "masks"
+    images_dir, masks_dir = root / "images", root / "masks"
+    images_dir.mkdir(parents=True)
+    masks_dir.mkdir(parents=True)
+    for stem in ("a", "b"):
+        Image.new("RGB", (32, 32), (10, 20, 30)).save(images_dir / f"{stem}.png")
+        Image.new("L", (32, 32), 1).save(masks_dir / f"{stem}.png")
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
+                "split": {"val_ratio": 0.5, "seed": 1}}
+    auto_train_val("semantic_seg", data_cfg, None)
+
+    assert _admitted_class_space(data_cfg) is None
+
+
+def test_patch_experiment_config_scope_merges_into_durable_config(tmp_path, monkeypatch):
     import tcip_store as ts
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import config_key, create_experiment
-    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_id_map
+    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_scope
 
     create_experiment("exp1", {"model_source": {"builder": "x:y"}, "data": {"images_dir": "img"}})
 
-    _patch_experiment_config_id_map("exp1", "bud", "opening", {"closed": 0, "open": 1})
+    _patch_experiment_config_scope("exp1", ClassScope("bud", "opening", {"closed": 0, "open": 1}))
 
     cfg = ts.read(config_key("exp1"))
     assert cfg["data"]["id_map"] == {"closed": 0, "open": 1}
@@ -107,12 +127,12 @@ def test_patch_experiment_config_id_map_merges_into_durable_config(tmp_path, mon
     assert cfg["model_source"] == {"builder": "x:y"}  # untouched sibling key
 
 
-def test_patch_experiment_config_id_map_never_sinks_a_run_with_no_experiment_dir(tmp_path, monkeypatch):
+def test_patch_experiment_config_scope_never_sinks_a_run_with_no_experiment_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_id_map
+    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_scope
 
     # No experiments/<id>/config.json exists at all: best-effort, must not raise.
-    _patch_experiment_config_id_map("no_such_exp", "bud", None, {"bud": 0})
+    _patch_experiment_config_scope("no_such_exp", ClassScope("bud", None, {"bud": 0}))
 
 
 def test_is_manifest_bound_split_only_true_for_a_manifest_binding():
@@ -160,7 +180,7 @@ def test_worker_leaves_a_spatial_runs_identities_out_of_the_durable_config(tmp_p
         raise StopAfterSplit
 
     monkeypatch.setattr(sc, "auto_train_val", stub_auto_train_val)
-    monkeypatch.setattr(worker, "_resolve_run_id_map", stop)
+    monkeypatch.setattr(worker, "_admitted_class_space", stop)
     with pytest.raises(StopAfterSplit):
         worker.run("exp1", str(out), "")
 

@@ -18,6 +18,7 @@ import pytest
 from PIL import Image
 
 from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
 def _grid(height: int, width: int, channels: int, dtype=np.uint8) -> np.ndarray:
@@ -181,12 +182,10 @@ def _detection_project(tmp_path: Path, arr: np.ndarray, *, extrasamples: list[st
 def test_a_uint8_tiff_trains_augmented_through_detection(tmp_path: Path):
     pytest.importorskip("torch")
     import torch
-    from tcip_mcp.pipelines.data.datasets import build_dataset
 
     arr = _grid(40, 32, 3)
     images_dir, labels_dir = _detection_project(tmp_path, arr)
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="bud", transforms=_flip_transform())
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", transforms=_flip_transform())
     got, _target = ds[0]
     flipped = torch.from_numpy(arr[:, ::-1].astype(np.float32) / 255.0).permute(2, 0, 1)
     assert torch.equal(got, flipped)
@@ -196,20 +195,17 @@ def test_a_uint8_windowed_tile_trains_augmented_through_tiling(tmp_path: Path):
     pytest.importorskip("torch")
     import torch
     from tcip_mcp.pipelines import raster_source
-    from tcip_mcp.pipelines.data.datasets import build_dataset
 
     raster_source.close_source_pool()
     try:
         arr = _grid(96, 96, 3)
         images_dir, labels_dir = _detection_project(tmp_path, arr)
-        ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                           subject="bud", transforms=_flip_transform(),
-                           tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+        ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", transforms=_flip_transform(), tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
         got, _target = ds[0]  # tile at (0, 0)
         tile = arr[0:64, 0:64]
         flipped = torch.from_numpy(tile[:, ::-1].astype(np.float32) / 255.0).permute(2, 0, 1)
         assert torch.equal(got, flipped)
-        assert ds.source_frames["img0"]["windowed"] is True
+        assert ds.source_frames[ds.stems[0]]["windowed"] is True
     finally:
         raster_source.close_source_pool()
 
@@ -221,15 +217,12 @@ def test_a_declared_alpha_windowed_tile_trains_augmented(tmp_path: Path):
     pytest.importorskip("torch")
     import torch
     from tcip_mcp.pipelines import raster_source
-    from tcip_mcp.pipelines.data.datasets import build_dataset
 
     raster_source.close_source_pool()
     try:
         arr = _grid(96, 96, 4)
         images_dir, labels_dir = _detection_project(tmp_path, arr, extrasamples=["unassalpha"])
-        ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                           subject="bud", num_channels=4, transforms=_flip_transform(),
-                           tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+        ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", num_channels=4, transforms=_flip_transform(), tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
         got, _target = ds[0]  # tile at (0, 0)
         tile = arr[0:64, 0:64]
         flipped = torch.from_numpy(tile[:, ::-1].astype(np.float32) / 255.0).permute(2, 0, 1)
@@ -246,15 +239,12 @@ def test_a_declared_spectral_fourth_band_windowed_tile_trains_unaugmented(tmp_pa
     pytest.importorskip("torch")
     import torch
     from tcip_mcp.pipelines import raster_source
-    from tcip_mcp.pipelines.data.datasets import build_dataset
 
     raster_source.close_source_pool()
     try:
         arr = _grid(96, 96, 4)
         images_dir, labels_dir = _detection_project(tmp_path, arr, extrasamples=["unspecified"])
-        ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                           subject="bud", num_channels=4, transforms=_flip_transform(),
-                           tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+        ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", num_channels=4, transforms=_flip_transform(), tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
         got, _target = ds[0]  # tile at (0, 0)
         tile = arr[0:64, 0:64]
         unflipped = torch.from_numpy(tile.astype(np.float32) / 255.0).permute(2, 0, 1)

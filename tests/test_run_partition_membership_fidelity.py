@@ -50,7 +50,7 @@ def _persisted_split(experiment_id: str, data_cfg: dict) -> dict:
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None, "the fixture must produce a real validation side"
     create_experiment(experiment_id, {})
-    persist_run_partition(experiment_id, train_ds, val_ds, data_cfg)
+    persist_run_partition(experiment_id, data_cfg)
     return read_run_partition(experiment_id)
 
 

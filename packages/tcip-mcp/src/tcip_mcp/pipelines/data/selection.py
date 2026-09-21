@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 
 import tcip_store
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
@@ -27,6 +27,49 @@ SIDES = ("train", "val", "calibration")
 """The sides a draw assigns. ``train`` and ``val`` build the run's two loaders; ``calibration``
 builds neither and is the universe a calibration or an evaluation reads its operating point off,
 held out from both training and selection."""
+
+DOCUMENT = "document"
+"""Ground truth that is one label document per sample, ``<stem>.json``."""
+
+MASK = "mask"
+"""Ground truth that is one mask raster per sample, ``<stem>.png``."""
+
+TABLE = "table"
+"""Ground truth that is one row of a table, named by the row's own key."""
+
+GROUND_TRUTH_SHAPES = (DOCUMENT, MASK, TABLE)
+"""The three shapes ground truth has here. A shape is a property of the ground truth itself, read
+off what a record names rather than decided by the task a run states, so one admission and one
+re-admission serve every task."""
+
+SHAPE_DESCRIPTIONS = {
+    DOCUMENT: "its own per-image label document",
+    MASK: "a <stem>.png mask raster of its own",
+    TABLE: "a row of a table, named by its row key",
+}
+"""How each shape reads in a refusal, stated once so a loader, an admission and a document all
+name one shape the same way."""
+
+
+def shape_of(ground_truth: str, row_key: str | None) -> str:
+    """Which of :data:`GROUND_TRUTH_SHAPES` a ground-truth name is, read off the name itself: a
+    row key or a ``.csv`` means one row of a table, a ``.png`` means a mask raster of its own, and
+    anything else is a label document of its own.
+
+    The one rule, so a loader, a re-admission, a foreground count, a freeze and the sniff over a
+    place a config names (:func:`~tcip_mcp.pipelines.data.label_queries.ground_truth_shape`, which
+    asks this of what it finds there) cannot disagree about what a name carries, and nothing has
+    to carry a second field saying which shape a record already spells. A name, never a file: this
+    reads no disk, which is what lets every reader of a record ask it.
+    """
+    if row_key is not None:
+        return TABLE
+    suffix = Path(ground_truth).suffix.lower()
+    if suffix == ".csv":
+        return TABLE
+    if suffix == ".png":
+        return MASK
+    return DOCUMENT
 
 
 @dataclass(frozen=True)
@@ -47,7 +90,9 @@ class Sample:
     capture dates as its draw admitted, and one key for all of them would answer some samples out
     of a bucket nobody wrote them under. It is stated by the producer that admitted the sample,
     never re-derived downstream: the key a writer stated and the date a path happens to spell are
-    two different facts.
+    two different facts. It is ``None`` for a sample no confirmation store answers for: a mask
+    raster and a table row are admitted by their own existence beside the image, so there is no
+    bucket to name and naming one would claim a human assertion nobody made.
 
     ``rect`` is the half-open pixel rect ``(x0, y0, x1, y1)`` a within-image draw assigned, or
     ``None`` when the sample is the whole source. ``ground_truth_digest`` is that file's digest at
@@ -58,7 +103,7 @@ class Sample:
     ground_truth: str
     group: str
     side: str
-    confirmation_bucket: str
+    confirmation_bucket: str | None
     rect: tuple[int, int, int, int] | None = None
     row_key: str | None = None
     ground_truth_digest: str | None = None
@@ -76,16 +121,26 @@ class Sample:
         return f"{self.source}[{self.rect[0]},{self.rect[1]},{self.rect[2]},{self.rect[3]}]"
 
     @property
-    def member_stem(self) -> str:
-        """The bare stem a membership record names this sample by.
+    def shape(self) -> str:
+        """Which of :data:`GROUND_TRUTH_SHAPES` this sample's ground truth is
+        (:func:`shape_of`)."""
+        return shape_of(self.ground_truth, self.row_key)
 
-        Its row key's stem when one document answers for many samples, its own ground-truth
-        document's otherwise, which is every sample a geometry loader reads today: those name a
-        document per image and carry no row key. Every membership record, every cal/holdout lock
-        and every leakage join names a member this way, so the sample states it once here rather
-        than each consumer deriving it from whichever of the two fields it happens to hold.
+    @property
+    def member_stem(self) -> str:
+        """The name a membership record names this sample by.
+
+        Its row key as written when one ground truth answers for many samples: a row key is
+        already the member's own name, so stripping a suffix from it would read ``a.1`` and
+        ``a.2`` as one member and collapse two rows into one everywhere a record, a cal/holdout
+        lock or a leakage join joins on this. Otherwise the stem of its own ground-truth file,
+        which is every sample whose ground truth is one file per sample. The sample states it
+        once here rather than each consumer deriving it from whichever of the two fields it
+        happens to hold.
         """
-        return Path(self.row_key or self.ground_truth).stem
+        if self.row_key is not None:
+            return self.row_key
+        return Path(self.ground_truth).stem
 
     @property
     def ground_truth_scope(self) -> str:
@@ -102,13 +157,58 @@ class Sample:
 
 
 @dataclass(frozen=True)
+class ClassScope:
+    """The class space a run's ground truth was admitted under.
+
+    ``subject`` is the object class a document admission read confirmations and targets for,
+    ``attribute`` the value vocabulary it was scoped to when one was named, and ``id_map`` the
+    ``assign_class_ids`` map its loader reads targets under. A mask raster and a table row carry
+    their own classes, so a run over them has no scope and every field is ``None``. The one shape
+    both a draw's own :class:`~tcip_mcp.pipelines.data.label_queries.Admission` and a recorded
+    :class:`Selection` answer with, so nothing downstream restates which facts a class space is.
+    """
+
+    subject: str | None = None
+    attribute: str | None = None
+    id_map: dict[str, int] | None = None
+
+    @classmethod
+    def recorded_in(cls, data_cfg: "Mapping[str, Any]") -> "ClassScope":
+        """The class space a run's own data config records: the one read of it, for a checkpoint,
+        the durable experiment record, a freeze and inference decode alike. A door that reads the
+        subject a run admits for reads that key alone, which is not this fact.
+
+        An empty subject, attribute or map reads as "none", the same fact as a missing key, so a
+        reader never has to tell one writer's empty form from another's.
+        """
+        id_map = data_cfg.get("id_map")
+        return cls(
+            subject=data_cfg.get("subject") or None,
+            attribute=data_cfg.get("attribute") or None,
+            id_map=({str(name): int(cid) for name, cid in id_map.items()}
+                    if isinstance(id_map, dict) and id_map else None),
+        )
+
+    def onto(self, data_cfg: "MutableMapping[str, Any]") -> None:
+        """Record this class space on a run's own data config, in the one empty form every reader
+        of it expects: ``None`` where nothing scopes the run, never an empty map beside a missing
+        key. The one write, so a drawn run and a bound run record it the same way."""
+        data_cfg["subject"] = self.subject
+        data_cfg["attribute"] = self.attribute
+        data_cfg["id_map"] = dict(self.id_map) if self.id_map else None
+
+
+@dataclass(frozen=True)
 class Selection:
     """A drawn partition: its samples, the scope they were admitted under, and how they were drawn.
 
     ``subject``/``attribute``/``id_map`` are the scope the draw admitted through, carried so a run
     binding this selection reads them from here rather than restating them and being checked
     against it. ``id_map`` is the ``assign_class_ids`` map the admission used, so the loader's
-    class ids and the draw's are one derivation.
+    class ids and the draw's are one derivation. All three are empty for a draw over ground truth
+    no registry scopes, a mask raster or a table row: the class space a run binding such a
+    selection trains in is derived from that ground truth once for the whole run
+    (:func:`~tcip_mcp.pipelines.data.split_construction.loader_sizes`).
     """
 
     samples: tuple[Sample, ...]
@@ -121,6 +221,13 @@ class Selection:
     admission_counts: dict[str, int] = field(default_factory=dict)
     realized_ratios: dict[str, float] = field(default_factory=dict)
     origin: dict | None = None
+
+    @property
+    def scope(self) -> ClassScope:
+        """The class space this selection was drawn under, empty for ground truth no registry
+        scopes."""
+        return ClassScope(subject=self.subject or None, attribute=self.attribute or None,
+                          id_map=dict(self.id_map) if self.id_map else None)
 
     def on(self, side: str) -> list[Sample]:
         """This selection's samples on one side, in recorded order."""
@@ -137,9 +244,22 @@ class Selection:
         return {s.identity for s in self.samples}
 
 
-def side_samples(samples: Iterable[Sample], side: str) -> list[Sample]:
-    """The samples of ``samples`` on one side, for a caller holding a bare sample list."""
-    return [s for s in samples if s.side == side]
+def unscoped_document_issue(selection: Selection, selection_dir: str | Path) -> str | None:
+    """Why a selection over per-image label documents that records no subject cannot be read, or
+    ``None`` when it can.
+
+    The one statement of that refusal, so a run binding the selection, the preflight that offers
+    it and a calibration redrawing its held-out side all say the same thing. A selection over a
+    mask raster or a table row records no subject because none scopes it, which is not this
+    refusal: only the document shape is subject-scoped.
+    """
+    if selection.samples and selection.samples[0].shape == DOCUMENT and not selection.subject:
+        return (
+            f"the selection at {selection_dir} records no subject: a read over per-image label "
+            "documents is scoped by the subject the selection was drawn under, and one drawn "
+            "without a subject names no class space to read them in."
+        )
+    return None
 
 
 def overlap(left: Iterable[Sample], right: Iterable[Sample]) -> dict[str, list[str]]:
@@ -156,15 +276,15 @@ def overlap(left: Iterable[Sample], right: Iterable[Sample]) -> dict[str, list[s
 
 
 def refuse_unreadable_samples(samples: Iterable[Sample]) -> None:
-    """Refuse a sample whose ground truth today's geometry loaders cannot read, naming what is
+    """Refuse a sample no loader here can read whatever its ground truth is, naming what is
     missing rather than letting the loader read something else.
 
-    Two fields the record carries and no geometry loader honors: ``rect``, a within-image region,
-    which a loader would otherwise read as the whole source, so two regions of one raster would
-    train as the same repeated image; and ``row_key``, a row inside a ground truth that answers
-    for many samples, which a loader reading the file whole would take for a per-image document.
-    Both refuse here rather than being ignored. The record shape is settled either way, so
-    honoring them later changes a loader and not a persisted record.
+    One field the record carries and no loader honors: ``rect``, a within-image region, which a
+    loader would otherwise read as the whole source, so two regions of one raster would train as
+    the same repeated image. It refuses here rather than being ignored. The record shape is
+    settled either way, so honoring it later changes a loader and not a persisted record. Whether
+    a sample's own shape is the one a loader reads is that loader's own declared shape, refused
+    once in :meth:`~tcip_mcp.pipelines.data.datasets.BaseImageDataset._init_from_samples`.
     """
     samples = list(samples)
     with_rect = [s.identity for s in samples if s.rect is not None]
@@ -174,13 +294,6 @@ def refuse_unreadable_samples(samples: Iterable[Sample]) -> None:
             f"({with_rect[:5]}): a within-image region is recorded but no loader windows to it "
             "yet, and reading the whole source instead would train two regions as the same "
             "repeated image. Draw a selection of whole sources for this run."
-        )
-    with_row = [s.identity for s in samples if s.row_key is not None]
-    if with_row:
-        raise ValueError(
-            f"{len(with_row)} sample(s) of this selection name a row inside their ground truth "
-            f"({with_row[:5]}): no geometry loader reads a ground truth by row yet, and reading "
-            "the file whole would take a document answering for many samples for a per-image one."
         )
 
 
@@ -254,8 +367,9 @@ def _sample_document(sample: Sample) -> dict[str, Any]:
     doc: dict[str, Any] = {
         "source": sample.source, "ground_truth": sample.ground_truth,
         "group": sample.group, "side": sample.side,
-        "confirmation_bucket": sample.confirmation_bucket,
     }
+    if sample.confirmation_bucket is not None:
+        doc["confirmation_bucket"] = sample.confirmation_bucket
     if sample.rect is not None:
         doc["rect"] = list(sample.rect)
     if sample.row_key is not None:
@@ -287,8 +401,10 @@ def as_selection(document: Any, *, where: str) -> Selection:
     never writes.
 
     ``where`` names the document in every refusal. Refuses a non-mapping, a missing or empty
-    ``samples`` list, a sample missing ``source``/``ground_truth``/``group``, a side outside
-    :data:`SIDES`, a malformed ``rect``, and a partition whose sides cross
+    ``samples`` list, a sample missing ``source``/``ground_truth``/``group``/``side``, a side
+    outside :data:`SIDES`, a malformed ``rect``, a sample whose ground truth is its own label
+    document and which names no ``confirmation_bucket`` (the bucket whose human confirmations
+    admitted it, which that shape's admission always reads), and a partition whose sides cross
     (:func:`refuse_crossing_sides`).
     """
     if not isinstance(document, dict):
@@ -308,13 +424,11 @@ def as_selection(document: Any, *, where: str) -> Selection:
             raise ValueError(
                 f"sample {position} of the selection at {where} is a "
                 f"{type(raw).__name__}, not a mapping.")
-        missing = [k for k in ("source", "ground_truth", "group", "side", "confirmation_bucket")
-                   if not raw.get(k)]
+        missing = [k for k in ("source", "ground_truth", "group", "side") if not raw.get(k)]
         if missing:
             raise ValueError(
                 f"sample {position} of the selection at {where} carries no {missing}: every "
-                "sample names its own source, ground truth, group key, side, and the "
-                "confirmation bucket its admission read.")
+                "sample names its own source, ground truth, group key and side.")
         side = str(raw["side"])
         if side not in SIDES:
             raise ValueError(
@@ -330,13 +444,20 @@ def as_selection(document: Any, *, where: str) -> Selection:
             x0, y0, x1, y1 = (int(v) for v in rect_raw)
             rect = (x0, y0, x1, y1)
         row_key = raw.get("row_key")
-        samples.append(Sample(
+        bucket = raw.get("confirmation_bucket")
+        sample = Sample(
             source=str(raw["source"]), ground_truth=str(raw["ground_truth"]),
             group=str(raw["group"]), side=side,
-            confirmation_bucket=str(raw["confirmation_bucket"]), rect=rect,
+            confirmation_bucket=str(bucket) if bucket else None, rect=rect,
             row_key=str(row_key) if row_key is not None else None,
             ground_truth_digest=raw.get("ground_truth_digest"),
-        ))
+        )
+        if sample.confirmation_bucket is None and sample.shape == DOCUMENT:
+            raise ValueError(
+                f"sample {position} of the selection at {where} names its own label document "
+                "and no confirmation_bucket: that admission reads a human confirmation store, so "
+                "the bucket it read is part of the sample. Draw the selection again.")
+        samples.append(sample)
     refuse_crossing_sides(samples)
     id_map = document.get("id_map")
     return Selection(

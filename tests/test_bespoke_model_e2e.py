@@ -36,6 +36,7 @@ from torch.utils.data import DataLoader  # noqa: E402
 from tests import bespoke_models  # noqa: E402 (the agent-authored bespoke model + train loop)
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 IMG = 64
 
@@ -58,7 +59,6 @@ def _audit_events(root: Path, tool: str = "training_run") -> list[dict]:
 def test_bespoke_detector_end_to_end(tmp_path: Path):
     from tcip_mcp.experiments import create_experiment, update_status
     from tcip_mcp.model_registry import ModelRegistry, load_registered_checkpoint
-    from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.derivations import gt_aspect_ratios
     from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE, build_predictor
     from tcip_mcp.pipelines.model_build import build_model
@@ -83,8 +83,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
                                   IMG, IMG, keep_empty=True)
         gt_wh.append((w, h))
 
-    dataset = build_dataset("detection", images_dir=str(images_dir),
-                            labels_dir=str(labels_dir), subject="bud")
+    dataset = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
     train_loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
     val_loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
 

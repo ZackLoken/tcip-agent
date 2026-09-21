@@ -14,7 +14,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tcip_annotation import Annotation, BBox, Polygon
+from tcip_annotation import Annotation, BBox
+from tcip_annotation.state import polygonal
 from tcip_annotation.json_io import UnreadableLabelDocument
 from tcip_annotation.json_io import read_annotations as read_labels
 
@@ -59,7 +60,7 @@ def _binding_refusal(binding: dict | None, compared_root: str) -> dict:
 def _logical_image_names(images_dir) -> list[str]:
     """Every logical image's on-disk display name under ``images_dir``, a plain file's own name,
     or (for a ``.bandgroup``-grouped capture) its manifest's filename, the file every other
-    by-name reader (``image_name_map``, the dataset gallery route) treats as that capture's name.
+    by-name reader (the dataset gallery route) treats as that capture's name.
     Folding sibling band files into one name here is what lets this tool's frame index agree with
     the frontend's own image_list, which enumerates the same way.
     """
@@ -213,7 +214,7 @@ def _subject_task(anns: list[Annotation], subject: str) -> str | None:
     Annotate tab's own frame count, while calling it ``"detect"`` would claim a box nobody drew.
     """
     scoped = [a for a in anns if a.subject == subject and a.geometry is not None]
-    if any(isinstance(a.geometry, Polygon) for a in scoped):
+    if any(polygonal(a.geometry) for a in scoped):
         return "segment"
     if any(isinstance(a.geometry, BBox) for a in scoped):
         return "detect"

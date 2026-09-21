@@ -25,6 +25,7 @@ OBJECTS_PER_IMAGE = 8
 
 CAL_STEMS = [f"cal_{i}" for i in range(N_IMAGES)]
 HOLD_STEMS = [f"hold_{i}" for i in range(N_IMAGES)]
+LABELS_DIR = "annotations/2-11-26"
 
 
 def _records(stems: list[str], offset: float) -> list[dict]:
@@ -43,13 +44,19 @@ def _records(stems: list[str], offset: float) -> list[dict]:
 
 
 def _write_split(experiment_id: str, train_stems: list[str]) -> None:
-    tcip_store.replace(split_key(experiment_id), {"train": train_stems, "group_by": "stem"})
+    """The record's membership lives per ground-truth scope, the way every run writes it: a bare
+    member name means one image only within the scope its own block names."""
+    tcip_store.replace(split_key(experiment_id), {
+        "members": {LABELS_DIR: {
+            "train": train_stems, "val": [],
+            "group_key_map": {stem: stem for stem in train_stems}}},
+        "group_by": "stem"})
 
 
 def _resolve(experiment_id: str):
     return resolve_operating_point(
         "bud_opening", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
-        experiment_id=experiment_id,
+        experiment_id=experiment_id, calibration_labels_dir=LABELS_DIR,
         calibration_records=_records(CAL_STEMS, 0.0),
         holdout_records=_records(HOLD_STEMS, 100000.0))
 

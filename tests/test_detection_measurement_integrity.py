@@ -634,7 +634,6 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
                          "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
-                 "val_images_dir": str(val_images), "val_labels_dir": str(val_labels),
                  "tiling": {"enabled": True}},  # no tile_size -> effective default must be persisted
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
@@ -1018,9 +1017,9 @@ def test_manifest_calibration_firewall_hashes_the_universe(
 
 
 def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_path, monkeypatch):
-    """A manifest-restricted calibration answers how many present stems it left out of its
-    universe, the train side's, the val side's and the unassigned ones, as counts beside the
-    incomplete attribute count, so the caller learns the exclusions without opening the persisted
+    """A manifest-restricted calibration answers how many members the selection put elsewhere
+    under this scope, its train side's and its val side's, as counts beside the incomplete
+    attribute count, so the caller learns the exclusions without opening the persisted
     evidence."""
     import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
@@ -1040,8 +1039,7 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
             "stated_values": {"selection_dir": str(tmp_path / "m")},
         },
         "calibration_stems": ["a"],
-        "excluded": {"excluded_training_stems": ["b", "c"], "excluded_validation_stems": ["e"],
-                    "excluded_unassigned_stems": ["d"]},
+        "excluded": {"excluded_training_stems": ["b", "c"], "excluded_validation_stems": ["e"]},
     }
     monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
@@ -1059,7 +1057,6 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
 
     assert r["n_excluded_training_stems"] == 2
     assert r["n_excluded_validation_stems"] == 1
-    assert r["n_excluded_unassigned_stems"] == 1
     assert r["n_excluded_incomplete_attribute"] == 0
 
 

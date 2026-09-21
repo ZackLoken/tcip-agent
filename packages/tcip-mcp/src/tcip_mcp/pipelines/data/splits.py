@@ -32,7 +32,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import TYPE_CHECKING, Callable, Iterable, Sequence
+from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Sequence
 
 from tcip_store import (
     RECORD_JSON,
@@ -86,9 +86,9 @@ def count_lines(label_path: str | Path) -> int:
 
 
 def count_label_lines(
-    labels_dir: str | Path, stem: str, *, subject: str | None = None, attribute: str | None = None,
+    label_path: str | Path, *, subject: str | None = None, attribute: str | None = None,
 ) -> int:
-    """Annotation count for ``stem`` from its name-based per-image ``<stem>.json``.
+    """Annotation count for one per-image label document, by its own path.
 
     Drives stratified splitting, a foreground-density proxy. With ``subject`` omitted, every
     record in the file counts regardless of subject (the whole-tree proxy a stats-only draw
@@ -101,15 +101,19 @@ def count_label_lines(
     counts against every record assessed or not (its real meaning, "no attribute") rather than
     scoring zero against a key no record ever carries.
 
+    The document is named by the path the caller holds, never by a directory and a name it would
+    be recomposed from: a caller holding an admitted sample already knows which file answered for
+    it, and one enumerating a directory composes the path once at its own site
+    (:func:`~tcip_mcp.dataset_layout.label_filename`).
+
     A missing file scores 0 foreground; a present, unreadable one raises
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than scoring 0, since a
     corrupt document is not the same fact as an empty one.
     """
     from tcip_annotation import json_io
-    from tcip_mcp.dataset_layout import label_filename
 
     subject, attribute = subject or None, attribute or None
-    jp = Path(labels_dir) / label_filename(stem)
+    jp = Path(label_path)
     if not jp.is_file():
         return 0
     records = json_io.read_annotations(str(jp))
@@ -143,14 +147,6 @@ def label_document_extent(label_path: str | Path) -> tuple[int, int] | None:
     data = load_label_document(p)
     w, h = int(data.get("width", 0) or 0), int(data.get("height", 0) or 0)
     return (w, h) if w > 0 and h > 0 else None
-
-
-def image_extent_from_labels(labels_dir: str | Path, stem: str) -> tuple[int, int] | None:
-    """:func:`label_document_extent` for a caller holding a labels directory and a stem rather
-    than the document's own path."""
-    from tcip_mcp.dataset_layout import label_filename
-
-    return label_document_extent(Path(labels_dir) / label_filename(stem))
 
 
 def group_balanced_split(
@@ -311,8 +307,22 @@ def group_balanced_split(
     return {n: sorted(result[n]) for n in SPLIT_NAMES}
 
 
+def foreground_group_count(
+    members: Iterable[str], counts: Mapping[str, int], group_of: Callable[[str], str],
+) -> int:
+    """How many distinct groups among ``members`` carry foreground.
+
+    The one reading of "carries foreground" every floor below is measured against, so a draw over
+    a whole tree, a bound run's calibration universe and a preflight all count groups the same
+    way. ``counts`` is each member's own foreground count under the caller's own key for it
+    (:func:`~tcip_mcp.pipelines.data.label_queries.foreground_counts`); a member the map does not
+    name carries none.
+    """
+    return len({group_of(member) for member in members if counts.get(member, 0) > 0})
+
+
 def refuse_insufficient_foreground_groups(
-    foreground_groups: int, minimums: dict[str, int],
+    foreground_groups: int, minimums: dict[str, int], *, remedy: str,
 ) -> None:
     """Refuses, before any write, a draw whose tree holds fewer foreground groups than the sum
     of the per-side minimums a caller states.
@@ -322,16 +332,17 @@ def refuse_insufficient_foreground_groups(
     ratio on any of them, so every side named here is always requested);
     :func:`selection_calibration_universe` calls it for its one held-out side in place of its own
     inline count. Names every requested side and its minimum, the foreground groups actually
-    found, and the remedy: annotate or confirm more foreground groups of the draw's own subject.
+    found, and ``remedy``, the caller's own sentence saying what to add: what counts as a
+    foreground group differs by the ground truth a draw reads, so the remedy is stated by the
+    caller that knows which it read rather than assumed here.
     """
     needed = sum(minimums.values())
     if foreground_groups >= needed:
         return
     sides = ", ".join(f"{name}={n}" for name, n in sorted(minimums.items()))
     raise ValueError(
-        f"the draw holds {foreground_groups} foreground group(s) of the draw's own subject, "
-        f"fewer than the {needed} the requested sides need ({sides}): annotate or confirm more "
-        "foreground groups of this subject."
+        f"the draw holds {foreground_groups} foreground group(s), fewer than the {needed} the "
+        f"requested sides need ({sides}): {remedy}"
     )
 
 
@@ -421,8 +432,7 @@ def draw_train_val(
 
 
 def redraw_starved_issue(
-    groups: Sequence[str], foreground_groups: Sequence[str], *,
-    selection_dir: str | None, seed: int | None,
+    selection: "Selection", *, selection_dir: str | None, seed: int | None,
 ) -> str | None:
     """Whether a selection's train-plus-val members resolve to too few *foreground* groups for a
     redraw to populate both a train and a val side.
@@ -438,22 +448,29 @@ def redraw_starved_issue(
     own pre-mint check for ``split_draws``), ahead of the redraw's own refusal once it has actually
     drawn a starved side for real.
 
-    ``groups`` is every group key among those members, ``foreground_groups`` the subset whose
-    samples carry the draw's own subject's foreground, both computed by the caller from the
-    selection's recorded group keys, never re-derived from a grouping policy here.
+    The members are the selection's own train-plus-val samples, grouped by the keys its draw
+    recorded on them and counted under the scope it drew with
+    (:func:`~tcip_mcp.pipelines.data.label_queries.foreground_counts`), never re-derived from a
+    grouping policy here.
 
     ``None`` when at least two foreground groups are available; the refusal otherwise, naming the
     selection, the seed and the two counts, with the two remedies: drop the redraw to bind the
     selection's recorded partition instead, or draw a selection with at least two foreground
     groups across train and val.
     """
-    distinct, foreground = set(groups), set(foreground_groups)
-    if len(foreground) >= 2:
+    from tcip_mcp.pipelines.data.label_queries import foreground_counts
+
+    pool = selection.on("train") + selection.on("val")
+    group_of = {s.identity: s.group for s in pool}
+    counts = foreground_counts({s.identity: s for s in pool}, selection.scope)
+    distinct = set(group_of.values())
+    foreground = foreground_group_count(group_of, counts, group_of.__getitem__)
+    if foreground >= 2:
         return None
     name = f"the selection at {selection_dir!r}" if selection_dir else "the selection"
     return (
         f"redrawing train and val inside {name}'s own members at seed {seed} would starve a "
-        f"side: they resolve to only {len(foreground)} foreground group(s) among "
+        f"side: they resolve to only {foreground} foreground group(s) among "
         f"{len(distinct)} distinct group(s), short of the two a train side and a val side each "
         "need at least one of. Drop data.split.redraw_within_selection and data.split.seed to "
         "bind the selection's recorded partition instead, or draw a selection with at least two "
@@ -944,10 +961,9 @@ def label_image_stems(
     own provenance sidecars are excluded through :func:`~tcip_annotation.json_io.prediction_documents`
     rather than named as if they were image stems.
 
-    This is the whole-directory universe; a caller drawing under a selection instead narrows its
-    own listing with :func:`selection_calibration_universe`, which takes this function's stems as
-    the ``present`` set it checks the selection's held-out samples against, never a second scan of
-    its own.
+    This is the whole-directory universe, for a door measuring over a whole labelled directory. A
+    door restricted to a selection reads :func:`selection_calibration_universe` instead, which
+    answers from the selection's own recorded samples and scans nothing.
     """
     from tcip_annotation.json_io import prediction_documents
 
@@ -963,31 +979,31 @@ def label_image_stems(
 
 
 def selection_calibration_universe(
-    selection: "Selection", labels_dir: str | Path, present: Iterable[str],
-    *, foreground_stems: Iterable[str] | None = None,
-    min_foreground_groups: dict[str, int] | None = None,
+    selection: "Selection", labels_dir: str | Path,
+    *, min_foreground_groups: dict[str, int] | None = None,
 ) -> tuple[list[str], str, dict[str, str], dict[str, list[str]], dict[str, "Sample"]]:
     """The calibration universe a selection gives one caller restricting a read to ``labels_dir``.
 
-    The selection's ``calibration`` samples whose own label document lives in ``labels_dir``, and
-    which are present in the door's own stem listing, so a read measures on exactly the side the
-    draw held out for it, never the side the shipped checkpoint was chosen on (a disjointness
-    check catches a leak onto that side separately, against the checkpoint's own selection). The
-    narrowing is by the label path each sample records, never by a capture date compared against
-    a directory: a selection spans dates, and a door that names one date's labels directory reads
-    that date's held-out samples out of it.
+    The selection's ``calibration`` samples whose own ground truth lives in ``labels_dir``, so a
+    read measures on exactly the side the draw held out for it, never the side the shipped
+    checkpoint was chosen on (a disjointness check catches a leak onto that side separately,
+    against the checkpoint's own selection). The narrowing is by the ground-truth scope each
+    sample records, never by a capture date compared against a directory: a selection spans dates,
+    and a door that names one date's ground truth reads that date's held-out samples out of it.
 
-    ``present`` is the door's own stem listing (e.g. :func:`label_image_stems`' stems). A recorded
-    calibration member the listing does not hold refuses by name: the selection is the membership
-    authority, so a member whose label or image the directory no longer carries is data that moved
-    under the draw, never a universe quietly two stems smaller than the one recorded.
-    ``foreground_stems``, when given, is the subset of the universe that actually
-    carries the draw's own subject's foreground (the caller's own subject-scoped read,
-    :func:`count_label_lines`'s job, never re-derived here): the floor below then counts only
-    foreground groups, so a universe of background-only groups cannot pass it. Omitted, the floor
-    counts every group in the universe, the weaker check every caller that has not wired
-    foreground info still gets; the platform's own calibration doors all wire it, through
-    :func:`resolve_selection_calibration_universe`.
+    The selection is the whole membership authority here: nothing is intersected against a
+    directory listing, and whether each member's ground truth still admits is the one re-admission
+    over recorded samples
+    (:func:`~tcip_mcp.pipelines.data.label_queries.refuse_inadmissible_samples`), which the door
+    building a loader over these samples runs. Whatever shape that ground truth is, this universe
+    returns it: a door refuses only what its own measurement cannot do, never a shape on this
+    function's behalf.
+
+    The floor below counts only the groups that actually carry foreground, read through the one
+    per-sample counter
+    (:func:`~tcip_mcp.pipelines.data.label_queries.foreground_counts`) under the selection's own
+    class space, so a universe of background-only groups cannot pass it and every door that names
+    a selection counts the same way the draw did.
 
     ``min_foreground_groups`` is the caller's own floor, forwarded to
     :func:`refuse_insufficient_foreground_groups` verbatim; omitted, it defaults to
@@ -996,111 +1012,63 @@ def selection_calibration_universe(
     states its own floor of one instead, so a legitimate single-foreground-group universe is not
     refused for a halving this caller never performs.
 
-    Returns ``(stems, group_by, group_key_map, excluded, samples)``: ``stems`` is the calibration
-    side's bare stems under ``labels_dir``; ``group_key_map`` is each one's recorded group key,
-    with ``group_by="explicit_map"``, so the locked draw groups by exactly the keys the selection
-    drew with rather than re-resolving a policy; ``excluded`` is the three-way partition of what
-    the universe does not hold: the recorded train members under this directory
-    (``excluded_training_stems``), its recorded val members (``excluded_validation_stems``), and
-    present stems the selection never claimed (``excluded_unassigned_stems``); ``samples`` is each
-    universe stem's own recorded sample, so a caller measures on the pixels the draw held out
-    rather than on whatever a directory listing of the same names happens to hold today.
+    Returns ``(stems, group_by, group_key_map, excluded, samples)``:
+    ``stems`` is the calibration side's bare member names under ``labels_dir``; ``group_key_map``
+    is each one's recorded group key, with ``group_by="explicit_map"``, so the locked draw groups
+    by exactly the keys the selection drew with rather than re-resolving a policy; ``excluded``
+    names what the selection put elsewhere under this scope, its recorded train members
+    (``excluded_training_stems``) and its recorded val members (``excluded_validation_stems``);
+    ``samples`` is each universe member's own recorded sample, so a caller measures on the pixels
+    the draw held out rather than on whatever a directory listing of the same names happens to
+    hold today. The class space the foreground was counted under is the selection's own
+    (``Selection.scope``), which the caller already holds.
 
-    Refuses a calibration sample naming a pixel rect or a table row
+    Refuses a calibration sample naming a pixel rect
     (:func:`~tcip_mcp.pipelines.data.selection.refuse_unreadable_samples`), the same refusal the
-    loaders apply: every door reaching a selection's samples either honors those fields or refuses
-    on them, so none of them measures a region over its whole source instead.
-
-    Refuses, naming the count, the labels directory and the caller's own floor, when the resulting
-    universe would hold fewer foreground (when known) groups than that floor states.
+    loaders apply, so no door measures a region over its whole source instead. Refuses, naming the
+    count, the labels directory and the caller's own floor, when the resulting universe would hold
+    fewer foreground (when known) groups than that floor states.
     """
+    from tcip_mcp.pipelines.data.label_queries import foreground_counts
     from tcip_mcp.pipelines.data.selection import refuse_unreadable_samples
 
-    present_set = set(present)
+    scope = selection.scope
     here = Path(labels_dir).resolve()
 
-    def _stem_here(sample) -> str | None:
-        label = Path(sample.ground_truth)
-        if label.parent.resolve() != here:
-            return None
-        return label.stem
-
+    # Through the sample's own recorded scope, never the parent of its ground-truth path: a table
+    # scope is the table itself, which no sample's parent directory equals.
+    in_scope = [s for s in selection.samples
+                if Path(s.ground_truth_scope).resolve() == here]
     by_side: dict[str, dict[str, str]] = {name: {} for name in SPLIT_NAMES}
     universe_samples: dict[str, "Sample"] = {}
-    for sample in selection.samples:
-        stem = _stem_here(sample)
-        if stem is None:
-            continue
-        by_side[sample.side][stem] = sample.group
+    for sample in in_scope:
+        by_side[sample.side][sample.member_stem] = sample.group
         if sample.side == "calibration":
-            universe_samples[stem] = sample
-
-    absent = sorted(stem for stem in universe_samples if stem not in present_set)
-    if absent:
-        raise ValueError(
-            f"{len(absent)} calibration member(s) of this selection are not in the stem listing "
-            f"for {labels_dir} ({absent[:5]}): the selection is what says which samples were held "
-            "out, so a member whose label or image the directory no longer holds is data that "
-            "moved under the draw. Restore them, or draw the selection again over the current data."
-        )
+            universe_samples[sample.member_stem] = sample
     refuse_unreadable_samples(universe_samples.values())
 
     stems = sorted(universe_samples)
     group_key_map = {stem: by_side["calibration"][stem] for stem in stems}
-    claimed = set().union(*(set(side) for side in by_side.values()))
     excluded = {
         "excluded_training_stems": sorted(by_side["train"]),
         "excluded_validation_stems": sorted(by_side["val"]),
-        "excluded_unassigned_stems": sorted(present_set - claimed),
     }
 
-    if foreground_stems is None:
-        n_groups = len(set(group_key_map.values()))
-    else:
-        fg = set(foreground_stems)
-        n_groups = len({key for stem, key in group_key_map.items() if stem in fg})
+    counts = foreground_counts(universe_samples, scope)
+    n_groups = foreground_group_count(stems, counts, group_key_map.__getitem__)
     floor = min_foreground_groups if min_foreground_groups is not None else {"calibration": 2}
     try:
-        refuse_insufficient_foreground_groups(n_groups, floor)
+        refuse_insufficient_foreground_groups(
+            n_groups, floor,
+            remedy="annotate or confirm more foreground groups of this subject.")
     except ValueError as exc:
         raise ValueError(
             f"the selection's calibration side under {labels_dir} gives a calibration universe "
-            f"of {n_groups} foreground group(s) ({len(stems)} stem(s) total) after excluding "
-            f"what isn't present: {exc} Draw the selection again with a larger "
-            "calibration_ratio or more foreground groups under this labels directory."
+            f"of {n_groups} foreground group(s) ({len(stems)} member(s) total): {exc} Draw the "
+            "selection again with a larger calibration_ratio or more foreground groups under "
+            "this ground truth."
         ) from exc
     return stems, "explicit_map", group_key_map, excluded, universe_samples
-
-
-def resolve_selection_calibration_universe(
-    selection: "Selection", labels_dir: str | Path, present: Iterable[str],
-    *, min_foreground_groups: dict[str, int] | None = None,
-) -> tuple[list[str], str, dict[str, str], dict[str, list[str]], str | None, str | None,
-           dict[str, "Sample"]]:
-    """:func:`selection_calibration_universe` with the subject-scoped foreground read every
-    calibration door owes it, so ``calibrate_operating_point``, ``evaluate_model``,
-    ``redraw_calibration_holdout`` and ``tcip calibrate-operating-point`` cannot drift into
-    disagreeing about what a selection-restricted read reads.
-
-    The selection's own ``subject``/``attribute`` are the scope: a door that named this selection
-    reads them off it rather than restating its own and being checked against them, so there is
-    one statement of the scope instead of two compared.
-
-    Returns ``(stems, group_by, group_key_map, excluded, subject, attribute, samples)``: the
-    universe, its recorded grouping, the scope the foreground was counted under (which a caller
-    going on to count foreground itself over the returned universe uses rather than re-deriving),
-    and each universe stem's own recorded sample.
-    """
-    subject, attribute = selection.subject or None, selection.attribute or None
-    present_stems = list(present)
-    foreground_stems = {
-        s for s in present_stems
-        if count_label_lines(labels_dir, s, subject=subject, attribute=attribute) > 0
-    }
-    stems, group_by, group_key_map, excluded, samples = selection_calibration_universe(
-        selection, labels_dir, present_stems, foreground_stems=foreground_stems,
-        min_foreground_groups=min_foreground_groups)
-    return stems, group_by, group_key_map, excluded, subject, attribute, samples
 
 
 def _split_content_hash(parts: dict[str, list[str]] | None) -> str | None:

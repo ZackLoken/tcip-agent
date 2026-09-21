@@ -111,21 +111,36 @@ def test_the_resolve_scale_sidecar_golden_carries_every_key_the_writer_stamps(tm
 
 
 def test_the_experiment_split_golden_carries_every_key_persist_run_partition_writes(tmp_path):
-    class _Drawn:
-        def __init__(self, stems: list[str]) -> None:
-            self.stems = stems
+    """Over a partition the platform's own producer named, so the golden is checked against a
+    record carrying real per-scope membership rather than against the four keys a member-less run
+    writes."""
+    from tcip_mcp.pipelines.data.split_construction import _recorded_partition
+
+    from tests._producer_fixtures import samples_over
+
+    images_dir, table = tmp_path / "images", tmp_path / "ranks.csv"
+    images_dir.mkdir()
+    for stem in ("img_001", "img_002"):
+        (images_dir / f"{stem}.jpg").write_bytes(b"")
+    table.write_text("image,rank\nimg_001,1\nimg_002,2\n", encoding="utf-8", newline="\n")
+    samples = samples_over(images_dir, table)
+    partition = _recorded_partition(samples[:1], samples[1:], samples)
 
     experiment_id = "exp-fixture-shape-check"
     create_experiment(experiment_id, {"model_source": {"builder": "my_module:build"}})
     persist_run_partition(
-        experiment_id, _Drawn(["img_001"]), _Drawn(["img_002"]), {"labels_dir": ""},
-        dataset_id="a1", dataset_fingerprint="7ac1",
+        experiment_id, {"split": {"resolved_group_by": "stem_prefix"}},
+        dataset_id="a1", dataset_fingerprint="7ac1", partition=partition,
     )
     fresh = read_run_partition(experiment_id)
     golden = REGISTERED["experiment_split"].golden
     assert isinstance(golden, dict)
 
     assert set(golden) == set(fresh)
+    golden_block = next(iter(golden["members"].values()))
+    fresh_block = next(iter(fresh["members"].values()))
+    assert set(golden_block) == set(fresh_block)
+    assert set(golden_block["label_digests"]) == set(fresh_block["label_digests"])
 
 
 def test_the_trait_specs_golden_carries_every_field_the_encoder_writes():

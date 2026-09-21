@@ -90,9 +90,8 @@ def _synth_batch(task: str, *, in_chans: int, num_classes: int, img_size: int, d
     for _ in range(2):
         img = torch.rand(in_chans, img_size, img_size, device=device)
         if task == "ordinal":
-            # 0-dim tensors, not python scalars: the stacking collate rebuilds a scalar on the cpu.
-            target = {"ranks": torch.randint(0, ranks, (), device=device),
-                      "num_ranks": torch.tensor(ranks, device=device)}
+            # A 0-dim tensor, not a python scalar: the stacking collate rebuilds a scalar on the cpu.
+            target = {"ranks": torch.randint(0, ranks, (), device=device)}
         elif task == "regression":
             target = {"values": torch.rand((), device=device)}
         elif task == "semantic_seg":

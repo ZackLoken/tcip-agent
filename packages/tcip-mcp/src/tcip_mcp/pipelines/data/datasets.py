@@ -1,19 +1,20 @@
 """Multi-task datasets with standardized interfaces.
 
-Each dataset type returns (image_tensor, target_dict) where the target
-format is task-specific but always dict-based. A factory function
-`build_dataset` dispatches to the correct class by task type, or, for a
-task the known loaders don't cover, to a bespoke ``dataset_source`` builder
-the agent supplies (mirrors ``model_source``; see `build_from_dataset_source`).
+Every loader here is built from the samples the producer named
+(``label_queries.admit``): each sample reads its own source and the ground truth that answers for
+it, and nothing here enumerates a directory or a table. Each dataset type returns
+(image_tensor, target_dict) where the target format is task-specific but always dict-based. A
+factory function `build_dataset` dispatches to the correct class by task type, or, for a task the
+known loaders don't cover, to a bespoke ``dataset_source`` builder the agent supplies (mirrors
+``model_source``; see `build_from_dataset_source`).
 """
 
 from __future__ import annotations
 
-import csv
 import logging
 from abc import ABC, abstractmethod
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -24,17 +25,18 @@ from torch.utils.data import Dataset
 
 
 from tcip_mcp.pipelines import raster_source
-from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, BandGroupRef
+from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+from tcip_annotation.state import box_derivable, polygonal
+
 from tcip_mcp.pipelines.data.label_queries import (
-    admission_date, assemble_coco, authored_frame, coco_det_targets, dir_label_format,
-    first_labels_json, image_name_map, json_det_targets, require_samples,
-    resolve_registry_id_map, trainable_stems,
+    authored_frame, ground_truth_table, json_det_targets,
 )
-from tcip_mcp.dataset_layout import label_filename
-from tcip_mcp.pipelines.data.selection import Sample, refuse_unreadable_samples
+from tcip_mcp.pipelines.data.selection import (
+    DOCUMENT, MASK, SHAPE_DESCRIPTIONS, TABLE, ClassScope, Sample, refuse_unreadable_samples,
+)
 from tcip_mcp.pipelines.image_utils import (
-    IMAGE_EXTS, crop_pad_tile, image_dimensions, list_logical_images, load_image,
-    pad_tile, pil_to_tensor, resolve_image_source, resolve_source_path, to_pil_if_faithful,
+    crop_pad_tile, image_dimensions, load_image,
+    pad_tile, pil_to_tensor, resolve_source_path, to_pil_if_faithful,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,7 +46,7 @@ class BaseDataset(Dataset, ABC):
     """Abstract base for all task-specific datasets."""
 
     task_type: str = ""
-    expected_channels: int = 3  # input channels the dataset yields (3=RGB; set by build_dataset)
+    expected_channels: int  # input channels the dataset yields, stamped by build_dataset
 
     @property
     @abstractmethod
@@ -69,97 +71,149 @@ class BaseDataset(Dataset, ABC):
 class BaseImageDataset(BaseDataset):
     """Base for image datasets, centralizes channel-aware loading + finalization.
 
-    Subclasses set ``self.images_dir`` and ``self.transforms`` (and inherit
-    ``expected_channels`` from build_dataset), then build only the task-specific target.
+    Subclasses set ``self.transforms`` (and inherit ``expected_channels`` from build_dataset),
+    then build only the task-specific target.
 
-    A dataset built from samples sets ``sample_sources`` and ``sample_ground_truth``: each
-    sample's own source and ground-truth path, keyed by the sample key this dataset indexes by.
-    Every read then goes to the path the sample recorded rather than to a directory listing,
-    which is what lets one dataset span capture dates and keeps two dates' same-named images
-    apart. ``sample_member_stems`` holds the bare stem a membership record names each sample by.
+    Every loader here is built from a recorded sample list and sets ``sample_sources`` and
+    ``sample_ground_truth``: each sample's own source and ground-truth path, keyed by the sample
+    key this dataset indexes by. Every read then goes to the path the sample recorded rather than
+    to a directory listing, which is what lets one dataset span capture dates and keeps two dates'
+    same-named images apart. ``sample_member_stems`` holds the bare stem a membership record names
+    each sample by.
+
+    ``ground_truth_shape`` is the one shape this loader reads
+    (:data:`~tcip_mcp.pipelines.data.selection.GROUND_TRUTH_SHAPES`), declared by each subclass
+    and refused once in :meth:`refuse_other_shapes`. ``takes`` names the class-space facts this
+    loader is built with beyond its samples and transforms, which the factory reads to hand it
+    exactly those and nothing else. ``reads_geometry`` declares which geometries answer for this
+    loader's measurement, for the loaders whose ground truth is a document.
     """
 
-    images_dir: Path
+    ground_truth_shape: str = DOCUMENT
+    takes: tuple[str, ...] = ()
+    reads_geometry: "Callable[[Any], bool] | None" = None
+    reads_description: str = ""
+    subject: str | None = None
     transforms: Any = None
-    sample_sources: dict[str, str] | None = None
-    sample_ground_truth: dict[str, str] | None = None
-    sample_member_stems: dict[str, str] | None = None
+    sample_sources: dict[str, str]
+    sample_ground_truth: dict[str, str]
+    sample_member_stems: dict[str, str]
     sample_counts: dict[str, int]
-    labels_dir: Path
     id_map: dict[str, int] | None
-    _coco: dict | None
     _num_classes: int
-    _image_names: dict[str, str]
 
     @property
     def record_stems(self) -> list[str]:
         """The bare ground-truth stem naming each indexed sample, in index order.
 
         The key a membership record, a cal/holdout lock and a leakage join all name a member by.
-        A directory-built dataset already indexes by that stem; a sample-built one indexes by each
-        sample's source identity, which keeps two dates' same-named images apart but is not what
-        those records spell, so the sample's own member stem is read back here rather than each
-        measurement door converting on its own.
+        A loader indexes by each sample's source identity, which keeps two dates' same-named
+        images apart but is not what those records spell, so the sample's own member stem is read
+        back here rather than each measurement door converting on its own.
         """
         keys: list[str] = list(getattr(self, "stems", None) or getattr(self, "_stems", []))
         return [self.member_stem_of(key) for key in keys]
 
     def member_stem_of(self, key: str) -> str:
-        """The bare stem a membership record names one indexed sample by: the stem the sample
-        itself states when this dataset was built from samples, else the key, which a directory
-        build already indexes by."""
-        if self.sample_member_stems is not None:
-            return self.sample_member_stems[key]
-        return key
+        """The bare stem a membership record names one indexed sample by, as the sample itself
+        stated it."""
+        return self.sample_member_stems[key]
 
-    def _init_from_samples(
-        self, samples: Sequence[Sample], id_map: dict[str, int] | None,
-    ) -> list[str]:
+    @classmethod
+    def refuse_other_shapes(cls, samples: Sequence[Sample]) -> None:
+        """Refuse a sample whose own ground truth is not the shape this loader reads, naming it.
+
+        The one statement of that refusal, asked by the factory before anything reads a sample's
+        ground truth: the sizes a run is built at are read off that ground truth, so a sample of
+        another shape is named here rather than by whichever reader opens it first.
+        """
+        wrong = [s.identity for s in samples if s.shape != cls.ground_truth_shape]
+        if wrong:
+            raise ValueError(
+                f"{len(wrong)} sample(s) name ground truth a {cls.task_type} loader does not "
+                f"read ({wrong[:5]}): it reads "
+                f"{SHAPE_DESCRIPTIONS[cls.ground_truth_shape]}, and reading what these name "
+                f"instead would train on something other than the ground truth recorded for "
+                f"them. Draw a selection over the ground truth {cls.task_type} reads."
+            )
+
+    def _init_from_samples(self, samples: Sequence[Sample]) -> list[str]:
         """Index a recorded sample list and answer the keys this dataset indexes: each sample's
-        own source and ground-truth document, the class ids it was admitted under, and nothing
-        rediscovered from a directory.
+        own source and ground truth, and nothing rediscovered from a directory.
 
         Each sample is keyed by its own source identity, distinct across capture dates by
         construction, so two dates holding a same-named image index as two samples rather than
         collapsing into one, and the bare stem a membership record names it by rides beside the
-        key. Refuses a sample whose ground truth these loaders cannot read
-        (:func:`~tcip_mcp.pipelines.data.selection.refuse_unreadable_samples`) before indexing any
-        of it. ``id_map`` is required and is the draw's own: recorded samples can span label
-        trees, so there is no single registry beside them to resolve class ids from.
+        key. Refuses, before indexing any of it, a sample no loader here can read
+        (:func:`~tcip_mcp.pipelines.data.selection.refuse_unreadable_samples`) and, where this
+        loader declares which geometries it reads, one whose document carries the subject only in
+        geometries it does not (:meth:`_refuse_unreadable_geometry`), which reads this instance's
+        own subject. Whether a sample's ground truth is the shape this loader reads is
+        :meth:`refuse_other_shapes`, asked by the factory before this runs.
         """
         refuse_unreadable_samples(samples)
+        self._refuse_unreadable_geometry(samples)
+        self.sample_sources = {s.identity: s.source for s in samples}
+        self.sample_ground_truth = {s.identity: s.ground_truth for s in samples}
+        self.sample_member_stems = {s.identity: s.member_stem for s in samples}
+        self.sample_counts = {}
+        return [s.identity for s in samples]
+
+    def _refuse_unreadable_geometry(self, samples: Sequence[Sample]) -> None:
+        """Refuse a sample whose document carries this run's subject only in geometries this
+        loader does not read, naming it.
+
+        Admission asks whether a document carries the subject at all; which geometries answer for
+        a measurement is this loader's own fact, declared in :attr:`reads_geometry`. A document
+        carrying the subject as a point, or as an image-level record, has real ground truth this
+        loader cannot turn into a target, so training it would put a real object's pixels in the
+        background class with no human having said the image is empty. A loader that declares no
+        geometry (a mask raster, a table row) reads the whole of what it was handed and refuses
+        nothing here.
+        """
+        if self.reads_geometry is None:
+            return
+        from tcip_annotation import json_io
+
+        reads = self.reads_geometry
+        wrong = []
+        for sample in samples:
+            mine = [a for a in json_io.read_annotations(sample.ground_truth)
+                    if a.subject == self.subject]
+            if mine and not any(reads(a.geometry) for a in mine):
+                wrong.append(sample.identity)
+        if wrong:
+            raise ValueError(
+                f"{len(wrong)} sample(s) carry {self.subject!r} only in geometries a "
+                f"{self.task_type} loader does not read ({wrong[:5]}): it reads "
+                f"{self.reads_description}, and training an image whose real objects it cannot "
+                f"read would teach them as background. Run a task whose loader reads what these "
+                f"documents carry, or supply a builder that reads them."
+            )
+
+    def _init_class_ids_from_draw(self, id_map: dict[str, int] | None) -> None:
+        """Set the class ids a sample-built geometry loader reads targets under.
+
+        ``id_map`` is required and is the draw's own: recorded samples can span label trees, so
+        there is no single registry beside them to resolve class ids from.
+        """
         if not id_map:
             raise ValueError(
                 f"a {self.task_type} dataset built from recorded samples needs the draw's own "
                 "id_map: its samples can span label trees, so there is no single registry beside "
                 "them to resolve class ids from."
             )
-        self.sample_sources = {s.identity: s.source for s in samples}
-        self.sample_ground_truth = {s.identity: s.ground_truth for s in samples}
-        self.sample_member_stems = {s.identity: s.member_stem for s in samples}
-        self.sample_counts = {}
-        self._image_names = {}
         self.id_map = dict(id_map)
         self._num_classes = len(id_map)
-        return [s.identity for s in samples]
 
     def _resolve_path(self, stem: str) -> Path | BandGroupRef:
-        """The logical image one sample key names: the sample's own recorded source when this
-        dataset was built from samples, else a literal path (classification folder mode) or a stem
-        in ``images_dir`` (a ``BandGroupRef`` when a ``.bandgroup`` manifest groups it)."""
-        if self.sample_sources is not None:
-            return resolve_source_path(self.sample_sources[stem])
-        p = Path(stem)
-        if p.is_absolute() or p.exists():
-            return p
-        return resolve_image_source(self.images_dir, stem)
+        """The logical image one sample key names: the sample's own recorded source (a
+        ``BandGroupRef`` when a ``.bandgroup`` manifest groups it)."""
+        return resolve_source_path(self.sample_sources[stem])
 
     def _label_path(self, stem: str) -> Path:
-        """The ground-truth document one sample key names: the sample's own recorded path when
-        this dataset was built from samples, else ``<labels_dir>/<stem>.json``."""
-        if self.sample_ground_truth is not None:
-            return Path(self.sample_ground_truth[stem])
-        return self.labels_dir / label_filename(stem)
+        """The ground truth one sample key names: the path the sample itself recorded."""
+        return Path(self.sample_ground_truth[stem])
 
     def _open_image(self, stem: str):
         """Open an image honoring ``expected_channels``: PIL where the pixels have a faithful
@@ -228,75 +282,47 @@ def indexed_sample_keys(dataset: Any) -> set[str]:
 
 
 class DetectionDataset(BaseImageDataset):
-    """Object detection over a recorded sample list, or over a labeled directory.
+    """Object detection over a recorded sample list.
 
-    Given ``samples`` (a draw's own list), membership is exactly what the draw recorded: each
-    sample reads its own source and the ground truth that answers for it, no directory is scanned
-    and no admission is re-derived, so the dataset spans whatever capture dates the draw did.
-
-    Given ``images_dir``/``labels_dir`` instead, membership is drawn from the directory through
-    the platform's own admission (``trainable_stems``), and the targets come from the canonical
-    per-image ``<labels_dir>/<stem>.json`` of the json_io schema, either read one at a time or,
-    when the caller hands in ``coco_data``, through the dataset-level COCO ``assemble_coco`` built
-    from those same documents, whose annotations are matched by image file name.
+    Membership is exactly what the producer recorded: each sample reads its own source and the
+    label document that answers for it, no directory is scanned and no admission is re-derived,
+    so the dataset spans whatever capture dates the draw did. Targets come from each sample's own
+    per-image document of the json_io schema, read through the run's own ``id_map``.
     """
 
     task_type = "detection"
+    ground_truth_shape = DOCUMENT
+    takes = ("subject", "attribute", "id_map")
+    reads_geometry = staticmethod(box_derivable)
+    reads_description = "a box or a polygon of its subject"
 
     def __init__(
         self,
-        images_dir: str = "",
-        labels_dir: str = "",
-        stems: list[str] | None = None,
+        samples: Sequence[Sample],
         transforms: Any = None,
-        num_classes: int = 1,
-        coco_data: dict | None = None,
         subject: str | None = None,
         attribute: str | None = None,
         id_map: dict[str, int] | None = None,
-        samples: Sequence[Sample] | None = None,
     ) -> None:
-        self.images_dir = Path(images_dir)
-        self.labels_dir = Path(labels_dir)
         self.transforms = transforms
-        self._num_classes = num_classes
         self.subject = subject
         self.attribute = attribute
-        self._coco = None
-        if samples is not None:
-            # Recorded samples each name their own document; nothing assembles a view of them.
-            self.stems = self._init_from_samples(samples, id_map)
-            return
-        self._coco = coco_data  # the assembled view of this directory's per-image documents
-        # The single name→id map: resolved here for a direct-json build, else supplied by
-        # build_dataset (which resolved it once for the COCO assembly). One derivation either way.
-        if id_map is None and self._coco is None:
-            _reg, id_map = resolve_registry_id_map(self.labels_dir, subject, attribute)
-            self._num_classes = len(id_map)
-        self.id_map = id_map
-        # The attribute-completeness rail lives inside trainable_stems, the one partition that
-        # already decides admission and records why a stem left; see its docstring for why.
-        self.stems, self.sample_counts = trainable_stems(
-            self.labels_dir, self.images_dir, stems,
-            subject=subject, date=admission_date(self.labels_dir), coco=self._coco,
-            attribute=attribute, id_map=self.id_map,
-        )
-        require_samples(self.stems, self.sample_counts, self.labels_dir)
-        # Real on-disk filenames, for matching a stem to the COCO's ``file_name`` (which carries the
-        # true name), image_name_map reads the actual directory listing, never a constructed guess.
-        self._image_names = image_name_map(self.images_dir)
+        self.stems = self._init_from_samples(samples)
+        self._init_class_ids_from_draw(id_map)
 
-    def _det_targets(self, stem: str, file_name: str) -> tuple[list, list]:
-        """Pixel-xyxy boxes + 1-indexed labels for one image (coco or name-based json).
+    def det_targets(self, stem: str) -> tuple[list, list]:
+        """Pixel-xyxy boxes + 1-indexed labels for one sample's own label document.
 
-        ``self.stems`` already excludes any image with an instance unlabeled for ``attribute``
-        (``trainable_stems``' ``skipped_incomplete_attribute`` rail, a fixed-length dataset can't
-        act on this per-``__getitem__`` call, only once, up front), so ``n_unlabeled`` is always 0
-        here by construction; the 3-tuple is unpacked for the shared ``json_det_targets``
-        signature, not because a nonzero count is expected at this point.
+        Public, because a delivery-grade measurement scores against the ground truth this run
+        trains on and reads it here rather than opening the document itself: one statement of
+        what this run's targets are, under this run's own class map.
+
+        The samples were already admitted with any image carrying an instance unlabeled for
+        ``attribute`` held out (the producer's ``skipped_incomplete_attribute`` rail, a
+        fixed-length dataset can't act on this per-``__getitem__`` call, only once, up front), so
+        ``n_unlabeled`` is always 0 here by construction; the 3-tuple is unpacked for the shared
+        ``json_det_targets`` signature, not because a nonzero count is expected at this point.
         """
-        if self._coco is not None:
-            return coco_det_targets(self._coco, file_name)
         boxes, labels, _n_unlabeled = json_det_targets(
             str(self._label_path(stem)), self.subject, self.attribute, self.id_map)
         return boxes, labels
@@ -312,31 +338,17 @@ class DetectionDataset(BaseImageDataset):
     @property
     def class_distribution(self) -> dict[int, int]:
         counts: Counter[int] = Counter()
-        if self._coco:
-            # self._coco may be shared across a full/train/val split trio (assembled once in
-            # training_tools.py, threaded into all three builds rather than re-assembled per
-            # split), its annotations cover the whole dataset, not just this dataset's own
-            # self.stems, so every consumer must filter to its own image set or a split's
-            # class_distribution reports the identical, unsplit whole for train and val alike.
-            own_names = {self._image_names.get(s, "") for s in self.stems}
-            image_names_by_id = {e.get("id"): str(e.get("file_name", ""))
-                                 for e in self._coco.get("images", [])}
-            for ann in self._coco.get("annotations", []):
-                if image_names_by_id.get(ann.get("image_id")) in own_names:
-                    counts[ann.get("category_id", 0)] += 1
-        else:  # json: parse each image's annotation
-            for stem in self.stems:
-                _, labels = self._det_targets(stem, "")
-                for lab in labels:
-                    counts[lab - 1] += 1  # back to 0-indexed cid
+        for stem in self.stems:
+            _, labels = self.det_targets(stem)
+            for lab in labels:
+                counts[lab - 1] += 1  # back to 0-indexed cid
         return dict(counts)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self.stems[idx]
         img = self._open_image(stem)
         w, h = self._image_size(img)
-        file_name = self._image_names.get(stem, "") if self._coco is not None else ""
-        boxes, labels = self._det_targets(stem, file_name)
+        boxes, labels = self.det_targets(stem)
         target = {
             "boxes": torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4),
             "labels": torch.tensor(labels, dtype=torch.int64),
@@ -348,6 +360,16 @@ class DetectionDataset(BaseImageDataset):
 # ====================================================================
 # Tiled Detection (SAHI-style sliding window)
 # ====================================================================
+
+TILE_SIZE = 224
+"""Tile edge in pixels a tiled detection run uses when its config states none. Stated here, where
+the tiler reads it, so a split deriving its block geometry before the dataset exists and the
+dataset itself resolve one lattice."""
+
+TILE_OVERLAP = 0.2
+"""Fraction of a tile shared with its neighbour when a tiled run's config states none, beside
+:data:`TILE_SIZE` and read by the same two callers."""
+
 
 def _validated_keep_regions(
     keep_regions: "Sequence[tuple[int, int, int, int]] | None",
@@ -401,8 +423,8 @@ class TiledDetectionDataset(BaseImageDataset):
     def __init__(
         self,
         base: "DetectionDataset",
-        tile_size: int = 224,
-        overlap: float = 0.2,
+        tile_size: int = TILE_SIZE,
+        overlap: float = TILE_OVERLAP,
         sliver_frac: float | None = None,
         dedup_iou: float = 0.8,
         skip_empty: bool = False,
@@ -416,18 +438,12 @@ class TiledDetectionDataset(BaseImageDataset):
         from tcip_mcp.pipelines.derivations import char_sizes_from_boxes, derive_sliver_frac
 
         self.base = base
-        # This wrapper does its own channel-aware reads rather than delegating to base. Inherit the
-        # band count from the dataset being wrapped so every construction path carries it,
-        # build_dataset stamps it afterwards, but ctx.tiled_dataset constructs this directly and
-        # would otherwise fall back to the 3-channel class default.
-        self.images_dir = base.images_dir
-        self.labels_dir = base.labels_dir
-        # A sample-built base reads each sample's own source and ground truth; the wrapper reads
-        # through the same maps, so the tiles come from the paths those samples recorded.
+        # This wrapper does its own channel-aware reads and its own tile index over the base's
+        # sample maps, so it takes the band count and the paths off the base it was handed.
         self.sample_sources = base.sample_sources
         self.sample_ground_truth = base.sample_ground_truth
         self.sample_member_stems = base.sample_member_stems
-        self.expected_channels = getattr(base, "expected_channels", 3)
+        self.expected_channels = base.expected_channels
         self.tile_size = tile_size
         self.overlap = overlap
         self.transforms = transforms
@@ -476,8 +492,7 @@ class TiledDetectionDataset(BaseImageDataset):
             # multi-band raster the authored frame and the decoded frame genuinely disagree, and
             # every box would be cropped from somewhere it was never drawn. Comparing the two
             # decoders instead would prove nothing: they share a branch and agree by construction.
-            authored = authored_frame(base._label_path(stem), base._coco, stem,
-                                       base._image_names.get(stem, ""))
+            authored = authored_frame(base._label_path(stem))
             if authored is not None and authored != (w, h):
                 raise ValueError(
                     f"tiled dataset frame mismatch for stem {stem!r}: the labels record a "
@@ -487,11 +502,8 @@ class TiledDetectionDataset(BaseImageDataset):
                     f"against the multi-band frame, or ingest this raster as {authored[0]}x"
                     f"{authored[1]}."
                 )
-            # Format-aware read via the base dataset's own targeting (json/coco share one path);
-            # only coco needs the image file name to match its annotations. Use the real on-disk name
-            # (img_path.name can be miscased on Windows), or the coco match silently finds nothing.
-            file_name = base._image_names.get(stem, "") if base._coco is not None else ""
-            full_boxes, full_labels = base._det_targets(stem, file_name)
+            # Through the base dataset's own targeting, over this sample's own document.
+            full_boxes, full_labels = base.det_targets(stem)
             fb = np.asarray(full_boxes, dtype=np.float32).reshape(-1, 4)
             fl = np.asarray(full_labels, dtype=np.int64)
             if len(fb):
@@ -639,85 +651,41 @@ class TiledDetectionDataset(BaseImageDataset):
 # ====================================================================
 
 class InstanceSegDataset(BaseImageDataset):
-    """Instance masks from per-image polygons: a draw's own samples, each naming its own source
-    and the label document that answers for it, or a labeled directory's own ``<stem>.json``
-    documents, read one at a time or through the dataset-level ``coco_data`` assembled from
-    them."""
+    """Instance masks from per-image polygons: the producer's own samples, each naming its own
+    source and the label document that answers for it."""
 
     task_type = "instance_seg"
+    ground_truth_shape = DOCUMENT
+    takes = ("subject", "attribute", "id_map")
+    reads_geometry = staticmethod(polygonal)
+    reads_description = "a polygon of its subject"
 
     def __init__(
         self,
-        images_dir: str = "",
-        labels_dir: str = "",
-        stems: list[str] | None = None,
+        samples: Sequence[Sample],
         transforms: Any = None,
-        num_classes: int = 1,
-        coco_data: dict | None = None,
         subject: str | None = None,
         attribute: str | None = None,
         id_map: dict[str, int] | None = None,
-        samples: Sequence[Sample] | None = None,
     ) -> None:
-        self.images_dir = Path(images_dir)
-        self.labels_dir = Path(labels_dir)
         self.transforms = transforms
-        self._num_classes = num_classes
         self.subject = subject
         self.attribute = attribute
-        self._coco = None
-        if samples is not None:
-            # Recorded samples each name their own document; nothing assembles a view of them.
-            self.stems = self._init_from_samples(samples, id_map)
-            return
-        self._coco = coco_data  # the assembled view of this directory's per-image documents
-        if id_map is None and self._coco is None:
-            _reg, id_map = resolve_registry_id_map(self.labels_dir, subject, attribute)
-            self._num_classes = len(id_map)
-        self.id_map = id_map
-        # attribute/id_map must be threaded through: without them the direct-JSON instance_seg path
-        # has no attribute-completeness rail at all, an image with any instance never assessed for
-        # `attribute` trains on its labeled subset instead of being held out whole, the same gap
-        # DetectionDataset's own call already closes.
-        self.stems, self.sample_counts = trainable_stems(
-            self.labels_dir, self.images_dir, stems,
-            subject=subject, date=admission_date(self.labels_dir), coco=self._coco,
-            attribute=attribute, id_map=self.id_map,
-        )
-        require_samples(self.stems, self.sample_counts, self.labels_dir)
-        # Real on-disk filenames for the COCO ``file_name`` match (see DetectionDataset / image_name_map).
-        self._image_names = image_name_map(self.images_dir)
+        self.stems = self._init_from_samples(samples)
+        self._init_class_ids_from_draw(id_map)
 
     def _read_polys(self, stem: str, w: int, h: int) -> list[tuple[list[list[tuple[float, float]]], int]]:
-        """(pixel polygon rings, 1-indexed label) per instance, from the assembled COCO or the
-        name-based per-image ``<stem>.json`` (filtered to ``subject`` + polygon geometry). Both are
-        already pixel-space; the +1 background offset is the loader's, nothing on disk carries it.
+        """(pixel polygon rings, 1-indexed label) per instance, from this sample's own
+        ``<stem>.json``, filtered to ``subject`` and the geometry this loader declares it reads
+        (:attr:`reads_geometry`). Already pixel-space; the +1
+        background offset is the loader's, nothing on disk carries it.
         An instance's rings is a list, an occlusion-split instance (a leaf crossed by a stem) is
         genuinely more than one ring; ``__getitem__`` rasterizes every ring of an instance into
         that instance's one mask."""
         out: list[tuple[list[list[tuple[float, float]]], int]] = []
-        if self._coco is not None:
-            from tcip_annotation import format_io
-            file_name = self._image_names.get(stem, "")
-            anns, _, _ = format_io._coco_image_annotations(self._coco, file_name=file_name)
-            for a in anns:
-                seg = a.get("segmentation")
-                if not (isinstance(seg, list) and seg):
-                    continue
-                rings = []
-                for coords in seg:
-                    if not (isinstance(coords, list) and len(coords) >= 6):
-                        continue
-                    rings.append([(float(coords[i]), float(coords[i + 1]))
-                                 for i in range(0, len(coords) - 1, 2)])
-                if not rings:
-                    continue
-                out.append((rings, int(a.get("category_id", 0)) + 1))
-            return out
         from tcip_annotation import json_io
-        from tcip_annotation.state import Polygon
         for ann in json_io.read_annotations(str(self._label_path(stem))):
-            if ann.subject != self.subject or not isinstance(ann.geometry, Polygon):
+            if ann.subject != self.subject or not polygonal(ann.geometry):
                 continue
             key = ann.attributes.get(self.attribute) if self.attribute else self.subject
             if key is None or self.id_map is None or key not in self.id_map:
@@ -780,46 +748,28 @@ class InstanceSegDataset(BaseImageDataset):
 # ====================================================================
 
 class SemanticSegDataset(BaseImageDataset):
-    """PNG mask images where pixel values are class IDs."""
+    """PNG mask images where pixel values are class IDs, over a recorded sample list.
+
+    Membership is exactly what the producer recorded and each sample reads the mask it names, so
+    the dataset spans whatever capture dates the draw did. ``num_classes`` is the run's own count,
+    resolved by the factory (:func:`sizes_from_samples`), never read off this half's own masks.
+    """
 
     task_type = "semantic_seg"
+    ground_truth_shape = MASK
+    takes = ("num_classes",)
 
     def __init__(
         self,
-        images_dir: str,
-        masks_dir: str,
-        stems: list[str] | None = None,
+        samples: Sequence[Sample],
         transforms: Any = None,
-        num_classes: int = 2,
+        *,
+        num_classes: int,
     ) -> None:
-        self.images_dir = Path(images_dir)
-        self.masks_dir = Path(masks_dir)
         self.transforms = transforms
+        self.stems = self._init_from_samples(samples)
+        self.sample_counts = {"annotated": len(self.stems), "skipped_unannotated": 0}
         self._num_classes = num_classes
-        # A sample needs a mask, and a mask is exactly ``<stem>.png`` in masks_dir: an
-        # all-background mask is an explicit annotation, so the file's existence is the rail.
-        entries = list(self.masks_dir.iterdir()) if self.masks_dir.is_dir() else []
-        mask_stems = {p.stem for p in entries if p.suffix.lower() == ".png"}
-        candidates = stems or sorted(image_name_map(self.images_dir))
-        unreadable = sorted(
-            p.name for p in entries
-            if p.suffix.lower() != ".png" and p.stem in candidates and p.stem not in mask_stems
-        )
-        if unreadable:
-            raise ValueError(
-                f"{self.masks_dir} holds {unreadable} beside an image of the same stem, and a "
-                f"mask is read only as <stem>.png; nothing here reads another format, and "
-                f"training the image without its mask would train it as entirely background."
-            )
-        self.stems = [s for s in candidates if s in mask_stems]
-        self.sample_counts = {"annotated": len(self.stems),
-                              "skipped_unannotated": len(candidates) - len(self.stems)}
-        if not self.stems:
-            raise ValueError(
-                f"no trainable samples: none of the {len(candidates)} image(s) in "
-                f"{self.images_dir} have a mask in {self.masks_dir}. An image with no mask would "
-                f"train as entirely background."
-            )
 
     @property
     def num_classes(self) -> int:
@@ -832,9 +782,9 @@ class SemanticSegDataset(BaseImageDataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self.stems[idx]
         img = self._open_image(stem)
-        # The constructor admitted this stem on the strength of this exact file; a mask gone
+        # The sample was admitted on the strength of this exact file; a mask gone
         # since raises from the read rather than training the image as background.
-        mask = np.array(load_image(self.masks_dir / f"{stem}.png", 1))
+        mask = np.array(load_image(self._label_path(stem), 1))
         # Key matches the SemanticSegHead loss contract.
         target = {"masks": torch.tensor(mask, dtype=torch.int64)}
         return self._finalize(img, target)
@@ -844,62 +794,48 @@ class SemanticSegDataset(BaseImageDataset):
 # Classification
 # ====================================================================
 
+def _values_by_sample(samples: Sequence[Sample]) -> list[str]:
+    """Each sample's own value, read out of the table its ``row_key`` names a row of.
+
+    Each table is read once however many samples it answers for. Whether a recorded row is still
+    there is the one re-admission's question
+    (:func:`~tcip_mcp.pipelines.data.label_queries.refuse_inadmissible_samples`), which every
+    bound route runs before a loader is built and which a drawn route cannot fail by
+    construction, so this reads the row the sample names rather than restating that check.
+    """
+    tables: dict[str, dict[str, str]] = {}
+    values: list[str] = []
+    for sample in samples:
+        assert sample.row_key is not None, "refuse_unreadable_samples requires a row key here"
+        if sample.ground_truth not in tables:
+            tables[sample.ground_truth] = ground_truth_table(sample.ground_truth)
+        values.append(tables[sample.ground_truth][sample.row_key])
+    return values
+
+
 class ClassificationDataset(BaseImageDataset):
-    """Image classification from CSV (image_stem, label) or folder structure."""
+    """Image classification over a recorded sample list.
+
+    Each sample reads the row its ``row_key`` names in the table it names, so the dataset spans
+    whatever tables the producer admitted. ``num_classes`` is the run's own count, resolved by the
+    factory (:func:`sizes_from_samples`).
+    """
 
     task_type = "classification"
+    ground_truth_shape = TABLE
+    takes = ("num_classes",)
 
     def __init__(
         self,
-        images_dir: str,
-        csv_path: str | None = None,
-        stems: list[str] | None = None,
-        labels: list[int] | None = None,
+        samples: Sequence[Sample],
         transforms: Any = None,
-        num_classes: int | None = None,
+        *,
+        num_classes: int,
     ) -> None:
-        self.images_dir = Path(images_dir)
         self.transforms = transforms
-        if csv_path is not None:
-            self._stems, self._labels = self._load_csv(csv_path)
-        elif stems is not None and labels is not None:
-            self._stems = stems
-            self._labels = labels
-        else:
-            # Folder-based: images_dir/<class_name>/<image>
-            self._stems, self._labels = self._load_folder_structure()
-        # Derived from the labels actually loaded, the same way build_dataset derives
-        # detection's num_classes from the label registry: a class id the loaded labels reach
-        # but the configured num_classes doesn't cover would index past the head's logits.
-        derived_classes = (max(self._labels) + 1) if self._labels else 0
-        if num_classes is not None and derived_classes > num_classes:
-            raise ValueError(
-                f"the loaded labels reach class {derived_classes - 1}, which needs "
-                f"num_classes >= {derived_classes}, but num_classes={num_classes} was "
-                f"configured; fix num_classes or the data."
-            )
-        self._num_classes = num_classes if num_classes is not None else max(derived_classes, 1)
-
-    def _load_csv(self, path: str) -> tuple[list[str], list[int]]:
-        stems, labels = [], []
-        with open(path, newline="") as f:
-            reader = csv.reader(f)
-            next(reader, None)  # skip header
-            for row in reader:
-                if len(row) >= 2:
-                    stems.append(row[0].strip())
-                    labels.append(int(row[1].strip()))
-        return stems, labels
-
-    def _load_folder_structure(self) -> tuple[list[str], list[int]]:
-        stems, labels = [], []
-        class_dirs = sorted(d for d in self.images_dir.iterdir() if d.is_dir())
-        for cid, cdir in enumerate(class_dirs):
-            for f in cdir.iterdir():
-                if f.suffix.lower() in IMAGE_EXTS:
-                    stems.append(str(f))
-                    labels.append(cid)
-        return stems, labels
+        self._stems = self._init_from_samples(samples)
+        self._labels = [int(v) for v in _values_by_sample(samples)]
+        self._num_classes = num_classes
 
     @property
     def num_classes(self) -> int:
@@ -925,42 +861,25 @@ class ClassificationDataset(BaseImageDataset):
 # ====================================================================
 
 class OrdinalDataset(BaseImageDataset):
-    """Ordinal regression from CSV (image_stem, rank). E.g., disease severity 0-4."""
+    """Ordinal regression over a recorded sample list: each sample reads the rank its ``row_key``
+    names in the table it names. ``num_ranks`` is the run's own count, resolved by the factory
+    (:func:`sizes_from_samples`)."""
 
     task_type = "ordinal"
+    ground_truth_shape = TABLE
+    takes = ("num_ranks",)
 
     def __init__(
         self,
-        images_dir: str,
-        csv_path: str,
+        samples: Sequence[Sample],
         transforms: Any = None,
-        num_ranks: int | None = None,
+        *,
+        num_ranks: int,
     ) -> None:
-        self.images_dir = Path(images_dir)
         self.transforms = transforms
-        self._stems: list[str] = []
-        self._ranks: list[int] = []
-        with open(csv_path, newline="") as f:
-            reader = csv.reader(f)
-            next(reader, None)
-            for row in reader:
-                if len(row) >= 2:
-                    self._stems.append(row[0].strip())
-                    self._ranks.append(int(row[1].strip()))
-        # Derived from the ranks actually loaded, the same way build_dataset derives
-        # detection's num_classes from the label registry: the OrdinalHead's CORN loss and
-        # decode() both loop over range(num_ranks - 1) using this count with no check against
-        # the data, so a rank the head was never told about silently folds into the top rank
-        # instead of raising.
-        derived_ranks = (max(self._ranks) + 1) if self._ranks else 0
-        if num_ranks is not None and derived_ranks > num_ranks:
-            raise ValueError(
-                f"{csv_path} carries ranks up to {derived_ranks - 1}, which needs "
-                f"num_ranks >= {derived_ranks}, but num_ranks={num_ranks} was configured. "
-                f"The CORN head/loss would silently train every rank >= num_ranks - 1 as the "
-                f"same top rank rather than raising; fix num_ranks or the data."
-            )
-        self._num_ranks = num_ranks if num_ranks is not None else max(derived_ranks, 1)
+        self._stems = self._init_from_samples(samples)
+        self._ranks = [int(v) for v in _values_by_sample(samples)]
+        self._num_ranks = num_ranks
 
     @property
     def num_classes(self) -> int:
@@ -977,8 +896,9 @@ class OrdinalDataset(BaseImageDataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self._stems[idx]
         img = self._open_image(stem)
-        # Key matches the OrdinalHead loss contract (plural, like "labels"/"masks").
-        target = {"ranks": self._ranks[idx], "num_ranks": self._num_ranks}
+        # Key matches the OrdinalHead loss contract (plural, like "labels"/"masks"). The rank
+        # count is the head's own, never restated per item.
+        target = {"ranks": self._ranks[idx]}
         return self._finalize(img, target)
 
 
@@ -987,27 +907,20 @@ class OrdinalDataset(BaseImageDataset):
 # ====================================================================
 
 class RegressionDataset(BaseImageDataset):
-    """Continuous-value regression from CSV (image_stem, value)."""
+    """Continuous-value regression over a recorded sample list: each sample reads the value its
+    ``row_key`` names in the table it names."""
 
     task_type = "regression"
+    ground_truth_shape = TABLE
 
     def __init__(
         self,
-        images_dir: str,
-        csv_path: str,
+        samples: Sequence[Sample],
         transforms: Any = None,
     ) -> None:
-        self.images_dir = Path(images_dir)
         self.transforms = transforms
-        self._stems: list[str] = []
-        self._values: list[float] = []
-        with open(csv_path, newline="") as f:
-            reader = csv.reader(f)
-            next(reader, None)
-            for row in reader:
-                if len(row) >= 2:
-                    self._stems.append(row[0].strip())
-                    self._values.append(float(row[1].strip()))
+        self._stems = self._init_from_samples(samples)
+        self._values = [float(v) for v in _values_by_sample(samples)]
 
     @property
     def num_classes(self) -> int:
@@ -1029,7 +942,7 @@ class RegressionDataset(BaseImageDataset):
 # Factory
 # ====================================================================
 
-_DATASET_MAP = {
+_DATASET_MAP: dict[str, type[BaseImageDataset]] = {
     "detection": DetectionDataset,
     "instance_seg": InstanceSegDataset,
     "semantic_seg": SemanticSegDataset,
@@ -1037,19 +950,37 @@ _DATASET_MAP = {
     "ordinal": OrdinalDataset,
     "regression": RegressionDataset,
 }
+"""The one place a task name selects code: which built-in loader reads a run's samples. A task
+outside this map reaches a dataset only through a bespoke ``dataset_source`` builder, which is
+handed the same samples the producer named for any other task."""
 
-def build_from_dataset_source(dataset_source: dict, **kwargs: Any) -> Dataset:
+def build_from_dataset_source(
+    dataset_source: dict, *, task: str, samples: Sequence[Sample],
+    id_map: dict[str, int] | None, transforms: Any,
+) -> Dataset:
     """Import the agent's dataset builder and call it, the bespoke-task escape (mirrors
     ``build_from_model_source``). Registry-free, no ``exec``: the builder is imported like any
-    module. It receives the run's data context (``images_dir`` / ``labels_dir`` / ``stems`` /
-    ``transforms`` / ``task``, whatever ``build_dataset`` was given) merged with its own
-    ``builder_kwargs`` (which win on conflict), and must return a torch ``Dataset``. Declare
-    ``**kwargs`` on the builder to ignore context keys it doesn't use.
+    module.
+
+    The lowest boundary, and the only one: the context below is the whole call, every field
+    stated, so there is no shape of call that hands a builder anything else. ``samples`` is the
+    sample list for the side being built, ``id_map``
+    the class map those samples were admitted under (``None`` where the ground-truth shape carries
+    its own classes and no admitted map exists, which is a mask raster or a table row: derive the
+    class space from the ground truth you were handed, the way :func:`sizes_from_samples` reads it
+    for the platform's own loaders), plus ``task`` and ``transforms``. Never a directory, a
+    document path or a format flag: the platform names the samples and the builder builds over
+    them, so nothing here asks what a bespoke dataset looks like.
+
+    ``builder_kwargs`` configure the builder and never restate what the producer named: a key the
+    context already states refuses by name, since a builder that overrode ``samples`` or
+    ``id_map`` would train on membership and a class space the run's own record does not describe.
+    Declare ``**kwargs`` on the builder to ignore context keys it doesn't use.
 
     ``dataset_source`` schema (parallels ``model_source``)::
 
         {"builder": "my_module:build_ds",  # required, 'module:function' (or 'module.function')
-         "builder_kwargs": {...},          # optional, passed to the builder (win on conflict)
+         "builder_kwargs": {...},          # optional, the builder's own configuration
          "source_files": [...],            # optional, provenance (snapshot_model_source copies these)
          "task": "..."}                    # optional, measurement/eval routing
     """
@@ -1061,110 +992,93 @@ def build_from_dataset_source(dataset_source: dict, **kwargs: Any) -> Dataset:
     builder_kwargs = dataset_source.get("builder_kwargs") or {}
     if not isinstance(builder_kwargs, dict):
         raise ValueError("dataset_source.builder_kwargs must be a dict")
-    return fn(**{**kwargs, **builder_kwargs})
-
-
-def _autoresolve_json_labels(kwargs: dict, *, subject: str, attribute: str | None,
-                             id_map: dict[str, int]) -> None:
-    """Route a name-based per-image-JSON label dir onto the assembled-COCO path for training/eval.
-
-    No-op when the caller already supplied the assembled document as ``coco_data``, or has no
-    ``images_dir`` to assemble against (both branches below share that one precondition). The
-    single ``id_map`` is
-    threaded into ``assemble_coco`` (and thus the one ``to_coco_dataset`` call), so the assembled
-    categories rest on the same name→id derivation as the loader targets and the contract dims.
-    A dataset-level COCO export sitting alongside real per-image label files is refused by name,
-    with both remedies stated (move the export out of the directory, or import it into per-image
-    documents), since only the breeder knows which of the two is this dataset's real label source.
-
-    The confirmation bucket comes from :func:`~tcip_mcp.pipelines.data.label_queries.
-    admission_date` over the same ``labels_dir``, the one resolution the dataset class hands
-    ``trainable_stems`` too, so the assembled COCO and the partition that consumes it read one
-    bucket rather than two keys that can disagree.
-    """
-    if kwargs.get("coco_data") is not None:
-        return
-    labels_dir = kwargs.get("labels_dir", "")
-    images_dir = kwargs.get("images_dir", "")
-    if not labels_dir or not images_dir:
-        return
-    detected = dir_label_format(labels_dir)
-    if detected == "coco":
-        offending = first_labels_json(labels_dir)
+    # What a bespoke builder is handed, and all it is handed: the membership the platform's own
+    # producer named, the class map it admitted it under, the task and the augmentation.
+    context = {"task": task, "samples": samples, "id_map": id_map, "transforms": transforms}
+    restated = sorted(set(context) & set(builder_kwargs))
+    if restated:
         raise ValueError(
-            f"labels_dir={labels_dir!r} holds a dataset-level COCO file ({offending}): if the "
-            "per-image label files in this directory are the ones that should train, move it out "
-            "of labels_dir; if this COCO export is the intended label source, import it into "
-            "per-image label documents first, which is the one shape training reads."
+            f"dataset_source.builder_kwargs restates {restated}: the samples this run trains on, "
+            f"the class map they were admitted under, the task and the augmentation are the "
+            f"platform's to state, and a builder given a second value for one of them would build "
+            f"over something the run's own record does not describe. Drop {restated} from "
+            "builder_kwargs."
         )
-    if detected == "json":
-        kwargs["coco_data"] = assemble_coco(
-            labels_dir, images_dir, stems=kwargs.get("stems"),
-            subject=subject, attribute=attribute, id_map=id_map,
-            date=admission_date(labels_dir))
+    return fn(**context, **builder_kwargs)
 
 
-def _probe_num_channels(images_dir: str | Path | None, stems: list[str] | None,
-                        default: int = 3) -> int:
-    """Band count of one sample raster from ``images_dir`` (derive-don't-pin, not a pinned 3).
+def _band_count(samples: Sequence[Sample]) -> int:
+    """The band count the sources of ``samples`` carry, one count for all of them.
 
-    Probes a single image (guard: one sample, not every image) so a multi-band raster threads its
-    real channel count through ``in_chans`` instead of silently defaulting to RGB. Falls back to
-    ``default`` only when no readable raster is found at all, or a genuinely unexpected decode error
-    hits it, never for a stale ``.bandgroup`` manifest (``BandGroupIncomplete`` propagates loudly
-    instead), since a confidently-wrong channel count silently sizes the model wrong for every
-    dataset that hits it.
+    Every source is probed, not one of them, so a run whose sources disagree refuses by name
+    rather than sizing the model for whichever one a probe happened to open first and reading
+    every other image at the wrong band count. A source that will not probe refuses the same way:
+    a confidently-wrong count sizes the model wrong for every image the run reads. The cost is one
+    header probe per sample, paid once for the run, beside the per-stem frame probe a tiled
+    dataset already makes.
     """
-    if not images_dir:
-        return default
-    images_dir = Path(images_dir)
-    sample: Path | BandGroupRef | None = None
-    for stem in (stems or []):
+    from tcip_mcp.pipelines.derivations import probe_channels
+
+    counts: dict[int, str] = {}
+    for sample in samples:
+        source = resolve_source_path(sample.source)
         try:
-            sample = resolve_image_source(images_dir, stem)
-            break
-        except FileNotFoundError:
-            # Per-stem skip-and-try-the-next-one (BandGroupIncomplete included): with multiple
-            # candidate stems, one stale/missing entry doesn't preclude probing a different, intact
-            # one, only the single-sample fallback below has no "next stem" to fall back to.
-            continue
-    if sample is None:
-        logical = list_logical_images(images_dir)
-        if logical:
-            # Through resolve_image_source (not a bare dict pick): its completeness check is what
-            # turns a stale manifest into a named BandGroupIncomplete here, rather than a bare
-            # decode error surfacing later inside probe_channels.
-            sample = resolve_image_source(images_dir, sorted(logical)[0])
-    if sample is None:
-        return default
-    from tcip_mcp.pipelines.derivations import probe_channels
-
-    try:
-        return int(probe_channels(sample))
-    except BandGroupIncomplete:
-        raise
-    except Exception:
-        return default
+            counts.setdefault(int(probe_channels(source)), str(source))
+        except Exception as exc:
+            raise ValueError(
+                f"the band count of {source} could not be read ({exc}): a run's input channels "
+                f"are derived from its own sources, and training at a guessed count would size "
+                f"the model wrong for every image it reads. Fix the source, or state "
+                "data.num_channels."
+            ) from exc
+    if not counts:
+        raise ValueError(
+            "a loader is built over the samples the platform's own producer named, and none were "
+            "handed here, so there is no source to read a band count from.")
+    if len(counts) > 1:
+        named = ", ".join(f"{count} in {counts[count]}" for count in sorted(counts))
+        raise ValueError(
+            f"the sources this run was handed carry different band counts ({named}): one model "
+            f"reads one band count, so training over both would read every image of one of them "
+            f"as something it is not. Run over sources of one band count, or state "
+            "data.num_channels to read them all at that count."
+        )
+    return next(iter(counts))
 
 
-def _probe_sample_channels(samples: Sequence[Sample], default: int = 3) -> int:
-    """Band count of one of a selection's own sources (derive-don't-pin, not a pinned 3).
+GROUND_TRUTH_COUNTS = ("num_classes", "num_ranks")
+"""The sizes ground truth carrying its own classes states, as a loader declares them in ``takes``.
+A stated one below what that ground truth reaches refuses; the band count beside them is a
+property of the source, so a caller narrowing it (reading an RGB source as one channel) states how
+to read rather than a vocabulary smaller than the data holds."""
 
-    The sample-list counterpart of :func:`_probe_num_channels`: one sample is probed, not every
-    one, and a stale ``.bandgroup`` manifest propagates as :class:`BandGroupIncomplete` rather
-    than silently sizing the model for RGB.
+
+def sizes_from_samples(task: str, samples: Sequence[Sample]) -> dict[str, int]:
+    """The sizes a run's own samples state: the band count their sources carry, and the class or
+    rank count their ground truth carries under the name the task's loader is built with.
+
+    Read over every sample the run holds, before the split, so one run's loaders are built at one
+    set of sizes: a class reaching only one side sizes both, and two sources disagreeing about
+    their band count refuse rather than one of them governing. Empty for a task no built-in loader
+    reads; the class or rank count is absent for a task whose class ids are the draw's own
+    recorded map and for one whose ground truth carries no count.
     """
-    if not samples:
-        return default
-    from tcip_mcp.pipelines.derivations import probe_channels
-
-    source = resolve_source_path(samples[0].source)
-    try:
-        return int(probe_channels(source))
-    except BandGroupIncomplete:
-        raise
-    except Exception:
-        return default
+    cls = _DATASET_MAP.get(task)
+    if cls is None:
+        return {}
+    # Asked before any ground truth is read, on the run's own route and the factory's alike:
+    # reading a size off a sample this loader cannot read is what the refusal exists to stop.
+    cls.refuse_other_shapes(samples)
+    sizes = {"num_channels": _band_count(samples)}
+    names = [name for name in cls.takes if name in GROUND_TRUTH_COUNTS]
+    if not names:
+        return sizes
+    if cls.ground_truth_shape == MASK:
+        held = max((int(np.array(load_image(Path(s.ground_truth), 1)).max()) for s in samples),
+                   default=0) + 1
+    else:
+        held = max((int(value) for value in _values_by_sample(samples)), default=0) + 1
+    return {**sizes, **{name: held for name in names}}
 
 
 def tile_kwargs_from_tiling(tiling: dict) -> dict:
@@ -1177,82 +1091,108 @@ def tile_kwargs_from_tiling(tiling: dict) -> dict:
             if k in tiling}
 
 
-def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Dataset:
+def build_dataset(
+    task: str, dataset_source: dict | None = None, *,
+    samples: Sequence[Sample], transforms: Any = None,
+    scope: ClassScope | None = None, num_classes: int | None = None,
+    num_ranks: int | None = None, tiling: dict | None = None,
+    num_channels: int | None = None, **unowned: Any,
+) -> Dataset:
     """Factory: build a dataset by task type, or via a bespoke ``dataset_source`` builder.
+
+    ``samples`` is the producer's own sample list and the one membership any loader here is built
+    from, required on every route: each sample reads its own source and the ground truth that
+    answers for it, its own label document, its own mask raster or the row its ``row_key`` names,
+    so the dataset spans whatever capture dates the draw did and nothing here scans a directory or
+    a table. ``scope`` is the class space those samples were admitted under
+    (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`), ``None`` for ground truth that
+    carries its own classes.
+
+    A sample whose ground truth is not the shape the selected loader reads refuses by name before
+    anything is read off it (:meth:`BaseImageDataset.refuse_other_shapes`, asked once inside
+    :func:`sizes_from_samples`). Each recipient is handed exactly what it declares and nothing
+    else: a built-in loader its own
+    :attr:`BaseImageDataset.takes`, a bespoke builder the producer-owned context
+    :func:`build_from_dataset_source` states. Anything
+    this factory was given that no recipient could take refuses by name, before anything is read
+    off it, here and through a bespoke ``train(ctx)`` body's own ``ctx.build_dataset`` call, which
+    is this same factory.
 
     An optional ``tiling`` dict (``{enabled, tile_size, overlap, sliver_frac,
     dedup_iou, skip_empty, keep_regions}``) wraps the detection dataset in a
-    :class:`TiledDetectionDataset`. Ignored for non-detection tasks.
+    :class:`TiledDetectionDataset`; a bespoke builder composes its own tiling over its own
+    samples, so it never reaches one. Every size the caller states none of is read off the samples
+    themselves (:func:`sizes_from_samples`): the band count their sources carry, so a multi-band
+    input threads its real count through ``in_chans`` instead of defaulting to RGB, and the class
+    or rank count their ground truth carries, with a stated one below what that ground truth
+    reaches refused by name. A builder's own dataset states its own sizes, and this factory
+    neither reads nor writes anything on an object it did not build.
 
-    ``num_channels`` is derived by probing one sample raster when the caller does not pin it, so a
-    multi-band input threads its real band count through ``in_chans`` instead of defaulting to RGB.
-
-    ``samples`` (detection and instance_seg) is a draw's own sample list: membership is exactly
-    what the draw recorded, each sample reading its own source and the ground truth that answers
-    for it, its own label document, so the dataset spans whatever
-    capture dates the draw did and no directory is scanned. It is exclusive with the directory
-    keys below.
-
-    ``date`` names the capture date whose confirmed negatives a directory build may admit, the
-    same key the GUI recorded them under, and reaches both the assembled COCO and the partition
-    unchanged. A run over ``annotations/<date>/`` states that date; ``None`` (the default) is the
-    key a tree that carries no date was written under.
-
-    ``dataset_source`` is the bespoke seam (mirrors ``model_source``): when given, an agent-supplied
-    importable builder produces the dataset for a task the known loaders don't cover. The known
-    loaders stay the default; the ``Unknown task`` error below is still raised for a bad known-task
-    name (an honest typo signal), the seam is the escape for a genuinely new task.
+    The known loaders stay the default; the ``Unknown task`` error below is still raised for a bad
+    known-task name with no builder (an honest typo signal), the seam is the escape for a
+    genuinely new task.
     """
-    tiling = kwargs.pop("tiling", None)
-    num_channels = kwargs.pop("num_channels", None)
-    samples = kwargs.get("samples")
-    if num_channels is None:
-        if samples:
-            num_channels = _probe_sample_channels(samples)
-        else:
-            num_channels = _probe_num_channels(kwargs.get("images_dir"), kwargs.get("stems"))
-
+    if unowned:
+        raise ValueError(
+            f"build_dataset was given {sorted(unowned)}: a loader is built from the samples the "
+            f"platform's own producer named, the class space they were admitted under and the "
+            f"augmentation this run resolved, and nothing else, so anything further could answer "
+            f"for a membership, a class space or a format this run's own record does not state. "
+            f"Drop {sorted(unowned)}; a bespoke builder's own configuration goes in "
+            "dataset_source.builder_kwargs."
+        )
+    scope = scope or ClassScope()
+    # The sizes the platform states for a loader it builds, named once: the bespoke refusal below
+    # and the table a loader's own declaration is read against both answer from this.
+    sizes: dict[str, Any] = {"num_classes": num_classes, "num_ranks": num_ranks,
+                             "num_channels": num_channels}
     if dataset_source is not None:
-        ds = build_from_dataset_source(dataset_source, task=task, **kwargs)
-        if getattr(ds, "expected_channels", None) is None:
-            # ds's real type is whatever the agent's bespoke builder returned; setattr (like the
-            # getattr above) reaches it without narrowing this seam to BaseDataset's own shape.
-            setattr(ds, "expected_channels", num_channels)
-        return ds
+        platform_owned = sorted(name for name, value in {"tiling": tiling, **sizes}.items()
+                                if value is not None)
+        if platform_owned:
+            raise ValueError(
+                f"build_dataset was given {platform_owned} beside a dataset_source: a bespoke "
+                f"builder composes its own tiling, band count and class count over the samples it "
+                f"was handed, so the platform states none of them for a dataset it does not "
+                f"build. Drop {platform_owned}, or put them in dataset_source.builder_kwargs."
+            )
+        return build_from_dataset_source(
+            dataset_source, task=task, samples=samples, id_map=scope.id_map,
+            transforms=transforms)
 
     cls = _DATASET_MAP.get(task)
     if cls is None:
         raise ValueError(f"Unknown task '{task}'. Available: {list(_DATASET_MAP.keys())}")
-
-    if task in ("detection", "instance_seg") and samples is None:
-        subject = kwargs.get("subject")
-        attribute = kwargs.get("attribute")
-        has_coco = kwargs.get("coco_data") is not None
-        if not has_coco and kwargs.get("labels_dir"):
-            # Name-based json: resolve the single id map once, set num_classes and assemble the COCO
-            # from it, the loader, the categories, and resolve_contract_dims all read this one map.
-            _registry, id_map = resolve_registry_id_map(kwargs["labels_dir"], subject, attribute)
-            # resolve_registry_id_map above already raises when subject is missing or empty.
-            assert subject, "resolve_registry_id_map raises above when subject is missing or empty"
-            kwargs["id_map"] = id_map
-            kwargs["num_classes"] = len(id_map)
-            _autoresolve_json_labels(kwargs, subject=subject, attribute=attribute, id_map=id_map)
-        elif has_coco and kwargs.get("num_classes") is None:
-            coco = kwargs.get("coco_data")
-            if isinstance(coco, dict):
-                kwargs["num_classes"] = len(coco.get("categories") or []) or 1
+    for name, stated_by_data in sizes_from_samples(task, samples).items():
+        if sizes[name] is None:
+            sizes[name] = stated_by_data
+        elif name in GROUND_TRUTH_COUNTS and int(sizes[name]) < stated_by_data:
+            raise ValueError(
+                f"the ground truth this run was handed reaches {stated_by_data - 1}, which needs "
+                f"{name} >= {stated_by_data}, but {name}={sizes[name]} was configured: a head "
+                f"sized under what the ground truth carries would index past its own outputs, or "
+                f"train every value beyond its last as that last one. Fix {name} or the ground "
+                "truth."
+            )
+    available = {"subject": scope.subject, "attribute": scope.attribute,
+                 "id_map": scope.id_map, **sizes}
+    declared = {name: available[name] for name in cls.takes if available[name] is not None}
+    # Each loader declares its own constructor keywords, so the call is made through the class
+    # object rather than a signature this factory restates.
+    construct: Any = cls
 
     if tiling and tiling.get("enabled", True) and task == "detection":
-        transforms = kwargs.pop("transforms", None)
-        base = cls(**kwargs)
-        # The tiler's __init__ indexes every image at this band count; stamping only the wrapper
-        # afterwards leaves the index built at 3 channels and the tiles read at N.
-        base.expected_channels = num_channels
-        ds = TiledDetectionDataset(base, transforms=transforms, **tile_kwargs_from_tiling(tiling))
+        base = construct(samples=samples, **declared)
+        assert isinstance(base, DetectionDataset), "_DATASET_MAP's detection entry is this class"
+        # The tiler's __init__ indexes every image at this band count, reading it off the base it
+        # wraps, so the base is stamped before the wrapper is built.
+        base.expected_channels = sizes["num_channels"]
+        ds: BaseDataset = TiledDetectionDataset(
+            base, transforms=transforms, **tile_kwargs_from_tiling(tiling))
     else:
         if tiling and tiling.get("enabled", True) and task != "detection":
             logger.warning("tiling is only supported for task='detection'; ignoring for task=%r", task)
-        ds = cls(**kwargs)
+        ds = construct(samples=samples, transforms=transforms, **declared)
 
-    ds.expected_channels = num_channels
+    ds.expected_channels = sizes["num_channels"]
     return ds

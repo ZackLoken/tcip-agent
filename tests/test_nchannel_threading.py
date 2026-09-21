@@ -3,6 +3,7 @@ guard, and dataset channel metadata. Multi-channel *readers* are separate; here 
 carries channel counts and validates them."""
 
 import pytest
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -264,7 +265,6 @@ def test_build_dataset_sets_expected_channels(tmp_path):
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.pipelines.data.datasets import build_dataset
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     labels_dir = tmp_path / "labels"
@@ -274,6 +274,28 @@ def test_build_dataset_sets_expected_channels(tmp_path):
                               [Annotation(subject="bud", geometry=BBox(6.4, 6.4, 9.6, 9.6))],
                               16, 16, keep_empty=True)
 
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="bud", num_channels=4)
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", num_channels=4)
     assert ds.expected_channels == 4
+
+
+def test_a_source_whose_band_count_cannot_be_read_refuses_rather_than_defaulting(tmp_path):
+    """A run's input channels are derived from its own sources, so a probe that fails refuses by
+    name: a confidently-wrong count sizes the model wrong for every image the run reads."""
+    import pytest
+
+    from PIL import Image
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    Image.new("RGB", (16, 16)).save(images_dir / "a.png")
+    json_io.write_annotations(str(labels_dir / "a.json"),
+                              [Annotation(subject="bud", geometry=BBox(6.4, 6.4, 9.6, 9.6))],
+                              16, 16, keep_empty=True)
+    (images_dir / "a.png").write_bytes(b"not an image")
+
+    with pytest.raises(ValueError, match="band count"):
+        dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")

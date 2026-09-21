@@ -117,7 +117,7 @@ def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     create_experiment(experiment_id, {"data": data_cfg})
-    persist_run_partition(experiment_id, train_ds, val_ds, data_cfg)
+    persist_run_partition(experiment_id, data_cfg)
 
     checkpoint_path = _bespoke_detection_checkpoint(tmp_path)
     return {
@@ -993,16 +993,16 @@ def _build_attribute_scoped_experiment(
     """A block-calibration experiment whose subject is scoped by a categorical attribute, with the
     dataset's registry reordered after the run resolved and stamped its own name->id map.
 
-    ``trained_values`` is the attribute-value order declared while the run resolved its map (the
-    map ``subprocess_worker`` stamps onto ``config['data']['id_map']``, which every checkpoint
-    embeds and ``GenericPredictor`` reads back as ``predictor.config``); ``reordered_values`` is
+    ``trained_values`` is the attribute-value order declared while the run's producer admitted its
+    samples (the map ``subprocess_worker`` stamps onto ``config['data']['id_map']``, which every
+    checkpoint embeds and ``GenericPredictor`` reads back as ``predictor.config``); ``reordered_values`` is
     the order the registry on disk declares now. ``labeled_value`` is the value every annotation
     carries. Returns the same keys ``_build_experiment`` does plus ``recorded_id_map``.
     """
     from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, write_registry
     from tcip_mcp.experiments import create_experiment
     from tcip_mcp.pipelines.model_build import build_model
-    from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
+    from tcip_mcp.pipelines.training.subprocess_worker import _admitted_class_space
     from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
 
@@ -1033,10 +1033,12 @@ def _build_attribute_scoped_experiment(
     }
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
-    _subject, _attribute, recorded_id_map = _resolve_run_id_map("detection", data_cfg)
-    data_cfg["id_map"] = dict(recorded_id_map)
+    recorded_scope = _admitted_class_space(data_cfg)
+    assert recorded_scope is not None
+    recorded_scope.onto(data_cfg)
+    recorded_id_map = recorded_scope.id_map
     create_experiment(experiment_id, {"data": data_cfg})
-    persist_run_partition(experiment_id, train_ds, val_ds, data_cfg)
+    persist_run_partition(experiment_id, data_cfg)
 
     _write_registry(reordered_values)
 

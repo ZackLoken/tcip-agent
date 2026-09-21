@@ -19,6 +19,9 @@ import pytest
 pytest.importorskip("torch")
 
 
+from tests._producer_fixtures import admission_of
+
+
 def _stub_checkpoint_load(monkeypatch) -> None:
     """These tests drive a stubbed predictor over a checkpoint path ("x.pt") that never exists
     on disk; load_registered_checkpoint is stubbed so the verified-load rail never reads it."""
@@ -70,11 +73,12 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
     _stub_checkpoint_load(monkeypatch)
 
     # ---- script path ----
-    class _Probe:
-        stems = ["a", "b"]
-
-    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", lambda *a, **kw: _Probe())
-    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda labels_dir, s, **kw: 1)
+    monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
+                        lambda *a, **kw: admission_of(["a", "b"]))
+    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
+                        lambda *a, samples=None, **kw: SimpleNamespace(
+                            stems=list(samples) if samples is not None else ["a", "b"]))
+    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda label_path, **kw: 1)
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
                         lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
     monkeypatch.setattr("torch.utils.data.DataLoader", lambda ds, **kw: ds)
@@ -134,11 +138,12 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor", _build_predictor)
     _stub_checkpoint_load(monkeypatch)
 
-    class _Probe:
-        stems = ["a", "b"]
-
-    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", lambda *a, **kw: _Probe())
-    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda labels_dir, s, **kw: 1)
+    monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
+                        lambda *a, **kw: admission_of(["a", "b"]))
+    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
+                        lambda *a, samples=None, **kw: SimpleNamespace(
+                            stems=list(samples) if samples is not None else ["a", "b"]))
+    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda label_path, **kw: 1)
 
     def _resolve_locked(stems, **kw):
         return {"calibration": ["a"], "holdout": ["b"]}
@@ -201,13 +206,14 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
                         lambda checkpoint=None, *, device, max_dets=None, **kw: _Predictor())
     _stub_checkpoint_load(monkeypatch)
 
-    class _Probe:
-        stems = ["a", "b"]
-
-    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", lambda *a, **kw: _Probe())
+    monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
+                        lambda *a, **kw: admission_of(["a", "b"]))
+    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
+                        lambda *a, samples=None, **kw: SimpleNamespace(
+                            stems=list(samples) if samples is not None else ["a", "b"]))
     # Sparse split: 2 objects/stem -> derive_max_dets_from_counts floors at 100, well under
     # DEFAULT_MAX_DETS (1000), a real, visible difference from the flat constant.
-    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda labels_dir, s, **kw: 2)
+    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda label_path, **kw: 2)
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
                         lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
     monkeypatch.setattr("torch.utils.data.DataLoader", lambda ds, **kw: ds)
@@ -252,11 +258,12 @@ def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path,
                         lambda *a, **kw: _Predictor())
     _stub_checkpoint_load(monkeypatch)
 
-    class _Probe:
-        stems = ["a", "b"]
-
-    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", lambda *a, **kw: _Probe())
-    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda labels_dir, s, **kw: 1)
+    monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
+                        lambda *a, **kw: admission_of(["a", "b"]))
+    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
+                        lambda *a, samples=None, **kw: SimpleNamespace(
+                            stems=list(samples) if samples is not None else ["a", "b"]))
+    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda label_path, **kw: 1)
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
                         lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
     monkeypatch.setattr("torch.utils.data.DataLoader", lambda ds, **kw: ds)
@@ -326,10 +333,11 @@ def test_script_prints_and_exits_cleanly_for_fewer_than_two_labeled_stems(monkey
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
                         lambda checkpoint=None, **kw: _Predictor())
 
-    class _Probe:
-        stems = ["only_one"]
-
-    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", lambda *a, **kw: _Probe())
+    monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
+                        lambda *a, **kw: admission_of(["only_one"]))
+    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
+                        lambda *a, samples=None, **kw: SimpleNamespace(
+                            stems=list(samples) if samples is not None else ["only_one"]))
     monkeypatch.setattr("tcip_mcp.project_paths.platform_state_root", lambda: tmp_path)
 
     from tcip_mcp.cli.calibrate_operating_point import main

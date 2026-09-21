@@ -50,7 +50,7 @@ def _bespoke_task_dataset(**_kwargs):
     return _DS()
 
 
-def _strict_bespoke_dataset(images_dir=None, transforms=None, task=None, stems=None):
+def _strict_bespoke_dataset(samples=None, id_map=None, transforms=None, task=None):
     """Declares only what the training path passes: no `**kwargs` catch-all to absorb stray keys."""
     from torch.utils.data import Dataset
 
@@ -66,6 +66,27 @@ def _strict_bespoke_dataset(images_dir=None, transforms=None, task=None, stems=N
 
 def _unbuildable_dataset(**_kwargs):
     raise RuntimeError("cannot open the source for this task")
+
+
+def _admitted_tree(tmp_path):
+    """An images directory and a label tree the platform's own producer admits samples from, for a
+    bespoke run: a builder does not exempt its run from naming the data the producer reads."""
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
+
+    root = tmp_path / "ds"
+    imgs, lbls = root / "images", root / "annotations"
+    imgs.mkdir(parents=True)
+    lbls.mkdir(parents=True)
+    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="leaf"),)))
+    for stem in ("a", "b", "c", "d"):
+        Image.new("RGB", (32, 32)).save(imgs / f"{stem}.png")
+        json_io.write_annotations(lbls / f"{stem}.json",
+                                  [Annotation(subject="leaf", geometry=BBox(2, 2, 10, 10))],
+                                  32, 32, keep_empty=True)
+    return imgs, lbls
 
 
 def _bespoke_task_model(**_kwargs):
@@ -91,33 +112,37 @@ def _bespoke_task_model(**_kwargs):
 # --------------------------------------------------------------------------
 
 def test_resolve_contract_dims_prefers_tile_edge_over_default():
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
     cfg = {
         "model_source": {"builder_kwargs": {"num_classes": 5, "in_chans": 4}, "task": "detection"},
         "data": {"tiling": {"enabled": True, "tile_size": 512}},
     }
-    dims = resolve_contract_dims(cfg, "detection")
+    dims = resolve_contract_dims(cfg, "detection", scope=ClassScope())
     assert dims == {"in_chans": 4, "num_classes": 5, "img_size": 512}
 
 
 def test_resolve_contract_dims_falls_back_without_inventing():
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
     # No num_classes / in_chans / tile_size: resolved to safe fallbacks, never a hard fail.
-    dims = resolve_contract_dims({"model_source": {}}, "detection")
+    dims = resolve_contract_dims({"model_source": {}}, "detection", scope=ClassScope())
     assert dims == {"in_chans": 3, "num_classes": 1, "img_size": 224}
 
 
-def test_resolve_contract_dims_attribute_without_registry_raises_not_silently_falls_back(tmp_path):
-    """A bare `except Exception: pass` around resolve_registry_id_map
-    must not fall open to the head's declared num_classes for any read failure, only the legitimate
-    "no subject in scope" case: falling open more broadly would mask a real problem (an
-    attribute-classification config with no subjects.json to order its values) as a healthy
-    smoke-test dims resolution. No subject at all still legitimately falls back (test above); a
-    subject that is given, with an attribute and no registry, must raise."""
+def test_resolve_contract_dims_takes_the_admitted_map_over_the_heads_declared_count(tmp_path):
+    """The count the smoke forwards at is the one the run's samples were admitted under, whatever
+    the head declares: a smoke proving a model against a head wider than the run's own class space
+    proves it against a model that will not train."""
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
     cfg = {
         "model_source": {"builder_kwargs": {"num_classes": 5}},
         "data": {"subject": "bud", "attribute": "opening", "labels_dir": str(tmp_path / "labels")},
     }
-    with pytest.raises(ValueError, match="subjects.json"):
-        resolve_contract_dims(cfg, "detection")
+    scope = ClassScope(subject="bud", attribute="opening", id_map={"open": 0, "closed": 1})
+
+    assert resolve_contract_dims(cfg, "detection", scope=scope)["num_classes"] == 2
 
 
 # --------------------------------------------------------------------------
@@ -134,7 +159,7 @@ def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
     lbls.mkdir()
     cfg = {
         "model_source": {"builder": f"{__name__}:_broken_builder", "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
     # Fast path (no smoke) is structurally valid: the builder imports fine.
@@ -158,7 +183,7 @@ def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
     r = preflight_config(cfg, smoke=True, overfit=True)
@@ -176,11 +201,10 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images"
-    imgs.mkdir()
+    imgs, lbls = _admitted_tree(tmp_path)
     cfg = {
         "model_source": {"builder": f"{__name__}:_bespoke_task_model", "task": "bunch_compactness"},
-        "data": {"images_dir": str(imgs),
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "leaf",
                  "dataset_source": {"builder": f"{__name__}:_bespoke_task_dataset",
                                     "task": "bunch_compactness"}},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
@@ -199,25 +223,20 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
 
 
 def test_preflight_smoke_batch_matches_what_the_run_will_build(tmp_path, monkeypatch):
-    """The smoked dataset is built from the run's own source kwargs, not a private key list.
+    """The smoked dataset is built the way the training path builds it, not from a private key
+    list.
 
-    A bespoke builder only has to accept what the training path passes it. Preflight forwarding
-    extra keys (labels_dir, masks_dir, ...) would reject a dataset that trains fine, turning the
-    contract rail into a blocker for valid work.
+    A bespoke builder only has to accept what the training path passes it, which is the producer's
+    own four names: forwarding a directory here would reject a dataset that trains fine, turning
+    the contract rail into a blocker for valid work.
     """
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.tools.training_tools import _dataset_source_kwargs, _one_real_batch
+    from tcip_mcp.tools.training_tools import _one_real_batch
 
-    imgs, lbls = tmp_path / "images", tmp_path / "labels"
-    imgs.mkdir()
-    lbls.mkdir()
-    data = {"images_dir": str(imgs), "labels_dir": str(lbls),
+    imgs, lbls = _admitted_tree(tmp_path)
+    data = {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "leaf",
             "dataset_source": {"builder": f"{__name__}:_strict_bespoke_dataset",
                                "task": "bunch_compactness"}}
-
-    # The training path and the smoke path derive the same kwargs from the same config.
-    assert _dataset_source_kwargs("bunch_compactness", data) == {
-        "images_dir": str(imgs), "dataset_source": data["dataset_source"]}
 
     batch, why = _one_real_batch("bunch_compactness", {"data": data})
     assert why is None, why
@@ -229,11 +248,10 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images"
-    imgs.mkdir()
+    imgs, lbls = _admitted_tree(tmp_path)
     cfg = {  # structurally valid, but the dataset cannot produce an item
         "model_source": {"builder": f"{__name__}:_bespoke_task_model", "task": "bunch_compactness"},
-        "data": {"images_dir": str(imgs),
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "leaf",
                  "dataset_source": {"builder": f"{__name__}:_unbuildable_dataset",
                                     "task": "bunch_compactness"}},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],

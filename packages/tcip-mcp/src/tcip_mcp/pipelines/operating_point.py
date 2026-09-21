@@ -37,7 +37,7 @@ from tcip_mcp.pipelines.resolution import (
     accepted_references,
     default,
     derived,
-    label_digests,
+    members_moved_since,
     resolve_tile_size_param,
 )
 from tcip_mcp.pipelines.training.evaluation import (
@@ -516,38 +516,14 @@ def _named_group_key_fn(group_by: str | None, date: str | None) -> Callable[[str
     return recorded_group_key_fn(group_by, date=date)
 
 
-def _unscoped_group_keys(
-    split: dict,
-) -> tuple[Callable[[str], str | None], Callable[[str], str] | None]:
-    """How a bare stem of the record's own flat member lists finds its group key where no
-    per-directory block scopes the comparison: ``(the record's own map, the named policy)``.
+def _recorded_side(split: dict, side: str) -> list[str]:
+    """Every member this record names on one side, across all the scopes it holds, through the
+    reader the partition's own writer states
+    (:func:`~tcip_mcp.pipelines.data.split_construction.recorded_side`)."""
+    from tcip_mcp.pipelines.data.split_construction import recorded_side
 
-    Both answer nothing for a record carrying per-directory members. Its flat ``train``/``val``
-    lists are the union across every directory the run's samples live under, so no capture date
-    can be attached to a bare stem of them, and a key reproduced without one would call two dates'
-    images of one parent a single group. Such a record answers through the exact-stem comparison
-    instead, which claims nothing about grouping.
-
-    A record with no per-directory members names one labels directory, and that directory is what
-    scopes its stems: its top-level map is keyed by member identity, since nothing else scopes it,
-    so it is looked up through that directory's own capture date, and the policy reproduces a key
-    the map does not cover the same way.
-    """
-    if isinstance(split.get("members"), dict):
-        return (lambda stem: None), None
-
-    from tcip_mcp.dataset_layout import annotation_date
-    from tcip_mcp.pipelines.data.splits import member_identity
-
-    recorded_dirs = split.get("labels_dirs") or []
-    date = annotation_date(recorded_dirs[0]) if len(recorded_dirs) == 1 else None
-    recorded = ((split.get("group_key_map") or {})
-                if split.get("group_by") == "explicit_map" else {})
-
-    def recorded_key_of(stem: str) -> str | None:
-        return recorded.get(member_identity(date, stem))
-
-    return recorded_key_of, _named_group_key_fn(split.get("group_by"), date)
+    members = split.get("members")
+    return recorded_side(members, side) if isinstance(members, dict) else []
 
 
 def _bound_side_disjointness(
@@ -603,9 +579,9 @@ def _train_disjointness(
       - a persisted ``group_key_map`` resolves whichever stems it actually covers.
       - a named, recognized strategy (``tile_prefix``/``stem``) resolves the rest, so a stem
         outside a finite map is still grouped rather than unresolvable, but only where the record
-        says which directory (and so which capture date) the stem belongs to: a per-directory
-        record read against a directory it names nothing under resolves no key at all, since a
-        bare stem of its flat member list belongs to no one date (:func:`_unscoped_group_key_fn`).
+        says which scope (and so which capture date) the stem belongs to: a record read against a
+        directory it names nothing under resolves no key at all, since a bare member name of the
+        union across its scopes belongs to no one date.
       - anything else (an unrecognized string, a missing field) resolves nothing at the group
         level beyond what the map covers.
 
@@ -621,13 +597,14 @@ def _train_disjointness(
     :func:`_selection_disjointness`, which runs the identical check against a checkpoint's own
     selection (val) side instead of its training side.
 
-    A record carrying no per-scope ``members`` block still gets that exact-stem fallback over its
-    flat ``train`` list, where the selection check refuses such a record outright. The two differ
-    because the answers differ in direction: this side compares every recorded training stem
-    against the calibration by name whatever directory either lives under, so an unscoped record
-    can name a leak that is only a shared filename, and can never miss one it holds. Over-naming a
-    leak refuses a claim that might have been fine; the selection side's unscoped comparison could
-    instead clear one that is not, which is why it requires the scope and this side does not.
+    A calibration reading a directory no scope of the record answers for still gets that
+    exact-stem comparison over the union of the record's scopes, where the selection check refuses
+    such a read outright. The two differ because the answers differ in direction: this side
+    compares every recorded training member against the calibration by name whatever scope either
+    lives under, so it can name a leak that is only a shared filename, and can never miss one it
+    holds. Over-naming a leak refuses a claim that might have been fine; the selection side's
+    unscoped comparison could instead clear one that is not, which is why it requires the scope
+    and this side does not.
 
     ``cal_rects``/``hold_rects`` (keyed by source stem, one pixel rect ``(x0, y0, x1, y1)`` per
     stem) are optional and additive: omitting them gets exactly the
@@ -643,35 +620,40 @@ def _train_disjointness(
     from tcip_mcp.experiments import read_run_partition
 
     split = read_run_partition(experiment_id)
-    recorded_dir, narrowed = _members_under(split, calibration_labels_dir)
-    train_stems = (split.get("train") or [])
-    if not train_stems:
-        # Nothing recorded to check against at all, not even the stem-overlap fallback has
-        # anything to compare, so this is genuinely unresolvable, not merely ungrouped.
-        return dict(_UNRESOLVABLE_TRAIN_DISJOINTNESS)
-
     cal_hold_stems = sorted(cal_ids | hold_ids)
     group_by = split.get("group_by")
-    if narrowed is not None and recorded_dir is not None and group_by != "spatial_strip":
-        return _bound_side_disjointness(split, recorded_dir, narrowed, "train", cal_hold_stems)
-
     if group_by == "spatial_strip":
         from tcip_mcp.pipelines.data.splits import stem_of_spatial_identity
 
         if cal_rects or hold_rects:
             return _spatial_strip_geometric_disjointness(
                 split.get("spatial") or {}, cal_rects, hold_rects)
-        # train_stems are per-region identities, not bare stems; only a same-source reference is
-        # caught here (a caller with real rects gets the geometric check above instead).
-        train_source_stems = {stem_of_spatial_identity(s) for s in train_stems}
+        # A spatial record's members are per-region identities, not bare stems; only a same-source
+        # reference is caught here (a caller with real rects gets the geometric check above).
+        train_source_stems = {stem_of_spatial_identity(s)
+                              for s in (split.get("train") or [])}
+        if not train_source_stems:
+            return dict(_UNRESOLVABLE_TRAIN_DISJOINTNESS)
         spatial_leaked_groups = sorted(train_source_stems & set(cal_hold_stems))
         return {
             "checked": True, "unresolvable": False, "leaked_groups": spatial_leaked_groups,
             "leaked_stems": [], "group_check": "spatial_strip",
         }
 
+    train_stems = _recorded_side(split, "train")
+    if not train_stems:
+        # Nothing recorded to check against at all, not even the stem-overlap fallback has
+        # anything to compare, so this is unresolvable rather than merely ungrouped.
+        return dict(_UNRESOLVABLE_TRAIN_DISJOINTNESS)
+
+    recorded_dir, narrowed = _members_under(split, calibration_labels_dir)
+    if narrowed is not None and recorded_dir is not None:
+        return _bound_side_disjointness(split, recorded_dir, narrowed, "train", cal_hold_stems)
+
+    # No scope of this record answers for the directory the calibration read, so no recorded
+    # group key is in a vocabulary this comparison could use: exact member names only.
     return _resolve_group_stem_disjointness(
-        train_stems, cal_hold_stems, *_unscoped_group_keys(split))
+        train_stems, cal_hold_stems, lambda stem: None, None)
 
 
 def _resolve_group_stem_disjointness(
@@ -745,10 +727,12 @@ _UNRESOLVABLE_SELECTION_SHAPE = {
 def _resolve_label_movement(
     label_digests_block: dict | None, cal_ids: set,
     calibration_labels_dir: str | None, selection_sha256: str | None,
+    recorded_sha256: str | None,
 ) -> dict:
     """The four label-movement keys plus ``calibration_labels_dir``, from a bound run's own
-    ``split.json``'s ``label_digests`` block (``at_split``/``at_run``/``selection_sha256``) and
-    the calibration's own labels directory, when it read one.
+    ``split.json``: its scope block's ``label_digests`` (``at_split``/``at_run``), the digest of
+    the selection that run bound (``recorded_sha256``, one fact for the whole run, recorded once
+    in its binding block) and the calibration's own labels directory, when it read one.
 
     All four keys ``None`` when the run recorded no ``label_digests`` block, or recorded one with
     an empty ``at_split`` (a run bound before that block existed, or an unbound run calibrated
@@ -758,11 +742,22 @@ def _resolve_label_movement(
 
     The second window (``labels_moved_run_to_now``) is scoped to ``cal_ids``, the calibration's
     own universe, rather than to every stem of ``at_run``: ``calibration_labels_dir`` may be one
-    of several already-split per-image directories (a classifier calibration's own GT dir, say),
-    holding only the calibration side's own files, so recomputing over the run's whole bound set
-    would read a train- or val-side stem's absence as a move it never made. When the scoped set is
-    empty (the named directory holds none of ``at_run``'s documents), the second window is left
-    unsealed (``None``) rather than sealed empty, since nothing in it was actually checked.
+    of several already-split scopes (a classifier calibration's own GT dir, say), holding only the
+    calibration side's own ground truth, so recomputing over the run's whole bound set would read
+    a train- or val-side member's absence as a move it never made. When the scoped set is empty
+    (the named scope holds none of ``at_run``'s members), the second window is left unsealed
+    (``None``) rather than sealed empty, since nothing in it was actually checked.
+
+    Recomputed through :func:`~tcip_mcp.pipelines.resolution.members_moved_since`, the one
+    comparison against a recorded ``at_run`` digest, over the path the run's own producer recorded
+    for each member, so whatever shape that ground truth is it reads as moved only when it moved.
+    A record that names no path for a scoped member leaves the second window unsealed (``None``)
+    rather than sealed empty, the same way an empty scoped set does: nothing in it was checked.
+
+    ``selection_redrawn`` is that same convention over the digest window: it answers only when
+    both digests are in hand, and a record that carries none of its own leaves it unsealed
+    (``None``). An absent recorded digest is no evidence, and comparing the current one against
+    nothing would report every such record's unchanged selection as redrawn.
     """
     if not label_digests_block or not label_digests_block.get("at_split"):
         return {
@@ -774,17 +769,13 @@ def _resolve_label_movement(
         }
     at_split = label_digests_block.get("at_split") or {}
     at_run = label_digests_block.get("at_run") or {}
-    recorded_sha256 = label_digests_block.get("selection_sha256")
+    recorded_paths = label_digests_block.get("ground_truth") or {}
 
     labels_moved_draw_to_run = sorted(
         stem for stem, digest in at_split.items() if at_run.get(stem) != digest)
     scoped = sorted(set(at_run) & cal_ids) if calibration_labels_dir is not None else []
-    if scoped:
-        # scoped is non-empty only when calibration_labels_dir is not None (see the ternary above).
-        assert calibration_labels_dir is not None
-        now = label_digests(calibration_labels_dir, scoped)
-        labels_moved_run_to_now = sorted(
-            stem for stem in scoped if now.get(stem) != at_run.get(stem))
+    if scoped and all(stem in recorded_paths for stem in scoped):
+        labels_moved_run_to_now = members_moved_since(recorded_paths, at_run, scoped)
     else:
         labels_moved_run_to_now = None
 
@@ -794,8 +785,8 @@ def _resolve_label_movement(
         "labels_moved_run_to_now": labels_moved_run_to_now,
         "calibration_labels_moved": sorted(moved & cal_ids),
         "selection_redrawn": (
-            selection_sha256 != recorded_sha256 if selection_sha256 is not None
-            else None
+            selection_sha256 != recorded_sha256
+            if selection_sha256 is not None and recorded_sha256 is not None else None
         ),
         "calibration_labels_dir": calibration_labels_dir,
     }
@@ -825,11 +816,10 @@ def _selection_disjointness(
     which scope they live under, so a calibration reading that same directory is exactly the
     overlap this check exists to catch.
 
-    A record carrying no per-scope ``members`` block at all is unresolvable, never compared: its
-    flat ``val`` list names stems with no directory to scope them to, so the same list could be
-    one directory's membership or two, and reading the absence as one directory would both
-    compare against a scope the record never stated and skip the one it never named. Requiring
-    the evidence is the only answer that cannot be wrong in the direction that matters.
+    A record carrying no per-scope ``members`` block at all is unresolvable, never compared: it
+    names no scope for its members, so reading its absence as one directory would both compare
+    against a scope the record never stated and skip the one it never named. Requiring the
+    evidence is the only answer that cannot be wrong in the direction that matters.
     Unresolvable, rather than not-applicable, when
     the calibration names a selection but there is no experiment record to check it against
     (``experiment_id is None``): a number whose provenance can't be checked is refused, and a
@@ -871,43 +861,36 @@ def _selection_disjointness(
                 "reason": "the run drew a within-image spatial split; its own calibration_region "
                           "is the selection check for that route, not this one",
                 **_NOT_APPLICABLE_SELECTION_SHAPE}
-    recorded_dir, narrowed = _members_under(split, calibration_labels_dir)
-    val_stems = split.get("val") or []
-    if not val_stems:
-        return {"applicable": False, "reason": "the run's split.json carries no val members",
-                **_NOT_APPLICABLE_SELECTION_SHAPE}
     if not isinstance(split.get("members"), dict):
         return {"applicable": True,
-                "reason": "this run's split.json records no per-scope membership, only flat "
-                          "train and val lists, so which directory its val members live under "
-                          "is not on record: comparing them against the one this calibration "
-                          "read would answer for a scope the record never stated. Retrain, or "
-                          "calibrate under a selection drawn over the current data, so the run's "
-                          "own membership is recorded per scope",
+                "reason": "this run's split.json records no per-scope membership, so which scope "
+                          "its val members live under is not on record: comparing them against "
+                          "the one this calibration read would answer for a scope the record "
+                          "never stated. Retrain, or calibrate under a selection drawn over the "
+                          "current data, so the run's own membership is recorded per scope",
                 **_UNRESOLVABLE_SELECTION_SHAPE}
+    if not _recorded_side(split, "val"):
+        return {"applicable": False, "reason": "the run's split.json carries no val members",
+                **_NOT_APPLICABLE_SELECTION_SHAPE}
     if calibration_labels_dir is None:
         return {"applicable": False,
                 "reason": "this calibration named no labels directory to check against the "
-                          "directories the run's own val members live under",
+                          "scopes the run's own val members live under",
                 **_NOT_APPLICABLE_SELECTION_SHAPE}
-    recorded_dirs = split.get("labels_dirs") or []
-    if recorded_dirs and not any(
-            is_the_same_labels_dir(d, calibration_labels_dir) for d in recorded_dirs):
+    recorded_dir, narrowed = _members_under(split, calibration_labels_dir)
+    if narrowed is None or recorded_dir is None:
         return {"applicable": False,
                 "reason": f"the calibration reads labels from {calibration_labels_dir!r}, and the "
-                          f"run's own val members live under {sorted(recorded_dirs)}; a bare stem "
-                          "means the same image only within one label directory",
+                          f"run's own members live under {sorted(split['members'])}; a bare "
+                          "member name means the same image only within one scope",
                 **_NOT_APPLICABLE_SELECTION_SHAPE}
 
     cal_hold_stems = sorted(cal_ids | hold_ids)
-    if narrowed is not None and recorded_dir is not None:
-        resolved = _bound_side_disjointness(split, recorded_dir, narrowed, "val", cal_hold_stems)
-    else:
-        resolved = _resolve_group_stem_disjointness(
-            val_stems, cal_hold_stems, *_unscoped_group_keys(split))
-    label_digests_block = (narrowed or {}).get("label_digests") or split.get("label_digests")
+    resolved = _bound_side_disjointness(split, recorded_dir, narrowed, "val", cal_hold_stems)
+    label_digests_block = narrowed.get("label_digests")
     moved = _resolve_label_movement(
-        label_digests_block, cal_ids, calibration_labels_dir, selection_sha256)
+        label_digests_block, cal_ids, calibration_labels_dir, selection_sha256,
+        (split.get("selection_binding") or {}).get("selection_sha256"))
     reason = None
     if not label_digests_block or not label_digests_block.get("at_split"):
         reason = (

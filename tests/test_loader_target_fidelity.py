@@ -15,6 +15,7 @@ from PIL import Image  # noqa: E402
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 BUD = "bud"
 
@@ -32,13 +33,12 @@ def _write(labels_dir, stem, boxes, size):
         size[0], size[1], keep_empty=True)
 
 
-def test_a_boxs_width_and_height_survive_the_assembled_coco_round_trip(tmp_path):
-    """Training assembles the per-image JSON into COCO xywh and the loader converts it back to
-    pixel xyxy. A box wider than it is tall must stay wider than it is tall: swapping the two keeps
-    the origin and moves the far corner, so every object trains against the wrong extent while the
-    box count and its position both look right.
+def test_a_boxs_width_and_height_reach_the_loader_unswapped(tmp_path):
+    """The loader reads each sample's own document into pixel xyxy. A box wider than it is tall
+    must stay wider than it is tall: swapping the two keeps the origin and moves the far corner,
+    so every object trains against the wrong extent while the box count and its position both look
+    right.
     """
-    from tcip_mcp.pipelines.data.datasets import build_dataset
 
     size = (120, 80)
     images, labels = tmp_path / "images", tmp_path / "annotations"
@@ -46,8 +46,7 @@ def test_a_boxs_width_and_height_survive_the_assembled_coco_round_trip(tmp_path)
     _make_images(images, ["img0"], size)
     _write(labels, "img0", [(10, 20, 70, 40), (80, 5, 95, 75)], size)
 
-    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=BUD)
-    assert ds._coco is not None
+    ds = dataset_over("detection", str(images), str(labels), subject=BUD)
     _img, target = ds[0]
     assert target["boxes"].tolist() == [[10.0, 20.0, 70.0, 40.0], [80.0, 5.0, 95.0, 75.0]]
 
@@ -72,7 +71,7 @@ def test_a_seam_fragment_is_not_indexed_as_a_whole_object(tmp_path, sliver_frac)
     and the recorded fraction describes a filter the data never went through. The tiles holding the
     rest of each box keep it.
     """
-    from tcip_mcp.pipelines.data.datasets import DetectionDataset, TiledDetectionDataset
+    from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
     size = (300, 200)
     images, labels = tmp_path / "images", tmp_path / "annotations"
@@ -80,7 +79,7 @@ def test_a_seam_fragment_is_not_indexed_as_a_whole_object(tmp_path, sliver_frac)
     _make_images(images, ["img0"], size)
     _write(labels, "img0", SEAM_BOXES, size)
 
-    base = DetectionDataset(str(images), str(labels), subject=BUD)
+    base = dataset_over('detection', str(images), str(labels), subject=BUD)
     ds = TiledDetectionDataset(base, tile_size=64, overlap=0.0, sliver_frac=sliver_frac)
 
     assert ds.min_box_size > 0
@@ -97,7 +96,6 @@ def test_each_detection_sample_carries_its_own_index_as_image_id(tmp_path):
     """The target dict says which sample it came from, and a consumer joins per-sample results back
     through that field. A shared value silently attributes every sample's boxes to one image.
     """
-    from tcip_mcp.pipelines.data.datasets import build_dataset
 
     size = (120, 80)
     images, labels = tmp_path / "images", tmp_path / "annotations"
@@ -107,7 +105,7 @@ def test_each_detection_sample_carries_its_own_index_as_image_id(tmp_path):
     for i, stem in enumerate(stems):
         _write(labels, stem, [(5 + 20 * k, 6, 25 + 20 * k, 44) for k in range(i + 1)], size)
 
-    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=BUD)
+    ds = dataset_over("detection", str(images), str(labels), subject=BUD)
     assert len(ds) == 3
     samples = [ds[i][1] for i in range(len(ds))]
     assert [t["image_id"] for t in samples] == [0, 1, 2]
@@ -119,16 +117,15 @@ def test_an_ordinal_sample_carries_the_rank_count_its_head_decodes_with(tmp_path
     ranks the scale reaches, never how many samples were loaded. The ranks here are sparse, so the
     two are different numbers.
     """
-    from tcip_mcp.pipelines.data.datasets import build_dataset
 
     images = tmp_path / "images"
     _make_images(images, ["s0", "s1", "s2"], (48, 32))
     csv_path = tmp_path / "ranks.csv"
     csv_path.write_text("stem,rank\ns0,0\ns1,2\ns2,5\n", encoding="utf-8")
 
-    ds = build_dataset("ordinal", images_dir=str(images), csv_path=str(csv_path))
+    ds = dataset_over("ordinal", str(images), str(csv_path))
     assert len(ds) == 3
+    assert ds.num_classes == 6  # the run's own rank count, once, off the table it was handed
     for idx, expected_rank in enumerate([0, 2, 5]):
         _img, target = ds[idx]
         assert target["ranks"] == expected_rank
-        assert target["num_ranks"] == 6

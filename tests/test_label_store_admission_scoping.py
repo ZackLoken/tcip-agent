@@ -2,9 +2,9 @@
 
 One per-image label file holds every subject's records and one status store holds every status a
 human can leave, so both rails are scoped rather than global. A record of another subject is not
-this run's annotation, a geometry-less whole-image note is not a detection target, and "complete"
-is the token for a finished image that has content, the opposite of "negative", never a weaker
-form of it.
+this run's annotation, a geometry-less whole-image note is ground truth the detection loader
+cannot read and says so by name, and "complete" is the token for a finished image that has
+content, the opposite of "negative", never a weaker form of it.
 """
 
 import pytest
@@ -16,6 +16,7 @@ from PIL import Image  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.dataset_layout import record_image_statuses, status_bucket  # noqa: E402
+from tests._producer_fixtures import admit_over, dataset_over  # noqa: E402
 
 BUD = "bud"
 BUSH = "bush"
@@ -43,7 +44,6 @@ def test_a_record_of_another_subject_is_not_this_subjects_annotation(tmp_path):
     learn from and no human statement that it holds no buds, so it is held out rather than
     trained as a zero-box negative. Each subject's own run still admits both of its images.
     """
-    from tcip_mcp.pipelines.data.datasets import DetectionDataset
 
     images, labels = tmp_path / "images", tmp_path / "annotations"
     labels.mkdir(parents=True)
@@ -52,27 +52,29 @@ def test_a_record_of_another_subject_is_not_this_subjects_annotation(tmp_path):
     _write(labels, "bushes_only", [_box(5, 5, 150, 85, subject=BUSH)])
     _write(labels, "both", [_box(20, 10, 44, 70), _box(0, 0, 159, 89, subject=BUSH)])
 
-    bud_ds = DetectionDataset(str(images), str(labels), subject=BUD)
-    assert sorted(bud_ds.stems) == ["both", "buds_only"]
-    assert bud_ds.sample_counts["annotated"] == 2
-    assert bud_ds.sample_counts["skipped_unconfirmed_empty"] == 1
-    for idx, stem in enumerate(bud_ds.stems):
+    bud_admitted = admit_over(images, labels, subject=BUD)
+    assert sorted(r.member for r in bud_admitted.records) == ["both", "buds_only"]
+    assert bud_admitted.counts["annotated"] == 2
+    assert bud_admitted.counts["skipped_unconfirmed_empty"] == 1
+
+    bud_ds = dataset_over('detection', str(images), str(labels), subject=BUD)
+    for idx, stem in enumerate(bud_ds.record_stems):
         _img, target = bud_ds[idx]
         assert target["boxes"].shape[0] > 0, (
             f"{stem} was admitted as annotated for {BUD} but carries no target of it")
 
-    bush_ds = DetectionDataset(str(images), str(labels), subject=BUSH)
-    assert sorted(bush_ds.stems) == ["both", "bushes_only"]
-    assert bush_ds.sample_counts["annotated"] == 2
-    assert bush_ds.sample_counts["skipped_unconfirmed_empty"] == 1
+    bush_admitted = admit_over(images, labels, subject=BUSH)
+    assert sorted(r.member for r in bush_admitted.records) == ["both", "bushes_only"]
+    assert bush_admitted.counts["annotated"] == 2
+    assert bush_admitted.counts["skipped_unconfirmed_empty"] == 1
 
 
-def test_a_whole_image_note_does_not_make_an_image_trainable(tmp_path):
-    """A record with no geometry is a note about the whole image, not a detection target. An image
-    carrying only those has no box to learn from and nobody has marked it empty, so it is held out
-    with the unconfirmed-empty images rather than trained as a negative.
+def test_a_whole_image_note_is_admitted_and_refused_by_the_detection_loader(tmp_path):
+    """A record with no geometry is a note about the whole image, real ground truth for the
+    subject. Admission asks whether the document carries the subject, so the image is admitted;
+    the detection loader reads no target from it and refuses it by name rather than training it
+    as a negative nobody stated.
     """
-    from tcip_mcp.pipelines.data.datasets import DetectionDataset
 
     images, labels = tmp_path / "images", tmp_path / "annotations"
     labels.mkdir(parents=True)
@@ -81,10 +83,13 @@ def test_a_whole_image_note_does_not_make_an_image_trainable(tmp_path):
     _write(labels, "rated_only",
            [Annotation(subject=BUD, geometry=None, attributes={"vigor": "high"})])
 
-    ds = DetectionDataset(str(images), str(labels), subject=BUD)
-    assert ds.stems == ["boxed"]
-    assert ds.sample_counts["annotated"] == 1
-    assert ds.sample_counts["skipped_unconfirmed_empty"] == 1
+    admitted = admit_over(images, labels, subject=BUD)
+    assert sorted(r.member for r in admitted.records) == ["boxed", "rated_only"]
+    assert admitted.counts["annotated"] == 2
+    assert admitted.counts["skipped_unconfirmed_empty"] == 0
+
+    with pytest.raises(ValueError, match="only in geometries a detection loader does not read"):
+        dataset_over('detection', str(images), str(labels), subject=BUD)
 
 
 def test_the_only_status_that_confirms_a_negative_is_the_negative_one(tmp_path):
@@ -92,7 +97,6 @@ def test_the_only_status_that_confirms_a_negative_is_the_negative_one(tmp_path):
     it. Reading it as a confirmation of emptiness turns a populated image into a negative nobody
     stated, so only the negative token confirms one, and it still confirms it.
     """
-    from tcip_mcp.pipelines.data.datasets import DetectionDataset
     from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     images, labels = tmp_path / "images", tmp_path / "annotations"
@@ -109,7 +113,7 @@ def test_the_only_status_that_confirms_a_negative_is_the_negative_one(tmp_path):
 
     assert confirmed_negative_names(labels, subject=BUD, date=None) == {"confirmed_empty.jpg"}
 
-    ds = DetectionDataset(str(images), str(labels), subject=BUD)
-    assert sorted(ds.stems) == ["confirmed_empty", "worked"]
-    assert ds.sample_counts["confirmed_negative"] == 1
-    assert ds.sample_counts["skipped_unconfirmed_empty"] == 1
+    admitted = admit_over(images, labels, subject=BUD)
+    assert sorted(r.member for r in admitted.records) == ["confirmed_empty", "worked"]
+    assert admitted.counts["confirmed_negative"] == 1
+    assert admitted.counts["skipped_unconfirmed_empty"] == 1

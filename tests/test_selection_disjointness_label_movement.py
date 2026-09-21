@@ -111,7 +111,7 @@ def _bind_run(root: Path, out: Path, experiment_id: str, *, date: str = DATES[0]
     data_cfg = {"split": {"selection_dir": str(out)}}
     train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
     create_experiment(experiment_id, {})
-    persist_run_partition(experiment_id, train_ds, val_ds, data_cfg, partition=partition)
+    persist_run_partition(experiment_id, data_cfg, partition=partition)
     return partition
 
 
@@ -262,7 +262,7 @@ def test_the_second_window_never_names_a_train_or_val_stem_absent_from_a_subset_
     second window must not read a train- or val-side stem's mere absence from that directory as
     a move: it is out of scope for that directory, not moved."""
     from tcip_mcp.pipelines.operating_point import _resolve_label_movement
-    from tcip_mcp.pipelines.resolution import label_digests as compute_label_digests
+    from tcip_mcp.pipelines.resolution import ground_truth_digest
 
     cal_dir = tmp_path / "cal_only"
     cal_dir.mkdir()
@@ -270,11 +270,15 @@ def test_the_second_window_never_names_a_train_or_val_stem_absent_from_a_subset_
 
     at_run = {
         "t1": "0" * 16, "v1": "1" * 16,
-        "c1": compute_label_digests(cal_dir, ["c1"])["c1"],
+        "c1": ground_truth_digest(cal_dir / "c1.json"),
     }
-    label_digests_block = {"at_split": dict(at_run), "at_run": dict(at_run), "selection_sha256": "m"}
+    paths = {"t1": str(tmp_path / "elsewhere" / "t1.json"),
+             "v1": str(tmp_path / "elsewhere" / "v1.json"),
+             "c1": str(cal_dir / "c1.json")}
+    label_digests_block = {"at_split": dict(at_run), "at_run": dict(at_run),
+                           "ground_truth": paths}
 
-    moved = _resolve_label_movement(label_digests_block, {"c1"}, str(cal_dir), None)
+    moved = _resolve_label_movement(label_digests_block, {"c1"}, str(cal_dir), None, "m")
 
     assert moved["labels_moved_run_to_now"] == []
     assert moved["calibration_labels_moved"] == []
@@ -290,9 +294,11 @@ def test_the_second_window_still_names_a_moved_calibration_side_stem(tmp_path: P
     (cal_dir / "c1.json").write_bytes(b'{"a": 1}')
 
     at_run = {"t1": "0" * 16, "c1": "stale-digest-not-matching-the-file-on-disk"}
-    label_digests_block = {"at_split": dict(at_run), "at_run": dict(at_run), "selection_sha256": "m"}
+    paths = {"t1": str(tmp_path / "elsewhere" / "t1.json"), "c1": str(cal_dir / "c1.json")}
+    label_digests_block = {"at_split": dict(at_run), "at_run": dict(at_run),
+                           "ground_truth": paths}
 
-    moved = _resolve_label_movement(label_digests_block, {"c1"}, str(cal_dir), None)
+    moved = _resolve_label_movement(label_digests_block, {"c1"}, str(cal_dir), None, "m")
 
     assert moved["labels_moved_run_to_now"] == ["c1"]
     assert moved["calibration_labels_moved"] == ["c1"]
@@ -463,6 +469,35 @@ def test_a_redraw_between_run_and_calibration_is_named_beside_a_moved_label(
     assert stem in sd["labels_moved_draw_to_run"]
 
 
+def test_a_record_carrying_no_selection_digest_leaves_the_redraw_window_unsealed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bound record that carries no digest of its own is no evidence either way: the redraw
+    window is left unsealed, the way the other windows are when the record holds nothing for
+    them. Comparing the calibration's own digest against nothing would report an unchanged
+    selection as redrawn."""
+    from tcip_store import store
+
+    from tcip_mcp.experiments import read_run_partition, split_key
+
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    root = _dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    _bind_run(root, out, "exp_no_recorded_digest")
+
+    record = read_run_partition("exp_no_recorded_digest")
+    assert record["selection_binding"].pop("selection_sha256")
+    store.replace(split_key("exp_no_recorded_digest"), record)
+
+    sd, _shippable = _seal(root, out, "exp_no_recorded_digest", tmp_path,
+                           calibration_labels_dir=str(root / "annotations" / DATES[0]),
+                           selection_sha256=_manifest_sha256(out))
+
+    assert sd["selection_redrawn"] is None
+    assert sd["labels_moved_draw_to_run"] == []
+
+
 def test_an_unbound_run_calibrated_under_a_caller_named_manifest_seals_null_keys(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -486,7 +521,7 @@ def test_an_unbound_run_calibrated_under_a_caller_named_manifest_seals_null_keys
     # A drawn run records a partition of its own; what it must not carry is a selection binding.
     assert partition is not None
     create_experiment("exp_unbound", {})
-    persist_run_partition("exp_unbound", train_ds, val_ds, flat_cfg, partition=partition)
+    persist_run_partition("exp_unbound", flat_cfg, partition=partition)
 
     sd, shippable = _seal(root, out, "exp_unbound", tmp_path, real_stem_ids=False)
 
@@ -517,18 +552,21 @@ def test_every_drawn_sample_carries_its_own_label_digest(
     assert all(sample.ground_truth_digest for sample in drawn.samples)
 
 
-def test_label_digests_gives_the_absent_file_digest_and_dataset_hash_is_unchanged(
+def test_a_withdrawn_ground_truth_digests_as_empty_bytes_in_both_readers(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.pipelines.resolution import dataset_hash, label_digests
+    """One convention for a file that is gone, in the per-member digest and in the combined hash
+    over a directory: the digest of empty bytes, never an absent key, so a withdrawn label reads
+    as moved rather than as never recorded."""
+    from tcip_mcp.pipelines.resolution import dataset_hash, ground_truth_digest
 
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir()
     (labels_dir / "present.json").write_bytes(b'{"a": 1}')
 
-    digests = label_digests(labels_dir, ["present", "absent"])
-    assert digests["absent"] == hashlib.sha256(b"").hexdigest()[:16]
-    assert digests["present"] == hashlib.sha256(b'{"a": 1}').hexdigest()[:16]
+    assert ground_truth_digest(labels_dir / "absent.json") == hashlib.sha256(b"").hexdigest()[:16]
+    assert ground_truth_digest(labels_dir / "present.json") == \
+        hashlib.sha256(b'{"a": 1}').hexdigest()[:16]
 
     expected = hashlib.sha256()
     for stem in ("absent", "present"):
@@ -539,28 +577,16 @@ def test_label_digests_gives_the_absent_file_digest_and_dataset_hash_is_unchange
         expected.update(b"\0")
     assert dataset_hash(labels_dir, stems=["absent", "present"]) == expected.hexdigest()[:16]
 
-    opened: list[Path] = []
-    real_read_bytes = Path.read_bytes
-
-    def spy(self: Path) -> bytes:
-        opened.append(self)
-        return real_read_bytes(self)
-
-    import unittest.mock as mock
-
-    with mock.patch.object(Path, "read_bytes", spy):
-        label_digests(labels_dir, ["present", "absent"])
-    assert opened.count(labels_dir / "present.json") == 1
-
 
 def test_selection_digest_is_the_one_function_the_bind_write_and_the_calibration_read_both_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``resolution.selection_digest`` is the sha256 hex digest over ``RECORD_JSON.encode`` of the
     selection's own document, and the run's own ``split.json`` (written by
-    ``persist_run_partition``, the bind side) already carries that value for the selection it
-    bound to, the same value a caller's own re-encoding produces: the two spellings this test's
-    own independent oracle (``_manifest_sha256``) and the production side must agree on."""
+    ``persist_run_partition``, the bind side) already carries that value in its binding block for
+    the selection it bound to, the same value a caller's own re-encoding produces: the two
+    spellings this test's own independent oracle (``_manifest_sha256``) and the production side
+    must agree on. It is one fact for the run, so it is recorded once, never per scope."""
     from tcip_mcp.experiments import read_run_partition
     from tcip_mcp.pipelines.resolution import selection_digest
 
@@ -574,50 +600,16 @@ def test_selection_digest_is_the_one_function_the_bind_write_and_the_calibration
     assert selection_digest(selection) == _manifest_sha256(out)
 
     split = read_run_partition("exp_selection_digest")
-    assert split["label_digests"]["selection_sha256"] == selection_digest(selection)
-    assert partition["label_digests"]["selection_sha256"] == selection_digest(selection)
+    assert split["selection_binding"]["selection_sha256"] == selection_digest(selection)
+    for block in (*split["members"].values(), *partition.values()):
+        assert "selection_sha256" not in block["label_digests"]
 
 
-def test_dataset_hash_and_label_digests_reads_each_label_once_and_agrees_with_the_apart_calls(
-    tmp_path: Path,
-) -> None:
-    """The pair ``draw_splits`` actually calls, ``dataset_hash_and_label_digests``, reads every
-    label's bytes once (not twice, once per digest, the way calling ``dataset_hash`` and
-    ``label_digests`` apart would) and returns the same values those two calls would have: the
-    earlier spy above proves only ``label_digests`` alone reads once, and says nothing about the
-    pair the draw runs."""
-    from tcip_mcp.pipelines.resolution import (
-        dataset_hash, dataset_hash_and_label_digests, label_digests,
-    )
-
-    labels_dir = tmp_path / "labels"
-    labels_dir.mkdir()
-    (labels_dir / "present.json").write_bytes(b'{"a": 1}')
-    stems = ["present", "absent"]
-
-    combined_hash, combined_digests = dataset_hash_and_label_digests(labels_dir, stems)
-    assert combined_hash == dataset_hash(labels_dir, stems=stems)
-    assert combined_digests == label_digests(labels_dir, stems)
-
-    opened: list[Path] = []
-    real_read_bytes = Path.read_bytes
-
-    def spy(self: Path) -> bytes:
-        opened.append(self)
-        return real_read_bytes(self)
-
-    import unittest.mock as mock
-
-    with mock.patch.object(Path, "read_bytes", spy):
-        dataset_hash_and_label_digests(labels_dir, stems)
-    assert opened.count(labels_dir / "present.json") == 1
-
-
-def test_draw_splits_digests_each_label_directory_once(
+def test_draw_splits_digests_each_document_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The draw calls ``label_digests`` once per label directory it admitted from, rather than
-    once per sample, so a two-date draw opens each document once."""
+    """The draw digests each member's own ground truth once, however many members that file
+    answers for, so a two-date draw opens each document exactly once."""
     import unittest.mock as mock
 
     from tcip_mcp.pipelines import resolution
@@ -626,17 +618,20 @@ def test_draw_splits_digests_each_label_directory_once(
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
 
-    real_digests = resolution.label_digests
-    calls: list[tuple] = []
 
-    def spy(labels_dir, stems):
-        calls.append((labels_dir, tuple(stems)))
-        return real_digests(labels_dir, stems)
+    real_digest = resolution.ground_truth_digest
+    opened: list[str] = []
 
-    with mock.patch("tcip_mcp.pipelines.resolution.label_digests", spy):
+    def spy(path):
+        opened.append(str(path))
+        return real_digest(path)
+
+    with mock.patch("tcip_mcp.pipelines.resolution.ground_truth_digest", spy):
         _draw(root, out)
 
-    assert len(calls) == len(DATES), calls
+    assert opened, "the draw digested nothing"
+    assert len(opened) == len(set(opened)), opened
+    assert all(p.endswith(".json") for p in opened), opened
 
 
 # -- rail: the durable config carries no per-stem digests after a bound run --------------------
@@ -665,7 +660,7 @@ def test_auto_train_vals_third_return_value_never_lands_in_the_split_config(
     data_cfg = {"split": {"selection_dir": str(out)}}
     _train_ds, _val_ds, partition = auto_train_val("detection", data_cfg, None)
 
-    assert partition is not None and partition["label_digests"] and partition["members"]
+    assert partition and all(block["label_digests"] for block in partition.values())
     for block in (data_cfg["split"], data_cfg["split"]["selection_binding"]):
         assert "label_digests" not in block
         assert "members" not in block

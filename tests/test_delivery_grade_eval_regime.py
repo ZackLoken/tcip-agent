@@ -326,6 +326,90 @@ def test_run_full_frame_evaluation_records_merge_and_operating_point(tmp_path):
     assert r_stated["max_dets"] == 2
 
 
+def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(tmp_path):
+    """The delivery gate measures over the loader a run would build, so ground truth carrying
+    the subject only as points refuses in that loader's own words rather than scoring every
+    image against an empty reference and reporting the number as a delivery metric."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
+
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox, Point
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    for index in range(8):
+        Image.new("RGB", (128, 128)).save(images_dir / f"p{index}.png")
+        json_io.write_annotations(
+            str(labels_dir / f"p{index}.json"),
+            [Annotation(subject="bud", geometry=Point(20.0, 30.0))], 128, 128)
+
+    class _EmptyStub:
+        train_tile_size = 100
+        train_overlap = 0.2
+
+        def predict_tiled(self, path, **kw):
+            return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],
+                    "labels": [], "cap_hit": False}
+
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+
+    checkpoint = stub_verified_checkpoint("ckpt.pt")
+    build_predictor_orig = predictor_mod.build_predictor
+    try:
+        predictor_mod.build_predictor = lambda *a, **kw: _EmptyStub()
+        with pytest.raises(ValueError, match="only in geometries a detection loader"):
+            run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
+                                      str(tmp_path / "out"), subject="bud")
+
+        # Admits valid work: the same eight images, their documents carrying boxes, score.
+        for index in range(8):
+            json_io.write_annotations(
+                str(labels_dir / f"p{index}.json"),
+                [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 128, 128)
+        scored = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
+                                           str(tmp_path / "boxes"), subject="bud")
+    finally:
+        predictor_mod.build_predictor = build_predictor_orig
+    assert scored["n_images"] == 8
+
+
+def test_the_gate_refuses_an_images_tree_with_no_ground_truth(tmp_path):
+    """A measurement is against a reference: with no label store there is nothing to score
+    against, so the gate refuses by name rather than scoring every image against empty ground
+    truth and reporting a perfect-looking miss rate."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
+
+    from PIL import Image
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    Image.new("RGB", (128, 128)).save(images_dir / "a.png")
+
+    class _EmptyStub:
+        train_tile_size = 100
+        train_overlap = 0.2
+
+        def predict_tiled(self, path, **kw):
+            return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],
+                    "labels": [], "cap_hit": False}
+
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+
+    checkpoint = stub_verified_checkpoint("ckpt.pt")
+    build_predictor_orig = predictor_mod.build_predictor
+    try:
+        predictor_mod.build_predictor = lambda *a, **kw: _EmptyStub()
+        with pytest.raises(ValueError, match="neither a .csv table nor a directory"):
+            run_full_frame_evaluation(checkpoint, str(images_dir), str(tmp_path / "labels"),
+                                      str(tmp_path / "out"), subject="bud")
+    finally:
+        predictor_mod.build_predictor = build_predictor_orig
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # tiled provenance distinguishes explicit from default
 # ══════════════════════════════════════════════════════════════════════════

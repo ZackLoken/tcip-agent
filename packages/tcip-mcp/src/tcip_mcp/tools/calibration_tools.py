@@ -9,7 +9,6 @@ discoverable in one place.
 
 from __future__ import annotations
 
-import csv
 import logging
 from pathlib import Path
 
@@ -84,12 +83,16 @@ def redraw_calibration_holdout(
         selection_dir: Restrict the redraw's universe to a selection's ``calibration`` samples
             under ``labels_dir`` (``pipelines.data.selection.read_selection``), the same
             restriction ``run_inference`` applies, instead of every labelled stem with an image.
-            Requires ``labels_dir``, ``images_dir`` and ``subject``. The identity is
-            ``dataset_hash(labels_dir, stems=universe)`` rather than the whole directory's hash,
-            so the redraw addresses the same lock a selection-restricted calibration locked.
-        subject: The object class ``selection_dir``'s admission was drawn for; required
-            alongside it.
-        attribute: The attribute ``selection_dir``'s admission was scoped to, when it was.
+            Requires ``labels_dir`` and ``images_dir``. The scope is the selection's own: its
+            recorded subject and attribute govern, whatever this call states, and a selection
+            over per-image label documents that records none refuses by name while one over a
+            mask raster or a table row, which no subject scopes, redraws without one. The
+            identity is ``dataset_hash(labels_dir, stems=universe)`` rather than the whole
+            directory's hash, so the redraw addresses the same lock a selection-restricted
+            calibration locked.
+        subject: The object class this redraw's foreground is counted for, for the
+            whole-directory universe. A selection states its own and overrides it.
+        attribute: The attribute the foreground count is scoped to, the same way.
     """
     if not reason or not reason.strip():
         return {"error": "reason is required (a non-empty justification) for a force_redraw"}
@@ -99,9 +102,6 @@ def redraw_calibration_holdout(
         if not labels_dir:
             return {"error": "selection_dir requires labels_dir: the universe is drawn "
                              "from the selection's held-out samples under that directory."}
-        if not subject:
-            return {"error": "selection_dir requires subject: the object class the redrawn "
-                             "universe's foreground is counted for."}
         if not images_dir:
             return {"error": "selection_dir requires images_dir: a labels-only universe "
                              "can include a stem whose image is gone, a lock the redraw would "
@@ -125,16 +125,27 @@ def redraw_calibration_holdout(
 
     selection_stems: list[str] | None = None
     if selection_dir is not None:
-        from tcip_mcp.pipelines.data.selection import read_selection
-        from tcip_mcp.pipelines.data.splits import resolve_selection_calibration_universe
+        from tcip_mcp.pipelines.data.selection import read_selection, unscoped_document_issue
+        from tcip_mcp.pipelines.data.splits import selection_calibration_universe
+
+        from tcip_mcp.pipelines.data.label_queries import (
+            foreground_counts, refuse_inadmissible_samples,
+        )
 
         assert labels_dir is not None, "the selection_dir refusal above requires it"
         selection = read_selection(selection_dir)
-        present, _ = label_image_stems(labels_dir, images_dir)
+        # The scope is the selection's own, read off it: a subject scopes a document selection
+        # and nothing else, so a mask or table selection redraws without one.
+        unscoped = unscoped_document_issue(selection, selection_dir)
+        if unscoped:
+            return {"error": unscoped}
         try:
-            (selection_stems, group_by, group_key_map, _excluded, subject, attribute,
-             _samples) = resolve_selection_calibration_universe(
-                selection, labels_dir, present)
+            (selection_stems, group_by, group_key_map, _excluded,
+             universe_samples) = selection_calibration_universe(selection, labels_dir)
+            # The one re-admission over recorded samples, run before a lock is drawn over them:
+            # a member the calibration that reads this lock would refuse is not lockable here.
+            refuse_inadmissible_samples(
+                [universe_samples[stem] for stem in selection_stems], selection.scope)
         except ValueError as exc:
             return {"error": str(exc)}
 
@@ -170,19 +181,22 @@ def redraw_calibration_holdout(
         assert labels_dir is not None, "selection_stems is only set where labels_dir was required"
         stems = selection_stems
         try:
-            annotation_counts = {
-                s: count_label_lines(labels_dir, s, subject=subject, attribute=attribute)
-                for s in stems
-            }
+            # The one per-sample counter, over each member's own recorded ground truth: a mask or
+            # a row is ground truth by existing, so nothing here reads one as a document.
+            annotation_counts = foreground_counts(universe_samples, selection.scope)
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
     elif labels_dir:
         # The same labels-intersect-images scan calibrate_operating_point uses, not a second
         # independent glob (images_dir omitted degrades to the labels-only scan).
+        from tcip_mcp.dataset_layout import label_filename
+
         stems, _ = label_image_stems(labels_dir, images_dir)
         try:
+            # The one caller here holding a name rather than a record composes its path, here.
             annotation_counts = {
-                s: count_label_lines(labels_dir, s, subject=subject, attribute=attribute)
+                s: count_label_lines(Path(labels_dir) / label_filename(s),
+                                     subject=subject, attribute=attribute)
                 for s in stems
             }
         except UnreadableLabelDocument as exc:
@@ -283,8 +297,8 @@ def calibrate_scalar_operating_point(
     distinct from every other operating-point sidecar (see
     ``resolution.read_ordinal_operating_point_sidecar``/``read_regression_operating_point_sidecar``).
 
-    This door takes no selection: its universe is the CSV's own stems, and no selection is drawn
-    over a CSV-sourced scalar trait.
+    This door names no selection: its universe is every row the producer admits from this table,
+    the same rows a run over it would train on.
 
     A stamp that claims validation names the record it was earned from, the same two phases the
     classifier door goes through: ``resolution.open_validation`` runs the gate over the evidence,
@@ -336,7 +350,6 @@ def calibrate_scalar_operating_point(
 
     from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
     from tcip_mcp.pipelines.data.splits import cal_holdout_scope_root, resolve_locked_cal_holdout_split
-    from tcip_mcp.pipelines.image_utils import list_logical_images
     from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.operating_point import (
         resolve_ordinal_operating_point,
@@ -358,19 +371,26 @@ def calibrate_scalar_operating_point(
     shape = _ORDINAL_REGRESSION_TASKS[task]
     is_ordinal = task == "ordinal"
 
-    true_by_stem: dict[str, float] = {}
-    with open(csv_path, newline="") as f:
-        reader = csv.reader(f)
-        next(reader, None)
-        for row in reader:
-            if len(row) >= 2:
-                value = int(row[1].strip()) if is_ordinal else float(row[1].strip())
-                true_by_stem[row[0].strip()] = value
+    # Through the producer, so this door and a run over the same table hold one membership: the
+    # rows it admits are the rows this door measures, each with the source it resolved.
+    from tcip_mcp.pipelines.data.label_queries import admit, ground_truth_table, require_admitted
+    from tcip_mcp.pipelines.image_utils import resolve_source_path
 
-    logical = list_logical_images(images_dir)
-    stems = sorted(s for s in true_by_stem if s in logical)
-    if not stems:
-        return {"error": f"no stem in {csv_path!r} has a matching image under {images_dir!r}"}
+    try:
+        admitted = admit(images_dir, csv_path)
+        require_admitted(admitted)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    stems = sorted(record.member for record in admitted.records)
+    source_of = {record.member: resolve_source_path(record.source)
+                 for record in admitted.records}
+
+    cast = int if is_ordinal else float
+    try:
+        table = ground_truth_table(csv_path)
+        true_by_stem: dict[str, float] = {stem: cast(table[stem]) for stem in stems}
+    except ValueError as exc:
+        return {"error": f"{csv_path!r} does not read as a {task} ground-truth table: {exc}"}
 
     identity_hash = csv_dataset_hash(csv_path)
     try:
@@ -384,11 +404,10 @@ def calibrate_scalar_operating_point(
     cal_stems, hold_stems = locked["calibration"], locked["holdout"]
 
     predictor = build_predictor(checkpoint)
-    cal_pred = _scalar_predictions(predictor, logical, cal_stems, shape["suffix"])
-    hold_pred = _scalar_predictions(predictor, logical, hold_stems, shape["suffix"])
+    cal_pred = _scalar_predictions(predictor, source_of, cal_stems, shape["suffix"])
+    hold_pred = _scalar_predictions(predictor, source_of, hold_stems, shape["suffix"])
 
     def _items(sub_stems: list[str], preds: dict[str, float]) -> list[dict]:
-        cast = int if is_ordinal else float
         return [{"image_id": s, shape["true_key"]: true_by_stem[s], shape["pred_key"]: cast(preds[s])}
                 for s in sub_stems if s in preds]
 
@@ -396,9 +415,12 @@ def calibrate_scalar_operating_point(
     hold_items = _items(hold_stems, hold_pred)
 
     resolver = resolve_ordinal_operating_point if is_ordinal else resolve_regression_operating_point
+    # The table is where these rows' ground truth lives, the scope the run's own partition records
+    # them under, so the selection check can name a bound run's own validation row.
+    scope = str(csv_path)
     result = resolver(
         trait_name, criterion=criterion, calibration_items=cal_items, holdout_items=hold_items,
-        experiment_id=experiment_id,
+        experiment_id=experiment_id, calibration_labels_dir=scope,
     )
 
     from tcip_mcp.project_paths import resolve_output_path
@@ -427,7 +449,8 @@ def calibrate_scalar_operating_point(
             # Named off the function this door reported from, so record and report share one gate.
             evidence={"resolver": resolver.__name__,
                       "inputs": {"criterion": criterion, "calibration_items": cal_items,
-                                 "holdout_items": hold_items}},
+                                 "holdout_items": hold_items,
+                                 "calibration_labels_dir": scope}},
             trait=trait_name, checkpoint_sha256=checkpoint_sha256,
             producing_experiment_id=experiment_id,
             reference_inputs={
