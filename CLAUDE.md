@@ -125,7 +125,10 @@ for general techniques only, never for a per-trait pipeline; the endpoint is a t
   deleting the mechanism would look like and what stops that; only a live consumer or an owner
   ruling stops it, never the code's current shape. A brief never scopes out a sibling of a
   mechanism the change deletes: if every instance cannot go, that is the stop rule, brought to the
-  owner, never a paragraph naming what was left.
+  owner, never a paragraph naming what was left. A caller that splits a value it already holds
+  whole (a path into a directory and a stem, a record into its fields) to call a function that
+  recomposes it has found a function whose parameters are the wrong shape: the function takes the
+  value, and the callers that genuinely hold only the parts are the ones to enumerate.
 - A test that guards a fix is observed failing without the fix. Say when you have seen it fail and
   say when you have not. Every admits-valid-work test constructs its input through the platform's
   own producer.
