@@ -8,11 +8,11 @@ WORKDIR /app/packages/tcip-web/frontend
 RUN npm ci --no-fund --no-audit
 RUN npm run build
 
-FROM python:3.12-slim
+FROM python:3.13-slim
 WORKDIR /app
 
 # rasterio's bundled GDAL needs libexpat; torch's OpenMP runtime needs libgomp. Neither ships
-# in python:3.12-slim.
+# in python:3.13-slim.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libexpat1 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
