@@ -452,9 +452,12 @@ def run_capturing_outcome(tree: Path, targets: list[str], expr: str, env: dict[s
     The observed record, not the exit code, is what a caller judges on: an exit code cannot tell a
     real failure apart from an empty selection, a collection error or a usage error.
     """
+    # The child session keeps its temporary root inside this run's own tree: pytest deletes all
+    # but the last few roots under the shared one, including another session's, at every start.
     cmd = [
         sys.executable, "-m", "pytest", *targets,
         "-q", "-p", "no:cacheprovider", "-p", PLUGIN_MODULE, "--rootdir", str(tree),
+        "--basetemp", str(tree / ".pytest-basetemp"),
     ]
     if expr:
         cmd += ["-k", expr]

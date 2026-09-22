@@ -49,13 +49,17 @@ def test_two_marked_tests_on_two_workers_run_one_after_the_other(tmp_path):
     test_file.write_text(TWO_MARKED_TESTS, encoding="utf-8")
     intervals_dir = tmp_path / "intervals"
     intervals_dir.mkdir()
+    # The child session keeps its temporary root inside this test's own, which nothing else
+    # cleans: pytest deletes all but the last few roots under the shared one at every start.
+    basetemp = tmp_path / "child-basetemp"
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", str(test_file), "-n", "2", "-p", "no:cacheprovider",
-         "-p", "tests.ray_cluster_lock", "-q"],
+         "-p", "tests.ray_cluster_lock", "--basetemp", str(basetemp), "-q"],
         cwd=REPO, capture_output=True, text=True, timeout=120,
         env={**os.environ, "INTERVALS_DIR": str(intervals_dir)},
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert basetemp.is_dir(), proc.stdout + proc.stderr
     rows = [json.loads(path.read_text()) for path in sorted(intervals_dir.glob("*.json"))]
     assert len(rows) == 2, rows
     (_, first_start, first_end), (_, second_start, second_end) = sorted(rows, key=lambda r: r[1])
