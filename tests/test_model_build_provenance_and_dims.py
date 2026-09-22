@@ -88,26 +88,50 @@ def _agent_package(root: Path, name: str, modules: dict) -> Path:
 def test_contract_dims_take_the_admitted_count_without_the_loader_background_offset(tmp_path):
     """A scoped detection config smokes at the class count the run was admitted under, with no
     background class added: the +1 is the loader's own offset on the labels it builds, so applying
-    it here too would prove the model against a head one class wider than the one that trains."""
-    from tcip_mcp.pipelines.data.selection import ClassScope
+    it here too would prove the model against a head one class wider than the one that trains.
+
+    The count is the scope the run was admitted under, not a reading of the registry as it stands
+    now: this run was admitted when its subject declared two condition values, the registry has
+    since gained a third, and a re-resolution would smoke it one class wider than the head that
+    trains."""
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    from tests._producer_fixtures import admit_over
 
     dataset_root = tmp_path / "currant_2026"
+    images_dir = dataset_root / "images"
     labels_dir = dataset_root / "annotations"
+    images_dir.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
-    _write_registry(dataset_root)
+    subject_registry.write_registry(subjects_path(dataset_root), subject_registry.SubjectRegistry(
+        subjects=(subject_registry.Subject(
+            name="leaf", attributes=(subject_registry.Attribute(
+                name="condition", type="ordinal", values=("healthy", "mild")),)),)))
+    for stem, condition in (("leaf_a", "healthy"), ("leaf_b", "mild")):
+        Image.new("RGB", (64, 64)).save(images_dir / f"{stem}.png")
+        json_io.write_annotations(
+            str(labels_dir / f"{stem}.json"),
+            [Annotation(subject="leaf", geometry=BBox(8, 8, 24, 24),
+                        attributes={"condition": condition})], 64, 64)
 
     cfg = {
         "model_source": {"builder_kwargs": {"num_classes": 9, "in_chans": 5}},
         "data": {"subject": "leaf", "attribute": "condition", "labels_dir": str(labels_dir),
                  "tiling": {"enabled": True, "tile_size": 640}},
     }
+    scope = admit_over(images_dir, labels_dir, subject="leaf", attribute="condition").scope
+    assert len(scope.id_map) == 2  # the class space this run trains over
+
+    _write_registry(dataset_root)  # a third condition value declared since
     _registry, id_map = resolve_registry_id_map(str(labels_dir), "leaf", "condition")
-    assert len(id_map) == 3  # the three condition values this registry declares
-    scope = ClassScope(subject="leaf", attribute="condition", id_map=id_map)
+    assert len(id_map) == 3
 
-    dims = resolve_contract_dims(cfg, "detection", scope=scope)
+    dims = resolve_contract_dims(cfg, "detection", scope=scope, sizes={})
 
-    assert dims == {"in_chans": 5, "num_classes": len(id_map), "img_size": 640}
+    assert dims == {"in_chans": 5, "num_classes": 2, "img_size": 640}
+    assert dims["num_classes"] != len(id_map)
     assert dims["num_classes"] != cfg["model_source"]["builder_kwargs"]["num_classes"]
 
 
@@ -129,7 +153,8 @@ def test_contract_dims_count_only_the_subject_for_a_single_class_scope(tmp_path)
     assert len(id_map) == 1
 
     dims = resolve_contract_dims(cfg, "instance_seg",
-                                 scope=ClassScope(subject="bud", id_map=id_map))
+                                 scope=ClassScope(subject="bud", id_map=id_map),
+                                 sizes={"num_channels": 3})
 
     assert dims["num_classes"] == len(id_map)
 

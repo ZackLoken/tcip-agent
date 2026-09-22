@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -84,26 +85,42 @@ class TrainContext:
 
         return build_model(self.config)
 
-    def _contract_dims(self, **overrides: Any) -> dict:
+    def _contract_args(self, **overrides: Any) -> dict:
+        """What the smoke runs against: the dims this run resolved, or one batch off its own train
+        loader when those dims cannot shape a batch.
+
+        Whether they can is the contract's own statement (``no_batch_reason``), never a second
+        reading here: a run whose dims name a width but no count is exactly the case a real batch
+        answers for, and deciding it twice is how one side comes to refuse what the other admits.
+        """
+        from tcip_mcp.pipelines.data.datasets import stated_sizes
         from tcip_mcp.pipelines.data.selection import ClassScope
         from tcip_mcp.pipelines.model_build import resolve_contract_dims
+        from tcip_mcp.pipelines.model_contract import no_batch_reason
 
-        scope = ClassScope.recorded_in(self.config.get("data") or {})
-        return {**resolve_contract_dims(self.config, self.task, scope=scope), **overrides}
+        data_cfg = self.config.get("data") or {}
+        dims = resolve_contract_dims(self.config, self.task,
+                                     scope=ClassScope.recorded_in(data_cfg),
+                                     sizes=stated_sizes(data_cfg))
+        if no_batch_reason(self.task, dims, None) is not None:
+            batch = next(iter(self.train_loader or []), None)
+            if batch is not None:
+                return {"sample_batch": batch, **overrides}
+        return {"dims": dims, **overrides}
 
     def check_contract(self, model: Any = None, **overrides: Any) -> dict:
         """Run the measurement-boundary contract on ``model`` (built if omitted) at the run's
         resolved dims, so a hand-rolled ``train(ctx)`` can self-prove before the full loop."""
         from tcip_mcp.pipelines.model_contract import check_model_contract
 
-        return check_model_contract(model or self.build_model(), self.task, **self._contract_dims(**overrides))
+        return check_model_contract(model or self.build_model(), self.task, **self._contract_args(**overrides))
 
     def overfit_check(self, model: Any = None, **overrides: Any) -> dict:
         """Voluntary diagnostic: drive a few steps on one tiny batch and confirm the loss falls,
         the cheap proof a from-scratch model actually learns. Non-gating."""
         from tcip_mcp.pipelines.model_contract import overfit_check
 
-        return overfit_check(model or self.build_model(), self.task, **self._contract_dims(**overrides))
+        return overfit_check(model or self.build_model(), self.task, **self._contract_args(**overrides))
 
     # ---- the default trainer: one optional convenience ----
     def default_train(self) -> Any:
@@ -115,10 +132,17 @@ class TrainContext:
                      epoch_callback=self._epoch_sink, resume_from=self.resume_from)
 
     # ---- craft library passthroughs (compose, don't reinvent) ----
-    def build_dataset(self, task: str | None = None, **kwargs: Any) -> Any:
-        from tcip_mcp.pipelines.data.datasets import build_dataset
+    def build_dataset(self, task: str | None = None, *, samples: Any,
+                      sizes: "Mapping[str, int] | None" = None, **kwargs: Any) -> Any:
+        """The factory, over the samples you were handed. ``sizes`` unstated resolves from this
+        run's own data config and those samples, so a loader you build here reads at its width."""
+        from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
 
-        return build_dataset(task or self.task, **kwargs)
+        resolved_task = task or self.task
+        if sizes is None:
+            sizes = resolve_sizes(resolved_task, self.config.get("data") or {}, samples,
+                                  kwargs.get("dataset_source"))
+        return build_dataset(resolved_task, samples=samples, sizes=sizes, **kwargs)
 
     def tiled_dataset(self, base: Any, **kwargs: Any) -> Any:
         """Wrap a detection dataset in the native-resolution tiler (same derived sliver cutoff the

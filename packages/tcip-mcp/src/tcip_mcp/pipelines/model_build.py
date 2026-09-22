@@ -22,6 +22,7 @@ imports lazily inside the builder so MCP-server startup stays fast.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -158,18 +159,22 @@ def child_pythonpath() -> str:
     return os.pathsep.join(path_entries)
 
 
-def declared_in_chans(model_source: dict | None) -> int | None:
-    """The channel count ``model_source`` declares: its own ``in_chans``, falling back to
-    ``builder_kwargs.in_chans``. ``None`` when neither declares it (the caller's own default,
-    never baked in here), so every reader of this fact (``resolve_contract_dims`` in this module,
-    ``generic_trainer._validate_input_channels``, ``GenericPredictor.__init__`` and
-    ``training_tools.preflight_config``'s channel firewall) agrees on where it lives.
-    """
-    if not isinstance(model_source, dict):
-        return None
-    bk = model_source.get("builder_kwargs")
+def run_in_chans(model_source: Any, data_cfg: "Mapping[str, Any] | None") -> int | None:
+    """The width a run reads its sources at: what its model declares (its own ``in_chans`` or its
+    ``builder_kwargs``' one), else what its data config records
+    (:func:`~tcip_mcp.pipelines.data.split_construction.run_sizes`), since a build that declares
+    none trained at the width its run resolved and the trainer's channel check is what would
+    otherwise have stopped it. ``None`` when neither states it, a dataset the platform did not
+    build and no width anyone recorded.
+
+    The one reader of this fact, so the contract dims, the trainer's check, the predictor and
+    preflight's channel firewall all answer from one place."""
+    ms = model_source if isinstance(model_source, dict) else {}
+    bk = ms.get("builder_kwargs")
     bk = bk if isinstance(bk, dict) else {}
-    value = model_source.get("in_chans", bk.get("in_chans"))
+    value = ms.get("in_chans", bk.get("in_chans"))
+    if value is None and isinstance(data_cfg, Mapping):
+        value = data_cfg.get("num_channels")
     if value is None:
         return None
     try:
@@ -204,42 +209,37 @@ def build_model(config_or_ckpt: dict) -> Any:
     raise ValueError("Config has no 'model_source'.")
 
 
-def resolve_contract_dims(config: dict, task: str, *, scope: "ClassScope") -> dict:
-    """Resolve the ``(in_chans, num_classes, img_size)`` the smoke contract must forward at.
+def resolve_contract_dims(config: dict, task: str, *, scope: "ClassScope",
+                          sizes: "Mapping[str, int]") -> dict | None:
+    """The dimensions a synthetic smoke batch is shaped at, or ``None`` when this run states no
+    width and the caller must smoke a real batch instead.
 
-    Read from the same config the builder reads, never the contract's tiny 64px default: a model
-    with a minimum-spatial-size assumption must be smoked at the size it will actually see, or a
-    valid model false-fails. ``img_size`` is the tile edge when detection tiling is on (the real
-    training input), else a safe non-tiny fallback that clears typical stride-32 backbones.
-    ``in_chans`` comes from ``model_source`` / ``builder_kwargs``.
+    Read from the same config the builder reads: a model with a minimum-spatial-size assumption
+    must be smoked at the size it will actually see, or a valid model false-fails. ``img_size``
+    is the tile edge when detection tiling is on (the real training input), else a safe non-tiny
+    fallback that clears typical stride-32 backbones.
 
-    ``scope`` is the class space this run's own samples were admitted under, handed over by the
-    caller that holds it: the producer's own for a preflight, and the run config's recorded one
-    for a run already bound (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.recorded_in`).
-    Its map is the count the run will actually train at, so the smoke forwards at that count
-    rather than at a second reading of the registry. Ground truth carrying its own classes scopes
-    no map, and so does a bespoke build with no subject; both fall to the head's own
-    ``builder_kwargs`` count. The +1 background offset lives only in the loader, never here.
+    ``sizes`` is what this run resolved for its own loaders
+    (:func:`~tcip_mcp.pipelines.data.datasets.resolve_sizes`), handed over by its caller like
+    ``scope``: preflight's own resolution before a bind, and the run's recorded sizes after one.
+    The width is :func:`run_in_chans` over it, and the count is ``scope``'s map for a scoped run
+    and the resolved class or rank count for ground truth carrying its own classes, so the smoke
+    forwards at what the run trains at rather than at a size nobody resolved. A run that carries
+    no count states none here, and the contract says whether its task needed one. The +1
+    background offset lives only in the loader, never here.
     """
-    ms = config.get(MODEL_SOURCE_KEY) or {}
-    bk = ms.get("builder_kwargs") if isinstance(ms, dict) else None
-    bk = bk if isinstance(bk, dict) else {}
-
-    def _int(value: Any, fallback: int) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return fallback
-
-    in_chans = declared_in_chans(ms) if isinstance(ms, dict) else None
-    in_chans = in_chans if in_chans is not None else 3
-    num_classes = len(scope.id_map) if scope.id_map else _int(bk.get("num_classes"), 1)
+    in_chans = run_in_chans(config.get(MODEL_SOURCE_KEY), sizes)
+    if in_chans is None:
+        return None
+    count = (len(scope.id_map) if scope.id_map
+             else sizes.get("num_classes", sizes.get("num_ranks")))
 
     img_size = 224  # safe non-tiny default (7x7 at stride 32); overridden by the real tile edge below
     tiling = (config.get("data") or {}).get("tiling")
     if task == "detection" and isinstance(tiling, dict) and tiling.get("enabled", True) and tiling.get("tile_size"):
-        img_size = _int(tiling.get("tile_size"), img_size)
-    return {"in_chans": in_chans, "num_classes": num_classes, "img_size": img_size}
+        img_size = int(tiling["tile_size"])
+    return {"in_chans": in_chans, "img_size": img_size,
+            **({} if count is None else {"num_classes": count})}
 
 
 # The checkout's commit can't change within a process, resolve it once (a subprocess per training

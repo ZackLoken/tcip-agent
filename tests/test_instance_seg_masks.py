@@ -30,6 +30,9 @@ from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor  # n
 from tcip_mcp.pipelines.measurement.mask_geometry import mask_to_polygon_points  # noqa: E402
 from tests import bespoke_models  # noqa: E402
 
+# What the smokes below synthesize their batch at, the shape a run resolves for itself.
+_SMOKE_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": 64}
+
 
 # --------------------------------------------------------------------------
 # model_contract: instance_seg requires masks in the eval output
@@ -52,14 +55,14 @@ def test_contract_rejects_maskless_instance_seg_model():
             return [{"boxes": torch.zeros((1, 4)), "scores": torch.ones((1,)),
                     "labels": torch.ones((1,), dtype=torch.int64)}]
 
-    report = check_model_contract(_BoxesOnly(), "instance_seg", num_classes=1, img_size=64)
+    report = check_model_contract(_BoxesOnly(), "instance_seg", dims=_SMOKE_DIMS)
     assert report["ok"] is False
     assert any("masks" in i for i in report["issues"]), report["issues"]
 
 
 def test_contract_accepts_real_masked_instance_seg_model():
     model = bespoke_models.build_bespoke_instance_seg(num_classes=1, min_size=64, max_size=128)
-    report = check_model_contract(model, "instance_seg", num_classes=1, img_size=64)
+    report = check_model_contract(model, "instance_seg", dims=_SMOKE_DIMS)
     assert report["ok"], report["issues"]
     assert report["eval_output_type"] == "list[dict]"
 
@@ -68,7 +71,7 @@ def test_contract_detection_task_unaffected_by_mask_requirement():
     """Plain detection (no masks trained/expected) must not start requiring masks: a regression
     guard that the instance_seg-only requirement stays instance_seg-only."""
     model = bespoke_models.build_bespoke_detection(num_classes=1, min_size=64, max_size=128)
-    report = check_model_contract(model, "detection", num_classes=1, img_size=64)
+    report = check_model_contract(model, "detection", dims=_SMOKE_DIMS)
     assert report["ok"], report["issues"]
 
 
@@ -188,7 +191,8 @@ def instance_seg_ckpt(tmp_path_factory) -> str:
     from tcip_mcp.pipelines.model_build import build_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_instance_seg",
-                    "builder_kwargs": {"num_classes": 1, "min_size": TILE, "max_size": TILE * 2},
+                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": TILE,
+                                       "max_size": TILE * 2},
                     "task": "instance_seg"}
     model = build_model({"model_source": model_source})
     ckpt = tmp_path_factory.mktemp("instance_seg_ckpt") / "model_best.pt"

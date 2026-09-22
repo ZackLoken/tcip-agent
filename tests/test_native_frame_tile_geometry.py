@@ -204,7 +204,8 @@ def test_a_checkpoint_carries_its_untiled_training_geometry_to_the_predictor(tmp
     from tcip_mcp.tools.model_tools import register_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "min_size": TILE, "max_size": TILE * 2},
+                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": TILE,
+                                       "max_size": TILE * 2},
                     "task": "detection"}
     ckpt = tmp_path / "model_best.pt"
     torch.save({"model_source": model_source,
@@ -376,7 +377,8 @@ def _native_frame_checkpoint(tmp_path: Path, augmentation: dict | str | None = N
     from tcip_mcp.pipelines.model_build import build_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "min_size": TILE, "max_size": TILE * 2},
+                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": TILE,
+                                       "max_size": TILE * 2},
                     "task": "detection"}
     config: dict = {"data": {"tiling": {"enabled": False}, "train_native_size": [TILE, TILE]}}
     if augmentation is not None:
@@ -684,7 +686,7 @@ def _tiled_checkpoint(tmp_path: Path, tile_size: int) -> str:
     from tcip_mcp.pipelines.model_build import build_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "min_size": tile_size,
+                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": tile_size,
                                        "max_size": tile_size * 2},
                     "task": "detection"}
     config = {"data": {"tiling": {"tile_size": tile_size, "overlap": 0.2}}}
@@ -699,7 +701,8 @@ def _native_frame_checkpoint_of_size(tmp_path: Path, size: int) -> str:
     from tcip_mcp.pipelines.model_build import build_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "min_size": size, "max_size": size * 2},
+                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": size,
+                                       "max_size": size * 2},
                     "task": "detection"}
     config = {"data": {"tiling": {"enabled": False}, "train_native_size": [size, size]}}
     ckpt = tmp_path / "model_native.pt"

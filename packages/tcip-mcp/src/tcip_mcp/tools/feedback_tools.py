@@ -459,7 +459,7 @@ def prioritize_review_queue(
 
     from tcip_mcp.pipelines.image_utils import BandGroupRef
 
-    scored = scorer.score(sources, predictor.model, predictor.device)[:budget]
+    scored = scorer.score(sources, predictor)[:budget]
     calibration_stems, marks_unresolved = _resolve_calibration_ids(
         checkpoint, Path(images_dir), project_path=project_path or None)
     marks: Sequence[bool | None] = [None] * len(scored)

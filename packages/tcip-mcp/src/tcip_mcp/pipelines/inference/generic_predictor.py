@@ -24,7 +24,7 @@ from tcip_mcp.pipelines.model_build import (
     MODEL_SOURCE_KEY,
     STATE_DICT_KEY,
     build_model,
-    declared_in_chans,
+    run_in_chans,
 )
 from tcip_mcp.pipelines.image_utils import (
     BandGroupRef, display_source_path, load_image, pad_tile, pil_to_tensor,
@@ -79,7 +79,7 @@ class GenericPredictor:
         self,
         checkpoint: "VerifiedCheckpoint",
         device: str | None = None,
-        score_threshold: float = 0.5,
+        score_threshold: float | None = 0.5,
         nms_iou: float | None = None,
         max_dets: int | None = None,
     ) -> None:
@@ -112,16 +112,25 @@ class GenericPredictor:
         self.model.eval()
 
         # In-model thresholds, so the operating point governs which boxes exist rather than
-        # filtering ones the model already discarded. No-op for non-detection models.
+        # filtering ones the model already discarded; an unstated knob leaves the point as built.
         from tcip_mcp.pipelines.operating_point import set_detector_operating_point
         set_detector_operating_point(self.model, score_thresh=score_threshold,
                                      nms_thresh=nms_iou, detections_per_img=max_dets)
 
-        # Task + input channels come from the bespoke model_source's declared ``task`` / ``in_chans``.
+        # The task comes from the bespoke model_source; the width from the run this checkpoint
+        # came out of, its model's declaration or its data config's recorded one.
         src = self.model_source or {}
         self.task = src.get("task", "unknown")
-        declared = declared_in_chans(src)
-        self.in_chans = declared if declared is not None else 3
+        width = run_in_chans(src, self.config.get("data"))
+        if width is None:
+            raise ValueError(
+                f"{checkpoint.path} records no input width: its model_source declares no in_chans "
+                f"and its run config no data.num_channels, so how many bands to read an image at "
+                f"is unknown, and reading at a guess would feed the model something other than "
+                f"what it trained on. Re-register a checkpoint from a run this platform trained, "
+                "or declare model_source.in_chans."
+            )
+        self.in_chans = width
 
     @torch.no_grad()
     def predict(self, image_path: str | Path | BandGroupRef) -> dict:
@@ -328,7 +337,7 @@ class GenericPredictor:
                 return
             outputs = self.model(batch_tiles)
             for out, meta, (scale_x, scale_y) in zip(outputs, batch_meta, batch_scales):
-                keep = out["scores"] >= self.score_threshold
+                keep = self._kept_by_score(out["scores"])
                 boxes = out["boxes"][keep].cpu().numpy()
                 if (scale_x, scale_y) != (1.0, 1.0):
                     boxes = boxes.copy()
@@ -572,24 +581,18 @@ class GenericPredictor:
         result["image"] = display_source_path(source)
         return result
 
-    def export_onnx(self, output_path: str, opset: int = 17) -> str:
-        """Export model to ONNX format with dynamic batch size."""
-        dummy = torch.randn(1, 3, 640, 640).to(self.device)
-        self.model.eval()
-        torch.onnx.export(
-            self.model,
-            (dummy,),
-            output_path,
-            opset_version=opset,
-            input_names=["images"],
-            output_names=["output"],
-            dynamic_axes={"images": {0: "batch", 2: "height", 3: "width"}},
-        )
-        logger.info("ONNX model exported to %s", output_path)
-        return output_path
+    def _kept_by_score(self, scores: torch.Tensor) -> torch.Tensor:
+        """Which detections this predictor's own score threshold keeps.
+
+        All of them when it was built with none: the model's own in-model point then decides which
+        detections exist at all, and filtering again here would apply a threshold nobody stated.
+        """
+        if self.score_threshold is None:
+            return torch.ones_like(scores, dtype=torch.bool)
+        return scores >= self.score_threshold
 
     def _format_detection(self, outputs: dict, image_path: str, w: int, h: int) -> dict:
-        keep = outputs["scores"] >= self.score_threshold
+        keep = self._kept_by_score(outputs["scores"])
         result = {
             "image": image_path,
             "width": w,

@@ -36,7 +36,7 @@ from tcip_mcp.pipelines.model_build import (
     MODEL_SOURCE_KEY,
     STATE_DICT_KEY,
     build_model,
-    declared_in_chans,
+    run_in_chans,
     stamp_model_ref,
 )
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
@@ -297,8 +297,9 @@ def _save_checkpoint(
 ) -> None:
     """Write a resumable periodic checkpoint.
 
-    ``GenericPredictor`` reads only the model reference (``model_source``) + the weights, so it
-    stays compatible regardless of what else this payload carries.
+    ``GenericPredictor`` reads the model reference (``model_source``), the weights and the width
+    this run recorded on its config, so those three are what a payload must carry to be predicted
+    from.
     """
     write_checkpoint(stamp_model_ref({
         STATE_DICT_KEY: model.state_dict(),
@@ -505,15 +506,14 @@ def apply_stage_freeze(
 
 
 def _validate_input_channels(config: dict, loader: DataLoader) -> None:
-    """Fail loudly if the data's channel count doesn't match the model's declared ``in_chans``.
+    """Fail loudly if the data's channel count doesn't match the width this run reads at.
 
     Catches an N-channel/RGB mismatch up front with a clear message instead of an opaque
-    conv-shape error deep in the first forward pass. The width is the bespoke ``model_source``'s
-    own declaration (:func:`declared_in_chans`), and a build that declares none states no width
-    to check against: the run's loaders are built at the band count its own sources carry, so
-    there is nothing here to disagree with.
+    conv-shape error deep in the first forward pass. The width is the run's own
+    (:func:`run_in_chans`), and a run that states none anywhere states nothing here to disagree
+    with, which is a dataset the platform did not build.
     """
-    expected = declared_in_chans(config.get(MODEL_SOURCE_KEY))
+    expected = run_in_chans(config.get(MODEL_SOURCE_KEY), config.get("data"))
     if expected is None:
         return
     batch = next(iter(loader), None)
@@ -526,8 +526,8 @@ def _validate_input_channels(config: dict, loader: DataLoader) -> None:
     channels = int(sample.shape[-3])
     if channels != expected:
         raise ValueError(
-            f"Input images have {channels} channels but the model's backbone expects "
-            f"in_chans={expected}. Set backbone.in_chans={channels} (or provide matching data)."
+            f"Input images have {channels} channels but this run reads at in_chans={expected}. "
+            f"Set model_source.in_chans={channels}, or hand it data at {expected} bands."
         )
 
 

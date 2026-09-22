@@ -106,8 +106,8 @@ def _detection_smoke_cfg(builder: str, tmp_path: Path) -> dict:
     lbls.mkdir()
     return {
         "model_source": {"builder": builder,
-                         "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 96,
-                                            "detector": "fcos"},
+                         "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": 64,
+                                            "max_size": 96, "detector": "fcos"},
                          "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
         "batch_size": 2,

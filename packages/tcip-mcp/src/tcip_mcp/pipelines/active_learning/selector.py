@@ -1,42 +1,11 @@
-"""Active learning selector: pick next images to annotate.
+"""Active learning selector: partition a checkpoint's own predictions.
 
-Uses scorers to rank unlabeled images, then selects top-N.
-Also provides auto-accept (high-confidence) and review-queue
-(medium-confidence) partitioning.
+Auto-accept (high-confidence), review-queue (medium-confidence) and unscoreable partitioning over
+prediction dicts. Ranking unlabeled images by informativeness is the scorers' own seam
+(``active_learning.scorer``), which reads the predictor rather than these dicts.
 """
 
 from __future__ import annotations
-
-import logging
-
-import torch
-
-from tcip_mcp.pipelines.active_learning.scorer import BaseScorer
-
-logger = logging.getLogger(__name__)
-
-
-def select_batch(
-    scorer: BaseScorer,
-    unlabeled_paths: list[str],
-    model: torch.nn.Module,
-    device: torch.device,
-    budget: int = 50,
-) -> list[str]:
-    """Select the top-N most informative images to annotate next.
-
-    Args:
-        scorer: A BaseScorer instance (uncertainty, diversity, or combined).
-        unlabeled_paths: List of paths to unlabeled images.
-        model: Trained model for scoring.
-        device: Torch device.
-        budget: Number of images to select.
-
-    Returns:
-        List of image paths to annotate, ordered by informativeness.
-    """
-    scored = scorer.score(unlabeled_paths, model, device)
-    return [path for path, _ in scored[:budget]]
 
 
 def _confidence_values(pred: dict) -> list[float]:

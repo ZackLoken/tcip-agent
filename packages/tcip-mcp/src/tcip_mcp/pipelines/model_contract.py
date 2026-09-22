@@ -19,6 +19,7 @@ All torch use is lazy (inside the functions) so importing this module stays chea
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
 
 from tcip_store.values import finite_or_none, stored_number
@@ -30,6 +31,10 @@ _DETECTION_TASKS = {"detection", "instance_seg"}
 _SYNTHESIZABLE_TASKS = _DETECTION_TASKS | {
     "classification", "ordinal", "regression", "semantic_seg",
 }
+_COUNTED_TASKS = _SYNTHESIZABLE_TASKS - _DETECTION_TASKS - {"regression"}
+"""The tasks whose synthetic target carries a class or rank id, so a batch for one cannot be
+shaped without the run's own count. A detector labels its one box foreground and a regression
+target is a value, so neither reads one."""
 
 
 @runtime_checkable
@@ -50,24 +55,41 @@ class TCIPModel(Protocol):
     def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
-def _synth_batch(task: str, *, in_chans: int, num_classes: int, img_size: int, device: Any):
+def no_batch_reason(task: str, dims: "Mapping[str, int] | None", sample_batch: Any) -> str | None:
+    """Why this call can smoke nothing, or ``None`` when it can: one statement, so the contract,
+    the overfit check and a caller deciding what to hand them say the same thing about one call."""
+    if sample_batch is not None:
+        return None
+    if task not in _SYNTHESIZABLE_TASKS:
+        return (f"no synthetic batch schema for task {task!r}; pass sample_batch= (an (images, "
+                f"targets) pair from this run's dataset) to smoke it. Schemas exist for "
+                f"{sorted(_SYNTHESIZABLE_TASKS)}.")
+    missing = ("an input width" if dims is None else
+               "a class count" if task in _COUNTED_TASKS and dims.get("num_classes") is None
+               else None)
+    if missing is not None:
+        return (f"no dimensions to synthesize a {task} batch at: this run states {missing} "
+                f"nowhere. Pass dims= (its own resolved dimensions) or sample_batch= (an "
+                f"(images, targets) pair from its dataset).")
+    return None
+
+
+def _synth_batch(task: str, *, in_chans: int, img_size: int, device: Any,
+                 num_classes: int | None = None):
     """A minimal batch in the exact shape ``generic_trainer`` feeds ``model.forward`` for ``task``.
 
     Synthesizes per-sample ``(image, target)`` items shaped like a dataset's ``__getitem__``, then
     collates them with the trainer's own ``task_collate``. The batch a model is smoked against is
     therefore assembled by the same function the DataLoader assembles the training batch with, and
     it carries the per-sample target keys the datasets emit rather than a separate list of them.
+
+    ``num_classes`` is the run's own count, which only a ``_COUNTED_TASKS`` target reads. Every
+    caller asks :func:`no_batch_reason` first, which is where an unshapeable call is named.
     """
     import torch
 
     from tcip_mcp.pipelines.training.collation import task_collate
 
-    if task not in _SYNTHESIZABLE_TASKS:
-        raise ValueError(
-            f"no synthetic batch schema for task {task!r}. Pass sample_batch= (an (images, "
-            f"targets) pair from this run's dataset) to check_model_contract, overfit_check, or "
-            f"ctx.check_contract. Schemas exist for {sorted(_SYNTHESIZABLE_TASKS)}."
-        )
     collate = task_collate(task)
 
     if task in _DETECTION_TASKS:
@@ -85,19 +107,21 @@ def _synth_batch(task: str, *, in_chans: int, num_classes: int, img_size: int, d
             target["masks"] = mask
         return collate([(img, target)])
 
-    ranks = max(num_classes, 2)
+    if task == "regression":
+        return collate([(torch.rand(in_chans, img_size, img_size, device=device),
+                         {"values": torch.rand((), device=device)}) for _ in range(2)])
+
+    assert num_classes is not None, "a counted task reaches here with its own count"
     items = []
     for _ in range(2):
         img = torch.rand(in_chans, img_size, img_size, device=device)
         if task == "ordinal":
             # A 0-dim tensor, not a python scalar: the stacking collate rebuilds a scalar on the cpu.
-            target = {"ranks": torch.randint(0, ranks, (), device=device)}
-        elif task == "regression":
-            target = {"values": torch.rand((), device=device)}
+            target = {"ranks": torch.randint(0, num_classes, (), device=device)}
         elif task == "semantic_seg":
-            target = {"masks": torch.randint(0, ranks, (img_size, img_size), device=device)}
+            target = {"masks": torch.randint(0, num_classes, (img_size, img_size), device=device)}
         else:
-            target = {"labels": torch.randint(0, ranks, (), device=device)}
+            target = {"labels": torch.randint(0, num_classes, (), device=device)}
         items.append((img, target))
     return collate(items)
 
@@ -137,10 +161,13 @@ def _forward_loss(model: Any, images: Any, targets: Any):
 
 
 def check_model_contract(
-    model: TCIPModel, task: str, *, in_chans: int = 3, num_classes: int = 1,
-    img_size: int = 64, device: str = "cpu", sample_batch: Any = None,
+    model: TCIPModel, task: str, *, dims: "Mapping[str, int] | None" = None,
+    device: str = "cpu", sample_batch: Any = None,
 ) -> dict:
     """Behavioral smoke test of the measurement boundary. Returns a report; never raises.
+
+    ``dims`` is :func:`~tcip_mcp.pipelines.model_build.resolve_contract_dims`' output, stated only
+    when a batch is synthesized here; a caller handing over ``sample_batch`` states none.
 
     ``{"ok": bool, "issues": [...], "train_loss": float|None, "eval_output_type": str|None,
     "operating_point_knobs": list[str]|None}``. ``operating_point_knobs`` is which of
@@ -170,15 +197,10 @@ def check_model_contract(
         report["operating_point_knobs"] = (
             sorted(attr for attr in OPERATING_POINT_ATTRS if hasattr(holder, attr))
             if holder is not None else [])
-    if sample_batch is None and task not in _SYNTHESIZABLE_TASKS:
-        # Do not invent a target shape for a task we have no schema for: a green report earned
-        # against a guessed shape proves nothing. Say so, and let the caller smoke it with a real
-        # batch (ctx.check_contract(sample_batch=...)) instead.
-        report["not_smokeable"] = (
-            f"no synthetic batch schema for task {task!r}; pass sample_batch= (an (images, targets) "
-            f"pair from this run's dataset) to smoke it. Schemas exist for "
-            f"{sorted(_SYNTHESIZABLE_TASKS)}."
-        )
+    # Never invent a batch shape: a green report earned against a guessed one proves nothing, so
+    # a caller with no schema or no dimensions is told to smoke a real batch instead.
+    report["not_smokeable"] = no_batch_reason(task, dims, sample_batch)
+    if report["not_smokeable"] is not None:
         return report
     dev = torch.device(device)
     try:
@@ -190,8 +212,7 @@ def check_model_contract(
     try:
         model.train()
         images, targets = (sample_batch if sample_batch is not None else
-                           _synth_batch(task, in_chans=in_chans, num_classes=num_classes,
-                                        img_size=img_size, device=dev))
+                           _synth_batch(task, device=dev, **(dims or {})))
         loss = _forward_loss(model, images, targets)
         if not (hasattr(loss, "requires_grad") and loss.requires_grad):
             issues.append("train-mode loss does not require grad (no learnable path)")
@@ -222,8 +243,7 @@ def check_model_contract(
     try:
         model.eval()
         images, _ = (sample_batch if sample_batch is not None else
-                     _synth_batch(task, in_chans=in_chans, num_classes=num_classes,
-                                  img_size=img_size, device=dev))
+                     _synth_batch(task, device=dev, **(dims or {})))
         with torch.no_grad():
             out = model(images)
         if task in _DETECTION_TASKS:
@@ -257,13 +277,13 @@ def check_model_contract(
 
 
 def overfit_check(
-    model: TCIPModel, task: str, *, steps: int = 20, in_chans: int = 3, num_classes: int = 1,
-    img_size: int = 64, seed: int = 0, lr: float = 1e-2, device: str = "cpu",
+    model: TCIPModel, task: str, *, dims: "Mapping[str, int] | None" = None,
+    steps: int = 20, seed: int = 0, lr: float = 1e-2, device: str = "cpu",
     sample_batch: Any = None,
 ) -> dict:
     """Drive ``steps`` optimizer updates on one fixed tiny batch; the loss must fall.
 
-    Seeded + CPU by default so the result is reproducible. Returns
+    ``dims`` is as for :func:`check_model_contract`. Seeded + CPU by default. Returns
     ``{"passed": bool, "losses": [...], "initial": float, "final": float, "issue": str|None}``.
     ``passed`` iff every loss is finite and the final loss is strictly below the initial one,
     the minimal evidence a bespoke model with a real learnable path actually optimizes.
@@ -276,6 +296,9 @@ def overfit_check(
 
     from tcip_mcp.pipelines.training.generic_trainer import set_seed
 
+    reason = no_batch_reason(task, dims, sample_batch)
+    if reason is not None:
+        return {"passed": False, "losses": [], "initial": None, "final": None, "issue": reason}
     set_seed(seed)
     dev = torch.device(device)
     try:
@@ -285,9 +308,8 @@ def overfit_check(
 
     try:
         images, targets = (sample_batch if sample_batch is not None else
-                           _synth_batch(task, in_chans=in_chans, num_classes=num_classes,
-                                        img_size=img_size, device=dev))
-    except ValueError as exc:  # no schema for this task: report, never raise (this returns a dict)
+                           _synth_batch(task, device=dev, **(dims or {})))
+    except ValueError as exc:  # report, never raise: this returns a dict
         return {"passed": False, "losses": [], "initial": None, "final": None, "issue": str(exc)}
     losses: list[float] = []
     issue: str | None = None

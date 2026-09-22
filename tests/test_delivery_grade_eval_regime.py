@@ -103,7 +103,7 @@ def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypat
 
     captured: dict = {}
 
-    def _fake(ckpt, loader, device, task, output_dir, **kw):
+    def _fake(ckpt, model, loader, device, task, output_dir, **kw):
         captured.update(kw)
         return {"tiled": False, "eval_regime": "tile-level"}
 
@@ -124,7 +124,7 @@ def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
 
     captured: dict = {}
 
-    def _fake(ckpt, loader, device, task, output_dir, **kw):
+    def _fake(ckpt, model, loader, device, task, output_dir, **kw):
         captured.update(kw)
         return {"tiled": False, "eval_regime": "tile-level"}
 
@@ -242,6 +242,7 @@ def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
     class _ManyDetectionsStub:
         train_tile_size = 100
         train_overlap = 0.2
+        in_chans = 3
 
         def predict_tiled(self, path, **kw):
             # 5 detections returned; max_dets below will cap the caller intentionally at 2.
@@ -266,6 +267,46 @@ def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
     assert r["max_dets_cap_saturated_frac"] == 1.0  # the one image hit the cap, now visible
 
 
+def test_the_gate_reads_its_references_at_the_predictors_own_width(tmp_path):
+    """The delivery gate builds its loader at the width the predictor reads at, and never derives
+    one: this gate scores source paths through the predictor and reads only targets off the
+    loader, so references of differing band counts are a measurement it can take."""
+    import numpy as np
+    import tifffile
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+
+    images_dir, labels_dir = _det_dataset(tmp_path)  # three-band sources
+    array = np.zeros((128, 128, 5), dtype=np.uint8)
+    tifffile.imwrite(str(images_dir / "five_band.tif"), array)  # and one of five bands
+    json_io.write_annotations(str(labels_dir / "five_band.json"),
+                              [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
+
+    class _OneBandStub:
+        train_tile_size = 100
+        train_overlap = 0.2
+        in_chans = 1
+
+        def predict_tiled(self, path, **kw):
+            return {"image": path, "width": 128, "height": 128, "boxes": [[10, 10, 40, 40]],
+                    "scores": [0.9], "labels": [1], "count": 1, "cap_hit": False}
+
+    build_predictor_orig = predictor_mod.build_predictor
+    try:
+        predictor_mod.build_predictor = lambda *a, **kw: _OneBandStub()
+        r = run_full_frame_evaluation(stub_verified_checkpoint("ckpt.pt"), str(images_dir),
+                                      str(labels_dir), str(tmp_path / "out"), subject="bud")
+    finally:
+        predictor_mod.build_predictor = build_predictor_orig
+
+    assert r["scored_images"] == 4
+    assert r["tp"] == 4
+
+
 def test_run_full_frame_evaluation_records_merge_and_operating_point(tmp_path):
     """The raw regime through the runner: the record carries global_nms_iou, postprocess and an
     operating_point mapping whose conf/max_dets read source "explicit" when stated (a stated
@@ -282,6 +323,7 @@ def test_run_full_frame_evaluation_records_merge_and_operating_point(tmp_path):
     class _EmptyStub:
         train_tile_size = 100
         train_overlap = 0.2
+        in_chans = 3
 
         def predict_tiled(self, path, **kw):
             return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],
@@ -349,6 +391,7 @@ def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(tmp_pa
     class _EmptyStub:
         train_tile_size = 100
         train_overlap = 0.2
+        in_chans = 3
 
         def predict_tiled(self, path, **kw):
             return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],
@@ -392,6 +435,7 @@ def test_the_gate_refuses_an_images_tree_with_no_ground_truth(tmp_path):
     class _EmptyStub:
         train_tile_size = 100
         train_overlap = 0.2
+        in_chans = 3
 
         def predict_tiled(self, path, **kw):
             return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],

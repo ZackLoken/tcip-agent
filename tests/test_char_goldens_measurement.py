@@ -434,7 +434,7 @@ def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path,
 
     captured: dict = {}
 
-    def _fake_diagnostic(ckpt, loader, device, task, output_dir, **kw):
+    def _fake_diagnostic(ckpt, model, loader, device, task, output_dir, **kw):
         captured["diagnostic_max_dets"] = kw.get("max_dets")
         return {"tiled": False, "eval_regime": "tile-level"}
 
@@ -472,7 +472,6 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
     stating the default value explicitly (0.5) still reaches the full-frame runner's record as an
     explicit stated value, never read back as an untouched default at the same number."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    import tcip_mcp.pipelines.model_build as model_build
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.pipelines import resolution as R
     from tcip_mcp.pipelines.training.eval_runners import evaluation_results_key
@@ -491,15 +490,14 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
     from PIL import Image
 
     class _DummyModel:
-        def load_state_dict(self, state_dict):
-            pass
-
         def to(self, device):
             pass
 
     class _StubPredictor:
         train_tile_size = 64
         train_overlap = 0.0
+        in_chans = 3
+        model = _DummyModel()
 
         def predict_tiled(self, path, **kw):
             return {"width": 64, "height": 64, "boxes": [], "scores": [], "labels": []}
@@ -519,7 +517,6 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
     ff_default_ds = _prepare("ff-default", "conf-full-frame-default")
     ff_stated_ds = _prepare("ff-stated", "conf-full-frame-stated")
 
-    monkeypatch.setattr(model_build, "build_model", lambda ckpt: _DummyModel())
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "precision": 0.4, "recall": 0.5, "f1": 0.44})
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _StubPredictor())

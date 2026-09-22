@@ -22,6 +22,10 @@ from tcip_mcp.pipelines.model_contract import (  # noqa: E402
 from tcip_store import check_json_value  # noqa: E402
 from tests import bespoke_models  # noqa: E402
 
+# What the smokes below synthesize their batch at, the shape a run resolves for itself.
+CLS_DIMS = {"in_chans": 3, "num_classes": 2, "img_size": 64}
+DET_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": 64}
+
 
 def _bespoke_builder(**kwargs):
     """An importable 'agent-written' builder: a real bespoke classification module."""
@@ -65,7 +69,7 @@ def test_tcip_model_protocol_membership():
 
 def test_check_model_contract_classification_ok():
     model = bespoke_models.build_bespoke_classifier(num_classes=2)
-    report = check_model_contract(model, "classification", num_classes=2)
+    report = check_model_contract(model, "classification", dims=CLS_DIMS)
     assert report["ok"], report["issues"]
     assert report["eval_output_type"] == "dict"
     assert report["train_loss"] is not None
@@ -76,7 +80,7 @@ def test_check_model_contract_records_per_parameter_gradient_magnitudes():
     conjunct only asks whether a .grad exists, not what it is, so the report also states each
     named parameter's gradient norm rather than gating the report on presence alone."""
     model = bespoke_models.build_bespoke_classifier(num_classes=2)
-    report = check_model_contract(model, "classification", num_classes=2)
+    report = check_model_contract(model, "classification", dims=CLS_DIMS)
     assert report["ok"], report["issues"]
     mags = report["gradient_magnitudes"]
     assert isinstance(mags, dict) and mags
@@ -105,7 +109,7 @@ def test_check_model_contract_gradient_norm_survives_a_float32_overflow():
                 return {"loss": self.w.sum() + self.lin(torch.rand(1, 4)).sum() * 0}
             return {"logits": self.lin(torch.rand(1, 4))}
 
-    report = check_model_contract(_NearOverflowGradient(), "classification", num_classes=2)
+    report = check_model_contract(_NearOverflowGradient(), "classification", dims=CLS_DIMS)
     assert report["ok"], report["issues"]
     norm = report["gradient_magnitudes"]["w"]
     assert math.isfinite(norm)
@@ -126,7 +130,7 @@ def test_check_model_contract_rejects_prediction_free_eval_output():
                 return {"loss": self.lin(torch.rand(1, 4)).sum()}
             return {"note": "done"}
 
-    report = check_model_contract(_Empty(), "classification", num_classes=2)
+    report = check_model_contract(_Empty(), "classification", dims=CLS_DIMS)
     assert report["ok"] is False
     assert any("no tensor value" in i for i in report["issues"]), report["issues"]
 
@@ -149,13 +153,13 @@ def test_check_model_contract_accepts_a_ragged_nested_eval_output():
             # Ragged: a different number of per-instance score tensors per image.
             return {"per_image": [torch.rand(3), torch.rand(1), torch.rand(0)]}
 
-    report = check_model_contract(_Ragged(), "classification", num_classes=2)
+    report = check_model_contract(_Ragged(), "classification", dims=CLS_DIMS)
     assert report["ok"], report["issues"]
 
 
 def test_check_model_contract_detection_ok():
     model = bespoke_models.build_bespoke_detection(num_classes=1, min_size=64, max_size=128)
-    report = check_model_contract(model, "detection", num_classes=1, img_size=64)
+    report = check_model_contract(model, "detection", dims=DET_DIMS)
     assert report["ok"], report["issues"]
     assert report["eval_output_type"] == "list[dict]"
 
@@ -166,7 +170,7 @@ def test_check_model_contract_detection_ok():
 
 def test_overfit_check_classification_passes():
     model = bespoke_models.build_bespoke_classifier(num_classes=2)
-    report = overfit_check(model, "classification", steps=25, num_classes=2, seed=0)
+    report = overfit_check(model, "classification", steps=25, dims=CLS_DIMS, seed=0)
     assert report["passed"], report["issue"]
     assert report["final"] < report["initial"]
     assert len(report["losses"]) == 25
@@ -178,7 +182,7 @@ def test_render_overfit_report_passes_through_a_finite_report():
     from tcip_mcp.pipelines.model_contract import render_overfit_report
 
     model = bespoke_models.build_bespoke_classifier(num_classes=2)
-    raw = overfit_check(model, "classification", steps=5, num_classes=2, seed=0)
+    raw = overfit_check(model, "classification", steps=5, dims=CLS_DIMS, seed=0)
     rendered = render_overfit_report(raw)
     check_json_value(rendered, path="overfit_check")  # never raises for a finite report
     assert rendered["passed"] == raw["passed"]

@@ -212,5 +212,7 @@ def test_model_contract_records_the_holders_own_knobs():
         "builder": "tests.bespoke_models:build_bare_no_knob_detector",
         "builder_kwargs": {"in_chans": 3}, "task": "detection"}})
 
-    assert check_model_contract(with_knob, "detection")["operating_point_knobs"] == ["score_thresh"]
-    assert check_model_contract(without_knob, "detection")["operating_point_knobs"] == []
+    dims = {"in_chans": 3, "num_classes": 1, "img_size": 64}
+    assert check_model_contract(with_knob, "detection", dims=dims)["operating_point_knobs"] == [
+        "score_thresh"]
+    assert check_model_contract(without_knob, "detection", dims=dims)["operating_point_knobs"] == []

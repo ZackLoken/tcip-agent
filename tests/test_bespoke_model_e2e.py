@@ -166,7 +166,8 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert entry["sha256"] and len(entry["sha256"]) == 64
 
     # ---- the module actually learns; resolve_operating_point + predict close the measurement loop ----
-    overfit = overfit_check(build_model(config), "detection", steps=30, lr=5e-3)
+    overfit = overfit_check(build_model(config), "detection", steps=30, lr=5e-3,
+                            dims={"in_chans": 3, "num_classes": 1, "img_size": 64})
     assert overfit["passed"], overfit["issue"]
 
     records = records_over_loader(predictor.model, val_loader, torch.device("cpu"), "detection")

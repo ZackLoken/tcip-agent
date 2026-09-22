@@ -403,7 +403,7 @@ def _bespoke_checkpoint_payload() -> dict:
 
     src = {
         "builder": "tests.bespoke_models:build_bespoke_detection",
-        "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
+        "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": 64, "max_size": 128},
         "task": "detection",
     }
     model = build_model({"model_source": src})
@@ -436,7 +436,7 @@ def _stub_scorer(monkeypatch) -> None:
     import tcip_mcp.pipelines.active_learning.helpers as al_helpers
 
     class _Scorer:
-        def score(self, sources, model, device):
+        def score(self, sources, predictor):
             return [(s, 1.0) for s in sources]
 
     monkeypatch.setattr(al_helpers, "build_scorer", lambda method, task: _Scorer())
@@ -472,6 +472,34 @@ def test_prioritize_review_queue_marks_a_bound_runs_calibration_side(tmp_path, m
         stem = Path(entry["image"]).stem
         assert entry["calibration_member"] == (stem in calibration_stems), entry
     assert "marks_unresolved" not in r
+
+def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(tmp_path):
+    """Both scorers read a candidate at the width the checkpoint reads at: a one-channel model
+    over three-band candidates scores them as one band, rather than handing its first convolution
+    an image three times as wide as the one it was trained on."""
+    from PIL import Image
+
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    ckpt = registered_checkpoint(
+        tmp_path, project_root=tmp_path,
+        model_source={"builder": "tests.bespoke_models:build_bespoke_detection",
+                      "builder_kwargs": {"num_classes": 1, "in_chans": 1, "min_size": 64,
+                                         "max_size": 128, "image_mean": [0.4],
+                                         "image_std": [0.2]},
+                      "task": "detection", "in_chans": 1})
+    images = tmp_path / "images"
+    images.mkdir()
+    for stem in ("a", "b"):
+        Image.new("RGB", (64, 64), (90, 110, 70)).save(images / f"{stem}.png")
+
+    r = prioritize_review_queue(checkpoint_path=ckpt, images_dir=str(images), method="combined",
+                                project_path=str(tmp_path))
+
+    assert "error" not in r, r
+    assert len(r["queue"]) == 2, r
+    assert all(isinstance(entry["score"], float) for entry in r["queue"])
+
 
 def test_prioritize_review_queue_unbound_run_carries_no_marks_or_reason(tmp_path, monkeypatch):
     """A checkpoint with no registry-recorded producer has nothing bound to check against: no

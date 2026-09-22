@@ -33,8 +33,10 @@ class BaseScorer(ABC):
     """Rank images by how valuable they'd be to label next."""
 
     @abstractmethod
-    def score(self, image_paths: list[str], model: torch.nn.Module, device: torch.device) -> list[tuple[str, float]]:
-        """Return (path, score) pairs sorted descending (highest = most valuable)."""
+    def score(self, image_paths: list[str], predictor: Any) -> list[tuple[str, float]]:
+        """Return (path, score) pairs sorted descending (highest = most valuable), reading each
+        candidate through the loaded checkpoint ``predictor``: its model, its device and its
+        ``in_chans`` travel together."""
         ...
 
 
@@ -49,15 +51,17 @@ class UncertaintyScorer(BaseScorer):
         self.task = task
 
     @torch.no_grad()
-    def score(self, image_paths: list[str], model: torch.nn.Module, device: torch.device) -> list[tuple[str, float]]:
+    def score(self, image_paths: list[str], predictor: Any) -> list[tuple[str, float]]:
         from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 
+        model = predictor.model
         model.eval()
         scored: list[tuple[str, float]] = []
 
         for path in image_paths:
-            img = load_image(path, 3)  # EXIF-oriented: score/embed in the same frame the model trained on
-            tensor = pil_to_tensor(img).unsqueeze(0).to(device)
+            # EXIF-oriented: score in the same frame and at the width the model trained on.
+            img = load_image(path, predictor.in_chans)
+            tensor = pil_to_tensor(img).unsqueeze(0).to(predictor.device)
 
             if self.task in ("detection", "instance_seg"):
                 outputs = model([tensor[0]])
@@ -107,9 +111,10 @@ class DiversityScorer(BaseScorer):
         self._labeled = embeddings
 
     @torch.no_grad()
-    def score(self, image_paths: list[str], model: torch.nn.Module, device: torch.device) -> list[tuple[str, float]]:
+    def score(self, image_paths: list[str], predictor: Any) -> list[tuple[str, float]]:
         from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 
+        model = predictor.model
         if not hasattr(model, "backbone"):
             # No silent random-noise embeddings: diversity needs real backbone features.
             raise RuntimeError(
@@ -122,8 +127,9 @@ class DiversityScorer(BaseScorer):
         # Extract backbone features
         embeddings = []
         for path in image_paths:
-            img = load_image(path, 3)  # EXIF-oriented: score/embed in the same frame the model trained on
-            tensor = pil_to_tensor(img).unsqueeze(0).to(device)
+            # EXIF-oriented: embed in the same frame and at the width the model trained on.
+            img = load_image(path, predictor.in_chans)
+            tensor = pil_to_tensor(img).unsqueeze(0).to(predictor.device)
             # A bespoke model's own opt-in attribute, not part of nn.Module's stub (checked above).
             feats = cast(Any, model).backbone(tensor)
             feat = list(feats.values())[-1] if isinstance(feats, dict) else feats
@@ -170,9 +176,9 @@ class CombinedScorer(BaseScorer):
         self.uw = uncertainty_weight
         self.dw = diversity_weight
 
-    def score(self, image_paths: list[str], model: torch.nn.Module, device: torch.device) -> list[tuple[str, float]]:
-        unc_scores = dict(self.unc.score(image_paths, model, device))
-        div_scores = dict(self.div.score(image_paths, model, device))
+    def score(self, image_paths: list[str], predictor: Any) -> list[tuple[str, float]]:
+        unc_scores = dict(self.unc.score(image_paths, predictor))
+        div_scores = dict(self.div.score(image_paths, predictor))
 
         # Normalize each to [0, 1]
         def _normalize(d: dict[str, float]) -> dict[str, float]:
