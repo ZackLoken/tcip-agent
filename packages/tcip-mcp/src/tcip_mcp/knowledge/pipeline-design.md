@@ -33,8 +33,9 @@ list, say so plainly rather than approximating it.
 Buildable now:
 
 - 2D imagery from any capture modality: aerial, ground, rover-mounted, lab/benchtop.
-- RGB and N-channel rasters (GeoTIFF, NPZ, grayscale). `num_channels` threads to the backbone's
-  `in_chans`, and inference is channel-aware.
+- RGB and N-channel rasters (GeoTIFF, NPZ, grayscale). A run reads its sources at one width,
+  `data.num_channels` when it states one and the sources' own count otherwise, recorded on the run
+  and read back by every later reader, so inference is channel-aware.
 - The task strings `build_dataset` routes, or a bespoke `dataset_source` you write for a task it
   does not route. The seam is open; the loader set is not a taxonomy.
 
@@ -106,7 +107,8 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   `dataset_source`: an *importable* builder you wrote (`{"builder": "my_module:build_ds",
   "builder_kwargs": {...}, "source_files": [...], "task": "..."}`, mirroring `model_source`). It
   receives the samples the platform's own producer named for the side being built and the class
-  map they were admitted under (`samples` / `id_map` / `transforms` / `task`), plus your own
+  map they were admitted under (`samples` / `id_map` / `transforms` / `task`), sizing the dataset
+  it builds itself, plus your own
   `builder_kwargs`, and must return a torch `Dataset`. Never a directory, a document path or a
   format flag, on any route including your own `ctx.build_dataset` call, which is this same
   factory: the platform names the samples and your builder builds over them, so a strip split

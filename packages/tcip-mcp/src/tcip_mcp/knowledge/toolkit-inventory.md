@@ -145,9 +145,10 @@ occlusion-split object identically.
 ## Active learning: the scorer registry (`pipelines.active_learning.scorer`)
 
 An acquisition function is a capability, not a fixed menu; scorers resolve through a dict registry
-you can extend rather than a welded `if/elif`. Implement `BaseScorer.score(image_paths, model,
-device) -> list[tuple[str, float]]` ((path, score) pairs sorted descending, highest = most
-valuable) and register your own (margin, least-confidence, …) with `register_scorer(name,
+you can extend rather than a welded `if/elif`. Implement `BaseScorer.score(image_paths,
+predictor) -> list[tuple[str, float]]` ((path, score) pairs sorted descending, highest = most
+valuable), reading the model, the device and the width to load an image at off the predictor you
+are handed, and register your own (margin, least-confidence, …) with `register_scorer(name,
 factory)`. `resolve_scorer(method, task)` resolves a built-in name, a registered one, or a
 dotted `module:factory` you wrote; an unresolvable name raises `ValueError` naming the
 built-ins itself, rather than silently substituting one.
