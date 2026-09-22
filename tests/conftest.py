@@ -10,8 +10,9 @@ from pathlib import Path
 import pytest
 
 from tests.hung_test_watchdog import pytest_timeout_set_timer
+from tests.ray_cluster_lock import pytest_configure, pytest_runtest_protocol
 
-__all__ = ["pytest_timeout_set_timer"]
+__all__ = ["pytest_configure", "pytest_runtest_protocol", "pytest_timeout_set_timer"]
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -1387,6 +1387,7 @@ def test_group_split_draws_ineligible_when_a_repeated_point_never_completes_ever
 # -- end to end: a real Ray sweep ----------------------------------------------------
 
 
+@pytest.mark.ray_cluster
 def test_tune_search_split_draws_end_to_end_pairs_every_point_with_every_seed(tmp_path, monkeypatch):
     """A real Ray sweep over a trivial objective (the shape test_hpo_ray_detached_exit.py's
     subprocess script uses: one value reported, resources_per_trial={"cpu": 1}, storage_path

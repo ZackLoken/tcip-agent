@@ -862,6 +862,7 @@ def test_default_trial_resources_no_gpu(monkeypatch):
     assert hpo._default_trial_resources(max_concurrent=1) == {"cpu": 1.0, "gpu": 0.0}
 
 
+@pytest.mark.ray_cluster
 def test_tune_search_accepts_explicit_resources_per_trial(tmp_path):
     """A real, lightweight Ray sweep (matching test_imbalance_aug_hpo.py's own established
     pattern for this function: a pure-math objective, no training) still finds the minimum when
@@ -885,6 +886,7 @@ def test_tune_search_accepts_explicit_resources_per_trial(tmp_path):
     assert result["best_value"] is not None
 
 
+@pytest.mark.ray_cluster
 def test_tune_search_runs_despite_deprecated_ray_result_dir_variables(tmp_path, monkeypatch):
     """Ray Tune refuses to run while TUNE_RESULT_DIR or RAY_AIR_LOCAL_CACHE_DIR is set anywhere
     in the environment, even though storage_path alone decides where trial results land. A

@@ -19,7 +19,10 @@ import time
 
 import pytest
 
-pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="the console-signal exit path this test drives is Windows-only")
+pytestmark = [
+    pytest.mark.skipif(sys.platform != "win32", reason="the console-signal exit path this test drives is Windows-only"),
+    pytest.mark.ray_cluster,
+]
 
 DETACHED_PROCESS = 0x00000008
 
