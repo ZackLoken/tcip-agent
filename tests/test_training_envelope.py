@@ -228,7 +228,7 @@ def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
         w.writerows(rows)
 
     def build_loader():
-        ds = dataset_over("classification", str(images_dir), str(csv_path), num_classes=2)
+        ds = dataset_over("classification", str(images_dir), str(csv_path))
         return DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
 
     cfg = {

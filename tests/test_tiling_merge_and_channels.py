@@ -113,7 +113,9 @@ def test_tiled_detection_reads_multiband_and_keeps_boxes_on_their_pixels(tmp_pat
 
 
     images_dir, labels_dir = _multiband_detection_fixture(tmp_path)
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", num_channels=5, tiling={"enabled": True, "tile_size": 16, "overlap": 0.0})
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+                      stated={"num_channels": 5},
+                      tiling={"enabled": True, "tile_size": 16, "overlap": 0.0})
     assert ds.expected_channels == 5
 
     hits = [ds[i] for i in range(len(ds))]
@@ -158,7 +160,9 @@ def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
                               keep_empty=True)
 
     with pytest.raises(ValueError, match="the labels record a 5x40 image but it decodes as 40x24"):
-        dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", num_channels=5, tiling={"enabled": True, "tile_size": 16, "overlap": 0.0})
+        dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+                     stated={"num_channels": 5},
+                     tiling={"enabled": True, "tile_size": 16, "overlap": 0.0})
 
 
 def test_authored_frame_raises_on_a_corrupt_label_rather_than_reading_as_no_frame(tmp_path):
@@ -183,7 +187,8 @@ def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
     images_dir, labels_dir = _multiband_detection_fixture(tmp_path)
-    base = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", num_channels=5)
+    base = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+                        stated={"num_channels": 5})
     assert TiledDetectionDataset(base, tile_size=16).expected_channels == 5
 
 
@@ -204,8 +209,10 @@ def test_tiled_detection_handles_channel_first_rasters(tmp_path):
                               [Annotation(subject="bud", geometry=BBox(28, 12, 34, 18))], 40, 24,
                               keep_empty=True)
 
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", num_channels=5, tiling={"enabled": True, "tile_size": 16, "overlap": 0.0})
-    with_boxes = [(t, tgt) for t, tgt in (ds[i] for i in range(len(ds))) if len(tgt["boxes"])]
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+                      stated={"num_channels": 5},
+                      tiling={"enabled": True, "tile_size": 16, "overlap": 0.0})
+    with_boxes =[(t, tgt) for t, tgt in (ds[i] for i in range(len(ds))) if len(tgt["boxes"])]
     assert with_boxes, "the GT box did not survive tiling on a channel-first raster"
     for tile, target in with_boxes:
         assert tile.shape == (5, 16, 16)

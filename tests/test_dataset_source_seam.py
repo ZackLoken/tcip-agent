@@ -111,7 +111,7 @@ def test_build_dataset_routes_to_dataset_source(tmp_path: Path):
 
     samples = _admitted_samples(tmp_path / "ds")
     ds = build_dataset("grape_bunch_count", dataset_source=DATASET_SOURCE, samples=samples,
-                       transforms=None)
+                       sizes={}, transforms=None)
 
     assert isinstance(ds, _CountingDataset)
     assert ds.samples == list(samples)       # the producer's own membership, unchanged
@@ -137,13 +137,18 @@ def test_a_bespoke_builder_is_handed_only_what_the_producer_named(tmp_path: Path
                     {"subject": "leaf"}):
         with pytest.raises(ValueError, match="was given"):
             build_dataset("grape_bunch_count", dataset_source=DATASET_SOURCE, samples=samples,
-                          **unowned)
+                          sizes={}, **unowned)
+
+    # A size the platform resolved is refused beside a builder that sizes its own dataset.
+    with pytest.raises(ValueError, match="beside a dataset_source"):
+        build_dataset("grape_bunch_count", dataset_source=DATASET_SOURCE, samples=samples,
+                      sizes={"num_channels": 3})
 
     # Admits valid work: the producer's own samples and class space reach the builder unchanged.
     from tcip_mcp.pipelines.data.selection import ClassScope
 
     built = build_dataset("grape_bunch_count", dataset_source=DATASET_SOURCE, samples=samples,
-                          scope=ClassScope(id_map={"leaf": 0}), transforms=None)
+                          sizes={}, scope=ClassScope(id_map={"leaf": 0}), transforms=None)
     assert isinstance(built, _CountingDataset)
     assert built.samples == list(samples) and built.id_map == {"leaf": 0}
 
@@ -167,7 +172,7 @@ def test_known_task_registry_stays_the_default(tmp_path: Path):
 
     # No dataset_source -> the closed-registry refusal stays the honest signal for a bad name.
     with pytest.raises(ValueError, match="Unknown task"):
-        build_dataset("grape_bunch_count", samples=_admitted_samples(tmp_path / "ds"))
+        build_dataset("grape_bunch_count", samples=_admitted_samples(tmp_path / "ds"), sizes={})
 
 
 def test_builder_kwargs_configure_the_builder(tmp_path: Path):

@@ -113,7 +113,8 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
         m[IMG // 4:IMG // 2, IMG // 4:IMG // 2] = 1  # a foreground block
         Image.fromarray(m, mode="L").save(masks_dir / f"img{i}.png")
 
-    dataset = dataset_over("semantic_seg", str(images_dir), str(masks_dir), num_classes=2)
+    dataset = dataset_over("semantic_seg", str(images_dir), str(masks_dir),
+                           stated={"num_classes": 2})
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("semantic_seg"))
     model = bespoke_models.build_bespoke_semantic_seg(num_classes=2)
 

@@ -234,7 +234,8 @@ def test_build_dataset_no_tiling_unchanged(tmp_path):
         w = csv.writer(f)
         w.writerow(("stem", "label"))
         w.writerows(rows)
-    ds2 = dataset_over("classification", str(cls_dir), str(csv_path), num_classes=2, tiling={"enabled": True})
+    ds2 = dataset_over("classification", str(cls_dir), str(csv_path),
+                       stated={"num_classes": 2}, tiling={"enabled": True})
     assert ds2.num_samples == 2  # plain classification dataset
 
 

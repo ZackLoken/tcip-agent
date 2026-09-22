@@ -93,7 +93,7 @@ def resolve_count_operating_point(
 
     from tcip_annotation.json_io import require_reference_ground_truth
     from tcip_mcp.model_registry import load_registered_checkpoint, resolve_model_identity
-    from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
     from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
     from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.operating_point import (
@@ -167,10 +167,12 @@ def resolve_count_operating_point(
         predictor.model, score_thresh=0.01, detections_per_img=density_cap)
 
     def _records(sub: list[str]) -> list[dict]:
-        # This pass's own recorded samples: the measurement reads the pixels and the ground truth
-        # its membership named, not a same-named file under the caller's directory.
-        ds = build_dataset("detection", tiling=None,
-                           samples=[counted[s] for s in sub], scope=scope)
+        # This pass's own recorded samples, at the width the predictor reads at: the measurement
+        # reads the pixels its membership named, in the shape the model below takes.
+        samples = [counted[s] for s in sub]
+        ds = build_dataset("detection", tiling=None, samples=samples, scope=scope,
+                           sizes=resolve_sizes("detection",
+                                               {"num_channels": predictor.in_chans}, samples))
         loader = DataLoader(ds, batch_size=4, collate_fn=task_collate("detection"))
         return records_over_loader(predictor.model, loader, predictor.device, "detection")
 

@@ -30,6 +30,28 @@ def test_compute_class_weights_balanced():
     assert float(w.mean()) == pytest.approx(1.0, abs=1e-5)  # normalized over present
 
 
+def test_class_weights_are_sized_by_the_one_class_count_derivation(monkeypatch):
+    """A weight vector and a run's loaders are sized by one rule: the weigher asks the platform's
+    own derivation for the count a distribution implies, so a distribution whose top id is above
+    its own length weights every class the ground truth reaches rather than only those present."""
+    from tcip_mcp.pipelines import derivations
+    from tcip_mcp.pipelines.components import losses
+
+    asked: list[dict] = []
+
+    def _record(distribution):
+        asked.append(dict(distribution))
+        return derivations.num_classes_from_distribution(distribution)
+
+    monkeypatch.setattr(losses, "num_classes_from_distribution", _record)
+
+    w = compute_class_weights({0: 40, 4: 10})
+
+    assert asked == [{0: 40, 4: 10}]  # the count came from the shared derivation
+    assert len(w) == 5  # ids 0 and 4 present, 1 to 3 counted but unseen
+    assert float(w[1]) == float(w[2]) == float(w[3]) > 0  # an unseen class is weighted, not dropped
+
+
 def test_focal_loss_scalar_alpha_unchanged():
     fl = FocalLoss(alpha=0.25, gamma=2.0)
     preds = torch.randn(8, 5, requires_grad=True)

@@ -573,6 +573,9 @@ def test_a_runs_unstated_class_count_is_read_once_for_both_its_loaders(tmp_path:
     assert _side(partition, "val") == [STEMS[0]]
     assert val_ds is not None
     assert train_ds.num_classes == val_ds.num_classes == 3
+    # And the run records what it resolved, so a reader after training takes the count from there.
+    assert data_cfg["num_classes"] == 3
+    assert data_cfg["num_channels"] == train_ds.expected_channels
 
 
 def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(tmp_path: Path):
@@ -600,6 +603,41 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(tmp_path:
     result = evaluate(model, loader, torch.device("cpu"), "semantic_seg")
 
     assert sorted(result["per_class_iou"]) == [0, 1, 2]
+
+
+def test_a_head_that_states_no_class_count_stops_the_measurement(tmp_path: Path):
+    """The scale metrics are reported on is the head's own count and nothing else: a model whose
+    head states none stops the evaluation where the count is read, rather than falling back to
+    whatever the scored half happens to carry and reporting that as the run's scale."""
+    import torch
+    from torch.utils.data import DataLoader
+
+    from tcip_mcp.pipelines.training.collation import task_collate
+    from tcip_mcp.pipelines.training.evaluation import evaluate
+
+    images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
+                "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3}}
+    train_ds, _val_ds, _partition = auto_train_val("semantic_seg", data_cfg, None)
+
+    class _CountlessSegModel(torch.nn.Module):
+        """A segmentation model whose head states no class count at all."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, train_ds.num_classes, 1)
+            self.heads = torch.nn.ModuleList([torch.nn.Identity()])
+
+        def forward(self, images, targets=None):
+            logits = self.conv(images)
+            if self.training and targets is not None:
+                return {"head0_loss": logits.mean()}
+            return {"head0_masks": logits.argmax(1)}
+
+    loader = DataLoader(train_ds, batch_size=1, collate_fn=task_collate("semantic_seg"))
+
+    with pytest.raises(AttributeError, match="num_classes"):
+        evaluate(_CountlessSegModel(), loader, torch.device("cpu"), "semantic_seg")
 
 
 def test_the_place_and_the_record_read_one_ground_truth_shape(tmp_path: Path):

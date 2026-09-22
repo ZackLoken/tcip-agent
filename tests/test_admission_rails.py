@@ -283,7 +283,7 @@ def test_a_point_document_is_admitted_and_trains_through_the_builder_that_reads_
 def test_class_distribution_counts_only_this_loaders_own_samples(tmp_path):
     """Two loaders over two sides of one dataset report their own distributions, never the
     dataset's unsplit whole: each reads the documents its own samples name."""
-    from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
 
     images, labels = tmp_path / "images", tmp_path / "annotations"
     stems = [f"img{i}" for i in range(4)]
@@ -296,10 +296,12 @@ def test_class_distribution_counts_only_this_loaders_own_samples(tmp_path):
     admitted = admit_over(images, labels, subject=BUD)
     samples = admitted.samples({stem: "train" for stem in stems}, lambda s: s)
     by_stem = {sample.member_stem: sample for sample in samples}
+    # The run's own sizes, resolved once over both sides, as a run builds its loaders.
+    sizes = resolve_sizes("detection", {}, samples)
     train_ds = build_dataset("detection", samples=[by_stem[s] for s in stems[:2]],
-                             scope=admitted.scope)
+                             scope=admitted.scope, sizes=sizes)
     val_ds = build_dataset("detection", samples=[by_stem[s] for s in stems[2:]],
-                           scope=admitted.scope)
+                           scope=admitted.scope, sizes=sizes)
 
     # img0 (1 box) + img1 (2 boxes) = 3; img2 (3 boxes) + img3 (4 boxes) = 7.
     assert train_ds.class_distribution == {0: 3}
@@ -529,7 +531,7 @@ def test_semantic_seg_requires_a_mask_but_admits_an_all_background_one(tmp_path)
     _Image.fromarray(np.ones((32, 32), dtype=np.uint8)).save(masks / "has_mask.png")
     _Image.fromarray(np.zeros((32, 32), dtype=np.uint8)).save(masks / "all_background.png")
 
-    ds = dataset_over("semantic_seg", images, masks, num_classes=2)
+    ds = dataset_over("semantic_seg", images, masks)
     assert sorted(ds.record_stems) == ["all_background", "has_mask"]
 
 

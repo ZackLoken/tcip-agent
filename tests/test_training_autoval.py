@@ -224,7 +224,7 @@ def _big_single_source(root: Path, width: int, height: int) -> tuple[Path, Path,
 
 def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
     """A single tiled detection source derives a real, disjoint spatial val split instead of
-    degrading to no validation: the tiling=tiling leak this closes."""
+    degrading to no validation, train and val tiles sharing no tile and no strip identity."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
@@ -463,6 +463,110 @@ def test_a_runs_band_count_is_read_over_every_source_and_a_disagreement_refuses(
         auto_train_val("detection", {**base_cfg, "split": dict(split)}, None)
 
 
+def _probe_spy(monkeypatch) -> list[str]:
+    """Every source the band-count probe is asked about, in call order."""
+    from tcip_mcp.pipelines import derivations
+
+    probed: list[str] = []
+    real_probe = derivations.probe_channels
+
+    def _record(source):
+        probed.append(str(source))
+        return real_probe(source)
+
+    monkeypatch.setattr(derivations, "probe_channels", _record)
+    return probed
+
+
+def test_a_stated_band_count_reads_every_source_at_it_and_probes_none(tmp_path: Path,
+                                                                      monkeypatch):
+    """A config that states how to read its sources is taken at its word: a run over an L source
+    and an RGB one, stated at one channel, builds both loaders at one channel rather than
+    deriving a disagreement it was told how to resolve, and probes no source to do it."""
+    from PIL import Image
+
+    images_dir, labels_dir = tmp_path / "ds" / "images", tmp_path / "ds" / "labels"
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir(parents=True)
+    for stem, mode in (("grey", "L"), ("colour", "RGB")):
+        Image.new(mode, (40, 24)).save(images_dir / f"{stem}.png")
+        json_io.write_annotations(
+            str(labels_dir / f"{stem}.json"),
+            [Annotation(subject="bud", geometry=BBox(28, 12, 34, 18))], 40, 24, keep_empty=True)
+    probed = _probe_spy(monkeypatch)
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                "subject": "bud", "num_channels": 1,
+                "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1}}
+
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+
+    assert val_ds is not None
+    assert train_ds.expected_channels == val_ds.expected_channels == 1
+    assert train_ds[0][0].shape[0] == 1
+    assert probed == []
+
+
+def test_a_runs_sources_are_probed_once_each_for_the_whole_run(tmp_path: Path, monkeypatch):
+    """The band count is read where the run resolves its sizes and nowhere else: each source is
+    probed once for the run, not again inside every loader the run builds."""
+    images_dir, labels_dir = tmp_path / "ds" / "images", tmp_path / "ds" / "labels"
+    for stem in ("a", "b", "c", "d"):
+        _multiband_source(images_dir, labels_dir, stem, 5)
+    probed = _probe_spy(monkeypatch)
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+                "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1}}
+
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+
+    assert val_ds is not None
+    assert train_ds.expected_channels == val_ds.expected_channels == 5
+    assert len(probed) == len(set(probed)) == 4
+
+
+def test_one_preflight_reads_a_sources_header_once_for_its_sizes(tmp_path: Path, monkeypatch):
+    """Preflight resolves this run's sizes once and every leg that needs them takes that answer:
+    the reserved-calibration feasibility probe builds the run's own dataset at the sizes already
+    resolved rather than resolving a second time over the same source."""
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": 64,
+                                            "max_size": 128},
+                         "task": "detection"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+                 "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+                 "split": {"val_ratio": 0.2, "test_ratio": 0.1,
+                           "reserve_calibration_fraction": 0.15}},
+        "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
+    }
+    probed = _probe_spy(monkeypatch)
+
+    result = preflight_config(cfg, smoke=True)
+
+    assert result["valid"] is True, result["issues"]
+    # One read for the run's sizes; the second is the spatial manifest's own raster identity,
+    # which answers for the file on disk rather than the width the run reads at.
+    assert len(probed) == 2, probed
+
+
+def test_a_bound_run_records_the_width_it_read_its_sources_at(tmp_path: Path):
+    """The width a run resolved is a fact about the checkpoint it produces, so the run records it
+    on its own data config: a later reader takes the recorded width rather than assuming RGB."""
+    images_dir, labels_dir = tmp_path / "ds" / "images", tmp_path / "ds" / "labels"
+    for stem in ("a", "b"):
+        _multiband_source(images_dir, labels_dir, stem, 5)
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+                "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1}}
+
+    train_ds, _val_ds, _ = auto_train_val("detection", data_cfg, None)
+
+    assert data_cfg["num_channels"] == train_ds.expected_channels == 5
+    from tcip_mcp.pipelines.model_build import run_in_chans
+    assert run_in_chans({"builder": "m:f"}, data_cfg) == 5
+
+
 def test_reserve_calibration_fraction_adds_a_disjoint_calibration_region(tmp_path: Path):
     """Admits valid work: an explicitly reserved calibration region is real, non-empty geometry,
     disjoint from train/val/test."""
@@ -496,9 +600,8 @@ def test_reserve_calibration_fraction_raises_on_unresolvable_extent(tmp_path: Pa
     rather than the unrequested case's silent (train_ds, None) degradation. The one source is
     admitted through the producer the run itself admits through, so the split is derived over the
     dataset the run would build."""
-    from tcip_mcp.pipelines.data.split_construction import (
-        loader_sizes, spatial_single_source_split,
-    )
+    from tcip_mcp.pipelines.data.datasets import resolve_sizes
+    from tcip_mcp.pipelines.data.split_construction import spatial_single_source_split
     from tests._producer_fixtures import admit_over
 
     images_dir = tmp_path / "images"
@@ -516,7 +619,7 @@ def test_reserve_calibration_fraction_raises_on_unresolvable_extent(tmp_path: Pa
     with pytest.raises(ValueError, match="reserve_calibration_fraction"):
         spatial_single_source_split(
             admitted.one_sample(), admitted.scope, tiling, split_cfg, None,
-            loader_sizes("detection", {}, admitted.every_sample()))
+            resolve_sizes("detection", {}, admitted.every_sample()))
 
 
 def test_single_tiled_source_raises_on_an_unreadable_label_regardless_of_reserve(

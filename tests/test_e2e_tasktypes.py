@@ -154,7 +154,8 @@ def test_semantic_seg_e2e(tmp_path: Path):
         m[IMG // 4 : IMG // 2, IMG // 4 : IMG // 2] = 1  # a foreground block
         Image.fromarray(m, mode="L").save(masks_dir / f"img{i}.png")
 
-    dataset = dataset_over("semantic_seg", str(images_dir), str(masks_dir), num_classes=2)
+    dataset = dataset_over("semantic_seg", str(images_dir), str(masks_dir),
+                           stated={"num_classes": 2})
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("semantic_seg"))
 
     model_source = _model_source("build_bespoke_semantic_seg", num_classes=2)
@@ -179,7 +180,7 @@ def test_ordinal_e2e(tmp_path: Path):
     csv_path = tmp_path / "ranks.csv"
     _write_csv(csv_path, rows, ("stem", "rank"))
 
-    dataset = dataset_over("ordinal", str(images_dir), str(csv_path), num_ranks=3)
+    dataset = dataset_over("ordinal", str(images_dir), str(csv_path), stated={"num_ranks": 3})
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("ordinal"))
 
     model_source = _model_source("build_bespoke_ordinal", num_ranks=3)
@@ -222,7 +223,7 @@ def test_ordinal_num_ranks_mismatch_raises(tmp_path: Path):
     _write_csv(csv_path, rows, ("stem", "rank"))
 
     with pytest.raises(ValueError, match="num_ranks"):
-        dataset_over("ordinal", str(images_dir), str(csv_path), num_ranks=5)
+        dataset_over("ordinal", str(images_dir), str(csv_path), stated={"num_ranks": 5})
 
 
 def test_classification_derives_num_classes_from_data(tmp_path: Path):
@@ -251,7 +252,7 @@ def test_classification_num_classes_mismatch_raises(tmp_path: Path):
     _write_csv(csv_path, rows, ("stem", "label"))
 
     with pytest.raises(ValueError, match="num_classes"):
-        dataset_over("classification", str(images_dir), str(csv_path), num_classes=2)
+        dataset_over("classification", str(images_dir), str(csv_path), stated={"num_classes": 2})
 
 
 def test_regression_e2e(tmp_path: Path):
@@ -288,9 +289,9 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     csv_path = tmp_path / "ranks.csv"
     _write_csv(csv_path, rows, ("stem", "rank"))
 
-    dataset = dataset_over("ordinal", str(images_dir), str(csv_path), num_ranks=3)
+    dataset = dataset_over("ordinal", str(images_dir), str(csv_path), stated={"num_ranks": 3})
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("ordinal"))
-    model_source = _model_source("build_bespoke_ordinal", num_ranks=3)
+    model_source = _model_source("build_bespoke_ordinal", num_ranks=3, in_chans=3)
     run = create_run(_train_config(model_source), str(tmp_path / "out"), id="auto-run-21")
     run = train(run, loader, val_loader=None, task="ordinal")
     _assert_trained(run, tmp_path / "out")
@@ -322,7 +323,7 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
 
     dataset = dataset_over("regression", str(images_dir), str(csv_path))
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("regression"))
-    model_source = _model_source("build_bespoke_regressor")
+    model_source = _model_source("build_bespoke_regressor", in_chans=3)
     run = create_run(_train_config(model_source), str(tmp_path / "out"), id="auto-run-22")
     run = train(run, loader, val_loader=None, task="regression")
     _assert_trained(run, tmp_path / "out")

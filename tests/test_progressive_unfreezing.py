@@ -138,7 +138,7 @@ def _classification_loader(tmp_path: Path, n: int = 6, batch_size: int = 2) -> D
         w = csv.writer(f)
         w.writerow(("stem", "label"))
         w.writerows(rows)
-    ds = dataset_over("classification", str(images_dir), str(csv_path), num_classes=2)
+    ds = dataset_over("classification", str(images_dir), str(csv_path))
     return DataLoader(ds, batch_size=batch_size, collate_fn=task_collate("classification"))
 
 
