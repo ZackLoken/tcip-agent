@@ -478,3 +478,31 @@ def test_a_process_with_a_console_lets_ray_shutdown_signal_its_daemons_directly(
             assert process_info.process.kill_calls == 0
             assert process_info.process.terminate_calls == 1
     assert ray.shutdown_calls == 1
+
+
+def test_a_cluster_this_process_starts_is_sized_to_the_sweep_s_own_request(monkeypatch):
+    """The cluster asks Ray for the sweep's CPUs, every concurrent trial's together, never for
+    the host's: three half-CPU trials at once need two whole CPUs, and the default one-CPU,
+    one-at-a-time sweep needs one."""
+    from pathlib import Path
+
+    from tcip_mcp.pipelines.training.hpo import tune_search
+
+    entered = [threading.Event(), threading.Event()]
+    release = [threading.Event(), threading.Event()]
+    for event in release:
+        event.set()
+    ray = _install_fake_ray(monkeypatch, entered, release)
+
+    tune_search(
+        objective_fn=lambda config, report: None,
+        param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
+        num_samples=1, search_alg="random", scheduler=None, max_concurrent=3,
+        resources_per_trial={"cpu": 0.5, "gpu": 0.0},
+        storage_path=str(Path(os.environ["TCIP_STATE_ROOT"]) / "hpo"),
+    )
+    assert ray.init_kwargs["num_cpus"] == 2
+
+    _run_one_search()
+    assert ray.init_calls == 2, "the first sweep's cluster was shut down, so this one started its own"
+    assert ray.init_kwargs["num_cpus"] == 1
