@@ -288,6 +288,14 @@ def build_bespoke_classifier(*, num_classes: int, in_chans: int = 3, dropout: fl
     return BespokeComposed(bb, neck, ClassificationHead(neck.out_channels, num_classes, dropout=dropout))
 
 
+def build_single_band_classifier(*, num_classes: int):
+    """A classifier whose input width is a property of its own architecture, declared nowhere in
+    its ``model_source``: the case a run's own recorded width has to answer for."""
+    bb = _resnet18(1)
+    neck = GlobalAvgPoolNeck(bb.out_channels)
+    return BespokeComposed(bb, neck, ClassificationHead(neck.out_channels, num_classes))
+
+
 def build_bespoke_ordinal(*, num_ranks: int, in_chans: int = 3):
     bb = _resnet18(in_chans)
     neck = GlobalAvgPoolNeck(bb.out_channels)

@@ -736,6 +736,7 @@ class _BucketStub:
         self.score_threshold = 0.5
         self.train_tile_size = None
         self.train_overlap = None
+        self.in_chans = 3
 
     def predict_batch(self, paths, **kw):
         return [{"image": p, "width": IMG, "height": IMG,
@@ -987,7 +988,7 @@ def test_a_bespoke_datasets_own_stems_name_its_records(tmp_path: Path):
     out = tmp_path / "m"
     drawn = _draw(root, out)
     dataset = build_dataset(
-        "detection", samples=drawn.on("train"), transforms=None, scope=drawn.scope,
+        "detection", samples=drawn.on("train"), sizes={}, transforms=None, scope=drawn.scope,
         dataset_source={"builder": f"{__name__}:build_bespoke_stem_dataset", "task": "detection"})
 
     class _NoDetections:

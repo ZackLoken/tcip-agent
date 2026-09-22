@@ -11,7 +11,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from tcip_mcp.pipelines.data.selection import ClassScope, Sample
 
@@ -184,7 +184,7 @@ def spatial_split_raster_identity(source: str) -> dict | None:
 
 def spatial_single_source_split(
     sample: "Sample", scope: "ClassScope", tiling: dict, split_cfg: dict, transforms,
-    sizes: dict[str, Any],
+    sizes: "Mapping[str, int]",
 ) -> tuple | None:
     """A train/val split over one detection source's own tile lattice, by disjoint pixel strips.
 
@@ -196,7 +196,7 @@ def spatial_single_source_split(
     every view here is built over: the untiled base each tiled view wraps is built from it, so the
     loaders name their member the way the producer did rather than rediscovering it from a
     directory, and a caller that already holds the sample hands it over rather than admitting
-    again to find it. ``sizes`` is what :func:`loader_sizes` read for this run, passed to the one
+    again to find it. ``sizes`` is what this run resolved (:func:`run_sizes`), passed to the one
     factory call here so the tile lattice is indexed and the tiles read at the band count the run
     states, the sizes every other route builds its loaders at. A test region is derived and
     reserved alongside train/val (excluded from both, so it
@@ -233,7 +233,7 @@ def spatial_single_source_split(
 
     stem = sample.member_stem
     base = build_dataset(
-        "detection", samples=[sample], transforms=None, scope=scope, **sizes)
+        "detection", samples=[sample], transforms=None, scope=scope, sizes=sizes)
     assert isinstance(base, DetectionDataset), "a detection build over samples is one of these"
     reserve_cal = float(split_cfg.get("reserve_calibration_fraction") or 0.0)
 
@@ -458,31 +458,18 @@ def recorded_side(members: dict, side: str) -> list[str]:
                    for name in block.get(side) or []})
 
 
-def loader_sizes(
+def run_sizes(
     task: str, data_cfg: dict, samples: "Sequence[Sample]", dataset_source=None,
-) -> dict[str, int | None]:
-    """The sizes this run's loaders are built at: the class count ground truth carrying its own
-    classes is read under, the rank count an ordinal table is read under, and the band count its
-    sources are read at.
+) -> dict[str, int]:
+    """This run's own sizes (:func:`~tcip_mcp.pipelines.data.datasets.resolve_sizes`), recorded on
+    its data config as the class space is
+    (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.onto`): what its loaders were built at
+    is a fact about every checkpoint it produces, and every later reader takes it from there."""
+    from tcip_mcp.pipelines.data.datasets import SIZE_NAMES, resolve_sizes
 
-    Read once per run, over every sample its loaders are built from and for both routes, so a size
-    the config states none of is read off the whole set here
-    (:func:`~tcip_mcp.pipelines.data.datasets.sizes_from_samples`) rather than off whichever half a
-    loader was handed: a class reaching only the validation side still sizes the training loader,
-    and sources that disagree about their band count refuse there rather than one half of the run
-    being read at the other's count. A run whose dataset a bespoke ``dataset_source`` builder
-    composes gets only what its config states, which refuses at the factory by name: a builder
-    sizes the dataset it builds, so the platform states no size for one it does not build.
-    """
-    from tcip_mcp.pipelines.data.datasets import sizes_from_samples
-
-    stated: dict[str, int | None] = {
-        name: data_cfg.get(name) for name in ("num_classes", "num_ranks", "num_channels")}
-    if dataset_source is not None:
-        return stated
-    derived = sizes_from_samples(task, samples)
-    return {name: value if value is not None else derived.get(name)
-            for name, value in stated.items()}
+    sizes = resolve_sizes(task, data_cfg, samples, dataset_source)
+    data_cfg.update({name: sizes.get(name) for name in SIZE_NAMES})
+    return sizes
 
 
 def _sample_loaders(
@@ -493,7 +480,7 @@ def _sample_loaders(
     """The run's loaders over its own samples, and the partition its record is written from.
 
     The one factory call shape, for a drawn run and a bound one alike: both sides are built under
-    the run's own class space and the sizes :func:`loader_sizes` reads once over the samples the
+    the run's own class space and the sizes :func:`run_sizes` resolves once over the samples the
     loaders are built from, so one run trains in one vocabulary at one set of sizes whichever
     directory or table a sample was admitted out of. A bespoke ``dataset_source`` builder is
     handed those same samples and that same class space, so what it builds over is what the
@@ -502,9 +489,9 @@ def _sample_loaders(
     """
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
-    sizes = loader_sizes(task, data_cfg, [*train_samples, *val_samples], dataset_source)
+    sizes = run_sizes(task, data_cfg, [*train_samples, *val_samples], dataset_source)
     build_kwargs: dict[str, Any] = {
-        "tiling": tiling, "dataset_source": dataset_source, "scope": scope, **sizes,
+        "tiling": tiling, "dataset_source": dataset_source, "scope": scope, "sizes": sizes,
     }
     train_ds = build_dataset(task, samples=list(train_samples), transforms=transforms,
                              **build_kwargs)
@@ -582,7 +569,7 @@ def _drawn_split(
             one = admitted.one_sample()
             spatial = spatial_single_source_split(
                 one, admitted.scope, tiling, split_cfg, transforms,
-                loader_sizes(task, data_cfg, [one]))
+                run_sizes(task, data_cfg, [one]))
             if spatial is not None:
                 return (*spatial, None)
         logger.warning("Auto train/val split for %s: %d admitted source(s) leave nothing to hold "

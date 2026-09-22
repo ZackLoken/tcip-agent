@@ -34,7 +34,7 @@ def test_a_png_mask_admits_its_image_and_serves_that_mask(tmp_path: Path) -> Non
     images_dir, masks_dir = _dataset(tmp_path)
     Image.fromarray(np.ones((8, 8), dtype=np.uint8), mode="L").save(masks_dir / "img1.png")
 
-    ds = dataset_over("semantic_seg", str(images_dir), str(masks_dir), num_classes=2)
+    ds = dataset_over("semantic_seg", str(images_dir), str(masks_dir))
 
     assert ds.record_stems == ["img0", "img1"]
     _img, target = ds[0]
@@ -49,7 +49,7 @@ def test_a_same_stem_non_png_entry_refuses(tmp_path: Path) -> None:
     Image.fromarray(np.ones((8, 8), dtype=np.uint8), mode="L").save(masks_dir / "img1.tif")
 
     with pytest.raises(ValueError, match="img1.tif"):
-        dataset_over("semantic_seg", str(images_dir), str(masks_dir), num_classes=2)
+        dataset_over("semantic_seg", str(images_dir), str(masks_dir))
 
 
 def test_the_class_count_is_derived_from_the_masks_the_run_was_handed(tmp_path: Path) -> None:
@@ -63,11 +63,36 @@ def test_the_class_count_is_derived_from_the_masks_the_run_was_handed(tmp_path: 
     Image.fromarray(three_classes, mode="L").save(masks_dir / "img1.png")
 
     assert dataset_over("semantic_seg", str(images_dir), str(masks_dir)).num_classes == 3
-    assert dataset_over(
-        "semantic_seg", str(images_dir), str(masks_dir), num_classes=5).num_classes == 5
+    assert dataset_over("semantic_seg", str(images_dir), str(masks_dir),
+                        stated={"num_classes": 5}).num_classes == 5
 
     with pytest.raises(ValueError, match="num_classes"):
-        dataset_over("semantic_seg", str(images_dir), str(masks_dir), num_classes=2)
+        dataset_over("semantic_seg", str(images_dir), str(masks_dir), stated={"num_classes": 2})
+
+
+def test_the_class_count_and_a_served_sample_read_one_mask_the_same_way(tmp_path, monkeypatch):
+    """Both the run's class count and the sample the loader serves come through one mask read:
+    two reads of the same file could disagree about what it holds."""
+    from tcip_mcp.pipelines.data.datasets import BaseImageDataset
+
+    images_dir, masks_dir = _dataset(tmp_path)
+    Image.fromarray(np.ones((8, 8), dtype=np.uint8), mode="L").save(masks_dir / "img1.png")
+
+    read_mask = BaseImageDataset.read_mask
+    read: list[str] = []
+
+    def _spy(path):
+        read.append(Path(path).name)
+        return read_mask(path)
+
+    monkeypatch.setattr(BaseImageDataset, "read_mask", staticmethod(_spy))
+
+    ds = dataset_over("semantic_seg", str(images_dir), str(masks_dir))
+    resolving = sorted(read)
+    ds[0]
+
+    assert resolving == ["img0.png", "img1.png"]
+    assert read[len(resolving):] == ["img0.png"]
 
 
 def test_an_image_with_no_mask_is_skipped_never_served_as_background(tmp_path: Path) -> None:
@@ -76,7 +101,7 @@ def test_an_image_with_no_mask_is_skipped_never_served_as_background(tmp_path: P
 
     from tests._producer_fixtures import admit_over
 
-    ds = dataset_over("semantic_seg", str(images_dir), str(masks_dir), num_classes=2)
+    ds = dataset_over("semantic_seg", str(images_dir), str(masks_dir))
     assert ds.record_stems == ["img0"]
     assert admit_over(images_dir, masks_dir).counts == {
         "annotated": 1, "skipped_unannotated": 1}

@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +31,7 @@ from tcip_annotation.state import box_derivable, polygonal
 from tcip_mcp.pipelines.data.label_queries import (
     authored_frame, ground_truth_table, json_det_targets,
 )
+from tcip_mcp.pipelines.derivations import num_classes_from_distribution
 from tcip_mcp.pipelines.data.selection import (
     DOCUMENT, MASK, SHAPE_DESCRIPTIONS, TABLE, ClassScope, Sample, refuse_unreadable_samples,
 )
@@ -123,9 +124,10 @@ class BaseImageDataset(BaseDataset):
     def refuse_other_shapes(cls, samples: Sequence[Sample]) -> None:
         """Refuse a sample whose own ground truth is not the shape this loader reads, naming it.
 
-        The one statement of that refusal, asked by the factory before anything reads a sample's
-        ground truth: the sizes a run is built at are read off that ground truth, so a sample of
-        another shape is named here rather than by whichever reader opens it first.
+        The one statement of that refusal, asked where a run's sizes are resolved
+        (:func:`resolve_sizes`) before anything reads a sample's ground truth: the sizes a run is
+        built at are read off that ground truth, so a sample of another shape is named there
+        rather than by whichever reader opens it first.
         """
         wrong = [s.identity for s in samples if s.shape != cls.ground_truth_shape]
         if wrong:
@@ -136,6 +138,17 @@ class BaseImageDataset(BaseDataset):
                 f"instead would train on something other than the ground truth recorded for "
                 f"them. Draw a selection over the ground truth {cls.task_type} reads."
             )
+
+    @staticmethod
+    def read_mask(path: "str | Path") -> np.ndarray:
+        """One mask raster as the integer class ids it carries.
+
+        The one read of a mask ground truth: what a mask loader serves a sample from, and what the
+        run's class count is resolved over (:func:`resolve_sizes`), so the two can never read one
+        file differently. A sample is admitted on the strength of this exact file, so a mask gone
+        since raises from here rather than reading as background.
+        """
+        return np.array(load_image(path, 1))
 
     def _init_from_samples(self, samples: Sequence[Sample]) -> list[str]:
         """Index a recorded sample list and answer the keys this dataset indexes: each sample's
@@ -149,7 +162,7 @@ class BaseImageDataset(BaseDataset):
         loader declares which geometries it reads, one whose document carries the subject only in
         geometries it does not (:meth:`_refuse_unreadable_geometry`), which reads this instance's
         own subject. Whether a sample's ground truth is the shape this loader reads is
-        :meth:`refuse_other_shapes`, asked by the factory before this runs.
+        :meth:`refuse_other_shapes`, asked where the run's sizes are resolved, before this runs.
         """
         refuse_unreadable_samples(samples)
         self._refuse_unreadable_geometry(samples)
@@ -752,7 +765,7 @@ class SemanticSegDataset(BaseImageDataset):
 
     Membership is exactly what the producer recorded and each sample reads the mask it names, so
     the dataset spans whatever capture dates the draw did. ``num_classes`` is the run's own count,
-    resolved by the factory (:func:`sizes_from_samples`), never read off this half's own masks.
+    resolved once for the run (:func:`resolve_sizes`), never read off this half's own masks.
     """
 
     task_type = "semantic_seg"
@@ -782,9 +795,7 @@ class SemanticSegDataset(BaseImageDataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self.stems[idx]
         img = self._open_image(stem)
-        # The sample was admitted on the strength of this exact file; a mask gone
-        # since raises from the read rather than training the image as background.
-        mask = np.array(load_image(self._label_path(stem), 1))
+        mask = self.read_mask(self._label_path(stem))
         # Key matches the SemanticSegHead loss contract.
         target = {"masks": torch.tensor(mask, dtype=torch.int64)}
         return self._finalize(img, target)
@@ -817,8 +828,8 @@ class ClassificationDataset(BaseImageDataset):
     """Image classification over a recorded sample list.
 
     Each sample reads the row its ``row_key`` names in the table it names, so the dataset spans
-    whatever tables the producer admitted. ``num_classes`` is the run's own count, resolved by the
-    factory (:func:`sizes_from_samples`).
+    whatever tables the producer admitted. ``num_classes`` is the run's own count, resolved once
+    for the run (:func:`resolve_sizes`).
     """
 
     task_type = "classification"
@@ -862,8 +873,8 @@ class ClassificationDataset(BaseImageDataset):
 
 class OrdinalDataset(BaseImageDataset):
     """Ordinal regression over a recorded sample list: each sample reads the rank its ``row_key``
-    names in the table it names. ``num_ranks`` is the run's own count, resolved by the factory
-    (:func:`sizes_from_samples`)."""
+    names in the table it names. ``num_ranks`` is the run's own count, resolved once for the run
+    (:func:`resolve_sizes`)."""
 
     task_type = "ordinal"
     ground_truth_shape = TABLE
@@ -967,7 +978,7 @@ def build_from_dataset_source(
     sample list for the side being built, ``id_map``
     the class map those samples were admitted under (``None`` where the ground-truth shape carries
     its own classes and no admitted map exists, which is a mask raster or a table row: derive the
-    class space from the ground truth you were handed, the way :func:`sizes_from_samples` reads it
+    class space from the ground truth you were handed, the way :func:`resolve_sizes` reads it
     for the platform's own loaders), plus ``task`` and ``transforms``. Never a directory, a
     document path or a format flag: the platform names the samples and the builder builds over
     them, so nothing here asks what a bespoke dataset looks like.
@@ -1013,9 +1024,9 @@ def _band_count(samples: Sequence[Sample]) -> int:
     Every source is probed, not one of them, so a run whose sources disagree refuses by name
     rather than sizing the model for whichever one a probe happened to open first and reading
     every other image at the wrong band count. A source that will not probe refuses the same way:
-    a confidently-wrong count sizes the model wrong for every image the run reads. The cost is one
-    header probe per sample, paid once for the run, beside the per-stem frame probe a tiled
-    dataset already makes.
+    a confidently-wrong count sizes the model wrong for every image the run reads. Each source is
+    read once for the count, off a header where its container carries one and by decoding where it
+    does not, paid where a run's sizes are resolved and only where no width is stated.
     """
     from tcip_mcp.pipelines.derivations import probe_channels
 
@@ -1052,33 +1063,61 @@ A stated one below what that ground truth reaches refuses; the band count beside
 property of the source, so a caller narrowing it (reading an RGB source as one channel) states how
 to read rather than a vocabulary smaller than the data holds."""
 
+SIZE_NAMES = GROUND_TRUTH_COUNTS + ("num_channels",)
+"""Every size a loader is built at, in the spelling a config and a caller state them by."""
 
-def sizes_from_samples(task: str, samples: Sequence[Sample]) -> dict[str, int]:
-    """The sizes a run's own samples state: the band count their sources carry, and the class or
-    rank count their ground truth carries under the name the task's loader is built with.
 
-    Read over every sample the run holds, before the split, so one run's loaders are built at one
-    set of sizes: a class reaching only one side sizes both, and two sources disagreeing about
-    their band count refuse rather than one of them governing. Empty for a task no built-in loader
-    reads; the class or rank count is absent for a task whose class ids are the draw's own
-    recorded map and for one whose ground truth carries no count.
+def stated_sizes(stated: "Mapping[str, Any]") -> dict[str, int]:
+    """The sizes a mapping states, absent where it states none: the one read of a config, for what
+    it states before a run and for what that run recorded on it after."""
+    return {name: int(stated[name]) for name in SIZE_NAMES if stated.get(name) is not None}
+
+
+def resolve_sizes(
+    task: str, stated: "Mapping[str, Any]", samples: Sequence[Sample],
+    dataset_source: dict | None = None,
+) -> dict[str, int]:
+    """The sizes a run's loaders are built at: what its caller states, and, for each size stated
+    nowhere, what the samples themselves carry.
+
+    The one resolution, for the run's own routes and for a single-loader measurement door alike,
+    read over every sample the loaders are built from: a class reaching only one side sizes both,
+    and two sources disagreeing about their band count refuse rather than one of them governing. A
+    stated band count is how the caller reads its sources, so it is taken as given and nothing is
+    probed; a stated class or rank count below what the ground truth reaches refuses.
+
+    Only what the caller states, for a task no built-in loader reads and for a bespoke
+    ``dataset_source``: a builder sizes the dataset it builds, so nothing is derived for one the
+    platform does not build.
     """
+    resolved = stated_sizes(stated)
     cls = _DATASET_MAP.get(task)
-    if cls is None:
-        return {}
-    # Asked before any ground truth is read, on the run's own route and the factory's alike:
-    # reading a size off a sample this loader cannot read is what the refusal exists to stop.
+    if cls is None or dataset_source is not None:
+        return resolved
+    # Asked before any ground truth is read: reading a size off a sample this loader cannot read
+    # is what the refusal exists to stop.
     cls.refuse_other_shapes(samples)
-    sizes = {"num_channels": _band_count(samples)}
+    if "num_channels" not in resolved:
+        resolved["num_channels"] = _band_count(samples)
     names = [name for name in cls.takes if name in GROUND_TRUTH_COUNTS]
     if not names:
-        return sizes
-    if cls.ground_truth_shape == MASK:
-        held = max((int(np.array(load_image(Path(s.ground_truth), 1)).max()) for s in samples),
-                   default=0) + 1
-    else:
-        held = max((int(value) for value in _values_by_sample(samples)), default=0) + 1
-    return {**sizes, **{name: held for name in names}}
+        return resolved
+    ids = (Counter(int(v) for s in samples
+                   for v in np.unique(cls.read_mask(Path(s.ground_truth))))
+           if cls.ground_truth_shape == MASK
+           else Counter(int(value) for value in _values_by_sample(samples)))
+    held = num_classes_from_distribution(ids)
+    for name in names:
+        if name not in resolved:
+            resolved[name] = held
+        elif resolved[name] < held:
+            raise ValueError(
+                f"the ground truth this run was handed reaches {held - 1}, which needs "
+                f"{name} >= {held}, but {name}={resolved[name]} was configured: a head sized "
+                f"under what the ground truth carries would index past its own outputs, or train "
+                f"every value beyond its last as that last one. Fix {name} or the ground truth."
+            )
+    return resolved
 
 
 def tile_kwargs_from_tiling(tiling: dict) -> dict:
@@ -1093,10 +1132,8 @@ def tile_kwargs_from_tiling(tiling: dict) -> dict:
 
 def build_dataset(
     task: str, dataset_source: dict | None = None, *,
-    samples: Sequence[Sample], transforms: Any = None,
-    scope: ClassScope | None = None, num_classes: int | None = None,
-    num_ranks: int | None = None, tiling: dict | None = None,
-    num_channels: int | None = None, **unowned: Any,
+    samples: Sequence[Sample], sizes: "Mapping[str, int]", transforms: Any = None,
+    scope: ClassScope | None = None, tiling: dict | None = None, **unowned: Any,
 ) -> Dataset:
     """Factory: build a dataset by task type, or via a bespoke ``dataset_source`` builder.
 
@@ -1108,25 +1145,22 @@ def build_dataset(
     (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`), ``None`` for ground truth that
     carries its own classes.
 
-    A sample whose ground truth is not the shape the selected loader reads refuses by name before
-    anything is read off it (:meth:`BaseImageDataset.refuse_other_shapes`, asked once inside
-    :func:`sizes_from_samples`). Each recipient is handed exactly what it declares and nothing
-    else: a built-in loader its own
-    :attr:`BaseImageDataset.takes`, a bespoke builder the producer-owned context
-    :func:`build_from_dataset_source` states. Anything
-    this factory was given that no recipient could take refuses by name, before anything is read
-    off it, here and through a bespoke ``train(ctx)`` body's own ``ctx.build_dataset`` call, which
-    is this same factory.
+    ``sizes`` is what the caller resolved for this run (:func:`resolve_sizes`), the band count its
+    sources are read at and the class or rank count its ground truth carries. Nothing is derived
+    here: one run's loaders are built at one set of sizes because one resolution answered for all
+    of them, and a sample whose ground truth is not the shape the selected loader reads has
+    already refused by name there. Each recipient is handed exactly what it declares and nothing
+    else: a built-in loader its own :attr:`BaseImageDataset.takes`, a bespoke builder the
+    producer-owned context :func:`build_from_dataset_source` states. Anything this factory was
+    given that no recipient could take refuses by name, before anything is read off it, here and
+    through a bespoke ``train(ctx)`` body's own ``ctx.build_dataset`` call, which is this same
+    factory.
 
     An optional ``tiling`` dict (``{enabled, tile_size, overlap, sliver_frac,
     dedup_iou, skip_empty, keep_regions}``) wraps the detection dataset in a
     :class:`TiledDetectionDataset`; a bespoke builder composes its own tiling over its own
-    samples, so it never reaches one. Every size the caller states none of is read off the samples
-    themselves (:func:`sizes_from_samples`): the band count their sources carry, so a multi-band
-    input threads its real count through ``in_chans`` instead of defaulting to RGB, and the class
-    or rank count their ground truth carries, with a stated one below what that ground truth
-    reaches refused by name. A builder's own dataset states its own sizes, and this factory
-    neither reads nor writes anything on an object it did not build.
+    samples, so it never reaches one, and it states no size either: a builder's own dataset sizes
+    itself, and this factory neither reads nor writes anything on an object it did not build.
 
     The known loaders stay the default; the ``Unknown task`` error below is still raised for a bad
     known-task name with no builder (an honest typo signal), the seam is the escape for a
@@ -1142,12 +1176,8 @@ def build_dataset(
             "dataset_source.builder_kwargs."
         )
     scope = scope or ClassScope()
-    # The sizes the platform states for a loader it builds, named once: the bespoke refusal below
-    # and the table a loader's own declaration is read against both answer from this.
-    sizes: dict[str, Any] = {"num_classes": num_classes, "num_ranks": num_ranks,
-                             "num_channels": num_channels}
     if dataset_source is not None:
-        platform_owned = sorted(name for name, value in {"tiling": tiling, **sizes}.items()
+        platform_owned = sorted(name for name, value in {"tiling": tiling, **dict(sizes)}.items()
                                 if value is not None)
         if platform_owned:
             raise ValueError(
@@ -1163,20 +1193,9 @@ def build_dataset(
     cls = _DATASET_MAP.get(task)
     if cls is None:
         raise ValueError(f"Unknown task '{task}'. Available: {list(_DATASET_MAP.keys())}")
-    for name, stated_by_data in sizes_from_samples(task, samples).items():
-        if sizes[name] is None:
-            sizes[name] = stated_by_data
-        elif name in GROUND_TRUTH_COUNTS and int(sizes[name]) < stated_by_data:
-            raise ValueError(
-                f"the ground truth this run was handed reaches {stated_by_data - 1}, which needs "
-                f"{name} >= {stated_by_data}, but {name}={sizes[name]} was configured: a head "
-                f"sized under what the ground truth carries would index past its own outputs, or "
-                f"train every value beyond its last as that last one. Fix {name} or the ground "
-                "truth."
-            )
-    available = {"subject": scope.subject, "attribute": scope.attribute,
-                 "id_map": scope.id_map, **sizes}
-    declared = {name: available[name] for name in cls.takes if available[name] is not None}
+    available: dict[str, Any] = {"subject": scope.subject, "attribute": scope.attribute,
+                                 "id_map": scope.id_map, **sizes}
+    declared = {name: available[name] for name in cls.takes if available.get(name) is not None}
     # Each loader declares its own constructor keywords, so the call is made through the class
     # object rather than a signature this factory restates.
     construct: Any = cls

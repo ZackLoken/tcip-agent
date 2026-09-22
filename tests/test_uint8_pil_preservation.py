@@ -222,7 +222,9 @@ def test_a_declared_alpha_windowed_tile_trains_augmented(tmp_path: Path):
     try:
         arr = _grid(96, 96, 4)
         images_dir, labels_dir = _detection_project(tmp_path, arr, extrasamples=["unassalpha"])
-        ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", num_channels=4, transforms=_flip_transform(), tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+        ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+                          stated={"num_channels": 4}, transforms=_flip_transform(),
+                          tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
         got, _target = ds[0]  # tile at (0, 0)
         tile = arr[0:64, 0:64]
         flipped = torch.from_numpy(tile[:, ::-1].astype(np.float32) / 255.0).permute(2, 0, 1)
@@ -244,7 +246,9 @@ def test_a_declared_spectral_fourth_band_windowed_tile_trains_unaugmented(tmp_pa
     try:
         arr = _grid(96, 96, 4)
         images_dir, labels_dir = _detection_project(tmp_path, arr, extrasamples=["unspecified"])
-        ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", num_channels=4, transforms=_flip_transform(), tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+        ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+                          stated={"num_channels": 4}, transforms=_flip_transform(),
+                          tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
         got, _target = ds[0]  # tile at (0, 0)
         tile = arr[0:64, 0:64]
         unflipped = torch.from_numpy(tile.astype(np.float32) / 255.0).permute(2, 0, 1)

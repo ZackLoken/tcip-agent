@@ -447,7 +447,7 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
     from PIL import Image
 
     from tcip_mcp.dataset_layout import status_bucket
-    from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
     from tcip_mcp.pipelines.data.selection import (
         ClassScope, Sample, Selection, read_selection, write_selection,
     )
@@ -473,9 +473,11 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
 
     scope = ClassScope(subject=SUBJECT, id_map={SUBJECT: 0})
     with pytest.raises(ValueError, match="a detection loader does not read"):
-        build_dataset("detection", samples=_selection("a.jpg").samples, scope=scope)
+        resolve_sizes("detection", {}, _selection("a.jpg").samples)
 
-    admitted = build_dataset("detection", samples=_selection(None).samples, scope=scope)
+    whole = _selection(None).samples
+    admitted = build_dataset("detection", samples=whole, scope=scope,
+                             sizes=resolve_sizes("detection", {}, whole))
     assert list(admitted.stems) == [str(images_dir / "a.jpg")]
 
 

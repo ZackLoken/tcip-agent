@@ -37,7 +37,7 @@ def test_cancel_before_training_yields_cancelled(tmp_path):
         rows.append(f"img{i},{i % 2}")
     (tmp_path / "labels.csv").write_text("\n".join(rows) + "\n")
 
-    ds = dataset_over("classification", str(images_dir), str(tmp_path / "labels.csv"), num_classes=2)
+    ds = dataset_over("classification", str(images_dir), str(tmp_path / "labels.csv"))
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",

@@ -50,11 +50,18 @@ def admission_of(members: list[str]):
 
 def dataset_over(
     task: str, images_dir, ground_truth, *, subject: str | None = None,
-    attribute: str | None = None, members: list[str] | None = None, **kwargs: Any,
+    attribute: str | None = None, members: list[str] | None = None,
+    stated: dict[str, Any] | None = None, **kwargs: Any,
 ):
-    """A loader for ``task`` over one place holding ground truth, through the producer."""
-    from tcip_mcp.pipelines.data.datasets import build_dataset
+    """A loader for ``task`` over one place holding ground truth, through the producer.
+
+    ``stated`` is what a config would state about the sizes (a band count, a class count); the
+    rest are resolved off the admitted samples the way a run resolves them."""
+    from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
 
     admitted = admit_over(images_dir, ground_truth, subject=subject, attribute=attribute,
                           members=members)
-    return build_dataset(task, samples=admitted.every_sample(), scope=admitted.scope, **kwargs)
+    samples = admitted.every_sample()
+    return build_dataset(
+        task, samples=samples, scope=admitted.scope,
+        sizes=resolve_sizes(task, stated or {}, samples, kwargs.get("dataset_source")), **kwargs)

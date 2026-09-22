@@ -208,7 +208,7 @@ class Selection:
     class ids and the draw's are one derivation. All three are empty for a draw over ground truth
     no registry scopes, a mask raster or a table row: the class space a run binding such a
     selection trains in is derived from that ground truth once for the whole run
-    (:func:`~tcip_mcp.pipelines.data.split_construction.loader_sizes`).
+    (:func:`~tcip_mcp.pipelines.data.split_construction.run_sizes`).
     """
 
     samples: tuple[Sample, ...]

@@ -10,6 +10,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from tcip_mcp.pipelines.derivations import num_classes_from_distribution
+
 
 class BaseLoss(nn.Module):
     """Abstract base for registered losses."""
@@ -240,9 +242,14 @@ def compute_class_weights(
     (``1/count``), or ``effective`` (Cui et al. 2019, ``(1-beta)/(1-beta**count)``).
     Zero-count classes get weight 1.0. When ``normalize``, weights are rescaled so
     the mean over present classes is 1.0.
+
+    ``num_classes`` unstated is the count the distribution itself implies
+    (:func:`~tcip_mcp.pipelines.derivations.num_classes_from_distribution`), so a weight vector
+    and a run's loaders are sized by one rule; a distribution that counted nothing implies no
+    classes and weights none.
     """
     if num_classes is None:
-        num_classes = (max(class_distribution) + 1) if class_distribution else 1
+        num_classes = num_classes_from_distribution(class_distribution)
     counts = [int(class_distribution.get(c, 0)) for c in range(num_classes)]
     total = sum(counts)
     n_present = sum(1 for c in counts if c > 0)
