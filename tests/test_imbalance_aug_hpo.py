@@ -383,6 +383,7 @@ def test_available_search_algs_lists_natives_and_installed_backends():
     assert "optuna" in algs  # backend installed in this env
 
 
+@pytest.mark.ray_cluster
 def test_tune_search_warm_start_and_optimizes(tmp_path):
     """End-to-end Ray Tune: a real sweep finds the minimum, honors warm_start, and reports
     each trial. Uses a pure-math objective so no training is needed."""
