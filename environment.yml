@@ -7,7 +7,7 @@
 # dependencies and the four local packages (editable) via pip. Run it from the
 # repository root so the editable paths resolve.
 #
-# GPU note: defaults to the CUDA build (cu126) via --extra-index-url below; it runs fine without a GPU too, since every device placement here branches on torch.cuda.is_available(). CI installs its own separate CPU wheel (.github/workflows/ci.yml), unaffected by this.
+# GPU note: defaults to the CUDA build (cu130) via --extra-index-url below; it runs fine without a GPU too, since every device placement here branches on torch.cuda.is_available(). CI installs its own separate CPU wheel (.github/workflows/ci.yml), unaffected by this.
 #
 # environment.win.lock.yml is a frozen export from one Windows machine, taken before this
 # file's Node and OpenCV corrections; it is kept only for the mypy pin its CI comment cites, never as a path to create an environment. environment.linux.lock.yml is the same kind of
@@ -22,7 +22,7 @@ dependencies:
   - nodejs>=22.9,<23  # npm 11 supports node ^20.17.0 || >=22.9.0; unpinned, conda-forge resolved a v26 alpha build it refuses
   - pip
   - pip:
-      - --extra-index-url https://download.pytorch.org/whl/cu126
+      - --extra-index-url https://download.pytorch.org/whl/cu130
       # --- core runtime ---
       - mcp>=2
       - numpy
