@@ -15,7 +15,7 @@ The commands below are CLAUDE.md's Commands block, verbatim, the same gate the p
 runs a change against:
 
 ```bash
-conda activate tcip-agent          # Python 3.12; torch installs CUDA by default, runs without a GPU
+conda activate tcip-agent          # Python 3.13; torch installs CUDA by default, runs without a GPU
 pytest tests/ -n 4 --tb=short --timeout=300 -q
 ruff check packages tests tools
 mypy                               # roots from mypy.ini, run from the repo root

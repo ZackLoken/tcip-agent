@@ -16,8 +16,9 @@ name: tcip-agent
 channels:
   - conda-forge
 dependencies:
-  # One version by choice, for a reproducible environment; the packages themselves take >=3.11.
-  - python=3.12.*
+  # One version by choice, for a reproducible environment; the packages themselves take >=3.12.
+  # Not 3.14 yet: fiona publishes no stable 3.14 wheel.
+  - python=3.13.*
   - nodejs>=22.9,<23  # npm 11 supports node ^20.17.0 || >=22.9.0; unpinned, conda-forge resolved a v26 alpha build it refuses
   - pip
   - pip:
