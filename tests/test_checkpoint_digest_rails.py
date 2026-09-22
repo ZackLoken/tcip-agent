@@ -19,7 +19,7 @@ pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 def _bespoke_checkpoint(path: Path, *, stamp: dict | None = None, tile_size: int = 64) -> str:
     """A real, unpicklable tcip checkpoint at path, the platform's own producer's shape."""
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "min_size": tile_size,
+                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": tile_size,
                                        "max_size": tile_size * 2},
                     "task": "detection"}
     payload = {"model_source": model_source,
@@ -273,7 +273,7 @@ def test_review_priority_route_worker_completes_the_job_with_a_registered_checkp
 
     monkeypatch.setattr(
         al_helpers, "build_scorer",
-        lambda method, task: SimpleNamespace(score=lambda sources, model, device: []))
+        lambda method, task: SimpleNamespace(score=lambda sources, predictor: []))
 
     job = PriorityQueueJob(job_id="rail7-pq", checkpoint_path=ckpt, images_dir=str(images_dir),
                           dataset_root=str(tmp_path), method="combined", budget=10,

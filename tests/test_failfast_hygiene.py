@@ -43,7 +43,9 @@ def test_uncertainty_scorer_averages_over_heads(tmp_path):
             return {"head0_logits": torch.tensor([[2.0, 0.0]]),
                     "head1_logits": torch.tensor([[0.0, 0.0]])}
 
-    scored = UncertaintyScorer(task="classification").score(
-        [str(img)], MultiHead(), torch.device("cpu"))
+    from types import SimpleNamespace
+
+    loaded = SimpleNamespace(model=MultiHead(), device=torch.device("cpu"), in_chans=3)
+    scored = UncertaintyScorer(task="classification").score([str(img)], loaded)
     expected = (_entropy(torch.tensor([[2.0, 0.0]])) + _entropy(torch.tensor([[0.0, 0.0]]))) / 2
     assert scored[0][1] == pytest.approx(expected)  # averaged across both heads, not first-only

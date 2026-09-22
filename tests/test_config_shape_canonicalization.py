@@ -92,9 +92,12 @@ def test_model_source_admits_every_declared_key():
 
 
 def test_two_band_config_declaring_in_chans_only_in_builder_kwargs_is_checked_at_two():
-    """declared_in_chans is the one fallback both the trainer and the predictor read; a config
-    that only declares in_chans inside builder_kwargs must not silently check against 3."""
-    from tcip_mcp.pipelines.model_build import declared_in_chans
+    """run_in_chans is the one reader the trainer, the predictor and the contract dims share; a
+    config that only declares in_chans inside builder_kwargs must not silently check against 3.
+    A run that declares none reads at the width its own data config recorded."""
+    from tcip_mcp.pipelines.model_build import run_in_chans
 
     model_source = {"builder": "m:f", "builder_kwargs": {"num_classes": 1, "in_chans": 2}}
-    assert declared_in_chans(model_source) == 2
+    assert run_in_chans(model_source, {"num_channels": 5}) == 2
+    assert run_in_chans({"builder": "m:f"}, {"num_channels": 5}) == 5
+    assert run_in_chans({"builder": "m:f"}, {}) is None

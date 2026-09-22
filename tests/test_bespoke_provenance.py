@@ -229,7 +229,7 @@ def test_build_predictor_rebuilds_bespoke_and_predicts(tmp_path):
 
 
 def test_predictor_loads_at_two_channels_when_in_chans_is_declared_only_in_builder_kwargs(tmp_path):
-    """declared_in_chans is the one reader GenericPredictor, resolve_contract_dims and
+    """run_in_chans is the one reader GenericPredictor, resolve_contract_dims and
     generic_trainer's channel check all go through; a two-band config declaring in_chans only in
     builder_kwargs must load its images at two channels, not silently default to 3."""
     import numpy as np

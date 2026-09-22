@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import torch
 from PIL import Image
 
@@ -27,7 +29,8 @@ def test_empty_frame_ranks_low_not_max(tmp_path):
         Image.new("RGB", (64, 64), (100, 100, 100)).save(tmp_path / f"{name}.png")
     paths = [str(tmp_path / "a.png"), str(tmp_path / "b.png")]
 
-    ranked = UncertaintyScorer(task="detection").score(paths, _FakeDetector(), torch.device("cpu"))
+    loaded = SimpleNamespace(model=_FakeDetector(), device=torch.device("cpu"), in_chans=3)
+    ranked = UncertaintyScorer(task="detection").score(paths, loaded)
     by_path = dict(ranked)
 
     assert by_path[paths[0]] == 0.0  # the empty frame: no ambiguous decision -> does not flood

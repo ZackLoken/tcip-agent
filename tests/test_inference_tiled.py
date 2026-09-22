@@ -21,7 +21,8 @@ def _detection_checkpoint(tmp_path: Path) -> str:
     from tcip_mcp.tools.model_tools import register_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "min_size": TILE, "max_size": TILE * 2},
+                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": TILE,
+                                       "max_size": TILE * 2},
                     "task": "detection"}
     model = build_model({"model_source": model_source})
     ckpt = tmp_path / "model_best.pt"
@@ -186,7 +187,8 @@ def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path, mon
     from tcip_mcp.tools.model_tools import register_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 3, "min_size": TILE, "max_size": TILE * 2},
+                    "builder_kwargs": {"num_classes": 3, "in_chans": 3, "min_size": TILE,
+                                       "max_size": TILE * 2},
                     "task": "detection"}
     from tcip_mcp.pipelines.model_build import build_model
     model = build_model({"model_source": model_source})

@@ -54,11 +54,8 @@ def _nchan_adapter(in_chans: int):
 
 
 def test_n_channel_detector_builds_and_trains():
-    """The documented multispectral claim, exercised on the detection path.
-
-    Every prior N-channel test stopped at a classifier, which is why a detector that cannot
-    normalize more than 3 bands survived.
-    """
+    """The documented multispectral claim, exercised on the detection path: a five-band detector
+    builds, normalizes at five bands and takes a training step."""
     from tcip_mcp.pipelines.components.detectors import build_detector
 
     adapter = _nchan_adapter(5)
@@ -274,8 +271,84 @@ def test_build_dataset_sets_expected_channels(tmp_path):
                               [Annotation(subject="bud", geometry=BBox(6.4, 6.4, 9.6, 9.6))],
                               16, 16, keep_empty=True)
 
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", num_channels=4)
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+                      stated={"num_channels": 4})
     assert ds.expected_channels == 4
+
+
+def _classification_run(tmp_path, *, num_channels: int | None):
+    """A run bound through the producer over three-band sources, with ``data.num_channels``
+    stated when given: returns the run's own data config once its loaders are built."""
+    import csv
+
+    from PIL import Image
+
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+
+    images_dir, csv_path = tmp_path / "images", tmp_path / "labels.csv"
+    images_dir.mkdir()
+    rows = []
+    for index in range(4):
+        Image.new("RGB", (32, 32), (40 * index, 90, 120)).save(images_dir / f"img{index}.png")
+        rows.append((f"img{index}", index % 2))
+    with open(csv_path, "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(("stem", "label"))
+        writer.writerows(rows)
+
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(csv_path),
+                "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1}}
+    if num_channels is not None:
+        data_cfg["num_channels"] = num_channels
+    train_ds, _val_ds, _partition = auto_train_val("classification", data_cfg, None)
+    return data_cfg, train_ds, str(images_dir / "img0.png")
+
+
+def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
+    """A model that declares no in_chans trained at the width its run resolved, so that recorded
+    width is what every later reader reads at: the contract dims and the predictor both take the
+    run's own one channel over three-band sources rather than assuming RGB."""
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.data.datasets import stated_sizes
+    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+    from tcip_mcp.pipelines.model_build import build_model, resolve_contract_dims, run_in_chans
+    from tcip_mcp.tools.model_tools import register_model
+
+    data_cfg, train_ds, image = _classification_run(tmp_path, num_channels=1)
+    assert data_cfg["num_channels"] == train_ds.expected_channels == 1
+
+    model_source = {"builder": "tests.bespoke_models:build_single_band_classifier",
+                    "builder_kwargs": {"num_classes": 2}, "task": "classification"}
+    config = {"model_source": model_source, "data": data_cfg}
+    assert run_in_chans(model_source, data_cfg) == 1  # nothing model-side states it
+    dims = resolve_contract_dims(config, "classification", scope=ClassScope(),
+                                 sizes=stated_sizes(data_cfg))
+    # The run recorded both: the width it read at and the count its own table carried.
+    assert dims == {"in_chans": 1, "num_classes": 2, "img_size": 224}
+
+    ckpt = tmp_path / "model_best.pt"
+    torch.save({"model_source": model_source, "config": config,
+                "model_state_dict": build_model(config).state_dict()}, str(ckpt))
+    assert "error" not in register_model(name="single-band", checkpoint_path=str(ckpt),
+                                         config={}, project_path=str(tmp_path))
+    predictor = build_predictor(
+        load_registered_checkpoint(str(ckpt), project_path=str(tmp_path)), device="cpu")
+
+    assert predictor.in_chans == 1
+    assert predictor.predict(image)  # the three-band source reads at the recorded one channel
+
+
+def test_a_run_that_states_no_width_records_the_one_its_sources_carry(tmp_path):
+    """Admits valid work: a run that states nothing records the width its own sources carry, and
+    a checkpoint of that run reads at it."""
+    data_cfg, train_ds, _image = _classification_run(tmp_path, num_channels=None)
+
+    assert data_cfg["num_channels"] == train_ds.expected_channels == 3
+
+    from tcip_mcp.pipelines.model_build import run_in_chans
+
+    assert run_in_chans({"builder": "m:f", "builder_kwargs": {}}, data_cfg) == 3
 
 
 def test_a_source_whose_band_count_cannot_be_read_refuses_rather_than_defaulting(tmp_path):

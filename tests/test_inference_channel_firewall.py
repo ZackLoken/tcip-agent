@@ -1,47 +1,35 @@
-"""A calibrated run compares the checkpoint's own band count against the imagery it is fed.
+"""Whether a source can be read at the checkpoint's band count is the predictor's own read.
 
-The loader will happily coerce a raster whose band count differs from the one the model was
-trained at, so the only place a channel-wrong inference becomes visible is the run's own
-provenance: the firewall must judge the checkpoint against the probed target, never the target
-against itself, and it must leave a legitimate same-channel run untouched.
+``load_image`` converts any photographic frame to the model's width itself, so a one-channel
+checkpoint over ordinary RGB captures is a legitimate run that must ship; a container with no such
+coercion is refused by name before any pixels reach the model. The calibrated inference door
+reports what it predicted rather than judging the bands a second time.
 """
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 torch = pytest.importorskip("torch")
+np = pytest.importorskip("numpy")
 pytest.importorskip("pycocotools")
 
-PROBED_BANDS = 3  # an ordinary RGB capture, what the target images below actually carry
 
-
-class _ChannelStub:
-    """A predictor carrying the checkpoint's own ``in_chans``, returning one detection per image."""
-
-    def __init__(self, in_chans: int) -> None:
-        self.in_chans = in_chans
-        self.model = SimpleNamespace(score_thresh=0.5, nms_thresh=0.5, detections_per_img=100)
-        self.device = "cpu"
-        self.score_threshold = 0.5
-        self.train_tile_size = None
-        self.train_overlap = None
-
-    def predict_batch(self, paths, **kw):
-        return [{"image": p, "width": 120, "height": 90,
-                 "boxes": [[10, 10, 30, 30]], "scores": [0.9], "labels": [1], "count": 1}
-                for p in paths]
-
-
-def _rgb_image(tmp_path):
+def _rgb_image(tmp_path: Path) -> str:
     from PIL import Image
 
     path = tmp_path / "capture.png"
     Image.new("RGB", (120, 90), color=(40, 80, 120)).save(path)  # a non-square frame
+    return str(path)
+
+
+def _five_band_raster(tmp_path: Path) -> str:
+    path = tmp_path / "capture.npy"
+    np.save(path, np.zeros((90, 120, 5), dtype=np.uint8))
     return str(path)
 
 
@@ -66,9 +54,9 @@ def _held_out_bundle():
     return resolve_operating_point("bud_opening", experiment_id=None, **inputs), inputs
 
 
-def _run(tmp_path, monkeypatch, in_chans):
+def _run(tmp_path, monkeypatch, *, in_chans, image, builder_kwargs=None, **overrides):
+    """A calibrated run of a real checkpoint built at ``in_chans`` over one target image."""
     import tcip_mcp.pipelines.calibration as calibration
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tests._verified_checkpoint_fixtures import registered_checkpoint, run_inference_verified
 
     bundle, inputs = _held_out_bundle()
@@ -76,33 +64,35 @@ def _run(tmp_path, monkeypatch, in_chans):
                 "reference_inputs": {"label_dirs": {"calibration": str(tmp_path)}}}
     monkeypatch.setattr(calibration, "calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
-    monkeypatch.setattr(predictor_mod, "build_predictor",
-                        lambda checkpoint, **kw: _ChannelStub(in_chans))
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, model_source={
+        "builder": "tests.bespoke_models:build_bespoke_detection",
+        "builder_kwargs": {"num_classes": 1, "in_chans": in_chans, "min_size": 64, "max_size": 128,
+                           **(builder_kwargs or {})},
+        "task": "detection",
+    })
     return run_inference_verified(
-        str(ckpt), image_paths=[_rgb_image(tmp_path)], images_dir=str(tmp_path), device="cpu",
-        tile=False, trait="bud_opening", calibration_labels_dir=str(tmp_path))
+        str(ckpt), image_paths=[image], images_dir=str(tmp_path), device="cpu",
+        trait="bud_opening", calibration_labels_dir=str(tmp_path), **overrides)
 
 
-@pytest.mark.parametrize("checkpoint_channels", [5, 1])
-def test_a_channel_wrong_run_is_reported_against_the_checkpoints_own_band_count(
-    tmp_path, monkeypatch, checkpoint_channels,
-):
-    """A checkpoint trained at a band count the target imagery does not carry, in either
-    direction, surfaces as a named issue and never ships as validated."""
-    r = _run(tmp_path, monkeypatch, checkpoint_channels)
-
-    assert "error" not in r, r
-    expected = f"in_chans={checkpoint_channels} != probed raster bands={PROBED_BANDS}"
-    assert any(expected in issue for issue in r["shippable_issues"]), r["shippable_issues"]
-    assert r["validated"] is False
+def test_a_source_with_no_coercion_is_refused_at_the_models_own_band_count(tmp_path, monkeypatch):
+    """A five-band raster under a three-channel checkpoint has no safe coercion, so the read
+    refuses by name instead of truncating the bands the model trained on."""
+    with pytest.raises(ValueError, match="refusing to silently truncate"):
+        _run(tmp_path, monkeypatch, in_chans=3, image=_five_band_raster(tmp_path),
+             tile=True, tile_size=64)
 
 
-def test_a_matching_band_count_leaves_a_calibrated_run_shippable(tmp_path, monkeypatch):
-    """The firewall admits the legitimate case: a checkpoint whose band count equals the probed
-    imagery's raises nothing and the held-out calibration still ships."""
-    r = _run(tmp_path, monkeypatch, PROBED_BANDS)
+def test_a_photographic_source_the_model_reads_leaves_the_run_shippable(tmp_path, monkeypatch):
+    """The legitimate case: an RGB capture under a one-channel checkpoint is converted by the
+    loader itself, so the run predicts and its held-out calibration still ships."""
+    from tcip_mcp.pipelines.derivations import band_normalization_stats
+
+    image = _rgb_image(tmp_path)
+    mean, std, _read = band_normalization_stats([image], 1)  # this capture's own single-band stats
+    r = _run(tmp_path, monkeypatch, in_chans=1, image=image, tile=False,
+             builder_kwargs={"image_mean": mean, "image_std": std})
 
     assert "error" not in r, r
     assert r["shippable_issues"] == []

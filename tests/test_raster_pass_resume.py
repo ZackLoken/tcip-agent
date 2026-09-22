@@ -26,7 +26,8 @@ def _instance_seg_checkpoint(tmp_path: Path) -> str:
     from tcip_mcp.tools.model_tools import register_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_instance_seg",
-                    "builder_kwargs": {"num_classes": 1, "min_size": TILE, "max_size": TILE * 2},
+                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": TILE,
+                                       "max_size": TILE * 2},
                     "task": "instance_seg"}
     model = build_model({"model_source": model_source})
     ckpt = tmp_path / "instance_seg.pt"

@@ -731,19 +731,14 @@ def test_effective_iou_type_resolution():
 def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
     """test_results.json must record the iou_type evaluate() actually scored with
     (instance_seg defaults to segm AP; recording 'bbox' would misreport mask AP)."""
-    import tcip_mcp.pipelines.model_build as model_build
     import tcip_mcp.pipelines.training.evaluation as evaluation
 
     class _DummyModel:
-        def load_state_dict(self, state_dict):
-            pass
-
         def to(self, device):
             pass
 
     ckpt_path = tmp_path / "model_best.pt"
     torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, str(ckpt_path))
-    monkeypatch.setattr(model_build, "build_model", lambda ckpt: _DummyModel())
     monkeypatch.setattr(evaluation, "evaluate", lambda *a, **k: {"loss": 0.1, "map50": 0.5})
 
     import tcip_store as ts
@@ -757,16 +752,18 @@ def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
     assert "error" not in result, result
     checkpoint = load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
 
-    r = run_test_evaluation(checkpoint, None, "cpu", "instance_seg", str(tmp_path / "seg"))
+    r = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", "instance_seg",
+                            str(tmp_path / "seg"))
     assert r["iou_type"] == "segm"
     on_disk = ts.read(evaluation_results_key(tmp_path / "seg"))
     assert on_disk["iou_type"] == "segm"
 
-    r = run_test_evaluation(checkpoint, None, "cpu", "detection", str(tmp_path / "det"))
+    r = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", "detection",
+                            str(tmp_path / "det"))
     assert r["iou_type"] == "bbox"
 
-    r = run_test_evaluation(checkpoint, None, "cpu", "instance_seg", str(tmp_path / "ovr"),
-                            iou_type="bbox")
+    r = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", "instance_seg",
+                            str(tmp_path / "ovr"), iou_type="bbox")
     assert r["iou_type"] == "bbox"  # explicit override still recorded as-is
 
 
@@ -778,7 +775,6 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     from PIL import Image
 
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    import tcip_mcp.pipelines.model_build as model_build
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_annotation import json_io
@@ -801,15 +797,11 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     }
 
     class _DummyModel:
-        def load_state_dict(self, state_dict):
-            pass
-
         def to(self, device):
             pass
 
     ckpt_path = tmp_path / "model_best.pt"
     torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, str(ckpt_path))
-    monkeypatch.setattr(model_build, "build_model", lambda ckpt: _DummyModel())
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "precision": 0.4, "recall": 0.5, "f1": 0.44})
     reg = register_model(name="row4-writer-check", checkpoint_path=str(ckpt_path), config={},
@@ -817,7 +809,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     assert "error" not in reg, reg
     checkpoint = load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
     test_out = tmp_path / "test_eval"
-    run_test_evaluation(checkpoint, None, "cpu", "detection", str(test_out),
+    run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", "detection", str(test_out),
                         selection_dir=str(tmp_path / "manifest"), evaluated_stem_count=3)
     test_result = ts.read(evaluation_results_key(test_out))
 
@@ -829,6 +821,8 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
                               [Annotation(subject="bud", geometry=BBox(4, 4, 12, 12))], 32, 32)
 
     class _StubPredictor:
+        in_chans = 3
+
         def predict_tiled(self, path, **kw):
             return {"width": 32, "height": 32, "boxes": [], "scores": [], "labels": []}
 
@@ -872,21 +866,16 @@ def test_a_written_result_carries_one_byte_per_line_ending(tmp_path, monkeypatch
     import tcip_store as ts
     from tcip_store.file_backend import FileBackend
 
-    import tcip_mcp.pipelines.model_build as model_build
     import tcip_mcp.pipelines.training.evaluation as evaluation
 
     ts.bind(FileBackend())
 
     class _DummyModel:
-        def load_state_dict(self, state_dict):
-            pass
-
         def to(self, device):
             pass
 
     ckpt_path = tmp_path / "model_best.pt"
     torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, str(ckpt_path))
-    monkeypatch.setattr(model_build, "build_model", lambda ckpt: _DummyModel())
     monkeypatch.setattr(evaluation, "evaluate", lambda *a, **k: {"loss": 0.1, "map50": 0.5})
 
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -897,7 +886,8 @@ def test_a_written_result_carries_one_byte_per_line_ending(tmp_path, monkeypatch
     assert "error" not in result, result
     checkpoint = load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
 
-    r = run_test_evaluation(checkpoint, None, "cpu", "detection", str(tmp_path / "out"))
+    r = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", "detection",
+                            str(tmp_path / "out"))
 
     raw = Path(r["results_path"]).read_bytes()
     assert b"\r\n" not in raw
@@ -914,21 +904,16 @@ def test_run_test_evaluation_hands_back_the_file_it_wrote(tmp_path, monkeypatch)
     import tcip_store as ts
     from tcip_store.file_backend import FileBackend
 
-    import tcip_mcp.pipelines.model_build as model_build
     import tcip_mcp.pipelines.training.evaluation as evaluation
 
     ts.bind(FileBackend())
 
     class _DummyModel:
-        def load_state_dict(self, state_dict):
-            pass
-
         def to(self, device):
             pass
 
     ckpt_path = tmp_path / "model_best.pt"
     torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, str(ckpt_path))
-    monkeypatch.setattr(model_build, "build_model", lambda ckpt: _DummyModel())
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "map50": 0.5, "precision": 0.4, "recall": 0.75})
 
@@ -941,7 +926,7 @@ def test_run_test_evaluation_hands_back_the_file_it_wrote(tmp_path, monkeypatch)
     checkpoint = load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
 
     out_dir = tmp_path / "runs" / "test"
-    r = run_test_evaluation(checkpoint, None, "cpu", "detection", str(out_dir))
+    r = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", "detection", str(out_dir))
 
     results_path = Path(r["results_path"])
     assert results_path == out_dir / "test_results.json"
@@ -1056,7 +1041,7 @@ def test_validate_classification_metrics(tmp_path):
         w = csv.writer(f)
         w.writerow(("stem", "label"))
         w.writerows(rows)
-    ds = dataset_over("classification", str(images_dir), str(csv_path), num_classes=2)
+    ds = dataset_over("classification", str(images_dir), str(csv_path))
     loader = DataLoader(ds, batch_size=3, collate_fn=task_collate("classification"))
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_classifier",

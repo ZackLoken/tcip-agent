@@ -887,23 +887,6 @@ def _run_inference_verified(
         else:
             target_hash, cross_dataset_check = None, "not-comparable-unlabeled-target"
         issues = bundle.shippable_issues(target_dataset_hash=target_hash)
-        # Channel firewall: probe one target raster and check its band count against the
-        # checkpoint's in_chans via validate_resolved_bundle, so a channel-wrong inference surfaces in
-        # the provenance rather than being silently coerced by the loader.
-        if resolved_paths:
-            from tcip_mcp.pipelines.derivations import probe_channels
-            from tcip_mcp.pipelines.resolution import (
-                ResolvedBundle, default as _resolved_default, validate_resolved_bundle,
-            )
-            try:
-                probed = int(probe_channels(resolved_paths[0]))
-            except Exception:
-                probed = None
-            if probed is not None:
-                chan_bundle = ResolvedBundle(trait=trait or "", dataset_hash=None, params={
-                    "in_chans": _resolved_default(
-                        "in_chans", int(getattr(predictor, "in_chans", 3)))})
-                issues = issues + validate_resolved_bundle(chan_bundle, probed_channels=probed)
         # validated only when held-out passed and nothing is un-shippable under the target actually used.
         validated = bool(bundle.is_shippable and not issues)
         if (conf_param.gate_evidence or {}).get("conf_floor_mismatch"):
@@ -2228,6 +2211,9 @@ def _export_predictions_raster(
     block_calibration_snapshot: dict | None = None
     bundle_dataset_hash: str | None = None
     bundle_shippable_issues: list[str] = []
+    # The conf this pass runs at: the stated-or-default one until a calibrated regime resolves its
+    # own below, and what the pass identity records either way.
+    conf = applied_conf
 
     if trait is not None:
         from tcip_mcp.pipelines.operating_point import set_detector_operating_point
@@ -2396,7 +2382,7 @@ def _export_predictions_raster(
     current_pass_identity = _raster_pass_identity_body(
         raster_identity=raster_identity, checkpoint_sha256=identity["sha256"], trait=trait,
         experiment_id=identity["experiment_id"], tile_batch_size=tile_batch_size,
-        conf=predictor.score_threshold, cross_tile_nms=applied_nms_iou, max_dets=predictor.max_dets,
+        conf=conf, cross_tile_nms=applied_nms_iou, max_dets=predictor.max_dets,
         tile_size=resolved_tile, overlap=resolved_overlap, tile_resize=tile_resize,
         postprocess=postprocess, require_masks=require_masks,
     )

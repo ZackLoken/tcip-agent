@@ -38,7 +38,7 @@ def registered_checkpoint(
 
     src = model_source or {
         "builder": "tests.bespoke_models:build_bespoke_detection",
-        "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
+        "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": 64, "max_size": 128},
         "task": "detection",
     }
     model = build_model({"model_source": src})

@@ -28,6 +28,7 @@ def _stub_predictor(monkeypatch) -> None:
                 roi_heads=SimpleNamespace(score_thresh=0.5, nms_thresh=0.5, detections_per_img=100)))
             self.device = "cpu"
             self.train_tile_size = None
+            self.in_chans = 3
 
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
                         lambda checkpoint=None, **kw: _Predictor())
@@ -68,6 +69,7 @@ def _stub_dense_pass(monkeypatch, cal_stems, hold_stems, cal_records, hold_recor
                 roi_heads=SimpleNamespace(score_thresh=0.5, nms_thresh=0.5, detections_per_img=100)))
             self.device = "cpu"
             self.train_tile_size = None
+            self.in_chans = 3
 
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
                         lambda checkpoint=None, **kw: _Predictor())
@@ -161,6 +163,43 @@ def _resolve_op_unshippable(trait_name, **kw):
                    derived_from="held-out sweep", validated_against="false",
                    gate_evidence={"passed_holdout": False, "failures": ["holdout_count_bias"]})
     return ResolvedBundle(trait=trait_name, dataset_hash=kw.get("dataset_hash"), params={"conf": conf})
+
+
+def test_the_calibration_pass_reads_its_references_at_the_predictors_own_width(
+    tmp_path, seed_bud_trait_spec,
+):
+    """The measurement reads the reference images at the width its own predictor reads at: a
+    one-channel checkpoint over three-band references resolves a bundle, rather than handing its
+    first convolution an image three times as wide as the one it was trained on."""
+    from PIL import Image
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.pipelines.count_calibration import resolve_count_operating_point
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    for index in range(4):
+        Image.new("RGB", (64, 64), (30 * index, 110, 60)).save(images_dir / f"img{index}.png")
+        json_io.write_annotations(
+            str(labels_dir / f"img{index}.json"),
+            [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 64, 64, keep_empty=True)
+    ckpt = registered_checkpoint(
+        tmp_path, project_root=tmp_path,
+        model_source={"builder": "tests.bespoke_models:build_bespoke_detection",
+                      "builder_kwargs": {"num_classes": 1, "in_chans": 1, "min_size": 64,
+                                         "max_size": 128, "image_mean": [0.4],
+                                         "image_std": [0.2]},
+                      "task": "detection", "in_chans": 1})
+
+    resolved = resolve_count_operating_point(
+        ckpt, "bud_opening", str(labels_dir), str(images_dir), str(tmp_path), str(tmp_path),
+        subject="bud", device="cpu")
+
+    assert resolved.bundle.get("conf") is not None
+    assert resolved.checkpoint_sha256
 
 
 def test_calibrate_count_operating_point_earns_a_validated_stamp(

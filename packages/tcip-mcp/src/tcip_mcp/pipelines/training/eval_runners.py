@@ -93,15 +93,18 @@ def write_evaluation_result(output_dir: Path | str, common: dict, extra: dict) -
 
 
 def run_test_evaluation(
-    checkpoint, loader, device, task: str, output_dir: str, *,
+    checkpoint, model, loader, device, task: str, output_dir: str, *,
     conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,  # report at the ship point
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
     tiling: dict | None = None, trait: str | None = None,
     selection_dir: str | None = None, evaluated_stem_count: int | None = None,
 ) -> dict:
-    """Evaluate ``loader`` against ``checkpoint``, write ``test_results.json``.
+    """Evaluate ``loader`` against ``model``, write ``test_results.json``.
 
-    ``checkpoint`` is a ``VerifiedCheckpoint`` (``model_registry.load_registered_checkpoint``);
+    ``model`` is the caller's own built model (``evaluate_model`` hands over the one its predictor
+    holds), scored at the in-model operating point it was built with: nothing here changes which
+    detections the model emits, so the numbers are the model's own. ``checkpoint`` is that model's
+    ``VerifiedCheckpoint`` (``model_registry.load_registered_checkpoint``), read for identity only;
     this function reads no file itself.
 
     ``tiling`` describes the eval dataset regime for provenance only (the loader is built by the
@@ -114,12 +117,8 @@ def run_test_evaluation(
     own binding, resolved and re-admitted before the loader was built): recorded verbatim when
     given, absent otherwise, never re-derived here.
     """
-    from tcip_mcp.pipelines.model_build import STATE_DICT_KEY, build_model
     from tcip_mcp.pipelines.training.evaluation import effective_iou_type, evaluate
 
-    ckpt = checkpoint.payload
-    model = build_model(ckpt)
-    model.load_state_dict(ckpt[STATE_DICT_KEY])
     model.to(device)
 
     metrics = evaluate(model, loader, device, task, conf_threshold=conf_threshold,
@@ -255,15 +254,19 @@ def run_full_frame_evaluation(
     tile_size, overlap = tile_param.value, resolved_overlap
 
     # The loader a run over this same ground truth builds, over the samples the producer admits.
-    from tcip_mcp.pipelines.data.datasets import DetectionDataset, build_dataset
+    from tcip_mcp.pipelines.data.datasets import DetectionDataset, build_dataset, resolve_sizes
     from tcip_mcp.pipelines.data.label_queries import admit, require_admitted
 
     contradicted_negatives: set[str] = set()
     admitted = admit(images_dir, labels_dir, subject=subject, attribute=attribute,
                      contradicted_out=contradicted_negatives)
     require_admitted(admitted)
+    # At the width the predictor reads at, like every other measurement door: this gate reads
+    # targets and source paths off the loader, and the predictor reads each source itself.
+    measured_samples = admitted.every_sample()
     measured = build_dataset(
-        "detection", scope=admitted.scope, samples=admitted.every_sample())
+        "detection", scope=admitted.scope, samples=measured_samples,
+        sizes=resolve_sizes("detection", {"num_channels": predictor.in_chans}, measured_samples))
     assert isinstance(measured, DetectionDataset), "a detection build over samples is one of these"
     sample_counts = admitted.counts
     # The admission held out every image carrying an instance unlabeled for `attribute`, so this

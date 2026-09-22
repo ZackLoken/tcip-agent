@@ -72,7 +72,7 @@ class Predictor(Protocol):
     # the operating point the callers set on a predictor after resolving it against the data.
     model: torch.nn.Module
     device: torch.device
-    score_threshold: float
+    score_threshold: float | None
     max_dets: int | None
 
     # Each image argument may be a plain path/string or a BandGroupRef (a band-grouped capture,

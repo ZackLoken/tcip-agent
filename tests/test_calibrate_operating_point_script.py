@@ -57,6 +57,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
             self.train_tile_size = None
             self.train_overlap = None
             self.score_threshold = 0.5
+            self.in_chans = 3
 
         def predict_batch(self, paths, **kw):
             return [{"image": p, "width": 100, "height": 100,
@@ -130,6 +131,7 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
                 roi_heads=SimpleNamespace(score_thresh=0.5, nms_thresh=0.5, detections_per_img=100)))
             self.device = "cpu"
             self.train_tile_size = None
+            self.in_chans = 3
 
     def _build_predictor(checkpoint=None, *, device, max_dets=None, **kw):
         calls["build_predictor_max_dets"] = max_dets
@@ -201,6 +203,7 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
             self.model = _Model()
             self.device = "cpu"
             self.train_tile_size = None
+            self.in_chans = 3
 
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
                         lambda checkpoint=None, *, device, max_dets=None, **kw: _Predictor())
@@ -253,6 +256,7 @@ def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path,
             self.train_tile_size = None
             self.train_overlap = None
             self.score_threshold = 0.5
+            self.in_chans = 3
 
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
                         lambda *a, **kw: _Predictor())
@@ -329,6 +333,7 @@ def test_script_prints_and_exits_cleanly_for_fewer_than_two_labeled_stems(monkey
                 roi_heads=SimpleNamespace(score_thresh=0.5, nms_thresh=0.5, detections_per_img=100)))
             self.device = "cpu"
             self.train_tile_size = None
+            self.in_chans = 3
 
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
                         lambda checkpoint=None, **kw: _Predictor())

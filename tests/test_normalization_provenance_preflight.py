@@ -285,9 +285,10 @@ def test_preflight_refuses_a_hand_written_dict_naming_the_record_keys(tmp_path):
 
 
 def test_preflight_reads_the_band_count_over_every_source_the_run_admits(tmp_path):
-    """The channel firewall reads the run's own band count the way the run reads it, over every
-    source it admits: a second source of another band count is named here, rather than one source
-    being probed and the rest trained at its count."""
+    """Preflight reads the run's own sizes the way the run reads them, over every source it
+    admits and whether or not the model declares a width to compare against: a second source of
+    another band count is named here, rather than one source being probed and the rest trained at
+    its count, or the whole read being skipped because nothing declared a comparison width."""
     pytest.importorskip("torch")
     import numpy as np
     import tifffile
@@ -301,12 +302,12 @@ def test_preflight_reads_the_band_count_over_every_source_the_run_admits(tmp_pat
     Image.new("RGB", (16, 16)).save(imgs / "a.png")
     tifffile.imwrite(str(imgs / "b.tif"), np.zeros((16, 16, 5), dtype=np.uint8))
     _label(lbls, "a", "b")
-    cfg = _cfg(imgs, lbls, builder_kwargs={"num_classes": 1, "in_chans": 3})
 
-    r = preflight_config(cfg)
+    for builder_kwargs in ({"num_classes": 1, "in_chans": 3}, {"num_classes": 1}):
+        r = preflight_config(_cfg(imgs, lbls, builder_kwargs=builder_kwargs))
 
-    assert r["valid"] is False
-    assert any("different band counts" in i for i in r["issues"]), r["issues"]
+        assert r["valid"] is False, builder_kwargs
+        assert any("different band counts" in i for i in r["issues"]), r["issues"]
 
 
 def test_preflight_admits_a_three_channel_config_with_no_statistics(tmp_path):

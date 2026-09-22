@@ -37,6 +37,7 @@ class _CountStub:
         self.score_threshold = 0.5
         self.train_tile_size = None
         self.train_overlap = None
+        self.in_chans = 3
 
     def predict_batch(self, paths, **kw):
         results = []

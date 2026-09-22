@@ -339,8 +339,6 @@ def test_checkpoint_marker_keys_have_one_home():
         "model_state_dict": ("STATE_DICT_KEY", {
             "pipelines/training/generic_trainer.py":
                 _module_path("pipelines/training/generic_trainer.py"),
-            "pipelines/training/eval_runners.py":
-                _module_path("pipelines/training/eval_runners.py"),
             "pipelines/inference/generic_predictor.py":
                 _module_path("pipelines/inference/generic_predictor.py"),
             "pipelines/inference/predictor.py": _module_path("pipelines/inference/predictor.py"),

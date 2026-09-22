@@ -59,7 +59,7 @@ class TestFullClassificationPipeline:
         # --- Step 1: A bespoke classification model_source ---
         model_source = {
             "builder": "tests.bespoke_models:build_bespoke_classifier",
-            "builder_kwargs": {"num_classes": 2},
+            "builder_kwargs": {"num_classes": 2, "in_chans": 3},
             "task": "classification",
         }
 

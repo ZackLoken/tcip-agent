@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import threading
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path, PureWindowsPath
 from typing import Any, Iterator, NamedTuple, Sized
@@ -472,30 +473,32 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     issues.extend(run.issues)
     warnings.extend(run.warnings)
 
-    # Channel firewall: the run's own band count, read the way the run reads it, against the
-    # declared in_chans, so a channel-wrong train is caught here and not in the subprocess.
-    if isinstance(model_source, dict) and population:
-        from tcip_mcp.pipelines.model_build import declared_in_chans
-        declared = declared_in_chans(model_source)
-        if declared is not None:
-            from tcip_annotation.json_io import UnreadableLabelDocument
-            from tcip_mcp.pipelines.data.split_construction import loader_sizes
-            from tcip_mcp.pipelines.resolution import (
-                ResolvedBundle, default as _resolved_default, validate_resolved_bundle,
-            )
-            run_task = model_source.get("task") or data_cfg_dict.get("task", "detection")
-            try:
-                sizes = loader_sizes(run_task, data_cfg_dict, population,
-                                     data_cfg_dict.get(DATASET_SOURCE_KEY) or None)
-            except (ValueError, UnreadableLabelDocument) as exc:
-                # The run reads its own sources this way and refuses on the same fact.
-                issues.append(f"data: {exc}")
-                sizes = {}
-            channels = sizes.get("num_channels")
-            if channels is not None:
-                b = ResolvedBundle(trait="", dataset_hash=None, params={
-                    "in_chans": _resolved_default("in_chans", declared)})
-                issues.extend(validate_resolved_bundle(b, probed_channels=int(channels)))
+    # The run's own sizes, read the way the run reads them, so whatever refuses the launch refuses
+    # here: a channel-wrong train is caught before the subprocess, declared width or not.
+    from tcip_mcp.pipelines.data.datasets import stated_sizes
+    from tcip_mcp.pipelines.model_build import run_in_chans
+
+    sizes: dict[str, int] = stated_sizes(data_cfg_dict)
+    if population:
+        from tcip_annotation.json_io import UnreadableLabelDocument
+        from tcip_mcp.pipelines.data.datasets import resolve_sizes
+
+        run_task = ((model_source.get("task") if isinstance(model_source, dict) else None)
+                    or data_cfg_dict.get("task", "detection"))
+        try:
+            sizes = resolve_sizes(run_task, data_cfg_dict, population,
+                                  data_cfg_dict.get(DATASET_SOURCE_KEY) or None)
+        except (ValueError, UnreadableLabelDocument) as exc:
+            issues.append(f"data: {exc}")
+    channels = sizes.get("num_channels")
+    declared = run_in_chans(model_source, None)  # the model's own, for the comparison below
+    if channels is not None and declared is not None:
+        from tcip_mcp.pipelines.resolution import (
+            ResolvedBundle, default as _resolved_default, validate_resolved_bundle,
+        )
+        b = ResolvedBundle(trait="", dataset_hash=None, params={
+            "in_chans": _resolved_default("in_chans", declared)})
+        issues.extend(validate_resolved_bundle(b, probed_channels=int(channels)))
 
     # Normalization provenance: per-band builder_kwargs statistics must carry which images produced them.
     image_stats_containment: str | None = None
@@ -560,7 +563,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     if reserve_cal_frac:
         issues.extend(_reserve_calibration_feasibility_issues(
             model_source, data_cfg_dict, split_cfg_dict, reserve_cal_frac,
-            run=run, smoke=smoke))
+            run=run, sizes=sizes, smoke=smoke))
 
     # Trainable-sample coverage, never gating: a run admitting a fraction of its annotated images
     # would otherwise read "valid, no warnings" while training on far fewer than expected.
@@ -632,16 +635,18 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
             ms = config.get(MODEL_SOURCE_KEY) or {}
             task = ms.get("task") or (config.get("data") or {}).get("task", "detection")
-            dims = resolve_contract_dims(config, task, scope=run.scope)
+            # The sizes preflight resolved above, this run having recorded none yet; a run that
+            # states none has no synthetic shape and smokes against a real batch.
+            dims = resolve_contract_dims(config, task, scope=run.scope, sizes=sizes)
             model = build_model(config)
-            report = check_model_contract(model, task, **dims)
+            report = check_model_contract(model, task, dims=dims)
             batch, why_no_batch = None, None
             if report.get("not_smokeable"):
-                # No synthetic batch schema for this task: smoke against a real batch from the
-                # run's own dataset instead, the only reference for a task the platform doesn't enumerate.
+                # No synthetic batch for this task or this width: smoke against a real batch from
+                # the run's own dataset, the only reference the platform has not guessed at.
                 batch, why_no_batch = _one_real_batch(task, config)
                 if batch is not None:
-                    report = check_model_contract(model, task, sample_batch=batch, **dims)
+                    report = check_model_contract(model, task, sample_batch=batch)
             # ``dims`` shape the synthetic batch only, so they describe nothing once a real batch
             # is used, record which reference actually proved the contract.
             result["smoke"] = {**report, "task": task,
@@ -664,7 +669,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 with _OVERFIT_CHECK_LOCK:
                     rng_state = capture_rng_state()
                     try:
-                        raw_report = overfit_check(model, task, sample_batch=batch, **dims)
+                        raw_report = overfit_check(model, task, sample_batch=batch, dims=dims)
                     except Exception as exc:  # noqa: BLE001, becomes the report's issue only
                         raw_report = {
                             "passed": False, "losses": [], "initial": None, "final": None,
@@ -3291,7 +3296,7 @@ def _one_real_batch(task: str, config: dict, n: int = 2):
 
 def _reserve_calibration_feasibility_issues(
     model_source: dict | None, data_cfg: dict, split_cfg: dict, reserve_cal_frac: float, *,
-    run: RunPopulation, smoke: bool,
+    run: RunPopulation, sizes: "Mapping[str, int]", smoke: bool,
 ) -> list[str]:
     """Named ``preflight_config`` issues for an explicitly-requested
     ``reserve_calibration_fraction`` that cannot be honored, so the launch refuses here rather
@@ -3338,13 +3343,12 @@ def _reserve_calibration_feasibility_issues(
     from tcip_annotation.json_io import UnreadableLabelDocument
 
     try:
-        from tcip_mcp.pipelines.data.split_construction import (
-            loader_sizes, spatial_single_source_split,
-        )
+        from tcip_mcp.pipelines.data.split_construction import spatial_single_source_split
 
+        # The sizes preflight already resolved for this run; this probe reports feasibility over
+        # the dataset that run would build and resolves nothing of its own.
         spatial_single_source_split(
-            run.samples[0], run.scope, tiling_cfg, dict(split_cfg), None,
-            loader_sizes(task, data_cfg, run.samples[:1]))
+            run.samples[0], run.scope, tiling_cfg, dict(split_cfg), None, sizes)
     except (ValueError, UnreadableLabelDocument) as exc:
         return [f"data.split.reserve_calibration_fraction: {exc}"]
     except Exception as exc:  # noqa: BLE001, an unrelated build failure isn't this check's own
@@ -3454,7 +3458,8 @@ def evaluate_model(
     from tcip_mcp.pipelines.training.eval_runners import (
         run_full_frame_evaluation, run_test_evaluation,
     )
-    from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.resolution import applied_operating_point
 
     # The tile-level/single-pass paths apply this directly below; the full-frame path resolves
@@ -3539,6 +3544,13 @@ def evaluate_model(
     if task != "detection":
         tiling = None
 
+    # The checkpoint's own predictor, built once: the width it reads images at sizes the loader and
+    # its model scores them, at the operating point it was built with (score_threshold unstated).
+    try:
+        predictor = build_predictor(checkpoint, score_threshold=None)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
     universe: list[Any] = []
     if selection_stems is not None:
         from tcip_mcp.pipelines.data.label_queries import refuse_inadmissible_samples
@@ -3556,8 +3568,7 @@ def evaluate_model(
         if selection_stems is not None:
             # The universe's own recorded samples under the class space the selection recorded:
             # the pixels measured are the ones the draw held out, in the run's own vocabulary.
-            dataset = build_dataset(
-                task, samples=universe, tiling=tiling, scope=selection_scope)
+            measured_samples, measured_scope = universe, selection_scope
         else:
             # Through the producer, over the ground truth this door was pointed at, so the door
             # and a run over the same data admit one membership.
@@ -3565,8 +3576,12 @@ def evaluate_model(
 
             admitted = admit(images_dir, labels_dir, subject=subject, attribute=attribute)
             require_admitted(admitted)
-            dataset = build_dataset(
-                task, samples=admitted.every_sample(), tiling=tiling, scope=admitted.scope)
+            measured_samples, measured_scope = admitted.every_sample(), admitted.scope
+        # Read at the width the predictor reads at: the model scores these tensors, so a loader
+        # sized off the references instead would hand it images of another shape.
+        dataset = build_dataset(
+            task, samples=measured_samples, tiling=tiling, scope=measured_scope,
+            sizes=resolve_sizes(task, {"num_channels": predictor.in_chans}, measured_samples))
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Failed to build dataset: {exc}"}
 
@@ -3594,7 +3609,7 @@ def evaluate_model(
     # from the delivery-grade path's 1000 above; an explicit caller max_dets is honored verbatim.
     resolved_max_dets = 100 if max_dets is None else max_dets
     return run_test_evaluation(
-        checkpoint, loader, device, task, str(Path(ckpt).parent),
+        checkpoint, predictor.model, loader, device, task, str(Path(ckpt).parent),
         conf_threshold=applied_conf, iou_threshold=iou_threshold,
         iou_type=iou_type, max_dets=resolved_max_dets, tiling=tiling, trait=trait,
         selection_dir=selection_dir,

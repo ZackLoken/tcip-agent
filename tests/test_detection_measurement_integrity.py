@@ -180,7 +180,7 @@ def _capture_run_test_evaluation(monkeypatch):
 
     captured: dict = {}
 
-    def _fake(ckpt, loader, device, task, output_dir, **kw):
+    def _fake(ckpt, model, loader, device, task, output_dir, **kw):
         captured["ds"] = loader.dataset
         captured["tiling"] = kw.get("tiling")
         return {"tiled": bool(kw.get("tiling")), "eval_regime": "tile-level"}
@@ -226,6 +226,157 @@ def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
     assert captured["tiling"] is None
 
 
+def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, monkeypatch):
+    """The door measures at the width the checkpoint reads at, and a checkpoint recording none
+    stops it where the predictor refuses rather than sizing the loader off the references."""
+    from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    images_dir, labels_dir = _det_dataset(tmp_path)  # three-band sources
+    one_band = {"builder": "tests.bespoke_models:build_bespoke_detection",
+                "builder_kwargs": {"num_classes": 1, "in_chans": 1, "min_size": 64,
+                                   "max_size": 128, "image_mean": [0.4], "image_std": [0.2]},
+                "task": "detection", "in_chans": 1}
+    ckpt = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="one_band.pt",
+                                 model_source=one_band)
+
+    captured = _capture_run_test_evaluation(monkeypatch)
+    evaluate_model(ckpt, str(images_dir), str(labels_dir), task="detection", subject="bud")
+    assert captured["ds"].expected_channels == 1
+
+    widthless = {"builder": "tests.bespoke_models:build_bespoke_detection",
+                 "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
+                 "task": "detection"}
+    unstated = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="unstated.pt",
+                                     name="unstated-width", model_source=widthless)
+
+    r = evaluate_model(unstated, str(images_dir), str(labels_dir), task="detection", subject="bud")
+
+    assert "records no input width" in r["error"], r
+
+
+def _detections_as_ground_truth(payload, images_dir, labels_dir, *, subject: str, limit: int = 20):
+    """Write each image's own strongest detections back as its ground truth, so a metric over this
+    fixture is sensitive to which detections the model is allowed to emit. The checkpoint's model
+    is read with its score floor removed so that it returns detections to write back.
+    """
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
+    from tcip_mcp.pipelines.model_build import STATE_DICT_KEY, build_model
+    from tcip_mcp.pipelines.operating_point import set_detector_operating_point
+
+    model = build_model(payload)
+    model.load_state_dict(payload[STATE_DICT_KEY])
+    model.eval()
+    set_detector_operating_point(model, score_thresh=0.0)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    for image in sorted(Path(images_dir).glob("*.png")):
+        tensor = pil_to_tensor(load_image(image, 3))
+        with torch.no_grad():
+            boxes = model([tensor])[0]["boxes"].tolist()
+        w, h = int(tensor.shape[-1]), int(tensor.shape[-2])
+        json_io.write_annotations(
+            str(labels_dir / f"{image.stem}.json"),
+            [Annotation(subject=subject, geometry=BBox(*(float(v) for v in box)))
+             for box in boxes[:limit] if box[2] - box[0] > 1 and box[3] - box[1] > 1],
+            w, h)
+
+
+def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatch):
+    """One build per evaluation, and the metrics it produces are the model's own.
+
+    The door builds the checkpoint to read the width it measures at, and the runner scores through
+    that same module at the operating point the builder gave it: a separately built copy of the
+    same checkpoint, untouched, answers with the same numbers over the same loader. This
+    checkpoint declares a score floor above what it scores at, so a run that replaced that floor
+    with one of its own would report detections this model does not emit, which the last
+    assertion measures rather than assumes.
+    """
+    from PIL import Image
+
+    import tcip_mcp.pipelines.inference.generic_predictor as generic_predictor
+    import tcip_mcp.pipelines.model_build as model_build
+    import tcip_mcp.pipelines.training.eval_runners as runners
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
+    from tcip_mcp.pipelines.operating_point import set_detector_operating_point
+    from tcip_mcp.pipelines.training.evaluation import evaluate
+    from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    images_dir.mkdir(parents=True)
+    for i in range(2):
+        Image.new("RGB", (128, 128), color=(120, 120, 120)).save(images_dir / f"img{i}.png")
+    declares_its_point = {
+        "builder": "tests.bespoke_models:build_bespoke_detection",
+        "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": 64, "max_size": 128,
+                           "box_score_thresh": 0.6},
+        "task": "detection",
+    }
+    # This seed's weights score just above 0.5, so the declared floor of 0.6 excludes every
+    # detection and a substituted floor of 0.5 or 0.0 would not.
+    torch.manual_seed(0)
+    ckpt = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="model.pt",
+                                 model_source=declares_its_point)
+    verified = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    _detections_as_ground_truth(verified.payload, images_dir, labels_dir, subject="bud")
+
+    build_model = model_build.build_model
+    builds = []
+
+    def _spy(payload):
+        builds.append(payload)
+        return build_model(payload)
+
+    monkeypatch.setattr(model_build, "build_model", _spy)
+    monkeypatch.setattr(generic_predictor, "build_model", _spy)
+
+    recorded: dict = {}
+    run_test_evaluation = runners.run_test_evaluation
+
+    def _record(checkpoint, model, loader, device, task, output_dir, **kw):
+        recorded.update(loader=loader, device=device, task=task, kw=kw)
+        return run_test_evaluation(checkpoint, model, loader, device, task, output_dir, **kw)
+
+    monkeypatch.setattr(runners, "run_test_evaluation", _record)
+
+    # Both routes run from one seed: the loss pass samples proposals, so two unseeded passes over
+    # the same weights differ in that one metric by more than float noise.
+    torch.manual_seed(777)
+    measured = evaluate_model(ckpt, str(images_dir), str(labels_dir), task="detection",
+                              subject="bud")
+    assert "error" not in measured, measured
+    assert len(builds) == 1
+
+    torch.manual_seed(777)
+    independent_model = build_model(verified.payload)
+    independent_model.load_state_dict(verified.payload[STATE_DICT_KEY])
+    independent_model.to(recorded["device"])
+    kw = recorded["kw"]
+
+    def _independent() -> dict:
+        return evaluate(
+            independent_model, recorded["loader"], recorded["device"], recorded["task"],
+            conf_threshold=kw["conf_threshold"], iou_threshold=kw["iou_threshold"],
+            iou_type=kw["iou_type"], max_dets=kw["max_dets"], trait=kw["trait"])
+
+    independent = _independent()
+    assert independent
+    for key, value in independent.items():
+        # Two forward passes over the same weights are equal to float noise, not bit for bit.
+        assert measured[key] == pytest.approx(value, rel=1e-4), key
+
+    # What a floor of someone else's choosing would have reported instead, so the equality above
+    # is evidence about this fixture rather than a comparison nothing could separate.
+    set_detector_operating_point(independent_model, score_thresh=0.0)
+    assert _independent()["map50"] > measured["map50"]
+
+
 def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
     from tcip_mcp.tools.training_tools import evaluate_model
@@ -260,6 +411,8 @@ def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
                               [Annotation(subject="bud", geometry=BBox(54, 54, 74, 74))], 128, 128)
 
     class _Stub:
+        in_chans = 3
+
         def predict_tiled(self, path, **kw):
             return {"image": path, "width": 128, "height": 128,
                     "boxes": [[54, 54, 74, 74]], "scores": [0.9], "labels": [1], "count": 1}
@@ -305,6 +458,8 @@ def test_evaluate_scores_a_contradicted_negative_on_its_actual_content_and_names
     )
 
     class _Stub:
+        in_chans = 3
+
         def predict_tiled(self, path, **kw):
             return {"image": path, "width": 128, "height": 128,
                     "boxes": [[54, 54, 74, 74]], "scores": [0.9], "labels": [1], "count": 1}
@@ -475,6 +630,7 @@ def test_gate_derives_tile_geometry_from_checkpoint(tmp_path):
     class _DerivedGeometryStub:
         train_tile_size = 224
         train_overlap = 0.1
+        in_chans = 3
 
         def predict_tiled(self, path, **kw):
             captured["tile_size"] = kw.get("tile_size")
@@ -738,6 +894,7 @@ class _CalStub:
         self.score_threshold = 0.5
         self.train_tile_size = None
         self.train_overlap = None
+        self.in_chans = 3
         self.applied_conf = None
 
     def predict_batch(self, paths, **kw):
@@ -1111,6 +1268,7 @@ def test_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
             self.score_threshold = 0.5
             self.train_tile_size = 64
             self.train_overlap = 0.2
+            self.in_chans = 3
 
         def predict_batch(self, paths, tile=False, tile_size=None, overlap=None,
                           tile_batch_size=96, global_nms_iou=None, postprocess="nms",
