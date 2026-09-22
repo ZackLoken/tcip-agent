@@ -14,6 +14,7 @@ Facts (not a recipe, the agent chooses):
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 import subprocess
@@ -406,7 +407,7 @@ def _kill_ray_daemons_before_shutdown(ray: Any) -> None:
 
 
 @contextmanager
-def _ray_session(ray: Any) -> Generator[None]:
+def _ray_session(ray: Any, num_cpus: int) -> Generator[None]:
     """Keep Ray up for the duration of one sweep, shutting it down only when the last
     concurrent sweep leaves and only if this module is what started it.
 
@@ -415,6 +416,13 @@ def _ray_session(ray: Any) -> Generator[None]:
     inside a process that initialized Ray for its own reasons (a notebook, an embedding
     application) from tearing that cluster down. The lock covers both, so the
     check-then-init and the decrement-then-shutdown sequences cannot interleave.
+
+    ``num_cpus`` is the CPU count the cluster is started with when this call starts it: the
+    sweep's own request, every concurrent trial's CPUs together. Left to Ray, a cluster claims
+    every core on the host and prestarts a worker process per core, so two sweeps starting
+    side by side on one machine can exhaust its memory before a trial runs. A sweep that joins
+    a cluster a sibling started runs on the sibling's size and queues behind it, which Ray
+    Tune reports itself when the trials wait on resources.
     """
     global _active_searches, _ray_started_here, _ray_runtime_pythonpath, _external_cluster_warned
 
@@ -427,9 +435,9 @@ def _ray_session(ray: Any) -> Generator[None]:
             # Only this branch configures Ray; the not-taken branch below leaves an
             # already-initialized cluster's runtime_env alone, whoever started it.
             pythonpath = child_pythonpath()
-            context = ray.init(include_dashboard=include_dashboard, dashboard_host="127.0.0.1",
-                               log_to_driver=False, ignore_reinit_error=True,
-                               configure_logging=False,
+            context = ray.init(num_cpus=num_cpus, include_dashboard=include_dashboard,
+                               dashboard_host="127.0.0.1", log_to_driver=False,
+                               ignore_reinit_error=True, configure_logging=False,
                                runtime_env={"env_vars": {"PYTHONPATH": pythonpath}})
             _ray_started_here = True
             _ray_runtime_pythonpath = pythonpath
@@ -702,7 +710,9 @@ def tune_search(
             central store would use.
         resources_per_trial: Ray resource request per trial (``{"cpu": ..., "gpu": ...}``, GPU as
             a fraction for sharing). Omit to derive one from the host's real GPU count and
-            ``max_concurrent``, an explicit value always wins over the derivation.
+            ``max_concurrent``, an explicit value always wins over the derivation. A cluster
+            this sweep starts is sized to the request, ``cpu`` times ``max_concurrent`` CPUs,
+            never to the host (:func:`_ray_session`).
         stop_all_when: Cooperative-cancel signal, ``None`` (the default) runs the sweep to
             completion with no stopper wired in. Given, a trial ends after the report it just
             made while this returns True; the whole experiment stops once it does and no trial
@@ -788,6 +798,8 @@ def tune_search(
         objective_fn(config, lambda value: tune.report({metric: float(value)}))
 
     trainable = tune.with_resources(trainable, resources=resources)
+    # A trainable with no CPU request gets one CPU from Ray, so the cluster is sized the same way.
+    cluster_cpus = math.ceil(float(resources.get("cpu", 1.0)) * max(max_concurrent, 1))
 
     run_kwargs: dict[str, Any] = {
         "verbose": 0,
@@ -811,7 +823,7 @@ def tune_search(
                 var, value, run_kwargs["storage_path"],
             )
     try:
-        with _ray_session(ray):
+        with _ray_session(ray, cluster_cpus):
             tuner = tune.Tuner(
                 trainable,
                 param_space=space,
