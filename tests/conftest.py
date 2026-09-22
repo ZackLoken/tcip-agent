@@ -9,6 +9,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.hung_test_watchdog import pytest_timeout_set_timer
+
+__all__ = ["pytest_timeout_set_timer"]
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _pin_torch_single_thread():
