@@ -45,7 +45,7 @@ def test_a_test_blocked_in_c_with_the_gil_is_ended_and_named(tmp_path, workers):
     # cleans: pytest deletes all but the last few roots under the shared one at every start.
     command = [sys.executable, "-m", "pytest", str(test_file), "-n", workers,
                f"--timeout={TIMEOUT_S}", "-p", "no:cacheprovider", "-p", "tests.hung_test_watchdog",
-               "--basetemp", str(tmp_path / "child-basetemp"), "-q"]
+               "--basetemp", str(tmp_path / "child-basetemp"), "--rootdir", str(tmp_path), "-q"]
     assert command[command.index("--basetemp") + 1].startswith(str(tmp_path))
     proc = subprocess.run(command, cwd=REPO, capture_output=True, text=True, timeout=BOUND_S)
     elapsed = time.monotonic() - started
