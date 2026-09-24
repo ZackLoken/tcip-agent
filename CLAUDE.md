@@ -101,6 +101,14 @@ implementation is replaceable and the guarantee is not.
   how it survives.
 - A stated format, subject or root is a claim the data must positively carry, never one it merely
   fails to contradict.
+- Nothing on disk is a consumer. Every project, record, lock, hash, log row and checkpoint that
+  exists today is sample data made to exercise the implementation, and a change that re-keys,
+  re-shapes or invalidates it conforms or discards it as part of the change. A mechanism is never
+  kept, shaped or recommended to preserve existing data, keep old records readable, or migrate
+  them: no "predates the field" branch, no default for a record written before a key existed, no
+  hash restored so existing locks stay bound, no reader kept for rows already written. A live
+  consumer is code with a caller. A sentence in a brief, a report, a recommendation or a review
+  that names existing data as a reason to keep something is a defect in that sentence.
 
 ## Pipelines, models, seeing
 
