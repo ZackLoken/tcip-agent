@@ -220,5 +220,9 @@ state resolves via `$TCIP_STATE_ROOT`, pinned at startup by the web backend and 
   scripts, README, skills, package `CLAUDE.md`s) is for whoever reads it next, never a changelog of
   the session that wrote it: no tracking labels, no inline decision dates, no bold or all-caps
   emphasis, no em dashes. If nothing survives once that framing is stripped, write nothing.
+- A docstring states what the function does and its contract: its inputs, what it returns,
+  what it refuses. It never restates a rule from this file or a package `CLAUDE.md`, never
+  names its callers, and never explains a rejected alternative; those live in the design
+  record or nowhere.
 - `docs/` and `.claude/` are local, gitignored dev tooling, except the generated skills under
   `.claude/skills/`, which are tracked.
