@@ -2,8 +2,7 @@
 
 Pure numpy; the only torch touchpoint is an optional ``torchvision.ops`` import in
 ``global_nms`` with a numpy greedy-NMS fallback, so the geometry is unit-testable
-without torch. Ported from the chestnut-burr ``CanopyTiler`` /
-``reconstruct_detections_core`` / ``_dedup_boxes`` (verified against that source):
+without torch. The geometry:
 
   * ``stride = int(tile_size * (1 - overlap))``  (224, 0.2 -> 179)
   * pad H,W up to the next multiple of ``tile_size``; iterate origins on a regular
