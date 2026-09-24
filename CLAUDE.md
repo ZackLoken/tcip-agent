@@ -156,8 +156,10 @@ for general techniques only, never for a per-trait pipeline; the endpoint is a t
   guards, so a suite of them stays green over exactly this defect, which is how it survives to be
   found by a reader instead of by the suite.
 - Gates before reporting a change done: `ruff check packages tests tools`, `mypy`, and the change's
-  own test files. Run the full suite on both storage backends when you touch the store seam or a
-  reader's contract. Never report a gate before its slowest part finishes; green means no detected
+  own test files. The full suite runs locally on the database backend only; the file backend is
+  covered by `tests/test_store_contract.py`, which runs both inside one session, and by CI's
+  two-leg matrix until the batch that deletes that backend removes it. Never report a gate
+  before its slowest part finishes; green means no detected
   breakage, never correctness. A test touching the filesystem outside `tmp_path` is the first
   reread on a break that only shows in CI.
 - A green suite is evidence only about the defects its fixtures can distinguish. Before trusting it
@@ -199,7 +201,8 @@ tcip adopt-store <root>            # a root's loose record files into its databa
 Every process binds one storage backend at its entry point; an unset environment or
 `TCIP_STORE_BACKEND=sqlite` binds the database (`<root>/.tcip/store.db`), `TCIP_STORE_BACKEND=file`
 the loose-file layout, any other value refuses. `tests/test_store_contract.py` runs on both in one
-run; the rest runs on whichever is bound, so run `pytest tests/` both ways when you touch the seam.
+run; the rest runs on whichever is bound, and CI runs both, so a local `pytest tests/` binds the
+database backend only.
 A root with loose records is refused by the database backend until `tcip adopt-store` conforms it.
 The MCP server auto-launches from `.mcp.json`; a stale tool index means restart the client. Durable
 state resolves via `$TCIP_STATE_ROOT`, pinned at startup by the web backend and every MCP server.
