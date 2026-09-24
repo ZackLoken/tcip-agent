@@ -8,10 +8,10 @@ Inference goes through ``build_predictor``, the same entry point as the MCP ``ru
 tool, which dispatches on the checkpoint's model kind and runs the tcip composed-model
 checkpoint through its own native SAHI-style tiling.
 The operating point (conf / NMS IoU / tiling / max_dets) is resolved through the same
-``raw_operating_point`` bundle as the MCP door and its provenance is stamped alongside the
-predictions, so a GUI run and an agent run can't diverge on the count or hide an unvalidated
-operating point. A run whose tile scale has no real basis at all is refused by the shared delivery
-gate before anything is written, the same refusal ``run_inference`` makes.
+``raw_operating_point`` bundle as the MCP door, and the run publishes through the MCP door's own
+publisher (``inference_tools.publish_bucket``): its gates refuse before any image is predicted,
+and the documents, the stamp and the publication's line are written as ``run_inference`` writes
+them, one image at a time as the publisher consumes the predictions.
 
 A launch into a bucket already holding another run's prediction documents is refused the way
 ``run_inference`` refuses one, naming a fresh bucket to write into instead; a bucket a live job of
@@ -26,27 +26,18 @@ import logging
 import threading
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from tcip_mcp.pipelines.resolution import (
-    DEFAULT_CONF,
-    DEFAULT_MAX_DETS,
-    DEFAULT_NMS_IOU,
-    DEFAULT_OVERLAP,
-)
-from tcip_mcp.dataset_layout import label_filename
 from tcip_mcp.web_client import INFERENCE_JOBS, current_root
 from tcip_web import jobstore
 from tcip_web.paths import assert_path_allowed
 from tcip_web.routes._body_common import EmptyBodyPayload
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_web.jobstore import JobStatus
 
 logger = logging.getLogger(__name__)
@@ -70,24 +61,15 @@ class InferenceJob:
     checkpoint_path: str
     images_dir: str
     output_dir: str
-    conf: float
-    iou: float
-    slice_hw: tuple[int, int]
-    overlap: float
-    max_dets: int = DEFAULT_MAX_DETS
-    postprocess: str = "nms"  # cross-tile merge: "nms" suppresses, "nmm" unions seam-split boxes
-    # The caller's own tile choice, unresolved: None means "derive from the checkpoint's own
-    # training geometry", resolved in the worker once the predictor is built (never here).
+    # The launch's own stated values, ``None`` where it stated nothing: the pass resolves each
+    # one exactly as run_inference resolves its own arguments (inference_tools._prepare_pass).
+    conf: Optional[float] = None
+    iou: Optional[float] = None
     tile: Optional[bool] = None
-    # Whether the caller explicitly chose `tile`, threaded into raw_operating_point's tiled_source.
-    tile_source: str = "default"
-    # Whether the caller explicitly chose conf/max_dets, fed to raw_operating_point's own
-    # conf_stated/max_dets_stated: a value equal to the platform default still stamps explicit.
-    conf_stated: bool = False
-    max_dets_stated: bool = False
-    # Whether slice_hw was the breeder's explicit override or should be re-derived from the
-    # checkpoint's own recorded training geometry, tiled or native-frame (resolve_tile_geometry).
-    slice_source: str = "default"
+    tile_size: Optional[int] = None
+    overlap: Optional[float] = None
+    max_dets: Optional[int] = None
+    postprocess: str = "nms"  # cross-tile merge: "nms" suppresses, "nmm" unions seam-split boxes
     total: int = 0
     done: int = 0
     status: JobStatus = "pending"
@@ -132,11 +114,6 @@ def _from_summary(s: dict, root: str) -> InferenceJob:
         checkpoint_path="",
         images_dir=s.get("images_dir", ""),
         output_dir=s.get("output_dir", ""),
-        tile=None,  # a dead job's own tile choice is never read again; honest, not fabricated
-        conf=0.0,
-        iou=0.0,
-        slice_hw=(0, 0),
-        overlap=0.0,
         total=s.get("total", 0),
         done=s.get("done", 0),
         platform_root=jobstore.require_platform_root(s, name=INFERENCE_REGISTRY, root=root),
@@ -190,17 +167,6 @@ def rehydrate_for_current_root() -> None:
 # ── Worker ─────────────────────────────────────────────────────────────
 
 
-def _list_images(images_dir: Path) -> list[Path | BandGroupRef]:
-    """Every logical image in ``images_dir``: a ``.bandgroup``-grouped multi-band capture folds
-    into one entry here (see ``image_utils.list_logical_images``), the same enumeration every other
-    reader in this platform shares, instead of this route's own raw sibling-file listing enumerating
-    each band file as its own (spurious) image."""
-    from tcip_mcp.pipelines.image_utils import list_logical_images
-
-    logical = list_logical_images(images_dir)
-    return [logical[stem] for stem in sorted(logical)]
-
-
 def _worker(job: InferenceJob) -> None:
     # Held through try/except, assigned to job.status only in finally, after the publication is
     # attempted. "running" (never a terminal read) until a branch below names the real outcome.
@@ -208,17 +174,12 @@ def _worker(job: InferenceJob) -> None:
     try:
         job.status = "running"
         _persist()
-        output_dir = Path(job.output_dir)
 
-        images = _list_images(Path(job.images_dir))
-        job.total = len(images)
-
-        # One inference entry point (same as MCP run_inference): build_predictor dispatches on
-        # the checkpoint's model kind, sniffed from the checkpoint itself.
+        from tcip_mcp.audit import AuditEntryNotWritten
+        from tcip_mcp.dataset_layout import bucket_dataset_root
         from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
-        from tcip_mcp.pipelines.inference.predictor import build_predictor
-        from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
-        from tcip_mcp.pipelines.resolution import raw_operating_point
+        from tcip_mcp.pipelines.resolution import DEFAULT_TILE_BATCH_SIZE
+        from tcip_mcp.tools.inference_tools import _prepare_pass, publish_bucket
 
         try:
             checkpoint = load_registered_checkpoint(
@@ -228,172 +189,46 @@ def _worker(job: InferenceJob) -> None:
             job.error = str(exc)
             logger.warning("inference job %s refused: %s", job.job_id, job.error)
             return
-        output_dir.mkdir(parents=True, exist_ok=True)
-        predictor = build_predictor(
-            checkpoint,
-            device=None,  # auto: cuda if available, else cpu
-            score_threshold=job.conf,  # conf is an unvalidated documented default either way,
-            nms_iou=job.iou,           # raw_operating_point below wraps the same raw value, never
-            max_dets=job.max_dets,     # transforms it (see its own docstring).
-        )
-
-        # Resolve the tiled bool now the checkpoint's own training geometry is in hand: an unset
-        # job.tile gets the checkpoint's own tiled-or-not regime, never a fixed platform default.
-        resolved_tile_bool = (
-            getattr(predictor, "train_tile_size", None) is not None
-            if job.tile is None else job.tile
-        )
-
-        # Derive tile_size/overlap/resize the same way run_inference does; job.slice_source ==
-        # "explicit" still wins. A contradicting edge raises, caught by this worker's own try/except.
-        from tcip_mcp.pipelines.inference.predictor import (
-            explicit_edge_provenance, resolve_tile_regime,
-        )
-
-        resolved_tile, tile_size_source, resolved_overlap, overlap_source, tile_resize = (
-            resolve_tile_regime(
-                predictor, tiled=resolved_tile_bool,
-                tile_size=job.slice_hw[0] if job.slice_source == "explicit" else None,
-                overlap=job.overlap if job.slice_source == "explicit" else None,
-            )
-        )
-        tile_size_derived_from = (
-            explicit_edge_provenance(predictor, resolved_tile)
-            if tile_size_source == "explicit" and resolved_tile is not None else None)
-
-        # Resolve the operating point through the same firewalled bundle as the MCP door: conf is a
-        # documented default with no per-dataset GT, so it is unvalidated and stamped validated=false.
-        op_bundle = raw_operating_point(
-            conf=job.conf, cross_tile_nms=job.iou, tiled=resolved_tile_bool,
-            tiled_source=job.tile_source, tile_size=resolved_tile,
-            tile_size_source=tile_size_source, tile_size_derived_from=tile_size_derived_from,
-            max_dets=job.max_dets,
-            conf_stated=job.conf_stated, max_dets_stated=job.max_dets_stated,
-        )
-
-        # Refuse an ungrounded tile scale before the pass, the same gate run_inference applies.
-        from tcip_mcp.pipelines.resolution import check_delivery_gate, tile_size_gate_flag
-
-        tile_ref = tile_size_gate_flag(op_bundle.to_provenance()["operating_point"])
-        gate = check_delivery_gate({"tile_size": tile_ref} if tile_ref is not None else {})
-        if not gate.ok:
+        # The pass run_inference prepares, from the launch's own stated values; device auto.
+        prepared = _prepare_pass(
+            checkpoint, images_dir=job.images_dir, conf_threshold=job.conf, device=None,
+            tile=job.tile, tile_size=job.tile_size, overlap=job.overlap,
+            global_nms_iou=job.iou, max_dets=job.max_dets,
+            postprocess=job.postprocess, experiment_id=None,
+            tile_batch_size=DEFAULT_TILE_BATCH_SIZE)
+        if isinstance(prepared, str):
             terminal_status = "failed"
-            tile_desc = f"{resolved_tile}px" if resolved_tile is not None else "no resolvable size"
-            job.error = (
-                f"inference refused: unvalidated dimension(s) {list(gate.unvalidated)}. "
-                f"This run's tile scale ({tile_desc}) has no real basis: the checkpoint records no "
-                "training tile geometry and no tile size was stated for this run, so the counts it "
-                "would produce rest on nothing that justifies them. Run untiled, or use a checkpoint "
-                "whose training tile geometry was persisted, or pass an explicit tile size."
-            )
-            logger.warning("inference job %s refused by the delivery gate: %s",
-                           job.job_id, job.error)
+            job.error = prepared
             return
+        job.total = len(prepared.paths)
 
-        # Stamp the operating point next to the predictions so a GUI-produced set carries the same
-        # provenance (and validated=false) the MCP door records: a phenotype's numbers are only as
-        # trustworthy as the operating point that produced them.
-        #
-        # checkpoint_sha256/experiment_id: the same producing-model identity resolver the MCP door
-        # uses (model_registry.resolve_model_identity, never a second implementation), so a bucket
-        # the GUI's own Inference tab produces carries the same identity fact the review-verdict
-        # scoping matches against.
-        from tcip_mcp.model_registry import resolve_model_identity
+        def predictions():
+            """Predict one image at a time as the publisher consumes them, counting each written
+            document, and stop at the next image boundary once a cancel is requested."""
+            for img in prepared.paths:
+                if job.cancel_event.is_set():
+                    return
+                yield prepared.predict([img])[0]
+                job.done += 1
 
-        identity = resolve_model_identity(checkpoint)
-
-        # This run's name->id map and scope: the same resolvers run_inference calls, never a
-        # second implementation; a registry read failing for a real reason fails the job outright.
-        from tcip_mcp.tools.inference_tools import (
-            resolve_decode_id_map, run_scope, unmapped_classified_run,
-        )
-
-        scope = run_scope(predictor)
-        subject, attribute = scope.subject, scope.attribute
-        id_map = resolve_decode_id_map(predictor, job.images_dir)
-        # A classified run resolving no map fails with the composed remedy, never a silent decode.
-        classified_refusal = unmapped_classified_run(
-            scope, id_map, images_dir=job.images_dir)
-        if classified_refusal is not None:
-            terminal_status = "failed"
-            job.error = classified_refusal
-            return
-
-        from tcip_mcp.audit import AuditEntryNotWritten
-        from tcip_mcp.pipelines import image_utils
-        from tcip_mcp.pipelines.resolution import operating_point_stamp, prediction_producer
-        from tcip_mcp.tools.inference_tools import seal_stamp_and_record
-
-        # overlap has no home in ResolvedBundle's tracked params (only conf/cross_tile_nms/tiled/
-        # tile_size/max_dets are), so the value and source this run actually used travel directly.
-        provenance = operating_point_stamp(
-            op_bundle.to_provenance()["operating_point"],
-            validated=op_bundle.is_shippable,
-            # This worker stamps from a raw operating point and is never validated at write time.
-            validated_by=None,
-            tile_size_validated=gate.stamp.get("tile_size"),
-            shippable_issues=op_bundle.shippable_issues(),
-            id_map=id_map,
-            subject=subject,
-            attribute=attribute,
-            trait=None,
-            dataset_hash=op_bundle.dataset_hash,
-            checkpoint=Path(job.checkpoint_path).stem,
-            checkpoint_sha256=identity["sha256"],
-            experiment_id=identity["experiment_id"],
-            images_dir=job.images_dir,
-            raster_path=None,
-            produced_at=datetime.now(timezone.utc).isoformat(),
-            overlap=resolved_overlap,
-            overlap_source=overlap_source,
-            image_filenames={img.stem: image_utils.logical_image_name(img) for img in images},
-        )
-        if getattr(predictor, "task", None) == "instance_seg":
-            # The unvalidated mask-binarize threshold write_predictions_json will use for every mask
-            # in this run: a run constant, so it travels once here, never per-annotation.
-            from tcip_mcp.pipelines.postprocessing.export import mask_binarize_provenance
-
-            provenance["mask_binarize"] = mask_binarize_provenance()
-
-        for img in images:
-            if job.cancel_event.is_set():
-                break
-            results = predictor.predict_batch(
-                [img],
-                tile=resolved_tile_bool,
-                tile_size=resolved_tile,
-                overlap=resolved_overlap,
-                global_nms_iou=job.iou,
-                postprocess=job.postprocess,
-                tile_resize=tile_resize,
-            )
-            if attribute is not None:
-                from tcip_mcp.pipelines.postprocessing.export import unmapped_label_ids
-
-                unmapped = unmapped_label_ids(results, id_map)
-                if unmapped:
-                    terminal_status = "failed"
-                    job.error = (
-                        f"{img.stem}: this classified run decoded to id(s) {unmapped}, not keys "
-                        f"of its recorded id_map ({sorted((id_map or {}).values())})."
-                    )
-                    break
-            job.dropped_boxes += write_predictions_json(
-                output_dir / label_filename(img.stem), results[0],
-                created_by=prediction_producer(job.checkpoint_path, identity["sha256"]),
-                id_map=id_map, subject=subject, attribute=attribute)
-            job.done += 1
-
-        if terminal_status != "failed":
-            # Last, never beside where it is built, so a partway-dead pass leaves a bucket no reader mistakes for certified;
-            # image_filenames names every enumerated image whether written or not, including one cancelled before its first write.
-            # Published through the one publisher every bucket ends in, so the stamp, the lineage
-            # link and the publication's line are the library's, as on the MCP door.
-            try:
-                seal_stamp_and_record(output_dir, provenance, None, written=job.done)
-            except AuditEntryNotWritten as exc:
-                job.audit_warning = str(exc)
-            terminal_status = "cancelled" if job.cancel_event.is_set() else "completed"
+        run = prepared.raw_result()
+        run["results"] = predictions()
+        try:
+            pub = publish_bucket(
+                run, out=Path(job.output_dir), checkpoint_path=job.checkpoint_path, trait=None,
+                images_dir=job.images_dir, dataset_root=bucket_dataset_root(job.output_dir),
+                allow_unvalidated_staging=False)
+        except AuditEntryNotWritten as exc:
+            # The publisher committed an act whose line it could not write; a failed pass's own
+            # line carries the error the pass failed on.
+            job.audit_warning = str(exc)
+            job.error = exc.arguments.get("error")
+        else:
+            if pub["refusal"] is not None:
+                job.error = pub["refusal"]["error"]
+            job.dropped_boxes = pub["dropped_boxes"]
+        terminal_status = ("failed" if job.error is not None
+                           else "cancelled" if job.cancel_event.is_set() else "completed")
     except Exception as exc:
         logger.exception("inference job %s failed", job.job_id)
         terminal_status = "failed"
@@ -418,7 +253,7 @@ class LaunchInferencePayload(BaseModel):
     # None (default) derives tiling from the checkpoint's own training geometry in the worker,
     # distinct from an explicit caller choice, so the job's provenance can say which happened.
     tile: bool | None = None
-    # conf/iou/slice_h/slice_w/overlap are all None by default: an omitted
+    # conf/iou/slice_h/overlap are all None by default: an omitted
     # field is a real "let the platform derive it" request, distinguished from an explicit choice
     # that happens to match the default, the same way `tile` already works. A frozen literal
     # transmitted on every launch would permanently shadow resolve_tile_geometry's
@@ -426,7 +261,6 @@ class LaunchInferencePayload(BaseModel):
     conf: float | None = None
     iou: float | None = None
     slice_h: int | None = None
-    slice_w: int | None = None
     overlap: float | None = None
     max_dets: int | None = None
     postprocess: str = "nms"
@@ -531,22 +365,7 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
         }) from exc
     resolved_output_dir = str(bucket_dir)
 
-    # job.tile carries the caller's raw choice (None = derive from the checkpoint's training
-    # geometry, resolved in the worker), never resolved here; the GUI checkbox has no "unset" state.
-    tile_source = "explicit" if payload.tile is not None else "default"
-    # conf/iou: no checkpoint-derivation concept applies (unlike tile_size): an omitted value
-    # falls back to the same shared defaults resolution.py names, matching the MCP door.
-    resolved_conf = DEFAULT_CONF if payload.conf is None else payload.conf
-    conf_stated = payload.conf is not None
-    resolved_iou = DEFAULT_NMS_IOU if payload.iou is None else payload.iou
-    resolved_max_dets = DEFAULT_MAX_DETS if payload.max_dets is None else payload.max_dets
-    max_dets_stated = payload.max_dets is not None
-    # slice_h/slice_w/overlap: the "explicit" signal resolve_tile_geometry needs.
-    # None here means "derive from the checkpoint's training geometry," resolved in the worker
-    # once the predictor is built. slice_hw stays a concrete tuple everywhere else (0 sentinel is
-    # never read as a real value; the worker only branches on slice_source).
-    slice_source = "explicit" if payload.slice_h is not None else "default"
-
+    # Every tuning value travels as stated, None where omitted; the worker's pass resolves each.
     job = InferenceJob(
         job_id=f"inf-{uuid.uuid4().hex[:8]}",
         checkpoint_path=payload.checkpoint_path,
@@ -556,15 +375,11 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
         requested_model_name=payload.model_name,
         date=payload.date,
         tile=payload.tile,
-        tile_source=tile_source,
-        conf=resolved_conf,
-        conf_stated=conf_stated,
-        iou=resolved_iou,
-        slice_hw=(payload.slice_h or 0, payload.slice_w or 0),
-        slice_source=slice_source,
-        overlap=payload.overlap if payload.overlap is not None else DEFAULT_OVERLAP,
-        max_dets=resolved_max_dets,
-        max_dets_stated=max_dets_stated,
+        conf=payload.conf,
+        iou=payload.iou,
+        tile_size=payload.slice_h,
+        overlap=payload.overlap,
+        max_dets=payload.max_dets,
         postprocess=payload.postprocess,
     )
     _register(job)

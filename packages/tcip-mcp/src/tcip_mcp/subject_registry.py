@@ -650,9 +650,9 @@ def _distinct_dataset_root(pred_dirs: Sequence[str | Path]) -> Path | None:
     resolve by picking one. The one computation ``registry_for_pred_dirs`` and
     ``dataset_root_for_pred_dirs`` both build on, so the two cannot disagree about it.
     """
-    from tcip_mcp.dataset_layout import dataset_root_of
+    from tcip_mcp.dataset_layout import bucket_dataset_root
 
-    roots: set[Path] = {r for d in pred_dirs if d and (r := dataset_root_of(d)) is not None}
+    roots: set[Path] = {r for d in pred_dirs if d and (r := bucket_dataset_root(d)) is not None}
     if len(roots) > 1:
         raise RegistryError(
             "a delivery's prediction directories resolve to more than one dataset root "

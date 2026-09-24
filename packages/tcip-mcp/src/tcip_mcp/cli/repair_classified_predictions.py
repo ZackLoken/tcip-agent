@@ -33,7 +33,7 @@ Per stamped bucket, in order:
 5. A sourced classified pair over a bucket carrying review verdicts is reported with the count;
    nothing is stamped or rewritten, since the platform never rewrites predictions a human reviewed.
    The verdict store is asked only when the bucket resolves under a dataset root
-   (``resolution.bucket_dataset_root``); a bucket outside any dataset's canonical layout has no
+   (``dataset_layout.bucket_dataset_root``); a bucket outside any dataset's canonical layout has no
    verdict store, and the no-verdict-store note is reported rather than silently skipped, the same
    inoperative guard ``run_inference`` states for such a bucket.
 6. Otherwise every document is read whole and every record classified, the object-class check made
@@ -49,7 +49,7 @@ Per stamped bucket, in order:
    stamp's own stored ``validated`` so a stale ``true`` is never read as still validated.
 8. One line per write: a stamp write's is ``update_sidecar``'s own ``stamp_written``, and a
    bucket whose documents were rewritten earns one entry of this command's, filed where the
-   stamp's line is (``resolution.bucket_dataset_root``): the bucket's dataset root, or the
+   stamp's line is (``dataset_layout.bucket_dataset_root``): the bucket's dataset root, or the
    platform log for a bucket under none. The entry carries the documents rewritten, the scope pair and its source, the
    free-text outcome line, and, for a rewrite under a stamp, the content digest before and after.
    A refusal, a no-op ("already conformed", "no stamp"), or a ``--plan`` preview writes no line.
@@ -87,11 +87,12 @@ from tcip_store.binding import bind_default
 from tcip_mcp.audit import record_event_or_raise
 from tcip_mcp.subject_registry import RegistryError, read_registry
 from tcip_mcp.dataset_layout import (
-    annotation_root, is_bucket_name, prediction_bucket_dirs, prediction_root, subjects_path,
+    annotation_root, bucket_dataset_root, is_bucket_name, prediction_bucket_dirs, prediction_root,
+    subjects_path,
 )
 from tcip_mcp.experiments import config_key, read_member
 from tcip_mcp.pipelines.resolution import (
-    BucketScope, StampScopeUnstated, bucket_dataset_root, bucket_scope, read_operating_point_sidecar,
+    BucketScope, StampScopeUnstated, bucket_scope, read_operating_point_sidecar,
     scope_consistent_with_map, update_sidecar, verify_stamp_binding,
 )
 from tcip_mcp.prediction_buckets import (

@@ -1548,11 +1548,12 @@ the calibration/holdout lock's draw event (`calibration_holdout_drawn`,
 `pipelines/data/splits.py:1253`), written by every first draw and redraw whichever door triggers
 it, the COCO import's `coco_document_imported` (`pipelines/data/coco_import.py`), written
 once a document has committed, on success and on a later failed write alike, and a prediction
-bucket's `prediction_bucket_published` (`tools/inference_tools.py`'s `seal_stamp_and_record`),
+bucket's `prediction_bucket_published` (`tools/inference_tools.py`'s `_publish_predictions`),
 written by the publishing library for an image bucket and a raster bucket alike, whichever door
-published it (the GUI's inference worker included), naming the documents written, and every bucket stamp's `stamp_written`
+published it (the GUI's inference worker included), naming the documents written, under status
+`failed` with the error when a pass raises after its first document and before its stamp, and every bucket stamp's `stamp_written`
 (`pipelines/resolution.py`'s `write_sidecar` and `update_sidecar`), naming the stamp as stored,
-filed under the bucket's dataset root (`resolution.bucket_dataset_root`) or the platform log when
+filed under the bucket's dataset root (`dataset_layout.bucket_dataset_root`) or the platform log when
 the bucket sits under none.
 Project-scoped: `routes/results.py`'s `_audit` (`routes/results.py:164`, its delivery and confirmation routes) and
 `pipelines/postprocessing/plant_mapping.py`'s `persist_mapping` (`pipelines/postprocessing/plant_mapping.py:1406`), whose two callers file
@@ -2319,7 +2320,7 @@ rather than only warning; `routes/annotate.py:145` (`record_committed(`) does th
 dataset, under a root that may be `None` (a label path outside any dataset tree, recorded to the
 platform log instead); `routes/subjects.py:78` (`record_committed(`) likewise; the GUI
 inference worker writes no line of its own and publishes through the one publisher,
-`routes/inference.py:393` (`seal_stamp_and_record(output_dir, provenance, None, written=job.done)`),
+`routes/inference.py:215` (`pub = publish_bucket(`),
 whose receipts are the library's, catching `AuditEntryNotWritten` into the job's
 `audit_warning`; `routes/results.py:176`
 (`record_committed(`) does the same for a project root instead. Reader:
@@ -2502,7 +2503,7 @@ Phase 3 verdict: single.
 
 Must agree: every writer stamps, and every consumer finds, the same provenance keys next to a bucket's predictions.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1051` (`def operating_point_stamp(`, the one stamp constructor, every field required of every producer; the stamp's whole key set is declared beside it as `STAMP_KEYS`, the constructor's own, plus `STAMP_EXTENSION_KEYS`, the producer-local additions each named for the producer that writes it; `write_sidecar`, `resolution.py:973`, and `update_sidecar`, `resolution.py:1013`, are the only writers, both through `sidecar_key`, `resolution.py:734`, both refusing an unearned validation claim, and for this document refusing a top-level key outside that declared union: a fresh mint on its whole body, an update on the keys it introduces). A validated claim is earned in two phases beside the resolvers it selects among: `open_validation`, `resolution.py:1637`, runs the document's own resolver over the evidence and refuses a result that cleared no accepted reference, and `seal_validation`, `resolution.py:1776`, takes the covered buckets' content identity from the files as they landed, files the row through the experiment record's validations member, and returns the stamp body with its pointer merged in.
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1181` (`read_operating_point_sidecar`, the one reader, with `verify_stamp_binding`, `resolution.py:1969`, deciding inside every reconciler whether a claiming stamp is answered for). The producers are `tools/inference_tools.py:917` and `tools/inference_tools.py:1250` and `packages/tcip-web/src/tcip_web/routes/inference.py:329` (`operating_point_stamp(`); the review promotion merges into the stored stamp under its lock at `routes/validation.py:407`.
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1181` (`read_operating_point_sidecar`, the one reader, with `verify_stamp_binding`, `resolution.py:1969`, deciding inside every reconciler whether a claiming stamp is answered for). The producers are the per-image publisher every per-image door publishes through, the GUI's inference worker included, and the raster pass, `tools/inference_tools.py:1310` and `tools/inference_tools.py:2459` (`op_stamp = operating_point_stamp(`); the review promotion merges into the stored stamp under its lock at `routes/validation.py:407`.
 Phase 3 verdict: single.
 
 ## S29. Prediction-bucket immutability
@@ -2543,7 +2544,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP entry point and the GUI entry point start from the same unresolved defaults, and both read a caller's unstated parameter off the `None` sentinel rather than off equality with the default, so a caller who states the default value is honored as an override instead of being resolved as if they had stated nothing.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:161` (`DEFAULT_CONF = 0.5`, with `DEFAULT_NMS_IOU`, `DEFAULT_OVERLAP` and `DEFAULT_MAX_DETS` declared beside it).
-Side B: `packages/tcip-web/src/tcip_web/routes/inference.py:32` (import; the sentinel form is `resolved_iou = DEFAULT_NMS_IOU if payload.iou is None else payload.iou`, `routes/inference.py:541`) and `packages/tcip-mcp/src/tcip_mcp/pipelines/training/eval_runners.py:15` (the tile-level regime's own default conf, `DEFAULT_CONF`). The full-frame runner, `evaluate_model`, and `run_inference`'s preview, verified body and raster branch all resolve a stated-or-default conf, NMS and cap through one function, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:169` (`def applied_operating_point(`), so the point a run is selected at starts where the point it ships at does; the cap parameters of `run_inference` and `deliver_per_image_counts` default to `None`, the shared constant supplies the pass, and the unstated parameter travels to the resolver as unstated so it can derive one from the data.
+Side B: `packages/tcip-web/src/tcip_web/routes/inference.py:377` (`conf=payload.conf,`: the GUI launch carries every stated value unresolved, `None` where omitted, and its worker resolves them through the MCP pass's own `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:975`, `def _prepare_pass(`) and `packages/tcip-mcp/src/tcip_mcp/pipelines/training/eval_runners.py:15` (the tile-level regime's own default conf, `DEFAULT_CONF`). The full-frame runner, `evaluate_model`, and `run_inference`'s preview, verified body and raster branch all resolve a stated-or-default conf, NMS and cap through one function, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:169` (`def applied_operating_point(`), so the point a run is selected at starts where the point it ships at does; the cap parameters of `run_inference` and `deliver_per_image_counts` default to `None`, the shared constant supplies the pass, and the unstated parameter travels to the resolver as unstated so it can derive one from the data.
 Phase 3 verdict: single. One value is still spelled as a literal rather than bound: `predict_tiled`'s overlap default, `packages/tcip-mcp/src/tcip_mcp/pipelines/inference/generic_predictor.py:422`.
 
 ## S34. check_delivery_gate behind every delivery path

@@ -282,8 +282,8 @@ def orthomosaic_plant_counts(
     if canopy_subject:
         import hashlib
 
-        from tcip_mcp.dataset_layout import annotation_path_for_image, dataset_root_of, \
-            require_dataset_identity
+        from tcip_mcp.dataset_layout import annotation_path_for_image, bucket_dataset_root, \
+            dataset_root_of, require_dataset_identity
         from tcip_mcp.pipelines.postprocessing.segment_attribution import (
             CanopySegmentRefusal, load_canopy_segments,
         )
@@ -301,14 +301,14 @@ def orthomosaic_plant_counts(
         except ValueError as exc:
             raise CountDeliveryRefused(f"canopy_subject delivery refused: {exc}") from exc
 
-        bucket_dataset_root = dataset_root_of(pred_dir)
-        if bucket_dataset_root is None:
+        bucket_root = bucket_dataset_root(pred_dir)
+        if bucket_root is None:
             raise CountDeliveryRefused(
                 f"canopy_subject delivery refused: {predictions_dir} does not lie under a "
                 "registered dataset's predictions/ tree; the canopy document is resolved "
                 "relative to the bucket's own registered dataset")
         try:
-            bucket_dataset_identity = require_dataset_identity(bucket_dataset_root)
+            bucket_dataset_identity = require_dataset_identity(bucket_root)
         except ValueError as exc:
             raise CountDeliveryRefused(f"canopy_subject delivery refused: {exc}") from exc
 
@@ -316,7 +316,7 @@ def orthomosaic_plant_counts(
             raise CountDeliveryRefused(
                 f"canopy_subject delivery refused: {raster_path} lies under dataset "
                 f"{raster_dataset_root} (id {raster_dataset_identity['id']!r}), a different "
-                f"dataset than the bucket at {predictions_dir} (under {bucket_dataset_root}, "
+                f"dataset than the bucket at {predictions_dir} (under {bucket_root}, "
                 f"id {bucket_dataset_identity['id']!r}); copy the verified raster to its "
                 "ingested position under the bucket's dataset")
 

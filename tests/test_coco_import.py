@@ -380,7 +380,67 @@ def test_a_label_written_after_validation_is_never_overwritten(tmp_path: Path, m
     (event,) = [row for row in _rows(root) if row["tool"] == "coco_document_imported"]
     assert event["status"] == "failed"
     assert [Path(p).name for p in event["arguments"]["written"]] == ["tree_01.json"]
-    assert Path(event["arguments"]["failed"]).name == "tree_02.json"
+    assert str(second) in event["arguments"]["error"]
+    assert "changed since it was read" in event["arguments"]["error"]
+
+
+def test_a_partial_import_and_a_partial_publish_record_one_key_set(tmp_path: Path, monkeypatch):
+    """The two producers of a partial-write record, the import and the bucket publisher, each
+    leave their failed line with the documents written and the error, and nothing else beyond
+    the one fact naming their own act (the document imported, the bucket published)."""
+    pytest.importorskip("torch")
+    import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.dataset_layout import prediction_dir
+    from tcip_mcp.pipelines.data.coco_import import import_coco_document
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    root = _dataset(tmp_path)
+    second = _labels(root) / "tree_02.json"
+    real_put_blob = ts.put_blob
+
+    def interleaved(key, data, **kwargs):
+        if (_labels(root) / "tree_01.json").exists() and not second.exists():
+            real_put_blob(*json_io.encode_annotations(second, [], IMG, IMG, keep_empty=True))
+        return real_put_blob(key, data, **kwargs)
+
+    monkeypatch.setattr(ts, "put_blob", interleaved)
+    with pytest.raises(ts.VersionConflict):
+        import_coco_document(_document(tmp_path / "external.json"), root, date=DATE)
+    monkeypatch.setattr(ts, "put_blob", real_put_blob)
+
+    class Detector:
+        def __init__(self, checkpoint_path=None, **kwargs):
+            pass
+
+        def predict_batch(self, paths, **kw):
+            return [{"image": p, "width": IMG, "height": IMG, "boxes": [BOX], "scores": [0.9],
+                     "labels": [1], "count": 1} for p in paths]
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", Detector)
+    real_write = itools.write_predictions_json
+    calls: list[str] = []
+
+    def failing_second_write(json_path, result, **kwargs):
+        calls.append(str(json_path))
+        if len(calls) == 2:
+            raise OSError("disk full")
+        return real_write(json_path, result, **kwargs)
+
+    monkeypatch.setattr(itools, "write_predictions_json", failing_second_write)
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    with pytest.raises(OSError):
+        itools.run_inference(ckpt, str(root / "images" / DATE),
+                             output_dir=str(prediction_dir(root, "detector", DATE)), tile=False)
+
+    failed = {row["tool"]: row for row in _rows(root) if row["status"] == "failed"}
+    imported = failed["coco_document_imported"]["arguments"]
+    published = failed["prediction_bucket_published"]["arguments"]
+    assert set(imported) - {"document", "date"} == set(published) - {"predictions_dir"} == {
+        "written", "error"}
+    for arguments in (imported, published):
+        assert [Path(p).name for p in arguments["written"]] == ["tree_01.json"]
+        assert isinstance(arguments["error"], str) and arguments["error"]
 
 
 def test_an_import_that_committed_no_document_leaves_no_event(tmp_path: Path, monkeypatch):

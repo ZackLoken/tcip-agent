@@ -76,9 +76,8 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 `deliver_per_image_counts` produces a different, per-image CSV, not the per-plant schema above
 (the `image` cell is the source basename with its extension, this platform's image identity
 everywhere else). The bucket regime resolves it from the stamp's `image_filenames` map (each
-prediction document's stem mapped to its source image's filename, recorded at publication) and
-falls back to the bare stem, disclosed in the response's `image_note`, for a bucket stamped before
-that map existed or for a stem the map does not name. Don't reach for it when the per-plant schema
+prediction document's stem mapped to its source image's filename, recorded at publication), and
+refuses a bucket whose stamp does not name each of its documents. Don't reach for it when the per-plant schema
 is what's wanted. Two source regimes: live (`checkpoint_path` + `images_dir`, routing through the
 same verified pass `run_inference` runs, optionally persisting the counted predictions into
 `predictions_dir` under `run_inference`'s own publish contract) or bucket (`predictions_dir` alone,

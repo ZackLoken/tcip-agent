@@ -30,7 +30,7 @@ from tcip_mcp.pipelines.image_utils import (
     BandGroupRef, display_source_path, load_image, pad_tile, pil_to_tensor,
 )
 from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
-from tcip_mcp.pipelines.resolution import DEFAULT_NMS_IOU
+from tcip_mcp.pipelines.resolution import DEFAULT_NMS_IOU, DEFAULT_TILE_BATCH_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +158,7 @@ class GenericPredictor:
     @torch.no_grad()
     def predict_batch(
         self, image_paths: list[str | Path | BandGroupRef], tile: bool = False,
-        tile_size: int | None = None, overlap: float = 0.2, tile_batch_size: int = 96,
+        tile_size: int | None = None, overlap: float = 0.2, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
         global_nms_iou: float = DEFAULT_NMS_IOU, batch_size: int = 16, postprocess: str = "nms",
         *, require_masks: bool = True, tile_resize: tuple[int, int] | None = None,
     ) -> list[dict]:
@@ -463,7 +463,7 @@ class GenericPredictor:
     @torch.no_grad()
     def predict_tiled(
         self, source: str | Path | BandGroupRef | WindowedRasterReader, tile_size: int | None = None,
-        overlap: float = 0.2, tile_batch_size: int = 96, global_nms_iou: float = DEFAULT_NMS_IOU,
+        overlap: float = 0.2, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE, global_nms_iou: float = DEFAULT_NMS_IOU,
         postprocess: str = "nms", *, require_masks: bool = True, source_label: str = "",
         tile_resize: tuple[int, int] | None = None,
         prior: dict | None = None,

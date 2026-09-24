@@ -117,9 +117,9 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             buckets_stamped=[])
     assert pred_dir is not None  # bucket_dirs is non-empty only when pred_dir was truthy above
 
+    from tcip_mcp.dataset_layout import bucket_dataset_root
     from tcip_mcp.pipelines.resolution import (
         StampScopeUnstated,
-        bucket_dataset_root,
         read_operating_point_sidecar,
         scope_of_stamp,
         verify_stamp_binding,

@@ -297,6 +297,44 @@ def test_a_calibration_curves_first_write_leaves_one_receipt_and_an_identical_re
     assert len(receipts()) == 1
 
 
+def test_two_concurrent_first_writes_of_one_curve_leave_one_record_and_one_receipt(monkeypatch):
+    """Two calibrations keeping one body at once write it once: the write is create-only, so the
+    second is the no-op an identical rewrite already is. An existence check ahead of the write is
+    held open here until both callers have made it, the window two first writes share."""
+    import threading
+
+    import tcip_store as ts
+
+    from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.tools import inference_tools
+    from tcip_mcp.tools.inference_tools import calibration_curve_key, keep_calibration_curve
+
+    body = {"trait": "leaf count", "dataset_hash": "h", "checkpoint_sha256": "s",
+            "gate_evidence": {"conf": [0.3]}}
+    both_checked = threading.Barrier(2, timeout=5)
+    real_exists = inference_tools.store.exists
+
+    def exists_then_wait(key):
+        found = real_exists(key)
+        both_checked.wait()
+        return found
+
+    monkeypatch.setattr(inference_tools.store, "exists", exists_then_wait)
+    identities: list[str] = []
+    threads = [threading.Thread(target=lambda: identities.append(keep_calibration_curve(body)))
+               for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+
+    assert len(set(identities)) == 1 and len(identities) == 2
+    assert ts.read(calibration_curve_key(identities[0])) == body
+    assert [r["arguments"]["calibration_evidence_key"]
+            for r in ts.read_log(audit_log_key()).records
+            if r["tool"] == "calibration_curve_written"] == identities[:1]
+
+
 # --- the rail admits the references that were always legitimate -------------------------------
 
 def test_hand_annotated_ground_truth_still_calibrates(tmp_path):

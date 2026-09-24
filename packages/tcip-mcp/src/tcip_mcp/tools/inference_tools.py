@@ -5,18 +5,21 @@ resolves identically for every entry point that runs a model over images."""
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from tcip_annotation.json_io import SIDECAR_FILENAMES
 from tcip_store import (
-    RECORD_JSON, BadKey, Key, StoreDescriptor, StoreError, Version, register_store, store,
+    RECORD_JSON, BadKey, Key, StoreDescriptor, StoreError, Version, VersionConflict,
+    register_store, store,
 )
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
-from tcip_mcp.dataset_layout import label_filename
+from tcip_mcp.dataset_layout import bucket_dataset_root, label_filename
 from tcip_mcp.pipelines.postprocessing.export import (
     export_detection_csv,
     mask_binarize_provenance,
@@ -25,9 +28,7 @@ from tcip_mcp.pipelines.postprocessing.export import (
     write_predictions_json,
 )
 from tcip_mcp.pipelines.resolution import (
-    DeliveryRefused,
-    applied_operating_point,
-    bucket_dataset_root,
+    DEFAULT_TILE_BATCH_SIZE, DeliveryRefused, applied_operating_point,
 )
 from tcip_mcp.project_paths import resolve_output_path
 
@@ -127,20 +128,22 @@ def calibration_curve_identity(body: dict) -> str:
 def keep_calibration_curve(body: dict) -> str:
     """Keep one calibration's curve under its own identity and return that identity.
 
-    The key is the body's own digest, so a record already under it is these same bytes and the
-    call writes nothing and leaves no line; a write leaves its one ``calibration_curve_written``
-    line, whatever the calling door does next. Raises what the identity or the store raises.
+    The key is the body's own digest and the write is create-only, so a record already under it
+    is these same bytes: the write conflicts, writes nothing and leaves no line, and of two
+    concurrent first writes one lands. A write leaves its one ``calibration_curve_written`` line,
+    whatever the calling door does next. Raises what the identity or the store raises.
     """
     from tcip_mcp.audit import record_event_or_raise
 
     identity = calibration_curve_identity(body)
-    key = calibration_curve_key(identity)
-    if not store.exists(key):
-        store.replace(key, body)
-        record_event_or_raise("calibration_curve_written", {
-            "calibration_evidence_key": identity, "trait": body.get("trait"),
-            "dataset_hash": body.get("dataset_hash"),
-            "checkpoint_sha256": body.get("checkpoint_sha256")})
+    try:
+        store.replace(calibration_curve_key(identity), body, expect=Version.ABSENT)
+    except VersionConflict:
+        return identity
+    record_event_or_raise("calibration_curve_written", {
+        "calibration_evidence_key": identity, "trait": body.get("trait"),
+        "dataset_hash": body.get("dataset_hash"),
+        "checkpoint_sha256": body.get("checkpoint_sha256")})
     return identity
 
 
@@ -262,10 +265,8 @@ def resolve_decode_id_map(predictor, images_dir: str | None, *,
     order-invariant-for-single-class degraded path this already was.
 
     A registry read that fails for a real reason (corrupted file, an id-space mismatch) propagates
-    loudly from here, but ``run_inference`` lets that reach its own caller, while the GUI worker
-    (``routes/inference.py``) wraps this whole call in a broad except and degrades to ``id_map=None``
-    on any failure; the two entry points share this one resolution but choose different failure postures on
-    top of it, not two different resolutions.
+    loudly from here: ``run_inference`` lets it reach its own caller, and the GUI worker
+    (``routes/inference.py``) fails the job with it.
 
     ``scope`` is the ``(subject, attribute)`` the registry fallback derives against, defaulting to
     the predictor's own recorded training scope. A caller holding the run's scope from elsewhere
@@ -300,7 +301,7 @@ def run_inference(
     tile: bool | None = None,
     tile_size: int | None = None,
     overlap: float | None = None,
-    tile_batch_size: int = 96,
+    tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
     global_nms_iou: float | None = None,
     max_dets: int | None = None,
     postprocess: str = "nms",
@@ -689,7 +690,7 @@ def run_inference(
     if "error" in result:
         return result
 
-    pub = _publish_bucket_bracket(
+    pub = publish_bucket(
         result, out=out, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
         dataset_root=bucket_root, allow_unvalidated_staging=allow_unvalidated_staging)
     if pub["refusal"] is not None:
@@ -747,103 +748,22 @@ def _run_inference_verified(
     loaded, never a second load through ``run_inference`` itself, so a door composing this pass
     never loads the file twice.
     """
-    max_dets_stated = max_dets is not None
-    conf_stated = conf_threshold is not None
-    applied_conf, applied_nms_iou, applied_max_dets = applied_operating_point(
-        conf_threshold, global_nms_iou, max_dets)
-
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
-    from tcip_mcp.pipelines.resolution import dataset_hash, raw_operating_point
+    from tcip_mcp.pipelines.resolution import dataset_hash
 
-    # NMS IoU + the full-frame detection cap govern which boxes exist (in-model thresholds), not
-    # just cross-tile merge, else nms_iou would have no effect on an untiled run.
-    predictor = build_predictor(
-        checkpoint,
-        device=device,
-        score_threshold=applied_conf,
-        nms_iou=applied_nms_iou,
-        max_dets=applied_max_dets,
-    )
-
-    # Resolve the tiled bool now the checkpoint's own persisted training geometry is in hand: an
-    # unset ``tile`` gets the checkpoint's own tiled-or-not regime, never a fixed platform default.
-    tiled_source = "explicit" if tile is not None else "default"
-    resolved_tile_bool = (
-        getattr(predictor, "train_tile_size", None) is not None) if tile is None else tile
-
-    # Identity resolved before calibration: its train-disjointness gate needs the checkpoint's
-    # experiment_id, off the object already loaded (no re-hash, no re-read).
-    from tcip_mcp.model_registry import resolve_model_identity
-
-    identity = resolve_model_identity(checkpoint, experiment_id=experiment_id)
-
-    # Derive tile geometry from training geometry unless the caller pinned it; refuses only when a
-    # stated edge contradicts the checkpoint's own recorded geometry.
-    from tcip_mcp.pipelines.inference.predictor import (
-        TileEdgeContradiction, explicit_edge_provenance, resolve_tile_regime,
-    )
-
-    # resolve_tile_regime resolves the resize half only when tiled, so an untiled run is never
-    # sunk by an unreadable recorded augmentation config.
-    try:
-        resolved_tile, tile_size_source, resolved_overlap, overlap_source, tile_resize = (
-            resolve_tile_regime(
-                predictor, tiled=resolved_tile_bool, tile_size=tile_size, overlap=overlap))
-    except TileEdgeContradiction as exc:
-        return {"error": str(exc)}
-    tile_size_derived_from = (
-        explicit_edge_provenance(predictor, resolved_tile)
-        if tile_size_source == "explicit" and resolved_tile is not None else None)
-    if resolved_tile_bool and resolved_tile is None:
-        # Tiling was requested but nothing justifies a scale: refuse rather than fabricate one.
-        return {"error": (
-            f"tile_size could not be resolved for {checkpoint.path}: this checkpoint carries no "
-            "persisted training tile geometry, no tile_size was given explicitly, and its untiled "
-            "training frame yields no tile edge either (none recorded, or a rectangular one, which "
-            "no single square edge reproduces the scale of on both axes), so tiled inference has no "
-            "real basis to run at. Pass tile_size explicitly, retrain with tile geometry persisted, "
-            "or leave tile unset/False to run untiled."
-        )}
-    if tile_size_source == "derived":
-        logger.info("tile_size %d derived from the checkpoint's training geometry", resolved_tile)
-    elif resolved_tile_bool and tile_size_source == "native_ratio":
-        resize_note = "" if tile_resize is None else (
-            f", each tile run through its recorded train-time resize {tuple(tile_resize)}")
-        logger.info(
-            "tile_size %d derived from this checkpoint's own uniform untiled training frame%s",
-            resolved_tile, resize_note)
-    # overlap_source == "default" is unremarkable (no persisted overlap analog); only tile_size's
-    # absence changes the object count's scale.
-
-    # Holds the union predict_batch itself accepts (a directory scan can resolve a BandGroupRef),
-    # never the narrower list[str] the image_paths parameter carries in from the caller.
-    resolved_paths: list[str | Path | BandGroupRef]
-    if image_paths is None:
-        if images_dir is None:
-            return {"error": "Provide either image_paths or images_dir"}
-        # Fold a `.bandgroup`-grouped capture into its one logical entry (list_logical_images),
-        # the same enumeration every other reader in this platform shares.
-        from tcip_mcp.pipelines.image_utils import list_logical_images
-
-        logical = list_logical_images(images_dir)
-        resolved_paths = [logical[stem] for stem in sorted(logical)]
-    else:
-        resolved_paths = list(image_paths)
-
-    # A classified run with no id_map cannot decode its own predictions: refuse before either
-    # pass runs, so no calibration evidence is spent on a run that would refuse at the write.
-    _scope = run_scope(predictor)
-    _subject, _attribute = _scope.subject, _scope.attribute
-    _door_id_map = resolve_decode_id_map(predictor, images_dir)
-    _refusal = unmapped_classified_run(_scope, _door_id_map, images_dir=images_dir)
-    if _refusal is not None:
-        return {"error": _refusal}
+    p = _prepare_pass(
+        checkpoint, image_paths=image_paths, images_dir=images_dir,
+        conf_threshold=conf_threshold, device=device, tile=tile, tile_size=tile_size,
+        overlap=overlap, tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou,
+        max_dets=max_dets, postprocess=postprocess, experiment_id=experiment_id)
+    if isinstance(p, str):
+        return {"error": p}
 
     # Resolve the confidence operating point: with a trait + labeled calibration dir, derive it
     # per dataset (count-unbiased + held-out validated); otherwise the byte-identical raw path.
-    extra: dict = {}
-    if trait and calibration_labels_dir:
+    if not (trait and calibration_labels_dir):
+        out = p.raw_result()
+    else:
         from tcip_annotation.json_io import UnreadableLabelDocument
 
         from tcip_mcp.pipelines.calibration import calibrate_operating_point, gate_evidence_summary
@@ -851,16 +771,16 @@ def _run_inference_verified(
         cal_images = calibration_images_dir or images_dir
         try:
             bundle, cal_hash, n_excluded_incomplete_attribute, evidence = calibrate_operating_point(
-                predictor, trait, calibration_labels_dir, cal_images,
-                tile=resolved_tile_bool, tile_size=resolved_tile, overlap=resolved_overlap,
-                tile_resize=tile_resize,
-                tile_size_source=tile_size_source, tile_size_derived_from=tile_size_derived_from,
-                tiled_source=tiled_source,
-                tile_batch_size=tile_batch_size, global_nms_iou=applied_nms_iou,
+                p.predictor, trait, calibration_labels_dir, cal_images,
+                tile=p.tiled, tile_size=p.tile_size, overlap=p.overlap,
+                tile_resize=p.tile_resize,
+                tile_size_source=p.tile_size_source,
+                tile_size_derived_from=p.tile_size_derived_from, tiled_source=p.tiled_source,
+                tile_batch_size=tile_batch_size, global_nms_iou=p.nms_iou,
                 postprocess=postprocess,
                 cross_tile_nms=global_nms_iou, max_dets=max_dets,
                 group_by=group_by, group_key_map=group_key_map,
-                experiment_id=identity["experiment_id"],
+                experiment_id=p.identity["experiment_id"],
                 seed=split_seed, holdout_ratio=split_holdout_ratio,
                 selection_dir=selection_dir,
             )
@@ -871,13 +791,12 @@ def _run_inference_verified(
         conf_param = bundle.get("conf")
         conf = (conf_param.value if conf_param.is_shippable
                 else conf_param.unvalidated_value(acknowledge_unvalidated=True))
-        applied_max_dets = int(bundle.get("max_dets").value)
-        applied_nms_iou = float(bundle.get("cross_tile_nms").value or applied_nms_iou)
+        p.max_dets = int(bundle.get("max_dets").value)
+        p.nms_iou = float(bundle.get("cross_tile_nms").value or p.nms_iou)
         # Apply the resolved operating point to the model so it governs which boxes exist.
-        predictor.score_threshold = conf
-        set_detector_operating_point(predictor.model, score_thresh=conf,
-                                     detections_per_img=applied_max_dets)
-        op_bundle = bundle
+        p.predictor.score_threshold = conf
+        set_detector_operating_point(p.predictor.model, score_thresh=conf,
+                                     detections_per_img=p.max_dets)
         # Dataset-scope firewall: the conf is scoped to the calibration GT. The inference target is
         # usually unlabeled, so its GT identity (a content hash) is undefined, pass None and record
         # 'not-comparable-unlabeled-target'. Only when inferencing the same labeled set it calibrated
@@ -886,7 +805,7 @@ def _run_inference_verified(
 
         from tcip_annotation.json_io import prediction_documents
 
-        inf_stems = [stem_of(pp) for pp in resolved_paths]
+        inf_stems = [stem_of(pp) for pp in p.paths]
         cal_label_stems = (
             set(evidence.get("calibration_stems", [])) if selection_dir is not None
             else {pp.stem for pp in prediction_documents(calibration_labels_dir)}
@@ -941,11 +860,11 @@ def _run_inference_verified(
         curve_body = {
             "trait": trait,
             "dataset_hash": cal_hash,
-            "checkpoint_sha256": identity["sha256"],
+            "checkpoint_sha256": p.identity["sha256"],
             "predictor_path": {
-                "tile": resolved_tile_bool, "tile_size": resolved_tile,
-                "overlap": resolved_overlap, "postprocess": postprocess,
-                "global_nms_iou": applied_nms_iou, "max_dets": applied_max_dets,
+                "tile": p.tiled, "tile_size": p.tile_size,
+                "overlap": p.overlap, "postprocess": postprocess,
+                "global_nms_iou": p.nms_iou, "max_dets": p.max_dets,
             },
             "gate_evidence": conf_param.gate_evidence,
             "calibration_evidence": evidence,
@@ -961,72 +880,182 @@ def _run_inference_verified(
         else:
             extra["calibration_curve_path"] = str(calibration_curve_path(curve_identity_hex))
             extra["calibration_evidence_key"] = curve_identity_hex
-    else:
-        # Raw inference has no per-dataset calibration: the model already carries score_threshold as
-        # its in-model conf; the bundle stamps it validated_against=false so the un-trustworthiness of
-        # this uncalibrated operating point (the count is the phenotype) travels with the result.
-        op_bundle = raw_operating_point(
-            conf=applied_conf, cross_tile_nms=applied_nms_iou, tiled=resolved_tile_bool,
-            tile_size=resolved_tile, max_dets=applied_max_dets, tile_size_source=tile_size_source,
-            tile_size_derived_from=tile_size_derived_from,
-            tiled_source=tiled_source, conf_stated=conf_stated,
-            max_dets_stated=max_dets_stated,
-        )
-        extra = {"validated": False, "conf_source": "default"}
+        out = p.result(bundle, extra)
 
-    # Preflight: warn (don't fail) when a slow workload will run on CPU because CUDA isn't
-    # available, full tiled inference over thousands of images is hours on CPU vs minutes on
-    # a GPU. Install a CUDA torch build (see environment.yml) to use the card.
-    cpu_warning = None
-    if device != "cpu" and (resolved_tile_bool or len(resolved_paths) > 8):
+    # Warn, never fail, when a slow workload will run on CPU because CUDA is not available.
+    if device != "cpu" and (p.tiled or len(p.paths) > 8):
         import torch
 
         if not torch.cuda.is_available():
-            cpu_warning = (
-                f"CUDA not available, running {len(resolved_paths)} image(s)"
-                f"{' tiled' if resolved_tile_bool else ''} on CPU, which is much slower. Install a "
+            out["warning"] = (
+                f"CUDA not available, running {len(p.paths)} image(s)"
+                f"{' tiled' if p.tiled else ''} on CPU, which is much slower. Install a "
                 "CUDA torch build (see environment.yml) to use the GPU."
             )
-            logger.warning(cpu_warning)
+            logger.warning(out["warning"])
 
-    results = predictor.predict_batch(
-        resolved_paths, tile=resolved_tile_bool, tile_size=resolved_tile, overlap=resolved_overlap,
-        tile_batch_size=tile_batch_size, global_nms_iou=applied_nms_iou, postprocess=postprocess,
-        tile_resize=tile_resize,
-    )
+    out["results"] = p.predict(p.paths)
+    out["image_count"] = len(out["results"])
     # A detection the writer would not store is no detection, so it is excluded here too.
-    total_detections = sum(positive_detections(r)[0] for r in results)
-
-    # Producing-model identity (resolved above, before calibration) travels with the result so every
-    # downstream deliverable can name the exact checkpoint (content hash) + run behind the count.
-    from datetime import datetime, timezone
-
-    # This run's name->id map, resolved once above (ahead of calibration) and reused for decode.
-    id_map = _door_id_map
-    out = {
-        "checkpoint": checkpoint.path,
-        "checkpoint_sha256": identity["sha256"],
-        "experiment_id": identity["experiment_id"],
-        "images_dir": images_dir,
-        "produced_at": datetime.now(timezone.utc).isoformat(),
-        "image_count": len(results),
-        "total_detections": total_detections,
-        "tiled": resolved_tile_bool,
-        # Stage-6 review: overlap has no home in the ResolvedBundle's tracked params (only conf/
-        # cross_tile_nms/tiled/tile_size/max_dets are), surface the value this specific call
-        # actually ran at directly, rather than silently drop it after resolving it.
-        "overlap": resolved_overlap,
-        "overlap_source": overlap_source,
-        "operating_point": op_bundle.to_provenance()["operating_point"],
-        "id_map": id_map,
-        "subject": _subject,
-        "attribute": _attribute,
-        "results": results,
-        **extra,
-    }
-    if cpu_warning:
-        out["warning"] = cpu_warning
+    out["total_detections"] = sum(positive_detections(r)[0] for r in out["results"])
     return out
+
+
+@dataclass
+class _PreparedPass:
+    """A raw per-image pass resolved from a loaded checkpoint and its caller's stated values: the
+    predictor, the images it runs over, the tile regime and operating point it runs at, and the
+    run's identity and class scope. ``_run_inference_verified`` and the GUI's inference worker
+    both prepare a pass through :func:`_prepare_pass`; the MCP door may then calibrate it, and
+    each door predicts through :meth:`predict`, a list at once or one image at a time."""
+
+    checkpoint_path: str
+    predictor: Any
+    images_dir: str | None
+    paths: list[str | Path | BandGroupRef]
+    identity: dict
+    scope: ClassScope
+    id_map: dict | None
+    tiled: bool
+    tiled_source: str
+    tile_size: int | None
+    tile_size_source: str
+    tile_size_derived_from: Any
+    overlap: float
+    overlap_source: str
+    tile_resize: Any
+    conf: float
+    nms_iou: float
+    max_dets: int
+    conf_stated: bool
+    max_dets_stated: bool
+    tile_batch_size: int
+    postprocess: str
+
+    def predict(self, paths: list[str | Path | BandGroupRef]) -> list[dict]:
+        return self.predictor.predict_batch(
+            paths, tile=self.tiled, tile_size=self.tile_size, overlap=self.overlap,
+            tile_batch_size=self.tile_batch_size, global_nms_iou=self.nms_iou,
+            postprocess=self.postprocess, tile_resize=self.tile_resize)
+
+    def result(self, op_bundle, extra: dict) -> dict:
+        """The run's own facts a publisher stamps from, before any image is predicted. The
+        overlap has no home in the bundle's tracked params, so the value run at travels here."""
+        from datetime import datetime, timezone
+
+        return {
+            "checkpoint": self.checkpoint_path,
+            "checkpoint_sha256": self.identity["sha256"],
+            "experiment_id": self.identity["experiment_id"],
+            "images_dir": self.images_dir,
+            "produced_at": datetime.now(timezone.utc).isoformat(),
+            "tiled": self.tiled,
+            "overlap": self.overlap,
+            "overlap_source": self.overlap_source,
+            "operating_point": op_bundle.to_provenance()["operating_point"],
+            "id_map": self.id_map,
+            "subject": self.scope.subject,
+            "attribute": self.scope.attribute,
+            **extra,
+        }
+
+    def raw_result(self) -> dict:
+        """:meth:`result` at the pass' own uncalibrated operating point: the model already carries
+        it in-model, and the bundle stamps it validated_against=false so its untrustworthiness
+        travels with the result."""
+        from tcip_mcp.pipelines.resolution import raw_operating_point
+
+        op_bundle = raw_operating_point(
+            conf=self.conf, cross_tile_nms=self.nms_iou, tiled=self.tiled,
+            tile_size=self.tile_size, max_dets=self.max_dets,
+            tile_size_source=self.tile_size_source,
+            tile_size_derived_from=self.tile_size_derived_from, tiled_source=self.tiled_source,
+            conf_stated=self.conf_stated, max_dets_stated=self.max_dets_stated)
+        return self.result(op_bundle, {"validated": False, "conf_source": "default"})
+
+
+def _prepare_pass(
+    checkpoint, *, image_paths: list[str] | None = None, images_dir: str | None,
+    conf_threshold: float | None, device: str | None, tile: bool | None, tile_size: int | None,
+    overlap: float | None, global_nms_iou: float | None, max_dets: int | None, postprocess: str,
+    experiment_id: str | None, tile_batch_size: int,
+) -> "_PreparedPass | str":
+    """Resolve a raw per-image pass from a loaded checkpoint and what its caller stated (``None``
+    for anything unstated), or the refusal naming why it cannot run: a stated tile edge the
+    checkpoint's recorded geometry contradicts, a tiled run with no basis for its scale, no
+    images named, or a classified run with no map to decode its predictions."""
+    from tcip_mcp.model_registry import resolve_model_identity
+    from tcip_mcp.pipelines.inference.predictor import (
+        TileEdgeContradiction, build_predictor, explicit_edge_provenance, resolve_tile_regime,
+    )
+
+    # The images first, before any model loads; a directory scan folds a `.bandgroup` capture
+    # into its one logical entry.
+    paths: list[str | Path | BandGroupRef]
+    if image_paths is not None:
+        paths = list(image_paths)
+    elif images_dir is None:
+        return "Provide either image_paths or images_dir"
+    else:
+        from tcip_mcp.pipelines.image_utils import list_logical_images
+
+        logical = list_logical_images(images_dir)
+        paths = [logical[stem] for stem in sorted(logical)]
+
+    conf, nms_iou, applied_max_dets = applied_operating_point(
+        conf_threshold, global_nms_iou, max_dets)
+    # NMS IoU and the detection cap govern which boxes exist in-model, not only the tile merge.
+    predictor = build_predictor(
+        checkpoint, device=device, score_threshold=conf, nms_iou=nms_iou,
+        max_dets=applied_max_dets)
+    # An unset ``tile`` gets the checkpoint's own tiled-or-not regime, never a platform default.
+    tiled = (getattr(predictor, "train_tile_size", None) is not None) if tile is None else tile
+    # Identity before calibration: its train-disjointness gate needs the checkpoint's experiment.
+    identity = resolve_model_identity(checkpoint, experiment_id=experiment_id)
+
+    # The resize half resolves only when tiled, so an unreadable augmentation config never sinks
+    # an untiled run.
+    try:
+        resolved_tile, tile_size_source, resolved_overlap, overlap_source, tile_resize = (
+            resolve_tile_regime(predictor, tiled=tiled, tile_size=tile_size, overlap=overlap))
+    except TileEdgeContradiction as exc:
+        return str(exc)
+    if tiled and resolved_tile is None:
+        return (
+            f"tile_size could not be resolved for {checkpoint.path}: this checkpoint carries no "
+            "persisted training tile geometry, no tile_size was given explicitly, and its untiled "
+            "training frame yields no tile edge either (none recorded, or a rectangular one, which "
+            "no single square edge reproduces the scale of on both axes), so tiled inference has no "
+            "real basis to run at. Pass tile_size explicitly, retrain with tile geometry persisted, "
+            "or leave tile unset/False to run untiled."
+        )
+    if tile_size_source == "derived":
+        logger.info("tile_size %d derived from the checkpoint's training geometry", resolved_tile)
+    elif tiled and tile_size_source == "native_ratio":
+        resize_note = "" if tile_resize is None else (
+            f", each tile run through its recorded train-time resize {tuple(tile_resize)}")
+        logger.info(
+            "tile_size %d derived from this checkpoint's own uniform untiled training frame%s",
+            resolved_tile, resize_note)
+
+    # A classified run with no id_map refuses before any pass, so no calibration is spent on it.
+    scope = run_scope(predictor)
+    id_map = resolve_decode_id_map(predictor, images_dir)
+    refusal = unmapped_classified_run(scope, id_map, images_dir=images_dir)
+    if refusal is not None:
+        return refusal
+    return _PreparedPass(
+        checkpoint_path=checkpoint.path, predictor=predictor, images_dir=images_dir, paths=paths,
+        identity=identity, scope=scope, id_map=id_map, tiled=tiled,
+        tiled_source="explicit" if tile is not None else "default",
+        tile_size=resolved_tile, tile_size_source=tile_size_source,
+        tile_size_derived_from=(
+            explicit_edge_provenance(predictor, resolved_tile)
+            if tile_size_source == "explicit" and resolved_tile is not None else None),
+        overlap=resolved_overlap, overlap_source=overlap_source, tile_resize=tile_resize,
+        conf=conf, nms_iou=nms_iou, max_dets=applied_max_dets,
+        conf_stated=conf_threshold is not None, max_dets_stated=max_dets is not None,
+        tile_batch_size=tile_batch_size, postprocess=postprocess)
 
 
 # --- earning the record a validated count claim names (the shared half of every door here) ---
@@ -1199,30 +1228,71 @@ def _draft_count_claim(result: dict, *, trait: str | None, bucket: Path,
     return draft, None
 
 
-def seal_stamp_and_record(out: Path, stamp_body: dict, draft, *, written: int
-                          ) -> tuple[dict, bool | None]:
-    """Append the record the gate earned over the files as they landed, write the stamp last, link
-    the bucket into its run's lineage, and record the publication.
+def _publish_predictions(out: Path, predictions: Iterable[dict], stamp_body: dict, draft, *,
+                         producer: str, dataset_root: Path | None
+                         ) -> tuple[list[str], int, dict, bool | None]:
+    """Write one prediction document per result as ``predictions`` yields it, then append the
+    record the gate earned over the documents as they landed, write the stamp last, link the bucket
+    into its run's lineage, and record the publication.
 
-    The last steps of the order every producer of a prediction bucket follows, an image bucket and
-    a raster bucket alike, the GUI's inference worker included, in one place so no door records
-    or skips the act on its own.
+    Every producer of a prediction bucket publishes here, an image bucket and a raster bucket
+    alike, whether its results arrive as a list or as a stream that predicts, reports progress and
+    stops on cancellation as it is consumed, so no door writes, stamps or records the act on its
+    own. The stamp names each written document's stem and its image's file name
+    (``image_filenames``) and carries the mask-binarize threshold when a result carried masks.
     ``draft`` is ``None`` for a run that earned nothing, which stamps unvalidated with no pointer.
-    A crash between the record and the stamp leaves a row no stamp names, which is inert; a crash
-    before either leaves prediction files that floor. The stamp's facts are its own
-    ``stamp_written`` line (``write_sidecar``); the one ``prediction_bucket_published`` line names
-    the documents written and whether the lineage link landed (``None`` when the run names no
-    experiment).
 
-    Returns ``(stamp_body, lineage_linked)``.
+    A raise after the first document lands, before the stamp does, writes no stamp and leaves one
+    ``prediction_bucket_published`` line under status ``failed`` naming the documents written and
+    the error, then propagates; a raise before any document lands committed nothing and leaves no
+    line. A lost audit line (``AuditEntryNotWritten``) is a committed act, not a failed pass, and
+    propagates as it is. A completed pass leaves the stamp's own ``stamp_written`` line and one
+    ``prediction_bucket_published`` line naming the documents written and whether the lineage link
+    landed (``None`` when the run names no experiment). ``dataset_root`` is the bucket's
+    (``bucket_dataset_root``), the root both lines are recorded under.
+
+    Returns ``(written, dropped_nonpositive_boxes, stamp_body, lineage_linked)``.
     """
-    from tcip_mcp.audit import record_event_or_raise
+    from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
     from tcip_mcp.pipelines.resolution import seal_validation, write_sidecar
 
-    if draft is not None:
-        _digest, stamp_body = seal_validation(
-            draft, dataset_root=draft.dataset_root, bucket_dirs=[out], stamp_body=stamp_body)
-    write_sidecar(out, stamp_body)
+    id_map, subject, attribute = stamp_body["id_map"], stamp_body["subject"], stamp_body["attribute"]
+    written: list[str] = []
+    names: dict[str, str] = {}
+    dropped, has_masks = 0, False
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+        for r in predictions:
+            image = Path(r["image"])
+            unmapped = unmapped_label_ids([r], id_map) if attribute is not None else []
+            if unmapped:
+                raise ValueError(
+                    f"{image.stem}: this classified run decoded to id(s) {unmapped}, not keys of "
+                    f"its recorded id_map ({sorted((id_map or {}).values())}).")
+            # Read before the write: a drop can empty a mask list that was genuinely there.
+            has_masks = has_masks or bool(r.get("masks"))
+            document = out / label_filename(image.stem)
+            dropped += write_predictions_json(
+                document, r, created_by=producer, id_map=id_map, subject=subject,
+                attribute=attribute)
+            written.append(str(document))
+            names[image.stem] = image.name
+        stamp_body["image_filenames"] = names
+        if has_masks:
+            stamp_body["mask_binarize"] = mask_binarize_provenance()
+        if draft is not None:
+            _digest, stamp_body = seal_validation(
+                draft, dataset_root=draft.dataset_root, bucket_dirs=[out], stamp_body=stamp_body)
+        write_sidecar(out, stamp_body)
+    except AuditEntryNotWritten:
+        raise
+    except Exception as exc:
+        if written:
+            record_event_or_raise(
+                "prediction_bucket_published",
+                {"predictions_dir": str(out), "written": written, "error": str(exc)},
+                status="failed", scope=dataset_root)
+        raise
     exp_id = stamp_body.get("experiment_id")
     lineage_linked = None
     if exp_id:
@@ -1237,15 +1307,16 @@ def seal_stamp_and_record(out: Path, stamp_body: dict, draft, *, written: int
     record_event_or_raise(
         "prediction_bucket_published",
         {"predictions_dir": str(out), "written": written, "lineage_linked": lineage_linked},
-        scope=bucket_dataset_root(out))
-    return stamp_body, lineage_linked
+        scope=dataset_root)
+    return written, dropped, stamp_body, lineage_linked
 
 
 def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
                                trait: str | None, images_dir: str | None,
-                               tile_size_validated: str | None, draft
+                               tile_size_validated: str | None, draft, dataset_root: Path | None
                                ) -> tuple[list[str], int, dict, bool | None]:
-    """Write one prediction file per image, then earn and stamp over exactly what landed.
+    """Stamp a per-image run from its own facts and publish its ``results`` through
+    :func:`_publish_predictions`, which consumes them once, list or stream.
 
     True once the bucket's own document refusal has already run: the resolver refuses a publish
     into a bucket a prior run's documents already occupy. ``out`` can still hold what that
@@ -1256,56 +1327,26 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
     ``resolve_writable_bucket``'s own docstring states (two publishers resolving the same clean
     bucket before either writes), ``out`` holds nothing but what this call is about to add.
 
-    The steps ``run_inference`` and ``deliver_per_image_counts`` share once each has resolved its own
-    bucket and run its own gate: both persist the same run's per-image detections into a bucket and
-    both stamp it, so the file naming, the producer string, the claim payload and the write order
-    are one implementation rather than two that agree today. ``draft`` present is exactly the
-    condition for a validated stamp: a door opens one only when the run's own dimensions all
-    cleared and the bucket sits where a claim can be recorded.
-
-    Returns ``(written, dropped_nonpositive_boxes, stamp_body, lineage_linked)``: the second value
-    is the count of detections dropped for a zero-extent box across every image, for the caller's
-    own summary; the last is :func:`seal_stamp_and_record`'s.
+    The step every per-image door shares once it has resolved its bucket and run
+    :func:`publish_bucket`'s gates (``run_inference``, ``deliver_per_image_counts``'s live path, the GUI's inference
+    worker), so the producer string and the stamp are one implementation. ``draft`` present is
+    exactly the condition for a validated stamp: a door opens one only when the run's own
+    dimensions all cleared and the bucket sits where a claim can be recorded.
     """
     from tcip_mcp.pipelines.resolution import operating_point_stamp, prediction_producer
 
-    out.mkdir(parents=True, exist_ok=True)
-    written: list[str] = []
     # The checkpoint's content hash, so an accepted prediction's GT names the exact model behind it.
     sha = result.get("checkpoint_sha256")
-    assert sha is not None  # _run_inference_verified always stamps its own checkpoint's real hash
-    producer = prediction_producer(checkpoint_path, sha)
-    id_map = result.get("id_map")
-    subject, attribute = result.get("subject"), result.get("attribute")
-    if attribute is not None:
-        unmapped = unmapped_label_ids(result["results"], id_map)
-        if unmapped:
-            raise ValueError(
-                f"{out}: this classified run decoded to id(s) {unmapped}, not keys of its "
-                f"recorded id_map ({sorted((id_map or {}).values())}); refusing before any "
-                "document is written."
-            )
-    has_masks = False
-    dropped = 0
-    for r in result["results"]:
-        out_json = out / label_filename(Path(r["image"]).stem)
-        # Read before the write: a drop can empty a mask list that was genuinely there, and
-        # has_masks must reflect what this run used, not what happened to survive the drop.
-        has_masks = has_masks or bool(r.get("masks"))
-        dropped += write_predictions_json(
-            out_json, r, created_by=producer, id_map=id_map, subject=subject, attribute=attribute)
-        written.append(str(out_json))
-
-    image_filenames = {Path(r["image"]).stem: Path(r["image"]).name for r in result["results"]}
+    assert sha is not None  # every door resolves its checkpoint's real hash before publishing
     op_stamp = operating_point_stamp(
         result.get("operating_point"),
         validated=draft is not None,
         validated_by=None,
         tile_size_validated=tile_size_validated,
         shippable_issues=result.get("shippable_issues", []),
-        id_map=id_map,
-        subject=subject,
-        attribute=attribute,
+        id_map=result.get("id_map"),
+        subject=result.get("subject"),
+        attribute=result.get("attribute"),
         trait=trait,
         dataset_hash=result.get("dataset_hash"),
         checkpoint=Path(checkpoint_path).stem,
@@ -1316,18 +1357,15 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
         produced_at=result.get("produced_at"),
         calibration_curve_path=result.get("calibration_curve_path"),
         gate_evidence_summary=result.get("gate_evidence_summary"),
-        image_filenames=image_filenames,
     )
-    if has_masks:
-        # The run-constant mask-binarize threshold travels once here rather than per-annotation.
-        op_stamp["mask_binarize"] = mask_binarize_provenance()
-    op_stamp, lineage_linked = seal_stamp_and_record(out, op_stamp, draft, written=len(written))
-    return written, dropped, op_stamp, lineage_linked
+    return _publish_predictions(
+        out, result["results"], op_stamp, draft,
+        producer=prediction_producer(checkpoint_path, sha), dataset_root=dataset_root)
 
 
 def _clear_door_refusal_reason(recorded_path: str) -> str | None:
     """Why ``clear_prediction_bucket`` would itself refuse ``recorded_path``, or ``None`` when the
-    door would reach it: named so the bracket's own refusal never promises the door as a remedy
+    door would reach it: named so the frozen-pointer refusal never promises the door as a remedy
     where it would refuse the exact same bucket."""
     from tcip_mcp.dataset_layout import canonical_prediction_bucket
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, stamp_names_raster
@@ -1346,16 +1384,43 @@ def _clear_door_refusal_reason(recorded_path: str) -> str | None:
     return None
 
 
-def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, trait: str | None,
-                           images_dir: str | None, dataset_root: Path | None,
-                           allow_unvalidated_staging: bool) -> dict:
-    """Publish a live run's predictions into ``out``, gated and linked exactly as
-    ``run_inference`` does: the authoritative post-inference tile gate, the count claim's own
-    gate, the frozen-lineage-pointer refusal, the write, and the post-write lineage link. Shared so
-    ``deliver_per_image_counts``' live-with-``predictions_dir`` path publishes under the identical contract
-    rather than a second implementation. ``out`` has already cleared the bucket-immutability
-    resolver (verdicts, and a prior run's own documents) before either caller reaches here; this
-    function does not re-resolve it.
+def _frozen_pointer_refusal(experiment_id: str | None, out: Path) -> str | None:
+    """Why publishing into ``out`` is refused because ``experiment_id``'s lineage already points
+    at another bucket it froze, or ``None`` when nothing refuses (no experiment, or a pointer
+    still open). Checked by every publishing door before it writes, so nothing on disk needs
+    unwinding; the reason names ``clear_prediction_bucket`` as the remedy only where that door
+    would reach the recorded bucket."""
+    if not experiment_id:
+        return None
+    from tcip_mcp.experiments import lineage_key, pointer_frozen, read_member
+
+    frozen = pointer_frozen(experiment_id, "lineage", "predictions", str(out))
+    if frozen is None:
+        return None
+    # pointer_frozen refuses exactly when terminal and the recorded pointer differs: that
+    # recorded path already holds the experiment's own published documents.
+    recorded_path = (read_member(lineage_key(experiment_id), {}) or {}).get("predictions")
+    door_reason = _clear_door_refusal_reason(recorded_path) if recorded_path else None
+    if door_reason is None:
+        return (f"{frozen} {recorded_path!r} holds the experiment's own published documents; "
+                f"clear_prediction_bucket(predictions_dir={recorded_path!r}, reason=...) "
+                "clears it for re-publication into that recorded path.")
+    return (f"{frozen} {recorded_path!r} holds the experiment's own published documents, and "
+            f"clear_prediction_bucket refuses that bucket too, since {door_reason}; it stays as "
+            "published.")
+
+
+def publish_bucket(result: dict, *, out: Path, checkpoint_path: str, trait: str | None,
+                   images_dir: str | None, dataset_root: Path | None,
+                   allow_unvalidated_staging: bool) -> dict:
+    """Publish a live per-image run's predictions into ``out``: the authoritative post-inference
+    tile gate, the count claim's own gate, the frozen-lineage-pointer refusal, then the writes, the
+    stamp, the lineage link and the publication's line (:func:`_publish_image_predictions`).
+    The one publisher of ``run_inference``, ``deliver_per_image_counts``' live-with-
+    ``predictions_dir`` path and the GUI's inference worker, whose ``result["results"]`` is a
+    stream predicting each image as it is consumed; every gate runs before the first result is
+    drawn. ``out`` has already cleared the bucket-immutability resolver (verdicts, and a prior
+    run's own documents) before a caller reaches here; this function does not re-resolve it.
 
     Returns a dict: ``refusal`` (the door's own error dict, or ``None``), ``written``,
     ``dropped_boxes``, ``op_stamp``, ``tile_size_validated`` and ``lineage_linked`` (``True``/
@@ -1383,36 +1448,15 @@ def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, tr
         return {"refusal": refusal, "written": [], "dropped_boxes": 0, "op_stamp": {},
                 "tile_size_validated": tile_size_validated, "lineage_linked": None}
 
-    exp_id = result.get("experiment_id")
-    if exp_id:
-        # Checked before the publisher writes the bucket, so nothing on disk needs unwinding.
-        from tcip_mcp.experiments import lineage_key, pointer_frozen, read_member
-
-        frozen = pointer_frozen(exp_id, "lineage", "predictions", str(out))
-        if frozen is not None:
-            # pointer_frozen refuses exactly when terminal and the recorded pointer differs:
-            # that recorded path already holds the experiment's own published documents.
-            recorded_path = (read_member(lineage_key(exp_id), {}) or {}).get("predictions")
-            door_reason = _clear_door_refusal_reason(recorded_path) if recorded_path else None
-            if door_reason is None:
-                frozen = (
-                    f"{frozen} {recorded_path!r} holds the experiment's own published documents; "
-                    f"clear_prediction_bucket(predictions_dir={recorded_path!r}, reason=...) "
-                    "clears it for re-publication into that recorded path."
-                )
-            else:
-                frozen = (
-                    f"{frozen} {recorded_path!r} holds the experiment's own published documents, "
-                    f"and clear_prediction_bucket refuses that bucket too, since {door_reason}; "
-                    "it stays as published."
-                )
-            return {"refusal": {"error": frozen}, "written": [], "dropped_boxes": 0,
-                    "op_stamp": {}, "tile_size_validated": tile_size_validated,
-                    "lineage_linked": None}
+    frozen = _frozen_pointer_refusal(result.get("experiment_id"), out)
+    if frozen is not None:
+        return {"refusal": {"error": frozen}, "written": [], "dropped_boxes": 0,
+                "op_stamp": {}, "tile_size_validated": tile_size_validated,
+                "lineage_linked": None}
 
     written, dropped_boxes, op_stamp, lineage_linked = _publish_image_predictions(
         out, result, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
-        tile_size_validated=tile_size_validated, draft=draft)
+        tile_size_validated=tile_size_validated, draft=draft, dataset_root=dataset_root)
     return {"refusal": None, "written": written, "dropped_boxes": dropped_boxes,
             "op_stamp": op_stamp, "tile_size_validated": tile_size_validated,
             "lineage_linked": lineage_linked}
@@ -2121,14 +2165,10 @@ def _export_predictions_raster(
         nms_iou=applied_nms_iou, max_dets=applied_max_dets,
     )
     identity = resolve_model_identity(checkpoint, experiment_id=experiment_id)
-    if identity["experiment_id"]:
-        # Checked before the raster pass, not after: a blob write cannot join the record's own
-        # transaction, so this is the one chance to refuse before the export writes anything.
-        from tcip_mcp.experiments import pointer_frozen
-
-        frozen = pointer_frozen(identity["experiment_id"], "lineage", "predictions", str(out))
-        if frozen is not None:
-            return {"error": frozen}
+    # Checked before the raster pass, not after, so the pass writes no progress record either.
+    frozen = _frozen_pointer_refusal(identity["experiment_id"], out)
+    if frozen is not None:
+        return {"error": frozen}
 
     # No images_dir for a raster source; resolved ahead of the pass (never after it) so a
     # classified run with no id_map refuses before the expensive tiled pass runs.
@@ -2445,24 +2485,7 @@ def _export_predictions_raster(
 
     from datetime import datetime, timezone
 
-    out.mkdir(parents=True, exist_ok=True)
     sha = identity["sha256"]
-    producer = prediction_producer(checkpoint.path, sha)
-    pred_path = out / label_filename(Path(raster_path).stem)
-    if raster_attribute is not None:
-        unmapped = unmapped_label_ids([result], id_map)
-        if unmapped:
-            raise ValueError(
-                f"{pred_path}: this classified run decoded to id(s) {unmapped}, not keys of its "
-                f"recorded id_map ({sorted((id_map or {}).values())}); refusing before writing."
-            )
-    # Read before the write: a drop can empty a mask list that was genuinely there, and has_masks
-    # must reflect what this run used, not what happened to survive the drop.
-    has_masks = bool(result.get("masks"))
-    dropped_boxes = write_predictions_json(
-        pred_path, result, created_by=producer, id_map=id_map,
-        subject=raster_subject, attribute=raster_attribute)
-
     produced_at = datetime.now(timezone.utc).isoformat()
     op_stamp = operating_point_stamp(
         op_provenance,
@@ -2482,8 +2505,6 @@ def _export_predictions_raster(
         raster_path=str(raster_path),
         produced_at=produced_at,
     )
-    if has_masks:
-        op_stamp["mask_binarize"] = mask_binarize_provenance()
     if block_prov is not None:
         op_stamp["claim_scope_validated"] = claim_scope_validated
         # spatial_manifest is already carried on the training experiment's own split.json.
@@ -2493,14 +2514,16 @@ def _export_predictions_raster(
     # Reused from the sampling taken at the top of this call, never resampled: a consumer
     # resolving these boxes through a raster's georeferencing needs this to name that raster.
     op_stamp["raster_content_identity"] = raster_identity
-    op_stamp, _lineage_linked = seal_stamp_and_record(out, op_stamp, draft, written=1)
+    files, dropped_boxes, op_stamp, _lineage_linked = _publish_predictions(
+        out, [result], op_stamp, draft, producer=prediction_producer(checkpoint.path, sha),
+        dataset_root=bucket_root)
     exp_id = identity["experiment_id"]
 
     # The pass finished: whatever progress it left has nothing left to resume.
     _clear_raster_pass_progress(out)
 
     response = {
-        "image_count": 1, "output_dir": str(out), "files": [str(pred_path)],
+        "image_count": 1, "output_dir": str(out), "files": files,
         "bucket_redirected": resolution.redirected,
         "requested_output_dir": str(out) if resolution.redirected else None,
         "operating_point": op_provenance,
@@ -2526,7 +2549,7 @@ _DELIVER_PER_IMAGE_COUNTS_LIVE_ONLY_DEFAULTS = {
     "conf_threshold": None, "device": None, "tile": None, "tile_size": None, "overlap": None,
     "global_nms_iou": None, "max_dets": None, "calibration_labels_dir": None,
     "calibration_images_dir": None, "selection_dir": None, "experiment_id": None,
-    "postprocess": "nms", "tile_batch_size": 96,
+    "postprocess": "nms", "tile_batch_size": DEFAULT_TILE_BATCH_SIZE,
 }
 """``deliver_per_image_counts`` parameters meaningful only for its live regime, mapped to the documented
 default a bucket-regime call is judged against. A non-``None`` default (``postprocess``,
@@ -2548,7 +2571,7 @@ def deliver_per_image_counts(
     tile: bool | None = None,
     tile_size: int | None = None,
     overlap: float | None = None,
-    tile_batch_size: int = 96,
+    tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
     global_nms_iou: float | None = None,
     max_dets: int | None = None,
     postprocess: str = "nms",
@@ -2617,12 +2640,8 @@ def deliver_per_image_counts(
     document stem a prediction file is itself named for. The live regime without ``predictions_dir``
     reads it straight off the pass's own per-image results; a bucket-reading regime (the bucket
     regime proper, or the live regime with ``predictions_dir``, both reading documents by stem)
-    resolves it through the bucket's own stamp-recorded ``image_filenames`` map. A stem the map does
-    not name (a stamp written before the map existed, or a document left over in the bucket from an
-    earlier publish this run's fresh map does not cover) falls that row back to the bare stem
-    instead, and the response's ``image_note`` key discloses which stems fell back and why, carried
-    on both a delivered response and a ``DeliveryRefused`` refusal, in either bucket-reading regime;
-    absent when nothing fell back.
+    resolves it through the bucket's own stamp-recorded ``image_filenames`` map, and refuses a
+    bucket whose stamp does not name each of its documents: no platform publisher wrote it.
 
     Meaning door: ``trait``'s per-image-count operationalization must be recorded and
     breeder-confirmed, checked before the pass runs (live) or the bucket is read (bucket regime),
@@ -2839,10 +2858,9 @@ def deliver_per_image_counts(
     dropped_boxes = 0
     bucket_published = False
     lineage_linked = None
-    image_note = None
     csv_rows = result["results"]
     if bucket is not None:
-        pub = _publish_bucket_bracket(
+        pub = publish_bucket(
             result, out=bucket, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
             dataset_root=bucket_root, allow_unvalidated_staging=allow_unvalidated_staging)
         if pub["refusal"] is not None:
@@ -2850,11 +2868,8 @@ def deliver_per_image_counts(
         dropped_boxes = pub["dropped_boxes"]
         lineage_linked = pub["lineage_linked"]
         bucket_published = True
-        # Counted off the just-published documents, filenames off the run's own just-written stamp;
-        # a document from an earlier publish this run's map does not name falls back and discloses.
-        filename_map = pub["op_stamp"].get("image_filenames")
-        csv_rows, fallback_stems = _bucket_csv_rows(bucket, filename_map)
-        image_note = _image_filename_fallback_note(bucket, filename_map, fallback_stems)
+        # Counted off the just-published documents, filenames off the run's own just-written stamp.
+        csv_rows = _bucket_csv_rows(bucket, pub["op_stamp"])
 
     provenance = {
         "producer_model_sha256": result.get("checkpoint_sha256"),
@@ -2910,8 +2925,6 @@ def deliver_per_image_counts(
             refusal["dropped_nonpositive_boxes"] = dropped_boxes
             if bucket_root is None:
                 refusal["note"] = _NO_DATASET_ROOT_NOTE.format(bucket=bucket)
-            if image_note is not None:
-                refusal["image_note"] = image_note
         return refusal
 
     # This response carries the counts too, so it needs the proof at the end that the write did.
@@ -2952,8 +2965,6 @@ def deliver_per_image_counts(
         out["lineage_linked"] = lineage_linked
         if bucket_root is None:
             out["note"] = _NO_DATASET_ROOT_NOTE.format(bucket=bucket)
-        if image_note is not None:
-            out["image_note"] = image_note
     # run_inference's own warnings (a CPU-bound workload) are surfaced here too, so a count CSV
     # never ships with the regime it ran in disclosed only in the server log.
     if result.get("warning"):
@@ -2961,64 +2972,43 @@ def deliver_per_image_counts(
     return out
 
 
-def _bucket_csv_rows(
-    bucket_path: Path, filename_map: dict[str, str] | None,
-) -> tuple[list[dict], list[str]]:
+def _bucket_csv_rows(bucket_path: Path, stamp: dict) -> list[dict]:
     """A prediction bucket's own per-image documents as ``export_detection_csv``'s row source.
 
     Counted detections only (``detection_annotations``: a ``Point`` and a crowd region excluded),
-    ordered by document
-    stem rather than trusted to ``prediction_documents``' own filename sort (which would diverge
-    from the live regime's sorted-stem enumeration once ``.json`` changes a stem's relative
-    order). The one reader every documents-backed CSV path shares, so a masked detection the
-    write side kept on its stored polygon's extent cannot be dropped again by a different,
-    box-based predicate downstream.
+    ordered by document stem rather than trusted to ``prediction_documents``' own filename sort
+    (which would diverge from the live regime's sorted-stem enumeration once ``.json`` changes a
+    stem's relative order). The one reader every documents-backed CSV path shares, so a masked
+    detection the write side kept on its stored polygon's extent cannot be dropped again by a
+    different, box-based predicate downstream.
 
-    Each row's ``image`` value is the stamp-recorded source filename (``filename_map[doc.stem]``,
-    the basename with extension the publisher stamped): a document's own filename is only ever
-    ``<stem>.json``, which carries no extension to recover. A ``filename_map`` that is absent
-    entirely, or names no entry for a given stem, falls that row back to the bare stem; the second
-    return value lists the stems that fell back, so a caller can disclose the fallback rather than
-    let the CSV's own cells silently say less than the caller believes.
+    Each row's ``image`` value is the source filename the stamp records for the document's stem
+    (``image_filenames``): a document's own filename is only ever ``<stem>.json``, which carries no
+    extension to recover. Every publisher names each document it writes there, so a stamp without
+    the map, or a document it does not name, is a bucket no platform publisher wrote, refused as
+    ``CountDeliveryRefused`` naming the bucket and the documents.
     """
     from tcip_annotation.json_io import detection_annotations, prediction_documents, safe_score
     from tcip_annotation.state import prediction_score
 
+    from tcip_mcp.pipelines.resolution import CountDeliveryRefused
+
     documents = sorted(prediction_documents(bucket_path), key=lambda p: p.stem)
+    stated = stamp.get("image_filenames")
+    names: dict = stated if isinstance(stated, dict) else {}
+    unnamed = [doc.stem for doc in documents if doc.stem not in names]
+    if unnamed:
+        raise CountDeliveryRefused(
+            f"{bucket_path}'s stamp names no source image for document(s) {unnamed}: every "
+            "platform publisher records each document it writes in the stamp's image_filenames, "
+            "so these documents are not a platform-published bucket's.")
     image_results = []
-    fallback_stems = []
     for doc in documents:
         annotations = detection_annotations(doc)
         scores = [safe_score(prediction_score(a)) for a in annotations]
-        filename = (filename_map or {}).get(doc.stem)
-        if filename is None:
-            filename = doc.stem
-            fallback_stems.append(doc.stem)
-        image_results.append({"image": filename, "count": len(annotations), "scores": scores})
-    return image_results, fallback_stems
-
-
-def _image_filename_fallback_note(
-    bucket_path: Path, filename_map: dict[str, str] | None, fallback_stems: list[str],
-) -> str | None:
-    """The fallback disclosure ``_bucket_csv_rows`` earns, shared by every count-bearing response
-    that reads a bucket's image filename map, whether the call succeeds or a ``DeliveryRefused``
-    refuses it: names which rows' image cells carry a bare document stem instead of the source
-    filename, and why. ``None`` when every row resolved through the map.
-    """
-    if filename_map is None:
-        return (
-            f"{bucket_path}'s stamp carries no image filename map: every row derives from a "
-            "document the map does not name, so every row's image cell carries the bare document "
-            "stem, not the source image's filename."
-        )
-    if fallback_stems:
-        return (
-            f"{bucket_path}'s stamp's image filename map names no entry for stem(s) "
-            f"{sorted(fallback_stems)}: those rows derive from documents the map does not name, "
-            "and their image cells carry the bare stem."
-        )
-    return None
+        image_results.append(
+            {"image": names[doc.stem], "count": len(annotations), "scores": scores})
+    return image_results
 
 
 def per_image_counts_from_bucket(
@@ -3045,7 +3035,8 @@ def per_image_counts_from_bucket(
     (``pipelines.resolution``) is the writer's own gate refusal, its ``facts`` attribute set here
     to this call's own counts-bearing facts; ``CountDeliveryRefused`` (``pipelines.resolution``)
     covers everything else this door refuses on (a missing stamp, a whole-raster bucket, an
-    unknown or mismatched trait, a malformed filename map, an empty bucket), each carrying the
+    unknown or mismatched trait, a document the stamp's filename map does not name, an empty
+    bucket), each carrying the
     same facts the tool's own ``{"error": ...}`` shape carries.
     """
     from tcip_mcp.operationalization import (
@@ -3102,22 +3093,13 @@ def per_image_counts_from_bucket(
             f"{bucket_path}'s stamp was recorded for trait {stamp_trait!r}, not {trait!r}: a "
             "bucket produced for one trait cannot deliver a per-image count under another.")
 
-    filename_map = sidecar.get("image_filenames")
-    if filename_map is not None and not isinstance(filename_map, dict):
-        raise CountDeliveryRefused(
-            f"{bucket_path}'s stamp's image_filenames is not a mapping (got "
-            f"{type(filename_map).__name__}): a bucket regime call expects the stem-to-filename "
-            "map run_inference, deliver_per_image_counts's live-with-predictions_dir path, or the "
-            "web inference worker writes there, or nothing at all.")
-    image_results, fallback_stems = _bucket_csv_rows(bucket_path, filename_map)
+    image_results = _bucket_csv_rows(bucket_path, sidecar)
     if not image_results:
         raise CountDeliveryRefused(
             f"{bucket_path} carries a readable stamp but no prediction documents: an empty "
             "bucket is not a per-image count either.")
     image_count = len(image_results)
     total_detections = sum(r["count"] for r in image_results)
-
-    image_note = _image_filename_fallback_note(bucket_path, filename_map, fallback_stems)
 
     op = sidecar.get("operating_point") or {}
     provenance = {
@@ -3143,8 +3125,6 @@ def per_image_counts_from_bucket(
             "total_detections": total_detections,
             "predictions_dir": str(bucket_path),
         }
-        if image_note is not None:
-            exc.facts["image_note"] = image_note
         raise
 
     out = {
@@ -3162,6 +3142,4 @@ def per_image_counts_from_bucket(
         "predictions_dir": str(bucket_path),
         "delivery_event_recorded": event_recorded,
     }
-    if image_note is not None:
-        out["image_note"] = image_note
     return out

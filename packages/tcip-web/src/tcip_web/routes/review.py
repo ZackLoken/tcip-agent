@@ -45,7 +45,9 @@ from tcip_annotation.json_io import (
 )
 from tcip_annotation.review_engine import capture_label_baseline
 from tcip_annotation.state import Annotation, prediction_score
-from tcip_annotation.verdicts import VerdictAction, decode_verdict
+from tcip_annotation.verdicts import (
+    ACCEPTED_ACTION, EDITED_ACTION, REJECTED_ACTION, SWEPT_ACTION, VerdictAction, decode_verdict,
+)
 from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status, label_filename
 from tcip_mcp.pipelines.image_utils import (
     AmbiguousImageStem, image_dimensions, resolve_image_source,
@@ -545,7 +547,7 @@ def _is_reviewer_drawn_new_shape(payload: "ActionPayload") -> bool:
     missed object with ``class_name = dataset.subject`` (the object class), and authoring that as
     the attribute's value would fabricate a state nobody assessed.
     """
-    return payload.gt_idx is None and payload.pred_idx is None and payload.action != "swept"
+    return payload.gt_idx is None and payload.pred_idx is None and payload.action != SWEPT_ACTION
 
 
 def _check_classified_value(class_name: str, vocabulary: set) -> None:
@@ -616,7 +618,7 @@ def _apply_gt_mutation(
             "then review its value here."
         )
 
-    if act == "edited":
+    if act == EDITED_ACTION:
         # The edited box or the one contour the reviewer drew, through the save routes' own
         # conversion, so an edit is checked exactly as a saved shape is.
         geom = annotation_from_payload(
@@ -655,7 +657,7 @@ def _apply_gt_mutation(
                                  created_by=reviewer, created_at=now_iso, accepted_by_rule=None))
         return True, len(ctx.gt) - 1
 
-    if act == "rejected" and dt in ("tp", "fn"):
+    if act == REJECTED_ACTION and dt in ("tp", "fn"):
         if classifying:
             raise ValueError(
                 "reject on a true positive or false negative is a detector-scope act: it removes "
@@ -668,7 +670,7 @@ def _apply_gt_mutation(
             return True, None
         return False, None
 
-    if act == "accepted" and dt == "fp" and _names_prediction(payload, ctx):
+    if act == ACCEPTED_ACTION and dt == "fp" and _names_prediction(payload, ctx):
         assert payload.pred_idx is not None  # _names_prediction's own guard
         pred = ctx.preds[payload.pred_idx]
         if isinstance(pred.geometry, BBox):
@@ -713,7 +715,7 @@ def _verify_rule_admitted_claim(
     """
     from tcip_mcp.pipelines.resolution import admission_rule_of, read_operating_point_sidecar
 
-    if payload.action != "accepted":
+    if payload.action != ACCEPTED_ACTION:
         raise HTTPException(
             400, f"rule_admitted refuses action {payload.action!r}: only an accept can be rule-admitted")
     if payload.det_type not in ("tp", "fp"):
@@ -814,7 +816,7 @@ def record_action(payload: ActionPayload) -> dict:
     # An edited verdict rewrites the GT geometry, so key the entry to the post-edit geometry;
     # otherwise the next reload's spatial lookup misses it and the detection reads unreviewed.
     norm_det = norm_ctx = None
-    if payload.action == "edited" and changed and landed_idx is not None:
+    if payload.action == EDITED_ACTION and changed and landed_idx is not None:
         norm_det = replace(det, gt_idx=landed_idx)
         norm_ctx = work
     producer_identity = _resolve_producer_identity(pred_path)

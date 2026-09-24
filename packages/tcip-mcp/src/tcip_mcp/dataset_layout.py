@@ -316,6 +316,16 @@ def dataset_root_of(path: str | Path) -> Optional[Path]:
     return Path(*parts[:i]) if i > 0 else None
 
 
+def bucket_dataset_root(bucket: str | Path) -> Optional[Path]:
+    """The resolved dataset root a prediction bucket sits under, or ``None`` when it is under
+    none: the root its verdict key, stamp, claim, publication and covered-bucket key are all
+    recorded against, so a door cannot record a key the verifier will not look for. Read from the
+    path where the bucket is now, never from the record or from what a write planted in the
+    bucket, so a dataset moved or copied whole keys its buckets the same way."""
+    root = dataset_root_of(bucket)
+    return root.resolve() if root is not None else None
+
+
 def subjects_path(dataset_root: str | Path) -> Path:
     """``<dataset_root>/subjects.json``: the one nested registry that decodes the dataset's labels.
 

@@ -43,6 +43,8 @@ from tcip_store import (
 )
 from tcip_store.file_backend import RootedFileLocator
 
+from tcip_mcp.dataset_layout import bucket_dataset_root
+
 logger = logging.getLogger(__name__)
 
 # --- vocabularies ---------------------------------------------------------
@@ -164,6 +166,8 @@ DEFAULT_OVERLAP = 0.2
 # A high full-frame detection cap so dense scenes (hundreds of objects) aren't silently truncated
 # at a framework default (torchvision 100 / ultralytics 300). Enforced after any tiled merge.
 DEFAULT_MAX_DETS = 1000
+# Tiles per forward batch: a throughput setting that changes no prediction.
+DEFAULT_TILE_BATCH_SIZE = 96
 
 
 def applied_operating_point(
@@ -988,18 +992,6 @@ def write_sidecar(pred_dir: str | Path, stamp: dict, document: str = "operating_
     _record_stamp_written(pred_dir, document, stamp, scope)
 
 
-def bucket_dataset_root(bucket: str | Path) -> Path | None:
-    """The dataset root a bucket sits under, or ``None`` when it is under none: the root its
-    stamp, claim, publication and covered-bucket key are all recorded against, so a door cannot
-    record a key the verifier will not look for. Read from the path where the bucket is now,
-    never from the record or from what a write planted in the bucket, so a dataset moved or
-    copied whole keys its buckets the same way."""
-    from tcip_mcp.dataset_layout import dataset_root_of
-
-    root = dataset_root_of(bucket)
-    return root.resolve() if root is not None else None
-
-
 def _record_stamp_written(pred_dir: str | Path, document: str, stamp: dict,
                           scope: Path | None) -> None:
     """A stamp write's one audit line, ``stamp_written``: the bucket, the document and the stamp
@@ -1149,25 +1141,20 @@ STAMP_EXTENSION_KEYS: dict[str, str] = {
     "review_reference_hash": "the review-promotion path (routes/review.py's _stamp_body)",
     "review_image_count": "the review-promotion path (routes/review.py's _stamp_body)",
     "validated_at": "the review-promotion path (routes/review.py's _stamp_body)",
-    "mask_binarize": "the image-export and raster-export doors and the web inference worker, "
-                     "for a bucket carrying masks",
+    "mask_binarize": "the one bucket publisher (inference_tools._publish_predictions), for a "
+                     "bucket carrying masks",
     "claim_scope_validated": "the raster-export door's block-calibration branch",
     "block_calibration": "the raster-export door's block-calibration branch",
     "raster_content_identity": "the raster-export door, recorded for every run of that regime",
-    "overlap": "the web inference worker",
-    "overlap_source": "the web inference worker",
-    "calibration_curve_path": "the shared per-image bucket publisher behind run_inference "
-                              "and deliver_per_image_counts's live path, for a calibrated run that "
-                              "persisted a curve",
-    "gate_evidence_summary": "the shared per-image bucket publisher behind run_inference "
-                             "and deliver_per_image_counts's live path, for a calibrated run that "
-                             "persisted a curve, and calibration_tools.calibrate_count_operating_point, "
-                             "which earns a claim over an already-published bucket rather than "
-                             "publishing one",
-    "image_filenames": "the per-image bucket publishers (the shared image-bucket publisher behind "
-                       "run_inference and deliver_per_image_counts's live path, and the web inference "
-                       "worker): each prediction document stem mapped to its source image's "
-                       "basename with extension",
+    "calibration_curve_path": "the per-image bucket publisher (inference_tools.publish_bucket), "
+                              "for a calibrated run that persisted a curve",
+    "gate_evidence_summary": "the per-image bucket publisher (inference_tools.publish_bucket), "
+                             "for a calibrated run that persisted a curve, and "
+                             "calibration_tools.calibrate_count_operating_point, which earns a "
+                             "claim over an already-published bucket rather than publishing one",
+    "image_filenames": "the one bucket publisher (inference_tools._publish_predictions), image and "
+                       "raster buckets alike: each written prediction document's stem mapped to "
+                       "its source image's basename with extension",
 }
 """Every top-level key a producer adds beside ``operating_point_stamp``'s own sixteen, one entry
 per key naming which producer writes it. :func:`write_sidecar` refuses a fresh ``operating_point``

@@ -174,15 +174,13 @@ def bucket_key_of(bucket_dir: str | Path | None) -> str:
     """
     from tcip_annotation.review_engine import NO_BUCKET
 
-    from tcip_mcp.dataset_layout import dataset_root_of
+    from tcip_mcp.dataset_layout import bucket_dataset_root
 
     if not bucket_dir:
         return NO_BUCKET
-    d = Path(bucket_dir)
-    root = dataset_root_of(d)
-    if root is None:
-        return d.resolve().as_posix()
-    return d.relative_to(root).as_posix()
+    root = bucket_dataset_root(bucket_dir)
+    d = Path(bucket_dir).resolve()
+    return d.as_posix() if root is None else d.relative_to(root).as_posix()
 
 
 def _open_review_engine(review_state_dir: Path | str):
