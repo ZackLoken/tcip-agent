@@ -1,7 +1,7 @@
 """Each fact here has one producer and one path its readers share: a prediction's score, a
 ground-truth record's content, the target a loader builds from annotations, a box's stored grid,
-a stamp write's audit line, a split lock's recorded fields and a completeness digest's stored
-grid. A record that does not state the fact is refused by name where it is read, never given a
+a stamp write's audit line, a split lock's recorded fields, a completeness digest's stored grid
+and a prediction bucket's dataset root. A record that does not state the fact is refused by name where it is read, never given a
 stand-in.
 
 Fixtures are written through the platform's own label writer and read back through its reader.
@@ -176,3 +176,31 @@ def test_a_split_lock_missing_a_recorded_field_raises_naming_it(tmp_path: Path):
     with pytest.raises(KeyError, match="redraw_history"):
         resolve_locked_cal_holdout_split(stems, identity_hash="h", scope_root=tmp_path,
                                          force_redraw=True)
+
+
+def test_every_reader_of_a_buckets_dataset_root_answers_what_bucket_dataset_root_answers(
+    tmp_path: Path, monkeypatch,
+):
+    """One bucket spelled two ways, absolute and relative through a ``..`` segment, is one bucket
+    under one root to the verdict key and to a delivery's single-dataset check; a bucket under no
+    dataset root has none to either."""
+    from tcip_mcp.dataset_layout import bucket_dataset_root
+    from tcip_mcp.prediction_buckets import bucket_key_of
+    from tcip_mcp.subject_registry import _distinct_dataset_root
+
+    dataset = tmp_path / "orchard"
+    bucket = dataset / "predictions" / "detector" / "2026-05-01"
+    bucket.mkdir(parents=True)
+    (dataset / "predictions" / "other").mkdir()
+    monkeypatch.chdir(tmp_path)
+    detour = Path("orchard", "predictions", "other", "..", "detector", "2026-05-01")
+
+    assert bucket_dataset_root(detour) == bucket_dataset_root(bucket) == dataset.resolve()
+    assert bucket_key_of(detour) == bucket_key_of(bucket) == "predictions/detector/2026-05-01"
+    assert _distinct_dataset_root([bucket, detour]) == dataset.resolve()
+
+    loose = tmp_path / "scratch" / "run"
+    loose.mkdir(parents=True)
+    assert bucket_dataset_root(loose) is None
+    assert bucket_key_of(loose) == loose.resolve().as_posix()
+    assert _distinct_dataset_root([loose]) is None

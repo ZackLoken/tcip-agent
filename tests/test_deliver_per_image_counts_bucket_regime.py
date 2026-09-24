@@ -13,7 +13,7 @@ import sys
 
 import pytest
 
-from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT
+from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT, write_sidecar
 from tests import _operationalization_fixtures as fx
 from tests._binding_fixtures import calibrated_run_fields, write_bound_sidecar, write_prediction
 from tests._record_damage_fixtures import damage_record
@@ -150,7 +150,7 @@ def test_a_live_only_parameter_stated_at_its_own_default_is_silently_admitted(tm
     dataset_root = tmp_path / "ds"
     bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
+    stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
              "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
@@ -270,7 +270,7 @@ def test_bucket_regime_admits_a_stamp_naming_no_trait_at_all(tmp_path):
 
     bucket = tmp_path / "no_trait_preds"
     _write_real_prediction(bucket, "a")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": None, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "trait": None, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -322,7 +322,7 @@ def test_bucket_regime_measured_subject_check_is_driven_by_a_recorded_id_map(tmp
 
     bucket = tmp_path / "id_mapped_preds"
     _write_real_prediction(bucket, "a")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": None, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "trait": None, "images_dir": str(tmp_path), "raster_path": None,
              "id_map": {fx.COUNT_SUBJECT: 0},
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
@@ -471,7 +471,7 @@ def test_a_withdrawn_operationalization_mid_flow_is_count_free_in_the_bucket_reg
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -528,7 +528,7 @@ def test_a_withdrawn_operationalization_mid_flow_is_count_free_in_the_live_regim
 def test_a_gate_refusal_is_counts_bearing_in_the_bucket_regime(tmp_path):
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -594,7 +594,6 @@ def test_live_and_bucket_regime_produce_the_same_csv_rows(tmp_path, monkeypatch)
     assert len(rows_a) == len(rows_b) == 1
     # The delivered cell carries the source extension, not the bare stem the .json document lost.
     assert rows_a[0]["image"] == "a.png"
-    assert "image_note" not in live and "image_note" not in bucket_result
     for key in rows_a[0]:
         if key == "produced_at":
             from datetime import datetime
@@ -641,29 +640,6 @@ def test_each_act_of_a_delivery_leaves_one_row_of_its_own(tmp_path, monkeypatch)
     assert _audit_tools(root) == sorted(earned + ["export_detection_csv"] * 2)
 
 
-def test_bucket_regime_falls_back_to_the_stem_for_a_bucket_with_no_filename_map(tmp_path):
-    """A bucket published before the image_filenames map existed carries no such key in its stamp:
-    the delivered image cell falls back to the bare document stem, and the response discloses the
-    fallback through image_note rather than silently reading as a filename."""
-    import tcip_mcp.tools.inference_tools as itools
-
-    dataset_root = tmp_path / "ds"
-    bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
-    _write_real_prediction(bucket, "a")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
-             "raster_path": None,
-             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
-    write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
-
-    out_csv = tmp_path / "o.csv"
-    r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(out_csv),
-                               trait=fx.COUNT_TRAIT)
-    assert "error" not in r, r
-    assert "carries no image filename map" in r["image_note"]
-    rows = list(csv.DictReader(out_csv.open()))
-    assert rows[0]["image"] == "a"
-
-
 def test_a_crowd_only_prediction_document_delivers_a_count_of_zero(tmp_path):
     """A crowd region holds many objects it never separated, so it is no detection: a document
     holding one alone delivers zero through the bucket door, and ``count_by_class`` reads zero."""
@@ -681,6 +657,7 @@ def test_a_crowd_only_prediction_document_delivers_a_count_of_zero(tmp_path):
                                                  geometry=BBox(10.0, 10.0, 60.0, 60.0))], 100, 100)
     stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True,
              "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+             "image_filenames": {"a": "a.png", "b": "b.png"},
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
 
@@ -689,72 +666,40 @@ def test_a_crowd_only_prediction_document_delivers_a_count_of_zero(tmp_path):
                                         trait=fx.COUNT_TRAIT)
     assert "error" not in r, r
     counts = {row["image"]: row["detection_count"] for row in csv.DictReader(out_csv.open())}
-    assert counts == {"a": "1", "b": "0"}
+    assert counts == {"a.png": "1", "b.png": "0"}
     scope = BucketScope(subject=fx.COUNT_SUBJECT, attribute=None)
     assert count_by_class(crowd, {fx.COUNT_SUBJECT: 0}, "x", scope=scope)[0] == 0
 
 
-def test_bucket_regime_partial_map_delivers_filenames_for_mapped_rows_and_stems_for_the_rest(
-    tmp_path,
+@pytest.mark.parametrize("image_filenames", [None, {"a": "a.png"}, ["a.png", "b.png"]],
+                         ids=["no map", "a document unnamed", "not a mapping"])
+def test_bucket_regime_refuses_a_bucket_whose_stamp_does_not_name_each_document(
+    tmp_path, image_filenames,
 ):
-    """A stamp's image filename map naming some but not all of the bucket's documents' stems
-    delivers the mapped rows under their filename and the rest under the bare stem, disclosing
-    the unmapped stems through image_note: the fallback branch is per-row, not all-or-nothing."""
+    """Every publisher names each document it writes in its stamp's image_filenames, so a stamp
+    without the map, or one that does not name a document the bucket holds, is a bucket no
+    platform publisher wrote: the delivery refuses naming the bucket and the unnamed documents,
+    and writes no CSV."""
     import tcip_mcp.tools.inference_tools as itools
 
     dataset_root = tmp_path / "ds"
     bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
     _write_real_prediction(bucket, "b")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
-             "raster_path": None, "image_filenames": {"a": "a.png"},
-             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
-    write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": False,
+             "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
+    if image_filenames is not None:
+        stamp["image_filenames"] = image_filenames
+    write_sidecar(bucket, stamp)
 
     out_csv = tmp_path / "o.csv"
     r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(out_csv),
-                               trait=fx.COUNT_TRAIT)
-    assert "error" not in r, r
-    assert "['b']" in r["image_note"]
-    rows = {row["image"]: row for row in csv.DictReader(out_csv.open())}
-    assert "a.png" in rows
-    assert "b" in rows
-
-
-def test_bucket_regime_gate_refusal_on_a_mapless_bucket_carries_the_image_note(tmp_path):
-    """A gate refusal (unvalidated conf, unacknowledged) is counts-bearing already; it must not
-    drop the same fallback disclosure a successful delivery off the same bucket would carry."""
-    import tcip_mcp.tools.inference_tools as itools
-
-    bucket = tmp_path / "preds"
-    _write_real_prediction(bucket, "a")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
-             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
-    write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
-
-    r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT)
-    assert "error" in r
-    assert "carries no image filename map" in r["image_note"]
-
-
-def test_bucket_regime_refuses_a_non_dict_image_filenames_in_the_stamp(tmp_path):
-    """A stamp whose image_filenames is not a mapping (a corrupted or hand-edited stamp) refuses
-    by name before _bucket_csv_rows ever calls .get on it, rather than crashing with
-    AttributeError on a value that carries no .get method."""
-    import tcip_mcp.tools.inference_tools as itools
-
-    bucket = tmp_path / "preds"
-    _write_real_prediction(bucket, "a")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
-             "image_filenames": ["a.png"],
-             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
-    write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
-
-    r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT)
-    assert "error" in r
-    assert "image_filenames" in r["error"]
+                                        trait=fx.COUNT_TRAIT)
+    assert str(bucket) in r["error"] and "image_filenames" in r["error"]
+    unnamed = "['b']" if isinstance(image_filenames, dict) else "['a', 'b']"
+    assert unnamed in r["error"]
+    assert not out_csv.exists()
 
 
 def test_live_regime_second_publish_into_a_document_holding_bucket_refuses(tmp_path, monkeypatch):
@@ -883,7 +828,7 @@ def test_bucket_regime_reads_a_real_published_bucket_with_no_torch_import(tmp_pa
     dataset_root = tmp_path / "ds"
     bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
+    stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
              "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
@@ -967,7 +912,7 @@ def test_bucket_regime_over_a_cleared_bucket_refuses_the_floored_binding_naming_
         id_map={fx.COUNT_SUBJECT: 0}, subject=fx.COUNT_SUBJECT, attribute=None,
         trait=fx.COUNT_TRAIT, dataset_hash="H", checkpoint="best", checkpoint_sha256="deadbeef",
         experiment_id=exp_id, images_dir=str(tmp_path), raster_path=None,
-        produced_at="2026-01-01T00:00:00Z",
+        produced_at="2026-01-01T00:00:00Z", image_filenames={"a": "a.png"},
     )
     _digest, stamped = seal_validation(
         draft, dataset_root=dataset_root, bucket_dirs=[bucket], stamp_body=earned_body)
@@ -1031,7 +976,7 @@ def test_bucket_regime_delivers_validated_after_the_stamp_is_promoted(tmp_path):
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    unvalidated_stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": False, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
+    unvalidated_stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "validated": False, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
                         "raster_path": None,
                         "operating_point": {"conf": {"value": 0.5,
                                                      "validated_against": VALIDATED_FALSE}}}
@@ -1123,7 +1068,7 @@ def test_the_live_regimes_export_detection_csv_stamp_scope_unstated_becomes_the_
     tmp_path, monkeypatch,
 ):
     """This conversion is defence in depth behind an identical earlier check: the fresh stamp
-    ``_publish_bucket_bracket`` writes at this live site always carries the pair
+    ``publish_bucket`` writes at this live site always carries the pair
     (``operating_point_stamp`` requires it with no default), so a no-pair stamp never survives a
     live publish and this call site's own conversion has no naturally reachable shape to test
     through. A real ``StampScopeUnstated``, earned from an actual ``bucket_scope`` call rather
@@ -1155,7 +1100,7 @@ def test_the_live_regimes_export_detection_csv_store_error_becomes_the_tools_own
     tmp_path, monkeypatch,
 ):
     """This call site's other conversion arm, defence in depth for the same reason as the
-    ``StampScopeUnstated`` arm above: the fresh stamp ``_publish_bucket_bracket`` writes at this
+    ``StampScopeUnstated`` arm above: the fresh stamp ``publish_bucket`` writes at this
     live site is always readable, so an undecodable stamp never survives a live publish. A real
     ``StoreError``, earned from an actual ``bucket_scope`` call over an undecodable stamp, pins the
     same type conversion (the exception becomes ``{"error": str(exc)}``, verbatim, with no text of
@@ -1196,7 +1141,7 @@ def test_per_image_counts_from_bucket_converts_export_detection_csvs_stamp_scope
     dataset_root = tmp_path / "ds"
     bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True,
+    stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True,
              "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
@@ -1229,7 +1174,7 @@ def test_per_image_counts_from_bucket_converts_export_detection_csvs_store_error
     dataset_root = tmp_path / "ds"
     bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True,
+    stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True,
              "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)

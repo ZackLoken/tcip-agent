@@ -89,7 +89,7 @@ def test_run_inference_writes_json(tmp_path, monkeypatch):
     # The publication names what the stamp does not, never a stamp fact over again.
     assert set(rows[1]["arguments"]) == {"predictions_dir", "written", "lineage_linked"}
     assert (rows[1]["arguments"]["predictions_dir"], rows[1]["arguments"]["written"]) == (
-        str(out), 1)
+        str(out), [str(out / "img.json")])
 
 
 def test_resolve_writable_bucket_for_pins_both_canonical_shapes_suggestion_strings(tmp_path):

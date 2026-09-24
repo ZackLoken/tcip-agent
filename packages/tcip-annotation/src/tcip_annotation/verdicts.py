@@ -4,10 +4,8 @@
 a caller's action against this vocabulary before storing anything, so nothing outside the four
 values reaches the store. ``routes/review.py``'s ``ActionPayload.action`` and
 ``Detection.reviewed_action`` fields, and the generated browser union all carry
-``VerdictAction`` rather than restating its values as a separate list. One site still does:
-``routes/review.py``'s own ``_apply_gt_mutation`` branches on the action against spelled-out
-literals, and a typo there is caught only where ``strict_equality`` is enabled, which the review
-route is not.
+``VerdictAction`` rather than restating its values as a separate list, and a branch on one action
+compares against its constant here.
 
 ``VerdictAction``'s literal strings are the declaration; ``VERDICT_ACTIONS`` is derived from them
 rather than the reverse, since a ``Literal`` built from a tuple does not typecheck.
@@ -30,11 +28,14 @@ from tcip_annotation.json_io import iscrowd_of
 VerdictAction = Literal["accepted", "rejected", "edited", "swept"]
 VERDICT_ACTIONS: tuple[VerdictAction, ...] = get_args(VerdictAction)
 
-POSITIVE_ACTIONS: frozenset[VerdictAction] = frozenset({"accepted", "edited"})
+ACCEPTED_ACTION: VerdictAction = "accepted"
+REJECTED_ACTION: VerdictAction = "rejected"
+EDITED_ACTION: VerdictAction = "edited"
+SWEPT_ACTION: VerdictAction = "swept"
+
+POSITIVE_ACTIONS: frozenset[VerdictAction] = frozenset({ACCEPTED_ACTION, EDITED_ACTION})
 """The actions by which a breeder affirms an object exists. A rejection is not among them, and
 neither is a verdict that only attests the image was swept."""
-
-REJECTED_ACTION: VerdictAction = "rejected"
 
 _GT_BOX_KEY = "gt_bbox_norm"
 _PRED_BOX_KEY = "pred_bbox_norm"

@@ -2011,7 +2011,7 @@ def _real_job_registry_summary() -> list[dict]:
     job = InferenceJob(
         job_id="j1", checkpoint_path="model_best.pt", images_dir="images/2026-03-04",
         output_dir="predictions/live/2026-03-04", conf=0.5, iou=0.5,
-        slice_hw=(512, 512), overlap=0.2, status="completed", platform_root="C:/orchards/valley",
+        overlap=0.2, status="completed", platform_root="C:/orchards/valley",
     )
     return [_summary(job)]
 

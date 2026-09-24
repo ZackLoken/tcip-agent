@@ -207,22 +207,6 @@ def test_serve_image_stale_group_returns_409(client: TestClient, grouped_dataset
 # ── routes/inference.py ──────────────────────────────────────────────────────────────────
 
 
-def test_inference_list_images_folds_a_group_into_one_entry(grouped_dataset: Path):
-    """routes/inference.py's own directory-listing fallback must route through
-    list_logical_images, not just widen its extension tuple, or a grouped capture's sibling band
-    files each enumerate as their own (spurious) image, the same bug class
-    run_inference had (inference_tools.py; see test_band_group_call_sites /
-    test_band_group_inference_calibration)."""
-    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_web.routes.inference import _list_images
-
-    date_dir = grouped_dataset / "images" / "2026-05-01"
-    images = _list_images(date_dir)
-    assert len(images) == 2  # one grouped capture + one plain photo, never 4 raw files
-    grouped = [i for i in images if isinstance(i, BandGroupRef)]
-    assert len(grouped) == 1 and grouped[0].stem == "cap_001"
-
-
 def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     tmp_path, monkeypatch,
 ):
@@ -263,7 +247,7 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     job = InferenceJob(
         job_id="t2", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), tile=False, conf=0.25, iou=0.7,
-        slice_hw=(640, 640), overlap=0.2, postprocess="nms", platform_root=str(tmp_path),
+        overlap=0.2, postprocess="nms", platform_root=str(tmp_path),
     )
     _worker(job)
 

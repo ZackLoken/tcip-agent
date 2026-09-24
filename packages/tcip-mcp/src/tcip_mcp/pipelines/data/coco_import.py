@@ -48,7 +48,8 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
     naming one capture, an annotation naming an unlisted image, a stated frame the image does not
     have, and a per-image document already present. The writes are then create-only, one document
     at a time: a label placed after validation raises on that document and leaves the documents
-    written before it, which the audit event names beside the one that failed.
+    written before it, which the audit event names under status ``failed`` beside the error, the
+    failing document's path and the store's refusal, the key set a failed publish records too.
     """
     import tcip_store
     from tcip_annotation.format_io import is_coco_id, parse_coco_annotations
@@ -136,23 +137,19 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
         raise ValueError(f"{source} was not imported, nothing written: " + "; ".join(problems))
 
     written: list[str] = []
-
-    def record_import(failed: str | None) -> None:
-        if not written:
-            return  # nothing committed, so nothing to record
-        record_event_or_raise(
-            "coco_document_imported",
-            {"document": source, "date": date, "written": written, "failed": failed},
-            status="ok" if failed is None else "failed", scope=root,
-            document_digest=digest_bytes(raw))
-
+    arguments = {"document": source, "date": date, "written": written}
     for key, data in writes:
         path = str(tcip_store.blob_path(key))
         try:
             tcip_store.put_blob(key, data, expect=tcip_store.Version.ABSENT)
-        except Exception:
-            record_import(path)
+        except Exception as exc:
+            if written:
+                record_event_or_raise(
+                    "coco_document_imported", {**arguments, "error": f"{path}: {exc}"},
+                    status="failed", scope=root, document_digest=digest_bytes(raw))
             raise
         written.append(path)
-    record_import(None)
-    return {"document": source, "date": date, "written": written}
+    if written:
+        record_event_or_raise("coco_document_imported", arguments, scope=root,
+                              document_digest=digest_bytes(raw))
+    return arguments

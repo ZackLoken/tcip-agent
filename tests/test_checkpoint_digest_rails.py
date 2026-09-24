@@ -123,7 +123,7 @@ def test_web_inference_worker_refuses_an_unregistered_checkpoint(tmp_path, monke
 
     job = InferenceJob(job_id="rail1", checkpoint_path=ckpt, images_dir=str(images_dir),
                        output_dir=str(out_dir), tile=False, conf=0.25, iou=0.7,
-                       slice_hw=(224, 224), overlap=0.2)
+                       overlap=0.2)
     _worker(job)
     assert job.status == "failed"
     assert "register_model" in job.error

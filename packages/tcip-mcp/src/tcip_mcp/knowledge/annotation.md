@@ -40,7 +40,7 @@ leaves those written before it. A crowd region keeps its `iscrowd` flag, and a r
 becomes the rings `mask_contours.mask_to_polygon_rings` extracts from it. The records keep the
 provenance the COCO carried and gain none. Once a document is written, the import's audit event
 records the document's path, the digest of the bytes read and the documents written, and on a
-later failed write the one that failed; an import that wrote no document, whether refused, failed
+later failed write the error, naming the document that failed; an import that wrote no document, whether refused, failed
 on its first write or carrying no annotations, changed nothing and leaves no line.
 
 A record carrying `iscrowd` is a region of unseparated objects, never one instance: the built-in

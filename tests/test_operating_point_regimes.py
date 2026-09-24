@@ -71,7 +71,7 @@ def test_gui_inference_stamp_records_what_the_agents_export_door_records(tmp_pat
     job = InferenceJob(
         job_id="stamp1", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), tile=False, conf=0.25, iou=0.7,
-        slice_hw=(640, 640), overlap=0.2, postprocess="nms", platform_root=str(tmp_path),
+        overlap=0.2, postprocess="nms", platform_root=str(tmp_path),
     )
     _worker(job)
 

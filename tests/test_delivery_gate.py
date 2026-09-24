@@ -918,6 +918,7 @@ def test_deliver_per_image_counts_bucket_regime_takes_no_acknowledgement(tmp_pat
         id_map={fx.COUNT_SUBJECT: 0})
     stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "validated": True, "subject": fx.COUNT_SUBJECT, "attribute": None,
+             "image_filenames": {"a": "a.png"},
              "operating_point": {
                  "conf": {"value": 0.6, "validated_against": VALIDATED_HELD_OUT},
                  "tile_size": {"value": 640, "requires_validation": True,
@@ -1095,14 +1096,13 @@ def test_run_inference_images_dir_gates_before_the_pass_not_after(tmp_path, monk
 # ── the GUI inference worker gates the bucket it persists, same as run_inference ──
 
 def _run_gui_inference_worker(tmp_path, monkeypatch, *, tile, train_tile_size=None,
-                              slice_source="default", tile_source="explicit"):
+                              tile_size=None):
     """Run the web Inference tab's own worker over one image and return ``(job, output_dir)``.
 
     ``train_tile_size`` is the checkpoint's own persisted training geometry, absent when the
-    checkpoint recorded none; ``slice_source="explicit"`` is a caller-stated tile edge.
-    ``tile_source`` defaults to ``"explicit"`` (every prior caller here passes a concrete
-    ``tile`` bool); pass ``"default"`` alongside ``tile=None`` to exercise the GUI launch route's
-    own "no tile field" case, where the worker derives the bool from the checkpoint itself.
+    checkpoint recorded none; ``tile_size`` is a caller-stated tile edge. ``tile=None`` is the
+    GUI launch route's own "no tile field" case, where the pass derives the bool from the
+    checkpoint itself.
     """
     pytest.importorskip("fastapi")
     from PIL import Image
@@ -1134,8 +1134,7 @@ def _run_gui_inference_worker(tmp_path, monkeypatch, *, tile, train_tile_size=No
     out_dir = tmp_path / "out"
     job = InferenceJob(
         job_id="gate", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=tile, tile_source=tile_source, conf=0.25, iou=0.7,
-        slice_hw=(512, 512), overlap=0.2, slice_source=slice_source,
+        output_dir=str(out_dir), tile=tile, conf=0.25, iou=0.7, tile_size=tile_size,
     )
     _worker(job)
     return job, out_dir
@@ -1180,8 +1179,7 @@ def test_gui_inference_worker_ships_a_caller_stated_tile_geometry(tmp_path, monk
     must clear the gate on the same terms the MCP door accepts an explicit tile_size on."""
     from tcip_mcp.pipelines.resolution import VALIDATED_EXPLICIT_GEOMETRY
 
-    job, out_dir = _run_gui_inference_worker(tmp_path, monkeypatch, tile=True,
-                                             slice_source="explicit")
+    job, out_dir = _run_gui_inference_worker(tmp_path, monkeypatch, tile=True, tile_size=512)
     assert job.status == "completed"
     assert _sidecar_tile_reference(out_dir) == VALIDATED_EXPLICIT_GEOMETRY
 
@@ -1205,7 +1203,7 @@ def test_gui_launch_with_no_tile_field_derives_from_the_checkpoint_not_a_default
     from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY
 
     job, out_dir = _run_gui_inference_worker(
-        tmp_path, monkeypatch, tile=None, tile_source="default", train_tile_size=224)
+        tmp_path, monkeypatch, tile=None, train_tile_size=224)
     assert job.status == "completed"
     assert (out_dir / "img.json").exists()
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
@@ -1220,7 +1218,7 @@ def test_gui_launch_with_no_tile_field_and_no_checkpoint_geometry_stays_untiled(
     """The mirror case: a checkpoint with no persisted training geometry, launched with the tile
     field unset, must run untiled rather than tiling at a scale nothing justifies."""
     job, out_dir = _run_gui_inference_worker(
-        tmp_path, monkeypatch, tile=None, tile_source="default")
+        tmp_path, monkeypatch, tile=None)
     assert job.status == "completed"
     assert (out_dir / "img.json").exists()
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar

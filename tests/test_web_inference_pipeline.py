@@ -93,7 +93,7 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
     job = InferenceJob(
         job_id="t", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), tile=True, conf=0.25, iou=0.7,
-        slice_hw=(640, 640), overlap=0.2, postprocess="nmm",
+        overlap=0.2, postprocess="nmm",
     )
     _worker(job)
 
@@ -148,7 +148,7 @@ def test_web_worker_resolves_id_map_from_predictor_config(tmp_path, monkeypatch)
     job = InferenceJob(
         job_id="t2", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), tile=False, conf=0.25, iou=0.7,
-        slice_hw=(640, 640), overlap=0.2, postprocess="nms",
+        overlap=0.2, postprocess="nms",
     )
     _worker(job)
 
@@ -196,7 +196,7 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
     job = InferenceJob(
         job_id="t3", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), tile=False, conf=0.25, iou=0.7,
-        slice_hw=(640, 640), overlap=0.2, postprocess="nms",
+        overlap=0.2, postprocess="nms",
     )
     _worker(job)
 
@@ -253,15 +253,18 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, mo
 
     job = InferenceJob(
         job_id="t3", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=True, tile_source="explicit", conf=0.25, iou=0.7,
-        slice_hw=(640, 640), overlap=0.2, postprocess="nms",
+        output_dir=str(out_dir), tile=True, conf=0.25, iou=0.7,
+        overlap=0.2, postprocess="nms",
     )
     _worker(job)
 
     assert job.status == "completed"        # no crash
     assert captured["tile"] is True          # the breeder's own checkbox choice is honored
     assert job.tile is True
-    assert job.tile_source == "explicit"     # never silently overridden to "default" anymore
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    # never silently overridden to "default"
+    assert read_operating_point_sidecar(out_dir)["operating_point"]["tiled"]["source"] == "explicit"
 
 
 def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_resize(
@@ -293,16 +296,16 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
 
         def predict_batch(self, paths, **kw):
             captured.update(kw)
-            return [{"count": 0, "width": 100, "height": 100, "boxes": [], "scores": [], "labels": []}
-                   for _ in paths]
+            return [{"image": p, "count": 0, "width": 100, "height": 100, "boxes": [],
+                     "scores": [], "labels": []} for p in paths]
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakeNativeFramePredictor)
 
     job = InferenceJob(
         job_id="t4", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(tmp_path / "out"), tile=True, tile_source="explicit", conf=0.25, iou=0.7,
-        slice_hw=(640, 640), overlap=0.2, postprocess="nms",
+        output_dir=str(tmp_path / "out"), tile=True, conf=0.25, iou=0.7,
+        overlap=0.2, postprocess="nms",
     )
     _worker(job)
 
@@ -363,9 +366,8 @@ def test_web_worker_stamps_explicit_conf_and_max_dets_source_at_the_platform_def
 
     job = InferenceJob(
         job_id="conf-explicit", checkpoint_path=ckpt, images_dir=images_dir,
-        output_dir=str(out_dir), tile=False, conf=DEFAULT_CONF, conf_stated=True,
-        iou=0.7, slice_hw=(0, 0), overlap=0.2, max_dets=DEFAULT_MAX_DETS,
-        max_dets_stated=True,
+        output_dir=str(out_dir), tile=False, conf=DEFAULT_CONF, iou=0.7,
+        max_dets=DEFAULT_MAX_DETS,
     )
     _worker(job)
 
@@ -381,9 +383,7 @@ def test_web_worker_stamps_default_conf_and_max_dets_source_when_unstated(tmp_pa
     says 'default' rather than 'explicit'."""
     from tcip_web.routes.inference import InferenceJob, _worker
 
-    from tcip_mcp.pipelines.resolution import (
-        DEFAULT_CONF, DEFAULT_MAX_DETS, read_operating_point_sidecar,
-    )
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
     import json
 
@@ -392,8 +392,7 @@ def test_web_worker_stamps_default_conf_and_max_dets_source_when_unstated(tmp_pa
 
     job = InferenceJob(
         job_id="conf-default", checkpoint_path=ckpt, images_dir=images_dir,
-        output_dir=str(out_dir), tile=False, conf=DEFAULT_CONF, iou=0.7, slice_hw=(0, 0),
-        overlap=0.2, max_dets=DEFAULT_MAX_DETS,
+        output_dir=str(out_dir), tile=False, iou=0.7,
     )
     _worker(job)
 
@@ -444,7 +443,7 @@ def test_web_worker_n_detections_agrees_with_the_persisted_document_on_a_degener
     job = InferenceJob(
         job_id="degenerate", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), tile=True, conf=0.25, iou=0.7,
-        slice_hw=(640, 640), overlap=0.2, postprocess="nmm",
+        overlap=0.2, postprocess="nmm",
     )
     _worker(job)
 
@@ -455,8 +454,8 @@ def test_web_worker_n_detections_agrees_with_the_persisted_document_on_a_degener
 
 
 def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path):
-    """``_list_images`` enumerates through ``image_utils.list_logical_images``, the same
-    enumeration every reader shares: a bucket already holding two logical identities under one
+    """The worker's pass (``inference_tools._prepare_pass``) enumerates through
+    ``image_utils.list_logical_images``, the same enumeration every reader shares: a bucket already holding two logical identities under one
     case-folded stem fails the job with the refusal's own message, through the worker's own
     ``except Exception`` handler, rather than crashing the worker thread."""
     from PIL import Image
@@ -473,7 +472,7 @@ def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path):
     job = InferenceJob(
         job_id="collision", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(tmp_path / "out"), tile=False, conf=0.25, iou=0.7,
-        slice_hw=(0, 0), overlap=0.2, postprocess="nms",
+        overlap=0.2, postprocess="nms",
     )
     _worker(job)
 

@@ -20,6 +20,8 @@ from typing import Any
 
 import numpy as np
 
+from tcip_mcp.pipelines.resolution import DEFAULT_TILE_BATCH_SIZE
+
 logger = logging.getLogger(__name__)
 
 # Enough bands to measure a per-band bias spread (resolve_operating_point's own equivalence gate
@@ -179,7 +181,7 @@ def _density_uniformity_flags(gt_counts: dict[str, int], *, factor: float = 3.0)
 
 def resolve_block_calibration_records(
     predictor: Any, *, trait_name: str, experiment_id: str | None,
-    global_nms_iou: float, export_tile_size: int, tile_batch_size: int = 96, postprocess: str = "nms",
+    global_nms_iou: float, export_tile_size: int, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE, postprocess: str = "nms",
     k_cal: int = DEFAULT_K_CAL, k_test: int = DEFAULT_K_TEST,
 ) -> tuple[Any, dict, dict]:
     """Resolve a detection operating point directly against a mosaic's own reserved

@@ -1140,7 +1140,8 @@ def _count_bucket(
              "labels": [1] * count, "scores": [0.9] * count, "width": 100, "height": 100},
             subject="stem", attribute=None, id_map=_COUNT_ID_MAP)
     sidecar: dict = {"id_map": _COUNT_ID_MAP, "images_dir": str(root / "images"), "trait": trait,
-                     "subject": "stem", "attribute": None}
+                     "subject": "stem", "attribute": None,
+                     "image_filenames": {f"img{i}": f"img{i}.png" for i in range(n_images)}}
     if validated:
         sidecar.update({
             "validated": True,
@@ -1851,7 +1852,7 @@ def test_inference_list_jobs_carries_each_jobs_warning(client: TestClient) -> No
 
     job = inference_routes.InferenceJob(
         job_id="inf-warn-test", checkpoint_path="", images_dir="", output_dir="",
-        conf=0.25, iou=0.5, slice_hw=(0, 0), overlap=0.0,
+        conf=0.25, iou=0.5, overlap=0.0,
         warning="3 images carried no readable capture date",
     )
     inference_routes._register(job)
@@ -1883,7 +1884,7 @@ def test_inference_by_id_job_route_is_retired(client: TestClient) -> None:
 
     job = inference_routes.InferenceJob(
         job_id="inf-retired-test", checkpoint_path="", images_dir="", output_dir="",
-        conf=0.25, iou=0.5, slice_hw=(0, 0), overlap=0.0,
+        conf=0.25, iou=0.5, overlap=0.0,
     )
     inference_routes._register(job)
     try:

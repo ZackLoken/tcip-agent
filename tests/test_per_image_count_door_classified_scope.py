@@ -38,7 +38,7 @@ def _classified_bucket(tmp_path: Path) -> Path:
         trait=fx.COUNT_TRAIT,
         dataset_hash="H", checkpoint="m", checkpoint_sha256="f" * 64, experiment_id=None,
         images_dir=str(tmp_path / "images"), raster_path=None,
-        produced_at="2026-05-20T00:00:00+00:00",
+        produced_at="2026-05-20T00:00:00+00:00", image_filenames={"img1": "img1.png"},
     )
     write_sidecar(bucket, stamp)
     return bucket
