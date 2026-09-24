@@ -2,7 +2,7 @@
 
 Both terminal outcomes are locked, the run that completed and the run that failed: neither can
 be re-opened to a non-terminal state, gain new epochs, have a recorded artifact pointer or a
-populated lineage edge rewritten, and every refusal lands on the append-only audit log. The lock
+populated lineage edge rewritten, and a refusal, which changes nothing, leaves no audit line. The lock
 stays additive, so a still-empty artifact name or lineage field takes its first write even after
 the run finished. A cancelled run is the separate case the lock deliberately leaves out: its
 record stays writable and re-openable.
@@ -29,8 +29,8 @@ def _metric_rows(root: Path, experiment_id: str) -> list[dict]:
 
 
 def _audit_refusals(root: Path) -> list[dict]:
-    events = ts.read_log(audit_log_key(root)).records
-    return [e for e in events if e.get("tool") == "experiment_mutation_refused"]
+    """Every line the root's audit log holds: an experiment-record refusal writes none."""
+    return list(ts.read_log(audit_log_key(root)).records)
 
 
 def test_failed_run_cannot_be_reopened_to_a_non_terminal_state(tmp_path):
@@ -110,7 +110,7 @@ def test_failed_run_populated_lineage_edge_is_frozen_while_an_empty_one_accepts_
     assert lineage["data_source"] == "/data/017"
 
 
-def test_refused_mutations_on_a_failed_run_are_recorded_on_the_audit_log(tmp_path):
+def test_refused_mutations_on_a_failed_run_leave_no_audit_line(tmp_path):
     from tcip_mcp.experiments import (
         create_experiment,
         log_metrics,
@@ -125,20 +125,14 @@ def test_refused_mutations_on_a_failed_run_are_recorded_on_the_audit_log(tmp_pat
     record_artifact(eid, "model_final", "/runs/018/model_final.pt")
     update_status(eid, "failed", error="killed by the wall-clock watcher")
 
-    log_metrics(eid, 3, {"val_map50": 0.90})
-    record_artifact(eid, "model_final", "/runs/019/model_final.pt")
-    update_status(eid, "running")
+    assert "error" in log_metrics(eid, 3, {"val_map50": 0.90})
+    assert "error" in record_artifact(eid, "model_final", "/runs/019/model_final.pt")
+    assert "error" in update_status(eid, "running")
 
-    refusals = _audit_refusals(tmp_path)
-    assert len(refusals) == 3
-    assert {e["arguments"]["op"] for e in refusals} == {
-        "log_metrics", "record_artifact", "update_status",
-    }
-    assert {e["arguments"]["experiment_id"] for e in refusals} == {eid}
-    assert {e["status"] for e in refusals} == {"refused"}
+    assert _audit_refusals(tmp_path) == []
 
 
-def test_completed_run_refuses_a_move_to_failed_and_audits_both_states(tmp_path):
+def test_completed_run_refuses_a_move_to_failed_naming_both_states(tmp_path):
     """The lock refuses a move between the two terminal states, not only a reopen to a
     non-terminal one: a completed record stays completed and the refusal names both states."""
     from tcip_mcp.experiments import create_experiment, update_status
@@ -152,13 +146,11 @@ def test_completed_run_refuses_a_move_to_failed_and_audits_both_states(tmp_path)
     assert "error" in res
     assert res["state"] == "completed"
 
+    assert "completed" in res["error"] and "'failed'" in res["error"]
+
     status = _record(tmp_path, eid, "status.json")
     assert status["state"] == "completed"
-
-    refusals = _audit_refusals(tmp_path)
-    assert len(refusals) == 1
-    assert refusals[0]["arguments"] == {"experiment_id": eid, "op": "update_status",
-                                        "from": "completed", "to": "failed"}
+    assert _audit_refusals(tmp_path) == []
 
 
 def test_repeat_of_failed_records_a_reason_onto_a_reasonless_record_with_no_restamp(tmp_path, monkeypatch):
@@ -211,12 +203,9 @@ def test_repeat_of_the_current_terminal_state_with_an_existing_reason_changes_no
     assert _audit_refusals(tmp_path) == []
 
 
-def test_update_status_refusal_raises_when_the_audit_append_itself_fails(tmp_path, monkeypatch):
-    """The repo's rule for every other refusal: an audit line that cannot be appended raises
-    rather than vanishing, since the record already reflects the refusal's own outcome (it
-    stayed terminal) by the time the append is attempted."""
-    import pytest
-    from tcip_mcp.audit import AuditEntryNotWritten
+def test_update_status_refusal_needs_no_audit_log(tmp_path, monkeypatch):
+    """A refusal writes no line, so an audit log that cannot be appended to changes nothing about
+    it: the refusal still returns, naming the state the record keeps."""
     from tcip_mcp.experiments import create_experiment, update_status
 
     eid = "exp-033-persimmon-fruit-det"
@@ -231,8 +220,7 @@ def test_update_status_refusal_raises_when_the_audit_append_itself_fails(tmp_pat
 
     monkeypatch.setattr(audit_mod, "append", _refuse_append)
 
-    with pytest.raises(AuditEntryNotWritten):
-        update_status(eid, "failed")
+    assert update_status(eid, "failed")["state"] == "completed"
 
 
 def test_cancelled_run_record_stays_writable_and_reopenable(tmp_path):

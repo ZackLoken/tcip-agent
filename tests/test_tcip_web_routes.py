@@ -13,7 +13,7 @@ from PIL import Image
 
 import tcip_store
 from tcip_annotation.json_io import read_annotations, write_annotations
-from tcip_annotation.state import Annotation, BBox
+from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.audit import audit_log_key
 from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
 from tcip_web.app import app
@@ -834,7 +834,6 @@ def test_annotate_save_persists_polygon_as_polygon(client, dataset_root, tmp_pat
     assert resp.status_code == 200
     anns = read_annotations(str(label_path))
     assert len(anns) == 1
-    from tcip_annotation.state import Polygon
     assert isinstance(anns[0].geometry, Polygon)
     # A hand-drawn contour is the one ring the canvas authored.
     assert anns[0].geometry.rings == [[(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]]
@@ -2441,8 +2440,8 @@ def test_annotate_resave_preserves_original_creator(client, dataset_root, tmp_pa
 
 
 def test_annotate_resave_preserves_accepted_by_rule(client, dataset_root, tmp_path) -> None:
-    """A loaded record carrying the rule marker saves back with it; a new shape saves with None;
-    the load route's _ann_dict emits the key for both."""
+    """A loaded record carrying the rule marker saves back with it; a new shape saves without
+    one, and the load route emits the key only for the record that holds it."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = tmp_path / "labels" / "IMG_0000.json"
     resp = client.post("/api/annotate/labels", json={
@@ -2463,7 +2462,74 @@ def test_annotate_resave_preserves_accepted_by_rule(client, dataset_root, tmp_pa
         "/api/annotate/labels", params={"image_path": str(img_path), "label_path": str(label_path)})
     loaded = load.json()["annotations"]
     assert loaded[0]["accepted_by_rule"] == "exp-1:0123456789abcdef"
-    assert loaded[1]["accepted_by_rule"] is None
+    assert "accepted_by_rule" not in loaded[1]
+
+
+def test_annotate_resave_keeps_the_crowd_flag(client, dataset_root, tmp_path) -> None:
+    """A crowd region the load route hands the canvas comes back on save as a crowd region: the
+    flag round-trips through the payload, and a shape that never carried one saves without it."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
+    write_annotations(label_path, [
+        Annotation(subject="bud", geometry=BBox(10, 10, 40, 40), iscrowd=True),
+        Annotation(subject="bud", geometry=BBox(50, 50, 70, 70))], 100, 100)
+
+    load = client.get(
+        "/api/annotate/labels", params={"image_path": str(img_path), "label_path": str(label_path)})
+    loaded = load.json()
+    assert [a["iscrowd"] for a in loaded["annotations"]] == [True, False]
+
+    resp = client.post("/api/annotate/labels", json={
+        "image_path": str(img_path), "label_path": str(label_path),
+        "annotations": loaded["annotations"], "base_mtime": loaded["base_mtime"], "user": "emily",
+    })
+    assert resp.status_code == 200, resp.text
+    assert [a.iscrowd for a in read_annotations(label_path)] == [True, False]
+
+
+@pytest.mark.parametrize("flag, status, crowd", [
+    ("yes", 400, None), ("false", 400, None), ("0", 400, None), (2, 400, None),
+    (None, 200, False), (True, 200, True), (1, 200, True),
+], ids=["yes", "false_string", "zero_string", "two", "null", "true", "one"])
+def test_annotate_save_reads_the_crowd_flag_through_the_decoders_check(
+        client, dataset_root, tmp_path, flag, status, crowd) -> None:
+    """The save route interprets the flag once, through the decoder's own check: a string is no
+    flag and refuses, where a coercing model would have read it as one; a null reads as no crowd."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
+    resp = client.post("/api/annotate/labels", json={
+        "image_path": str(img_path), "label_path": str(label_path),
+        "annotations": [{"subject": "bud", "bbox": [10, 10, 40, 40], "iscrowd": flag}],
+    })
+    assert resp.status_code == status, resp.text
+    if status == 400:
+        assert "iscrowd" in resp.json()["detail"] and not label_path.exists()
+    else:
+        assert [a.iscrowd for a in read_annotations(label_path)] == [crowd]
+
+
+def test_the_mcp_read_and_the_web_load_project_an_annotation_alike(
+        client, dataset_root, tmp_path) -> None:
+    """Both read doors hand a writer-produced crowd annotation to their client through the one
+    projection: the MCP read's dict and the web load's are the same but for ``authorship``."""
+    from tcip_mcp.dataset_layout import annotation_path_for_image
+    from tcip_mcp.tools.annotation_tools import read_annotations as mcp_read
+
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    label_path = annotation_path_for_image(str(img_path))
+    write_annotations(label_path, [
+        Annotation(subject="bud", geometry=BBox(10, 10, 40, 40), iscrowd=True,
+                   created_by="user:breeder", created_at="2026-02-11T00:00:00+00:00"),
+        Annotation(subject="bud", geometry=Polygon([[(50.0, 50.0), (70.0, 50.0), (70.0, 70.0)]]),
+                   attributes={"stage": "open"})], 100, 100)
+
+    web = client.get("/api/annotate/labels", params={
+        "image_path": str(img_path), "label_path": str(label_path)}).json()["annotations"]
+    mcp = mcp_read(str(img_path))["labels"]["annotations"]
+
+    assert [{k: v for k, v in a.items() if k != "authorship"} for a in web] == mcp
+    assert [a["authorship"] for a in web] == ["person", "unattributed"]
+    assert mcp[0]["iscrowd"] is True and mcp[1]["iscrowd"] is False
 
 
 def test_annotate_polygons_keep_and_stamp_provenance(client, dataset_root, tmp_path) -> None:

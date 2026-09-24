@@ -74,7 +74,7 @@ describe("polygonBbox / computePolygonBboxes", () => {
   });
 
   it("agrees with the backend's COCO-xywh box derivation (cross-codebase pin)", () => {
-    // polygonBbox (TS) and bbox_of + the _annotation_record xywh conversion (Python) are separate
+    // polygonBbox (TS) and bbox_of + the stored_content xywh conversion (Python) are separate
     // copies of the same min/max math; they must not drift. This polygon and its expected xywh
     // mirror tests/test_json_io.py's SQUARE, where the backend writes bbox = [10, 20, 100, 200].
     const square: [number, number][] = [

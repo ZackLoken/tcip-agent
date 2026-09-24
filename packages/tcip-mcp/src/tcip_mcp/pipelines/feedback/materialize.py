@@ -29,11 +29,11 @@ from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
+from tcip_annotation.verdicts import decode_verdict
 from tcip_mcp.dataset_layout import (
     CONFIRMED_NEGATIVE, annotation_root, image_root, label_filename, status_records,
 )
 from tcip_mcp.identity import user_identity
-from tcip_mcp.pipelines.feedback.verdicts import decode_verdict
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
@@ -75,7 +75,7 @@ def curated_manifest_path(output_dir: str | Path) -> Path:
 def partition_review_verdicts(review_state: dict, *, only_completed: bool = False) -> dict[str, dict]:
     """Partition per-image review verdicts into positives / hard-negatives / skip.
 
-    Returns ``{img_name: {"positives": [(class_name, cx, cy, w, h)], "rejected_count": int,
+    Returns ``{img_name: {"positives": [(class_name, (cx, cy, w, h), iscrowd)], "rejected_count": int,
     "rejected_subjects": [class_name], "subjects": [class_name], "reviewers": [name],
     "status": "positive"|"hard_negative"|"skip"}}``.
     A detection's box is ``gt_bbox_norm or pred_bbox_norm`` (the fallback handles
@@ -103,7 +103,7 @@ def partition_review_verdicts(review_state: dict, *, only_completed: bool = Fals
                 subjects.add(verdict.class_name)
             if verdict.is_positive:
                 if verdict.affirmed_box is not None:
-                    positives.append((verdict.class_name, *verdict.affirmed_box))
+                    positives.append((verdict.class_name, verdict.affirmed_box, verdict.iscrowd))
             elif verdict.is_rejection:
                 rejected += 1
                 if verdict.class_name:
@@ -158,10 +158,8 @@ def _write_positive_label(
     classified ``scope``, ``class_name`` is the object class itself, written to ``subject`` as
     before.
     """
-    # Denormalize the verdict log's [cx,cy,w,h] to pixel xyxy for the name-based per-image JSON.
-    def _annotation(name: str, cx: float, cy: float, w: float, h: float) -> Annotation:
-        box = BBox((cx - w / 2) * img_w, (cy - h / 2) * img_h,
-                   (cx + w / 2) * img_w, (cy + h / 2) * img_h)
+    def _annotation(name: str, box_norm, iscrowd: bool) -> Annotation:
+        box = BBox.from_normalized_centre(box_norm, img_w, img_h)
         if scope is not None and scope.classified:
             if not vocabulary:
                 raise ValueError(
@@ -176,8 +174,8 @@ def _write_positive_label(
                     "vocabulary has."
                 )
             return Annotation(subject=scope.subject, geometry=box,
-                              attributes={scope.attribute: name})
-        return Annotation(subject=name, geometry=box)
+                              attributes={scope.attribute: name}, iscrowd=iscrowd)
+        return Annotation(subject=name, geometry=box, iscrowd=iscrowd)
 
     try:
         anns = [_annotation(*p) for p in positives]

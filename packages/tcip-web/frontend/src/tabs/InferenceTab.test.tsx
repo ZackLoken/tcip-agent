@@ -284,7 +284,7 @@ describe("InferenceTab job table", () => {
         type: "final",
         status: "completed",
         error: null,
-        audit_warning: "gui_inference_run completed and its audit entry could not be written",
+        audit_warning: "stamp_written completed and its audit entry could not be written",
       }),
     );
 

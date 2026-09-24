@@ -1,8 +1,7 @@
 """Scan a folder for images, labels, and predictions.
 
 The read-only census an agent or operator runs to see what a dataset folder holds before
-splitting, validating or training on it: image/label/prediction counts, the detected label
-format, and which files are excluded from every bucket walk because their own stem or filename
+splitting, validating or training on it: image/label/prediction counts, and which files are excluded from every bucket walk because their own stem or filename
 collides with a prediction bucket's provenance stamp. Wraps
 ``tcip_mcp.tools.data_tools.scan_dataset`` with no MCP tool registration; a domain module still
 composes on the underlying function directly.

@@ -1,5 +1,5 @@
 """Reader-side surfaces that hold a classified bucket to its own recorded scope: ``count_by_class``
-under a coincidental detector map, ``per_plant_series``'s stamp refusals, the COCO round trip's
+under a coincidental detector map, ``per_plant_series``'s stamp refusals, the COCO reader's
 ``attributes`` handling, and the prediction render's legend.
 """
 
@@ -99,37 +99,20 @@ def test_per_plant_series_raises_for_an_undecodable_stamp(tmp_path: Path) -> Non
         phenology.per_plant_series(mapping, {"2026-05-02": str(pred_dir)}, "open", ["P1"])
 
 
-def test_coco_round_trip_keeps_a_classified_predictions_value(tmp_path: Path) -> None:
-    from tcip_annotation.format_io import parse_coco_annotations, write_coco
-
-    ann = Annotation(subject=SUBJECT, geometry=BBox(1, 1, 5, 5), score=0.9,
-                     attributes={ATTRIBUTE: "open"})
-    path = tmp_path / "out.json"
-    write_coco(str(path), {"img.jpg": ([ann], 10, 10)}, id_map={SUBJECT: 0})
-
-    import json
-
-    coco = json.loads(path.read_text(encoding="utf-8"))
-    assert coco["annotations"][0]["attributes"] == {ATTRIBUTE: "open"}
-
-    restored = parse_coco_annotations(coco, file_name="img.jpg")
-    assert restored[0].subject == SUBJECT
-    assert restored[0].attributes == {ATTRIBUTE: "open"}
-
-
-def test_coco_parser_refuses_a_non_string_attributes_shape() -> None:
+def test_the_coco_reader_keeps_a_classified_records_value() -> None:
     from tcip_annotation.format_io import parse_coco_annotations
-    from tcip_annotation.json_io import UnreadableLabelDocument
 
     coco = {
         "images": [{"id": 1, "file_name": "img.jpg", "width": 10, "height": 10}],
         "categories": [{"id": 0, "name": SUBJECT}],
         "annotations": [{"id": 1, "image_id": 1, "category_id": 0, "bbox": [1, 1, 4, 4],
-                         "attributes": {ATTRIBUTE: 7}}],
+                         "score": 0.9, "attributes": {ATTRIBUTE: "open"}}],
     }
 
-    with pytest.raises(UnreadableLabelDocument, match="not a mapping of strings to strings"):
-        parse_coco_annotations(coco, file_name="img.jpg")
+    (restored,) = parse_coco_annotations(
+        coco, decode_rle=lambda segmentation: pytest.fail("no run-length mask here"))[1][1]
+    assert restored.subject == SUBJECT
+    assert restored.attributes == {ATTRIBUTE: "open"}
 
 
 def test_legend_name_shows_the_classified_value_under_a_classified_scope() -> None:

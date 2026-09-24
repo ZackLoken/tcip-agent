@@ -2,8 +2,8 @@
 manifest write) never leaves the experiment record ``running`` and never ends the subprocess
 without a ``training_run`` audit event. ``run_training_envelope``, the one place that opens that
 event, is not reached from there, so the worker itself reconciles the record to ``failed`` and
-opens the event before letting the crash propagate, except when the crash is an already-audited
-terminal-lock refusal, which the reconciler leaves untouched.
+opens the event before letting the crash propagate, except when the crash is a terminal-lock
+refusal, which the reconciler leaves untouched.
 """
 
 from __future__ import annotations
@@ -23,11 +23,6 @@ from tcip_mcp.tools import training_tools as ttools
 def _training_run_events(root: Path) -> list[dict]:
     events = ts.read_log(audit_log_key(root)).records
     return [e for e in events if e.get("tool") == "training_run"]
-
-
-def _refusal_events(root: Path) -> list[dict]:
-    events = ts.read_log(audit_log_key(root)).records
-    return [e for e in events if e.get("tool") == "experiment_mutation_refused"]
 
 
 def _write_launch_config(tmp_path: Path, out: Path) -> dict:
@@ -73,10 +68,9 @@ def test_a_pre_envelope_crash_marks_the_run_failed_and_opens_a_training_run_even
     assert events[0]["arguments"]["experiment_id"] == eid
 
 
-def test_a_terminal_lock_refusal_reaching_run_is_left_to_its_own_audit_line(tmp_path):
+def test_a_terminal_lock_refusal_reaching_run_leaves_the_record_and_the_log_alone(tmp_path):
     """A pre-envelope crash that is already an ExperimentTerminal (a provenance patch's own
-    terminal-lock refusal, already audited by audit_refusal_reraising before it propagates) is
-    not re-marked failed or given a second, redundant training_run event; the record keeps the
+    terminal-lock refusal) is not re-marked failed and leaves no line at all; the record keeps the
     state and reason its own earlier writer (a wall-clock watchdog, say) recorded."""
     eid = "exp-worker-terminal"
     out = tmp_path / "run"
@@ -87,10 +81,7 @@ def test_a_terminal_lock_refusal_reaching_run_is_left_to_its_own_audit_line(tmp_
     exp.update_status(eid, "failed", error="exceeded max_wall_clock_seconds (5)")
 
     def _already_audited_refusal(*args, **kwargs):
-        try:
-            raise exp.ExperimentTerminal(f"Experiment {eid} is failed (terminal); refusing.")
-        except exp.ExperimentTerminal as terminal_exc:
-            exp.audit_refusal_reraising(eid, "simulated_patch", {}, terminal_exc)
+        raise exp.ExperimentTerminal(f"Experiment {eid} is failed (terminal); refusing.")
 
     original_ref = sc.auto_train_val
     sc.auto_train_val = _already_audited_refusal
@@ -104,18 +95,14 @@ def test_a_terminal_lock_refusal_reaching_run_is_left_to_its_own_audit_line(tmp_
     assert status["state"] == "failed"
     assert status["error"] == "exceeded max_wall_clock_seconds (5)"  # untouched
 
-    assert len(_refusal_events(tmp_path)) == 1
-    assert _training_run_events(tmp_path) == []  # the crash-audit branch never ran
+    assert ts.read_log(audit_log_key(tmp_path)).records == []  # the crash-audit branch never ran
 
 
-def test_a_terminal_records_refusal_append_failure_still_gets_a_training_run_event(
-    tmp_path, monkeypatch,
-):
+def test_a_terminal_records_refusal_still_gets_a_training_run_event(tmp_path, monkeypatch):
     """A pre-envelope crash landing on a record already terminal in a different state
-    (``completed``) makes update_status refuse the ``failed`` transition and try to audit that
-    refusal; when the refusal's own append raises AuditEntryNotWritten, the training_run event
-    for the crash itself must still be written. A record already ``failed`` would not exercise
-    this: update_status's repeat-of-current-state branch never calls refuse_if_terminal at all."""
+    (``completed``) makes update_status refuse the ``failed`` transition, a refusal that writes
+    nothing even with the audit log refused, and the training_run event for the crash itself is
+    still written."""
     eid = "exp-worker-refusal-append-fails"
     out = tmp_path / "run"
     out.mkdir()
@@ -143,7 +130,6 @@ def test_a_terminal_records_refusal_append_failure_still_gets_a_training_run_eve
     status = ts.read(exp.status_key(eid, root=tmp_path))
     assert status["state"] == "completed"  # the refused failed-transition never wrote
 
-    assert _refusal_events(tmp_path) == []  # the refusal's own append is what failed
     events = _training_run_events(tmp_path)
     assert len(events) == 1
     assert events[0]["status"] == "failed"

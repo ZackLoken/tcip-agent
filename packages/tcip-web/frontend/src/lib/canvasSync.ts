@@ -258,8 +258,8 @@ export function buildAnnotateShapes(args: {
     });
   });
   // ...plus each active-subject polygon's read-only derived box, mirroring the canvas so the capture
-  // stays faithful. Derived from ringsBbox here (the same min/max the loader and COCO export
-  // re-derive, over every ring), never a stored box, so it can't be double-counted as its own
+  // stays faithful. Derived from ringsBbox here (the same min/max the loader
+  // re-derives, over every ring), never a stored box, so it can't be double-counted as its own
   // annotation. Dashed distinguishes it from a real editable box (solid), the same convention the
   // in-progress/under-review shapes already use for "not a committed, directly-editable annotation."
   args.polygons.forEach((p) => {

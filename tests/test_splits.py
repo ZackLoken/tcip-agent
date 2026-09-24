@@ -268,6 +268,9 @@ def test_resolve_locked_cal_holdout_split_force_redraw_records_history(tmp_path)
     assert entry["timestamp"] == "2026-01-01T00:00:00Z"
     assert entry["old_content_hash"] is not None  # the old (first) split's membership, captured
     assert entry["policy"]["seed"] == 2
+    # The draw answers the membership it replaced, the one the door reports.
+    assert second.pop("old_membership") == {
+        "calibration": first["calibration"], "holdout": first["holdout"]}
 
     # Re-running with the same (now-locked) policy and no force_redraw returns it unchanged.
     third = resolve_locked_cal_holdout_split(

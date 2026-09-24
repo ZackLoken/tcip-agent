@@ -33,8 +33,8 @@ export interface InferenceJob {
   output_dir: string;
   error: string | null;
   warning: string | null;
-  // Set when the worker's own audit line for this run could not be written; the predictions are
-  // on disk regardless. A distinct fact from warning, never carried on it.
+  // Set when a line the publishing library writes for this run could not be written; the
+  // predictions are on disk regardless. A distinct fact from warning, never carried on it.
   audit_warning: string | null;
 }
 

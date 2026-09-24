@@ -605,6 +605,42 @@ def test_live_and_bucket_regime_produce_the_same_csv_rows(tmp_path, monkeypatch)
         assert rows_a[0][key] == rows_b[0][key], key
 
 
+def _audit_tools(*roots) -> list[str]:
+    """Every audit row's tool name across the platform log and each named root's own log."""
+    import tcip_store as ts
+
+    from tcip_mcp.audit import audit_log_key
+
+    keys = [audit_log_key()] + [audit_log_key(r) for r in roots]
+    return sorted(row["tool"] for key in keys for row in ts.read_log(key).records)
+
+
+def test_each_act_of_a_delivery_leaves_one_row_of_its_own(tmp_path, monkeypatch):
+    """The live regime earns a validation record for the run it publishes (the record's own two
+    rows), publishes a bucket, stamps it and delivers a CSV, one row each and each its library's;
+    the bucket regime delivers a CSV, one row. No row is the door's own on top."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    monkeypatch.setattr(itools, "_run_inference_verified",
+                        lambda *a, **kw: _earned_run_result(tmp_path, tiled=False))
+    root = tmp_path / "ds"
+    bucket = root / "predictions" / "baseline" / "2026-01-01"
+    live = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+                                           str(tmp_path / "a.csv"), trait=fx.COUNT_TRAIT,
+                                           calibration_labels_dir=str(tmp_path),
+                                           predictions_dir=str(bucket))
+    assert "error" not in live, live
+    earned = ["calibration_experiment_created", "experiment_validation_recorded",
+              "prediction_bucket_published", "stamp_written"]
+    assert _audit_tools(root) == sorted(earned + ["export_detection_csv"])
+
+    delivered = itools.deliver_per_image_counts(predictions_dir=str(bucket),
+                                                output_path=str(tmp_path / "b.csv"),
+                                                trait=fx.COUNT_TRAIT)
+    assert "error" not in delivered, delivered
+    assert _audit_tools(root) == sorted(earned + ["export_detection_csv"] * 2)
+
+
 def test_bucket_regime_falls_back_to_the_stem_for_a_bucket_with_no_filename_map(tmp_path):
     """A bucket published before the image_filenames map existed carries no such key in its stamp:
     the delivered image cell falls back to the bare document stem, and the response discloses the
@@ -626,6 +662,36 @@ def test_bucket_regime_falls_back_to_the_stem_for_a_bucket_with_no_filename_map(
     assert "carries no image filename map" in r["image_note"]
     rows = list(csv.DictReader(out_csv.open()))
     assert rows[0]["image"] == "a"
+
+
+def test_a_crowd_only_prediction_document_delivers_a_count_of_zero(tmp_path):
+    """A crowd region holds many objects it never separated, so it is no detection: a document
+    holding one alone delivers zero through the bucket door, and ``count_by_class`` reads zero."""
+    import tcip_mcp.tools.inference_tools as itools
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.pipelines.postprocessing.phenology import count_by_class
+    from tcip_mcp.pipelines.resolution import BucketScope
+
+    dataset_root = tmp_path / "ds"
+    bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
+    _write_real_prediction(bucket, "a")
+    crowd = bucket / "b.json"
+    json_io.write_annotations(crowd, [Annotation(subject=fx.COUNT_SUBJECT, iscrowd=True, score=0.9,
+                                                 geometry=BBox(10.0, 10.0, 60.0, 60.0))], 100, 100)
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True,
+             "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
+    write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
+
+    out_csv = tmp_path / "o.csv"
+    r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(out_csv),
+                                        trait=fx.COUNT_TRAIT)
+    assert "error" not in r, r
+    counts = {row["image"]: row["detection_count"] for row in csv.DictReader(out_csv.open())}
+    assert counts == {"a": "1", "b": "0"}
+    scope = BucketScope(subject=fx.COUNT_SUBJECT, attribute=None)
+    assert count_by_class(crowd, {fx.COUNT_SUBJECT: 0}, "x", scope=scope)[0] == 0
 
 
 def test_bucket_regime_partial_map_delivers_filenames_for_mapped_rows_and_stems_for_the_rest(

@@ -213,152 +213,18 @@ def test_compare_experiments_stale_heartbeat_compares_interrupted(tmp_path, monk
     assert c["state"] == "interrupted"
 
 
-def test_compare_experiments_reports_refused_mutations(tmp_path, monkeypatch):
+def test_compare_experiments_reads_no_refusal_history(tmp_path, monkeypatch):
+    """A refused write changes nothing and leaves no line, so the comparison has no refusal
+    history to report and carries no field for one."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import compare_experiments, create_experiment, log_metrics, update_status
 
     create_experiment("exp-refused", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
     update_status("exp-refused", "running")
     update_status("exp-refused", "completed")
-    log_metrics("exp-refused", 1, {"loss": 0.9})  # refused: the record is terminal
+    assert "error" in log_metrics("exp-refused", 1, {"loss": 0.9})
 
-    result = compare_experiments(["exp-refused"])
-    refusals = result["experiments"][0]["refused_mutations"]
-    assert len(refusals) == 1
-    assert refusals[0]["arguments"]["op"] == "log_metrics"
-    assert refusals[0]["arguments"]["experiment_id"] == "exp-refused"
-
-
-def test_compare_experiments_scans_the_audit_log_once_for_many_experiments(tmp_path, monkeypatch):
-    """_index_refused_mutations reads the platform audit log once per compare call, indexed by
-    experiment id, not once per experiment compared: five experiments cost one scan, not five."""
-    monkeypatch.chdir(tmp_path)
-    import tcip_store
-    from tcip_mcp.experiments import compare_experiments, create_experiment
-
-    ids = [f"exp-scan-{i}" for i in range(5)]
-    for eid in ids:
-        create_experiment(eid, {"model_source": {"builder": "my_models:chestnut_burr_det"}})
-
-    calls = {"n": 0}
-    real_read_log = tcip_store.read_log
-
-    def _counting(*a, **k):
-        calls["n"] += 1
-        return real_read_log(*a, **k)
-
-    monkeypatch.setattr(tcip_store, "read_log", _counting)
-
-    result = compare_experiments(ids)
-    assert result["count"] == 5
-    assert calls["n"] == 1
-
-
-def test_compare_experiments_refused_mutations_absent_when_the_read_raises(tmp_path, monkeypatch):
-    """refused_mutations is absent, never an empty list, when the read of the platform audit log
-    itself raises: "no refusals" and "couldn't read the log" must never be told apart by an empty
-    list."""
-    monkeypatch.chdir(tmp_path)
-    import tcip_store
-    from tcip_mcp.experiments import compare_experiments, create_experiment
-
-    create_experiment("exp-log-unreadable", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
-
-    def _boom(*a, **k):
-        raise OSError("simulated audit log read failure")
-
-    monkeypatch.setattr(tcip_store, "read_log", _boom)
-
-    result = compare_experiments(["exp-log-unreadable"])
-    assert "refused_mutations" not in result["experiments"][0]
-
-
-def test_compare_experiments_refused_mutations_absent_when_the_page_reports_corrupt_entries(
-    tmp_path, monkeypatch
-):
-    """read_log folds a corrupt entry onto page.corrupt rather than raising, so a page that reads
-    fine but reports corruption must still leave refused_mutations absent for every experiment,
-    not present as an incomplete list: an unreadable log and a corrupt one are the same "can't
-    trust this" fact."""
-    monkeypatch.chdir(tmp_path)
-    import tcip_store
-    from tcip_store import LogPage
-    from tcip_mcp.experiments import compare_experiments, create_experiment
-
-    create_experiment("exp-log-corrupt", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
-
-    def _corrupt_page(*a, **k):
-        return LogPage(records=[], cursor="", corrupt=(3,))
-
-    monkeypatch.setattr(tcip_store, "read_log", _corrupt_page)
-
-    result = compare_experiments(["exp-log-corrupt"])
-    assert "refused_mutations" not in result["experiments"][0]
-
-
-def test_compare_experiments_refused_mutations_absent_when_the_page_reports_version_refused(
-    tmp_path, monkeypatch
-):
-    """A page carrying a version-refused entry is the same "can't trust this" fact as a corrupt
-    one: refused_mutations must be absent, not an incomplete list built from what did decode."""
-    monkeypatch.chdir(tmp_path)
-    import tcip_store
-    from tcip_store import LogPage
-    from tcip_mcp.experiments import compare_experiments, create_experiment
-
-    create_experiment("exp-log-version-refused",
-                       {"model_source": {"builder": "my_models:chestnut_burr_det"}})
-
-    def _version_refused_page(*a, **k):
-        return LogPage(records=[], cursor="", version_refused=(2,))
-
-    monkeypatch.setattr(tcip_store, "read_log", _version_refused_page)
-
-    result = compare_experiments(["exp-log-version-refused"])
-    assert "refused_mutations" not in result["experiments"][0]
-
-
-def test_compare_experiments_finds_a_refusal_under_the_pinned_root(tmp_path, monkeypatch):
-    """Coverage of the one-root invariant: a refusal update_status itself records for an
-    experiment under the platform root this process is pinned to appears in refused_mutations
-    when comparing that experiment, produced through the real producer (a terminal-to-terminal
-    move) rather than a raw internal write. An output_dir naming a second root, even one whose
-    store.db holds garbage bytes, does not make the field absent: a refusal lands only under the
-    root that holds the record, so the platform log this reader scans is complete for an
-    experiment that resolves under it at all, and nothing about a second root ever gets read.
-    The direct write below is that field's own producer for this shape: a completed record
-    refuses stamp_run_identity's own precondition outright, so nothing in the platform writes
-    output_dir onto a terminal record."""
-    root = tmp_path / "root"
-    root.mkdir()
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
-
-    from tcip_store import store
-    from tcip_mcp.experiments import (
-        compare_experiments, create_experiment, status_key, update_status,
-    )
-
-    create_experiment("exp-terminal", {"model_source": {"builder": "my_models:fcos_det"}})
-    completed = update_status("exp-terminal", "completed")
-    assert completed["state"] == "completed"
-    refused = update_status("exp-terminal", "failed")
-    assert "error" in refused
-
-    other_root = tmp_path / "other_root"
-    (other_root / ".tcip").mkdir(parents=True)
-    (other_root / ".tcip" / "store.db").write_bytes(b"not a real sqlite database")
-    # A completed record refuses stamp_run_identity's own precondition; write output_dir
-    # directly, the field this test needs to point compare_experiments at a second root.
-    key = status_key("exp-terminal")
-    with store.transaction(key) as txn:
-        status = txn.read(key, default={})
-        status["output_dir"] = str(other_root / ".tcip" / "experiments" / "exp-terminal")
-        txn.write(key, status)
-
-    result = compare_experiments(["exp-terminal"])
-    refusals = result["experiments"][0]["refused_mutations"]
-    assert len(refusals) == 1
-    assert refusals[0]["arguments"]["op"] == "update_status"
+    assert "refused_mutations" not in compare_experiments(["exp-refused"])["experiments"][0]
 
 
 def test_compare_experiments_running_with_fresh_heartbeat(tmp_path, monkeypatch):

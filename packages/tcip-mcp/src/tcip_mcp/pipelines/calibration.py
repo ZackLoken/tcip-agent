@@ -56,6 +56,10 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     universe the redraw refuses the same way. The caller (``run_inference``) turns either into a
     clean ``{"error": ...}``.
 
+    The reference is read under the run's own recorded scope (``run_scope``), so a run that
+    recorded no subject is refused by name before anything is read or locked: nothing else states
+    which reference records its detections are of.
+
     ``labels_dir`` is read as a measurement reference, so it goes through
     ``json_io.require_reference_ground_truth`` first (the same admissibility rule the classifier
     calibration path applies to its own GT dirs): a directory of the model's own predictions
@@ -102,9 +106,16 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         set_detector_operating_point,
     )
     from tcip_mcp.pipelines.resolution import dataset_hash
-    from tcip_mcp.pipelines.training.evaluation import build_coco_image_record
+    from tcip_mcp.pipelines.training.evaluation import (
+        build_coco_image_record, detection_record, gt_records,
+    )
     from tcip_mcp.tools.inference_tools import run_scope
 
+    # The run's own recorded class space, through the one reader of it: calibration GT reads
+    # under the same scope the training targets did, so the swept count cannot diverge from it.
+    _checkpoint_scope = run_scope(predictor)
+    _subject = _checkpoint_scope.named_subject(repr(getattr(predictor, "path", predictor)))
+    _attribute = _checkpoint_scope.attribute
     labels_p = Path(labels_dir)
     require_reference_ground_truth(labels_p)
     if selection_dir is not None and (group_by is not None or group_key_map is not None):
@@ -113,11 +124,7 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
             "keys the selection recorded on its own samples govern the locked draw; pass neither "
             "beside it."
         )
-    # The run's own recorded class space, through the one reader of it: calibration GT reads
-    # under the same scope the training targets did, so the swept count cannot diverge from it.
-    _checkpoint_scope = run_scope(predictor)
-    _subject, _attribute = _checkpoint_scope.subject, _checkpoint_scope.attribute
-    _data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
+    _data_cfg =(getattr(predictor, "config", {}) or {}).get("data") or {}
     _checkpoint_selection_dir = (
         (_data_cfg.get("split") or {}).get("selection_binding") or {}).get("selection_dir")
     if (selection_dir is not None and _checkpoint_selection_dir is not None
@@ -170,15 +177,11 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         group_by = group_by or "tile_prefix"
         # The one caller here holding a name rather than a record composes its path once, here.
         gt_path_of = {s: str(labels_p / label_filename(s)) for s in stems}
-    _cal_id_map = None
-    if _subject:
-        # A selection states the exact map its samples were admitted under; it wins over both the
-        # checkpoint's stamp and a fresh registry read for a selection-restricted measurement.
-        _cal_id_map = selection_id_map or _checkpoint_scope.id_map
-        if _cal_id_map is None:
-            # No try/except: resolve_registry_id_map's only exception is its own deliberate
-            # ValueError, which must reach the caller rather than degrade to a single-class read.
-            _reg, _cal_id_map = resolve_registry_id_map(labels_dir, _subject, _attribute)
+    # A selection states the exact map its samples were admitted under; it wins over both the
+    # checkpoint's stamp and a fresh registry read for a selection-restricted measurement.
+    _cal_id_map = selection_id_map or _checkpoint_scope.id_map
+    if _cal_id_map is None:
+        _reg, _cal_id_map = resolve_registry_id_map(labels_dir, _subject, _attribute)
     dh = dataset_hash(labels_dir, stems=(stems if selection_dir is not None else None))
     # The one per-sample counter where this door holds the draw's own samples; the whole-directory
     # universe above holds names, and counts each member's document by the path it composed.
@@ -225,31 +228,18 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         )
         recs = []
         for s, r in zip(sub_stems, results):
-            dt = [{"category_id": int(lab), "bbox": [x1, y1, x2 - x1, y2 - y1], "score": float(sc)}
-                  for (x1, y1, x2, y2), sc, lab in zip(r["boxes"], r["scores"], r["labels"])]
+            dt = [detection_record(b, lab, sc)
+                  for b, sc, lab in zip(r["boxes"], r["scores"], r["labels"])]
             # GT lifted to the predictor's 1-indexed labels via the loader-side reader (subject +
-            # id map); with no run subject in scope, fall back to a single-class read of every box.
-            gt_path = gt_path_of[s]
-            if _subject and _cal_id_map is not None:
-                gboxes, glabels, n_unlabeled = json_det_targets(gt_path, _subject, _attribute, _cal_id_map)
-                # An image with any instance unlabeled for `attribute` is dropped whole from the
-                # record set (the missing-label-file precedent), counted rather than silently filtered.
-                if n_unlabeled:
-                    n_excluded_incomplete_attribute += 1
-                    continue
-                gt = [{"category_id": int(lab), "bbox": [x1, y1, x2 - x1, y2 - y1], "iscrowd": 0}
-                      for (x1, y1, x2, y2), lab in zip(gboxes, glabels)]
-            else:
-                from tcip_annotation import json_io
-                from tcip_annotation.state import bbox_of, box_derivable
-                gt = []
-                for a in json_io.read_annotations(gt_path):
-                    if not box_derivable(a.geometry):
-                        continue
-                    bx = bbox_of(a.geometry)
-                    gt.append({"category_id": 1,
-                               "bbox": [bx.x1, bx.y1, bx.x2 - bx.x1, bx.y2 - bx.y1], "iscrowd": 0})
-            recs.append(build_coco_image_record(int(r["width"]), int(r["height"]), gt, dt, image_id=s))
+            # id map), the same reading the run's training targets took.
+            target, n_unlabeled = json_det_targets(gt_path_of[s], _subject, _attribute, _cal_id_map)
+            # An image with any instance unlabeled for `attribute` is dropped whole from the
+            # record set (the missing-label-file precedent), counted rather than silently filtered.
+            if n_unlabeled:
+                n_excluded_incomplete_attribute += 1
+                continue
+            recs.append(build_coco_image_record(int(r["width"]), int(r["height"]),
+                                                gt_records(target), dt, image_id=s))
         return recs
 
     cal_records = _records(cal_stems)

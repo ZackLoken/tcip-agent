@@ -68,7 +68,7 @@ def dense_records(
         for k in range(objects_per_image):
             row, col = divmod(k, cols)
             cx, cy = 50.0 + col * spacing, 50.0 + row * spacing
-            gt.append({"category_id": 0, "bbox": _box(cx + shift, cy)})  # only GT shifts, not the det
+            gt.append({"category_id": 0, "bbox": _box(cx + shift, cy), "iscrowd": 0})  # only GT shifts, not the det
             if k < miss_pattern[i]:
                 continue
             dt.append({"category_id": 0, "bbox": _box(cx, cy), "score": score})

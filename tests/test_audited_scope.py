@@ -188,7 +188,12 @@ def test_relative_output_dir_records_where_the_tool_anchors_it_not_where_the_pro
     audit entry resolved any other way would name a directory the tool did not write to. A
     same-named directory under the cwd stands in for that wrong answer here.
     """
-    from tcip_mcp.tools.feedback_tools import materialize_review_dataset
+    from tcip_mcp.audit import audited
+    from tcip_mcp.project_paths import resolve_output_path
+
+    @audited(scope_arg="output_dir", scope_via=resolve_output_path)
+    def write_curated(output_dir: str) -> dict:
+        return {"output_dir": str(resolve_output_path(output_dir))}
 
     pinned_root = tmp_path / "pinned_project"
     anchored = pinned_root / "curated_dataset"
@@ -203,17 +208,12 @@ def test_relative_output_dir_records_where_the_tool_anchors_it_not_where_the_pro
     monkeypatch.chdir(process_cwd)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(pinned_root))
 
-    result = materialize_review_dataset(
-        dataset_root=str(tmp_path / "no_review_state"),
-        source_images_dir=str(tmp_path / "source"),
-        output_dir="curated_dataset",
-    )
-    assert "error" in result  # the early refusal still records the call it refused
+    assert write_curated("curated_dataset")["output_dir"] == str(anchored.resolve())
 
-    rows = _rows_for(anchored, "materialize_review_dataset")
+    rows = _rows_for(anchored, "write_curated")
     assert len(rows) == 1, _entries(anchored)
     assert rows[0]["scope"] == str(anchored.resolve())
-    assert _rows_for(platform_root, "materialize_review_dataset") == []
+    assert _rows_for(platform_root, "write_curated") == []
     assert not (decoy / ".tcip").exists()
 
 

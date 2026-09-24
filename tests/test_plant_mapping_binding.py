@@ -1533,3 +1533,24 @@ def test_second_receipt_scan_in_one_process_reads_only_what_was_appended(
     assert build_b is not None
     assert len(calls) == 2
     assert calls[1] is not None
+
+
+def test_a_build_leaves_one_row_its_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The door's one line is the library's receipt, which carries the record digest a decorator
+    line could not: every row the call adds to the log is counted, and there is one."""
+    from tcip_mcp.audit import audit_log_key
+
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, _ = _write_scene(dataset_root)
+    registry = register_plant_registry_for([plant_csv])
+    before = len(ts.read_log(audit_log_key(tmp_path)).records)
+
+    res = build_plant_mapping(name="valley", images_root=str(images_root), plant_registry=registry)
+
+    assert "error" not in res, res
+    rows = ts.read_log(audit_log_key(tmp_path)).records[before:]
+    assert [row["tool"] for row in rows] == ["plant_mapping_built"], rows
+    assert rows[0]["arguments"]["name"] == "valley"

@@ -321,7 +321,7 @@ def ingest_images(
     reserved_name_skips: list[dict] = []
     resolved_sources: list[tuple[Path, str, str | None]] = []
     for src_path in sources:
-        if is_sidecar_name(f"{src_path.stem}.json"):
+        if is_sidecar_name(dataset_layout.label_filename(src_path.stem)):
             # This stem is a bucket's own provenance stamp (json_io.SIDECAR_FILENAMES), reserved
             # so no bucket walk can mistake one for a label.
             reserved_name_skips.append({"stem": src_path.stem, "source": str(src_path)})
@@ -431,3 +431,38 @@ def ingest_images(
         "tcip_dir": scaffold["tcip_dir"],
         "band_groups": band_groups_result,
     }
+
+
+@mcp.tool()
+def import_coco(document: str, dataset_root: str, date: str) -> dict:
+    """Convert an external dataset-level COCO document into the dataset's per-image label documents.
+
+    Nothing trains or calibrates on a COCO file: this is the one way its labels come in. Run it
+    after ``ingest_images`` has placed the images it names. Every declared category must be a
+    subject the dataset's registry declares, and each image is the capture's image of that exact
+    file name (a ``.bandgroup`` capture by stem). Every fault found before writing is named
+    together and refuses the import with nothing written: a malformed or unregistered category, a
+    malformed record, a duplicate id or image, an image not in the capture, a frame that disagrees
+    with the image, or a per-image document already there. Documents are then written create-only
+    one at a time, so a label placed meanwhile raises on its document and leaves those written
+    before it, which the dataset's audit event names; an import that wrote no document leaves no
+    event. A crowd region keeps its flag and a run-length mask becomes rings. An image with no
+    annotations writes nothing.
+
+    Args:
+        document: Absolute path to the COCO ``.json`` (an ``images``/``categories`` key).
+        dataset_root: The dataset the images were ingested into.
+        date: The capture bucket under ``images/`` the images sit in (for a dataset with no dated
+            buckets, the flat ``images/`` root); the documents are written under
+            ``annotations/<date>/``. A COCO document states no capture date, so it is named.
+
+    Returns ``{document, date, written}`` with every per-image document written.
+    """
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    from tcip_mcp.pipelines.data.coco_import import import_coco_document
+
+    try:
+        return import_coco_document(document, dataset_root, date=date)
+    except (ValueError, FileNotFoundError, UnreadableLabelDocument) as exc:
+        return {"error": str(exc)}

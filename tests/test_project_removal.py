@@ -1639,11 +1639,8 @@ def test_the_archive_refuses_inside_the_door_and_leaves_the_target_untouched(cli
     assert workspace.pending_removal_record(target) is None
     assert _audit_lines(target) == []
 
-    # archive_project is bare-@audited: its own refused line lands in the open project's log,
-    # the calling process's platform root, never the target's.
-    open_lines = _audit_lines(open_project)
-    assert open_lines[-1]["tool"] == "archive_project"
-    assert open_lines[-1]["status"] == "ok"
+    # archive_project's refusal is its error dict: no act, so no line in the open project's log.
+    assert not [line for line in _audit_lines(open_project) if line["tool"] == "archive_project"]
 
 
 def test_an_unwritten_route_line_answers_409_naming_the_marker_already_written(

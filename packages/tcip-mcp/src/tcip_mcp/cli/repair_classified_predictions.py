@@ -32,15 +32,10 @@ Per stamped bucket, in order:
    re-inference as the remedy; nothing is stamped or rewritten.
 5. A sourced classified pair over a bucket carrying review verdicts is reported with the count;
    nothing is stamped or rewritten, since the platform never rewrites predictions a human reviewed.
-   The verdict store is asked only when the bucket resolves under a real dataset root
-   (``dataset_layout.dataset_root_of``, the canonical-segment test, not
-   ``dataset_scope_of``'s own bucket-itself fallback). On the file backend, a bucket outside any
-   dataset's canonical layout resolves to no root at all, so the guard is inoperative by
-   construction. On the database backend, such a bucket's own stamp write plants
-   ``<bucket>/.tcip/store.db``, so ``dataset_scope_of`` answers the bucket itself, a root no
-   ``ReviewEngine`` ever writes to; the guard is inoperative there too, for the same reason. Either
-   way the no-verdict-store note is reported rather than silently skipped, the same inoperative
-   guard ``run_inference`` states for such a bucket.
+   The verdict store is asked only when the bucket resolves under a dataset root
+   (``resolution.bucket_dataset_root``); a bucket outside any dataset's canonical layout has no
+   verdict store, and the no-verdict-store note is reported rather than silently skipped, the same
+   inoperative guard ``run_inference`` states for such a bucket.
 6. Otherwise every document is read whole and every record classified, the object-class check made
    first: already carrying the object class, a mapped value under the attribute settles it
    conformed, no value settles it unconformable (a stale detector document, never mistaken for a
@@ -52,14 +47,12 @@ Per stamped bucket, in order:
 7. After a rewrite, the new content's binding is checked (``verify_stamp_binding``): a count claim
    the bucket carried floors when its covered digest no longer matches, reported beside the
    stamp's own stored ``validated`` so a stale ``true`` is never read as still validated.
-8. One audit entry per bucket whose documents or stamp were actually written, filed under the
-   bucket's own resolved scope (``dataset_scope_of``): a real dataset root on the file backend, the
-   bucket itself on the database backend when it sits outside any dataset's canonical layout (its
-   own stamp write already planted ``<bucket>/.tcip/store.db``), or the platform log when no root
-   resolves at all. The entry carries the documents rewritten, whether the stamp was written, the
-   scope pair and its source, the free-text outcome line, and, for a rewrite under a stamp, the
-   content digest before and after. A refusal, a no-op ("already conformed", "no stamp"), or a
-   ``--plan`` preview writes no entry.
+8. One line per write: a stamp write's is ``update_sidecar``'s own ``stamp_written``, and a
+   bucket whose documents were rewritten earns one entry of this command's, filed where the
+   stamp's line is (``resolution.bucket_dataset_root``): the bucket's dataset root, or the
+   platform log for a bucket under none. The entry carries the documents rewritten, the scope pair and its source, the
+   free-text outcome line, and, for a rewrite under a stamp, the content digest before and after.
+   A refusal, a no-op ("already conformed", "no stamp"), or a ``--plan`` preview writes no line.
 
 For each dataset root walked, this command also reports, never rewrites, ground-truth records whose
 ``subject`` is a key of a conformed bucket's ``id_map`` or a declared attribute value of the
@@ -91,15 +84,14 @@ from tcip_annotation.state import Annotation
 from tcip_store import StoreError
 from tcip_store.binding import bind_default
 
-from tcip_mcp.audit import dataset_scope_of, record_event_or_raise
+from tcip_mcp.audit import record_event_or_raise
 from tcip_mcp.subject_registry import RegistryError, read_registry
 from tcip_mcp.dataset_layout import (
-    annotation_root, dataset_root_of, is_bucket_name, prediction_bucket_dirs,
-    prediction_root, subjects_path,
+    annotation_root, is_bucket_name, prediction_bucket_dirs, prediction_root, subjects_path,
 )
 from tcip_mcp.experiments import config_key, read_member
 from tcip_mcp.pipelines.resolution import (
-    BucketScope, StampScopeUnstated, bucket_scope, read_operating_point_sidecar,
+    BucketScope, StampScopeUnstated, bucket_dataset_root, bucket_scope, read_operating_point_sidecar,
     scope_consistent_with_map, update_sidecar, verify_stamp_binding,
 )
 from tcip_mcp.prediction_buckets import (
@@ -332,29 +324,25 @@ def _stamp_completed(bucket_dir: Path, *, subject: str | None, attribute: str | 
 
 
 def _emit_conform_audit(
-    bucket_dir: Path, *, documents_rewritten: int, stamp_written: bool,
+    bucket_dir: Path, *, documents_rewritten: int,
     subject: str | None, attribute: str | None, source: str, outcome: str, scope: Path | None,
     digest_before: str | None = None, digest_after: str | None = None,
 ) -> None:
-    """The one audit entry a bucket write earns, filed under ``scope`` or the platform log when
-    ``scope`` is ``None``, called at the exact point each write happens rather than decided again
-    by a caller from the outcome text: a refusal never reaches here, so an entry is written only
-    for a bucket whose documents or stamp actually changed.
+    """The one audit entry a document rewrite earns, filed under ``scope`` or the platform log
+    when ``scope`` is ``None``, called at the exact point the rewrite happens rather than decided
+    again by a caller from the outcome text: a refusal never reaches here, so an entry is written
+    only for a bucket whose documents actually changed. A stamp this command writes is recorded
+    by ``update_sidecar`` itself, its own line.
 
-    ``scope`` is the caller's own ``dataset_scope_of(bucket_dir)``, resolved once before the first
-    write into the bucket and passed in rather than re-resolved here: under the database backend a
-    stamp write plants ``<bucket>/.tcip/store.db`` (a document write goes through ``put_blob`` to
-    the file backend and plants nothing), so a ``dataset_scope_of`` read taken after the stamp
-    write answers the bucket as its own dataset root, which is the seam's own behaviour, not this
-    command's to change. ``outcome`` is the free-text line the caller is about
+    ``scope`` is the caller's own ``bucket_dataset_root(bucket_dir)``, the root the stamp's line
+    is filed under too. ``outcome`` is the free-text line the caller is about
     to return, carried on the entry beside its structured fields rather than left to reach only
     stdout. ``digest_before``/``digest_after`` are given only for the one branch that rewrites
     documents under a stamp (rule 7's binding check runs there); a stamp-only completion or a bare
     directory's document-only rewrite carries neither, since nothing there floors a claim.
     """
     extra: dict = {
-        "documents_rewritten": documents_rewritten, "stamp_written": stamp_written,
-        "subject": subject, "attribute": attribute, "source": source, "outcome": outcome,
+        "documents_rewritten": documents_rewritten, "subject": subject, "attribute": attribute, "source": source, "outcome": outcome,
     }
     if digest_before is not None:
         extra["digest_before"] = digest_before
@@ -412,7 +400,7 @@ def conform_bare_bucket(
     if plan:
         return (f"would rewrite from --like {like_dir}'s vocabulary, no stamp written (a bare "
                 "directory's regime stays the caller's own statement)", True, False)
-    dataset_root = dataset_scope_of(bucket_dir)
+    dataset_root = bucket_dataset_root(bucket_dir)
     docs_rewritten = rewrite_bucket(bucket_dir, subject=subject, attribute=attribute, id_map=id_map)
     if docs_rewritten == 0:
         return (f"conformed; already matches --like {like_dir}'s vocabulary, nothing rewritten",
@@ -420,8 +408,7 @@ def conform_bare_bucket(
     outcome = (f"rewrote {docs_rewritten} document(s) from --like {like_dir}'s vocabulary, no "
               "stamp written (a bare directory's regime stays the caller's own statement)")
     _emit_conform_audit(
-        bucket_dir, documents_rewritten=docs_rewritten, stamp_written=False,
-        subject=subject, attribute=attribute, source=f"--like {like_dir}", outcome=outcome,
+        bucket_dir, documents_rewritten=docs_rewritten, subject=subject, attribute=attribute, source=f"--like {like_dir}", outcome=outcome,
         scope=dataset_root,
     )
     return (outcome, False, True)
@@ -435,8 +422,8 @@ def conform_bucket(
 
     ``changed`` is true exactly for a bucket whose documents or stamp were actually written; a
     refusal, a no-op ("already conformed", "no stamp"), or a ``--plan`` preview is always false.
-    The one audit entry a changed bucket earns (:func:`_emit_conform_audit`) is written at the
-    exact point the change happens, not decided again here from the returned outcome text.
+    Each write's line is written at the exact point it happens (:func:`_emit_conform_audit` for a
+    document rewrite, ``update_sidecar`` for the stamp), not decided again from the outcome text.
     """
     state = read_stamp_state(bucket_dir)
 
@@ -482,15 +469,9 @@ def conform_bucket(
         if plan:
             return (f"would stamp the detector pair ({subject!r}, None) from the {source}; "
                     "documents untouched", True, None, False)
-        dataset_root = dataset_scope_of(bucket_dir)
         _stamp_completed(bucket_dir, subject=subject, attribute=None)
-        outcome = (f"stamped the detector pair ({subject!r}, None) from the {source}; documents "
-                  "untouched")
-        _emit_conform_audit(
-            bucket_dir, documents_rewritten=0, stamp_written=True,
-            subject=subject, attribute=None, source=source, outcome=outcome, scope=dataset_root,
-        )
-        return (outcome, False, None, True)
+        return (f"stamped the detector pair ({subject!r}, None) from the {source}; documents "
+                "untouched", False, None, True)
 
     recorded_map = stamp.get("id_map")
     if recorded_map:
@@ -512,9 +493,9 @@ def conform_bucket(
         return (f"refused, this bucket's own id_map carries the decimal key {bad_key!r}, "
                 "indistinguishable from a raw-index name; re-infer this run", True, None, False)
 
-    dataset_root = dataset_scope_of(bucket_dir)
+    dataset_root = bucket_dataset_root(bucket_dir)
     no_dataset_note = ""
-    if dataset_root is not None and dataset_root_of(bucket_dir) is not None:
+    if dataset_root is not None:
         vcount = verdict_count(review_state_dir_of(dataset_root), bucket_key_of(bucket_dir),
                                 bucket_stems(bucket_dir))
         if vcount:
@@ -538,14 +519,9 @@ def conform_bucket(
     docs_rewritten = rewrite_bucket(bucket_dir, subject=subject, attribute=attribute, id_map=id_map)
     _stamp_completed(bucket_dir, subject=subject, attribute=attribute)
     if docs_rewritten == 0:
-        outcome = (f"stamped the classified pair ({subject!r}, {attribute!r}) from the "
-                  f"{source}{no_dataset_note}; every record was already conformed")
-        _emit_conform_audit(
-            bucket_dir, documents_rewritten=0, stamp_written=True,
-            subject=subject, attribute=attribute, source=source, outcome=outcome,
-            scope=dataset_root, digest_before=old_digest, digest_after=old_digest,
-        )
-        return (outcome, False, id_map, True)
+        return (f"stamped the classified pair ({subject!r}, {attribute!r}) from the "
+                f"{source}{no_dataset_note}; every record was already conformed",
+                False, id_map, True)
     new_digest = bucket_content_digest(bucket_dir)
     new_stamp = read_operating_point_sidecar(bucket_dir) or {}
     binding = verify_stamp_binding(new_stamp, bucket_dir, document="operating_point")
@@ -560,8 +536,7 @@ def conform_bucket(
               f"({subject!r}, {attribute!r}) from the {source}{no_dataset_note}; digest "
               f"{old_digest} -> {new_digest}{floor_note}")
     _emit_conform_audit(
-        bucket_dir, documents_rewritten=docs_rewritten, stamp_written=True,
-        subject=subject, attribute=attribute, source=source, outcome=outcome,
+        bucket_dir, documents_rewritten=docs_rewritten, subject=subject, attribute=attribute, source=source, outcome=outcome,
         scope=dataset_root, digest_before=old_digest, digest_after=new_digest,
     )
     return (outcome, False, id_map, True)
@@ -620,8 +595,8 @@ def process_project_root(
         dataset_root = dataset_entry_path(root, entry)
         conformed_id_maps: list[dict] = []
         for bucket_dir in bucket_dirs_under(dataset_root):
-            # The audit entry for a changed bucket is written inside conform_bucket itself, at
-            # the exact point each write happens; this loop only collects outcomes and counts.
+            # Each write's line is written inside conform_bucket where it happens; this loop only
+            # collects outcomes and counts.
             outcome, this_refused, id_map, changed = conform_bucket(
                 bucket_dir, root=root, plan=plan, like_dir=None,
                 operator_subject=operator_subject, operator_attribute=operator_attribute,
@@ -677,7 +652,6 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     for i, bucket_dir in enumerate(args.bucket):
         bucket_dir = bucket_dir.resolve()
         like_dir = args.like[i].resolve() if args.like else None
-        # The audit entry for a changed bucket is written inside conform_bucket itself.
         outcome, this_refused, _id_map, changed = conform_bucket(
             bucket_dir, root=None, plan=args.plan, like_dir=like_dir,
             operator_subject=args.subject, operator_attribute=args.attribute, is_bare_named=True,

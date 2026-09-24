@@ -1,11 +1,11 @@
 """``experiments.py``'s per-mutator functions (``complete_run``, ``log_metrics``,
 ``record_artifact``, ``update_lineage``, ``overwrite_config_if_pristine``) each take a caller
-``root`` and thread it through to their own key resolution and their own ``_audit_refused``
-call, the same way ``update_status`` does.
+``root`` and thread it through to their own key resolution, the same way ``update_status``
+does; a refusal writes no audit line under either root.
 
 A launch's own wall-clock watchdog scopes its write to the root it captured at launch rather
 than wherever this process's platform root has since moved to, so a parent-side writer can
-reach a record, and its refusal's audit line, under a root other than the process's current pin.
+reach a record under a root other than the process's current pin.
 """
 
 from __future__ import annotations
@@ -18,11 +18,11 @@ from tcip_mcp.audit import audit_log_key
 
 
 def _refusals(root: Path) -> list[dict]:
-    events = ts.read_log(audit_log_key(root)).records
-    return [e for e in events if e.get("tool") == "experiment_mutation_refused"]
+    """Every line the root's audit log holds."""
+    return list(ts.read_log(audit_log_key(root)).records)
 
 
-def test_complete_run_refusal_audits_the_named_root_not_the_current_one(tmp_path, monkeypatch):
+def test_complete_run_refusal_reads_the_named_root_not_the_current_one(tmp_path, monkeypatch):
     launch_root = tmp_path / "launch"
     other_root = tmp_path / "other"
     launch_root.mkdir()
@@ -41,11 +41,11 @@ def test_complete_run_refusal_audits_the_named_root_not_the_current_one(tmp_path
 
     assert "error" in result
     assert result["state"] == "failed"
-    assert _refusals(launch_root)
+    assert _refusals(launch_root) == []
     assert _refusals(other_root) == []
 
 
-def test_record_artifact_refusal_audits_the_named_root_not_the_current_one(tmp_path, monkeypatch):
+def test_record_artifact_refusal_reads_the_named_root_not_the_current_one(tmp_path, monkeypatch):
     launch_root = tmp_path / "launch"
     other_root = tmp_path / "other"
     launch_root.mkdir()
@@ -61,12 +61,12 @@ def test_record_artifact_refusal_audits_the_named_root_not_the_current_one(tmp_p
     monkeypatch.setenv("TCIP_STATE_ROOT", str(other_root))
     result = exp.record_artifact(eid, "model_final", "/runs/second.pt", root=launch_root)
 
-    assert "error" in result
-    assert _refusals(launch_root)
+    assert "immutable" in result["error"]
+    assert _refusals(launch_root) == []
     assert _refusals(other_root) == []
 
 
-def test_log_metrics_refusal_audits_the_named_root_not_the_current_one(tmp_path, monkeypatch):
+def test_log_metrics_refusal_reads_the_named_root_not_the_current_one(tmp_path, monkeypatch):
     launch_root = tmp_path / "launch"
     other_root = tmp_path / "other"
     launch_root.mkdir()
@@ -81,12 +81,12 @@ def test_log_metrics_refusal_audits_the_named_root_not_the_current_one(tmp_path,
     monkeypatch.setenv("TCIP_STATE_ROOT", str(other_root))
     result = exp.log_metrics(eid, 1, {"loss": 0.5}, root=launch_root)
 
-    assert "error" in result
-    assert _refusals(launch_root)
+    assert "terminal" in result["error"]
+    assert _refusals(launch_root) == []
     assert _refusals(other_root) == []
 
 
-def test_update_lineage_identity_refusal_audits_the_named_root_not_the_current_one(
+def test_update_lineage_identity_refusal_reads_the_named_root_not_the_current_one(
     tmp_path, monkeypatch,
 ):
     """dataset_id/dataset_fingerprint are complete_run's alone via update_lineage: refused
@@ -101,13 +101,13 @@ def test_update_lineage_identity_refusal_audits_the_named_root_not_the_current_o
     exp.create_experiment(eid, {"a": 1})
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(other_root))
-    exp.update_lineage(eid, dataset_id="ds-1", root=launch_root)
+    assert exp.update_lineage(eid, dataset_id="ds-1", root=launch_root)["refused"] == ["dataset_id"]
 
-    assert _refusals(launch_root)
+    assert _refusals(launch_root) == []
     assert _refusals(other_root) == []
 
 
-def test_overwrite_config_if_pristine_refusal_audits_the_named_root_not_the_current_one(
+def test_overwrite_config_if_pristine_refusal_reads_the_named_root_not_the_current_one(
     tmp_path, monkeypatch,
 ):
     launch_root = tmp_path / "launch"
@@ -123,6 +123,6 @@ def test_overwrite_config_if_pristine_refusal_audits_the_named_root_not_the_curr
     monkeypatch.setenv("TCIP_STATE_ROOT", str(other_root))
     result = exp.overwrite_config_if_pristine(eid, {"a": 2}, root=launch_root)
 
-    assert "error" in result
-    assert _refusals(launch_root)
+    assert "no longer pristine" in result["error"]
+    assert _refusals(launch_root) == []
     assert _refusals(other_root) == []

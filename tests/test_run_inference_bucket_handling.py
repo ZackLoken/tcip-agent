@@ -75,6 +75,22 @@ def test_run_inference_writes_json(tmp_path, monkeypatch):
 
     assert anns[0]["created_by"] == f"model:m@{hashlib.sha256(ckpt.read_bytes()).hexdigest()[:12]}"
 
+    # The stamp and the publication are each recorded once, by the library that made them; the
+    # door writes no line.
+    import tcip_store as ts
+
+    from tcip_mcp.audit import audit_log_key
+
+    rows = [r for key in dict.fromkeys((audit_log_key(), audit_log_key(tmp_path),
+                                        audit_log_key(out)))
+            for r in ts.read_log(key).records]
+    assert [r["tool"] for r in rows] == ["stamp_written", "prediction_bucket_published"]
+    assert rows[0]["arguments"]["pred_dir"] == str(out) and rows[0]["stamp"]["checkpoint_sha256"]
+    # The publication names what the stamp does not, never a stamp fact over again.
+    assert set(rows[1]["arguments"]) == {"predictions_dir", "written", "lineage_linked"}
+    assert (rows[1]["arguments"]["predictions_dir"], rows[1]["arguments"]["written"]) == (
+        str(out), 1)
+
 
 def test_resolve_writable_bucket_for_pins_both_canonical_shapes_suggestion_strings(tmp_path):
     """Coverage: ``_resolve_writable_bucket_for`` restructured around the recognizer's own triple

@@ -402,12 +402,15 @@ def _refuse_if_owned_by_another_run(superseded: dict, *, name: str, new_experime
         )
 
 
-def _write_registry_entry(txn: tcip_store.Txn, key: Key, entry: dict) -> dict | None:
+def _write_registry_entry(txn: tcip_store.Txn, key: Key,
+                          entry: dict) -> tuple[dict | None, dict]:
     """Replace-by-name inside ``txn``'s already-open transaction over the index key.
 
-    Returns the superseded entry (``None`` for a first registration under this name), for the
-    caller to audit once the transaction has closed. Refuses (:class:`EntryOwnedByRun`) a replace
-    whose superseded entry names a run other than this write's own. Reads and writes through the
+    Returns ``(superseded, stored)``: the entry replaced (``None`` for a first registration under
+    this name), and the entry the registry holds after the call, ``entry`` itself when it was
+    written and the superseded entry when that already holds every field but ``registered_at``,
+    which is no change and so no write. Refuses (:class:`EntryOwnedByRun`) a replace whose
+    superseded entry names a run other than this write's own. Reads and writes through the
     entries-mapping document pair: an unwrapped bare-array document raises
     :class:`RegistryVersionRefused` naming what it found before anything is written.
     """
@@ -416,35 +419,33 @@ def _write_registry_entry(txn: tcip_store.Txn, key: Key, entry: dict) -> dict | 
     if superseded is not None:
         _refuse_if_owned_by_another_run(
             superseded, name=entry["name"], new_experiment_id=entry.get("experiment_id"))
+        if ({k: v for k, v in superseded.items() if k != "registered_at"}
+                == {k: v for k, v in entry.items() if k != "registered_at"}):
+            return superseded, superseded
     index = [e for e in index if e["name"] != entry["name"]]
     index.append(entry)
     txn.write(key, _write_registry_document(index))
-    return superseded
+    return superseded, entry
 
 
-def _audit_entry_replace(name: str, superseded: dict | None, entry: dict) -> None:
-    """Emit ``model_registry_replace`` once the transaction that changed ``name`` has closed, and
-    only when the replace actually changed content (not an idempotent same-digest re-registration).
+def _audit_entry_write(name: str, superseded: dict | None, entry: dict) -> None:
+    """Emit ``model_registered`` once the transaction that wrote ``name`` has closed: the one
+    record of a registry write, whichever door made it, a first registration or a replacement,
+    which also names the entry it superseded. Called only for a write that happened.
 
-    The transaction above has already replaced the entry, so a failed append raises
+    The transaction above has already written the entry, so a failed append raises
     ``AuditEntryNotWritten`` rather than leaving a provenance gap nobody is told about.
     """
-    if superseded is None or superseded.get("sha256") == entry["sha256"]:
-        return
     from tcip_mcp.audit import record_event_or_raise
 
-    record_event_or_raise("model_registry_replace", {
-        "name": name, "superseded_sha256": superseded.get("sha256"),
-        "superseded_tags": superseded.get("tags"),
+    replaced = {} if superseded is None else {
+        "superseded_sha256": superseded.get("sha256"), "superseded_tags": superseded.get("tags"),
         "superseded_experiment_id": superseded.get("experiment_id"),
-        "new_sha256": entry["sha256"],
+    }
+    record_event_or_raise("model_registered", {
+        "name": name, "new_sha256": entry["sha256"], "experiment_id": entry.get("experiment_id"),
+        **replaced,
     })
-
-
-def _audit_refused(op: str, detail: dict) -> None:
-    from tcip_mcp.audit import record_event_or_raise
-
-    record_event_or_raise("model_registry_write_refused", {"op": op, **detail}, status="refused")
 
 
 def _register_entry(
@@ -461,7 +462,7 @@ def _register_entry(
     sha256: str | None = None,
 ) -> dict:
     """The one write behind both registration modes: replace-by-name inside one transaction over
-    the project's index key, then audit the replacement (or the refusal) once it has closed.
+    the project's index key, then audit the write once it has closed.
 
     ``sha256``, when given (experiment mode: the digest a run's completion already recorded, and
     the caller's own file already verified against it), is written as-is, no second hash of the
@@ -480,10 +481,8 @@ def _register_entry(
     mode's caller has already confirmed the file), ``ValueError``/``TypeError`` for a
     ``config``/``metrics`` JSON cannot hold or a ``metrics_source`` pairing that disagrees with
     whether ``metrics`` is empty, :class:`EntryOwnedByRun` for a replace the eviction rail
-    refuses whose own refusal line lands, and ``AuditEntryNotWritten`` from either of two
-    places: after a committed replace, when ``_audit_entry_replace`` cannot append its own line,
-    or from ``_audit_refused`` inside the ``EntryOwnedByRun`` handler, when nothing committed
-    and the refusal's own line could not be written either, replacing ``EntryOwnedByRun`` itself.
+    refuses, and ``AuditEntryNotWritten`` after a committed write,
+    when ``_audit_entry_write`` cannot append its own line.
     """
     check_json_value(config, path="config")
     check_json_value(metrics or {}, path="metrics")
@@ -529,16 +528,11 @@ def _register_entry(
         "experiment_id": experiment_id,
     }
     key = registry_index_key(project_path)
-    try:
-        with tcip_store.transaction(key) as txn:
-            superseded = _write_registry_entry(txn, key, entry)
-    except EntryOwnedByRun as exc:
-        _audit_refused("_register_entry", {
-            "name": name, "attempted_experiment_id": experiment_id, "reason": str(exc),
-        })
-        raise
-    _audit_entry_replace(name, superseded, entry)
-    return entry
+    with tcip_store.transaction(key) as txn:
+        superseded, stored = _write_registry_entry(txn, key, entry)
+    if stored is entry:  # only a write that happened leaves a line
+        _audit_entry_write(name, superseded, entry)
+    return stored
 
 
 _STRAY_SCHEMA_VERSION_TWO = 2
@@ -845,12 +839,9 @@ class ModelRegistry:
                 ``ValueError`` also covers ``metrics_source`` disagreeing with whether
                 ``metrics`` is empty.
             EntryOwnedByRun: ``name`` already names an entry a run's completion bound to a
-                different (or, for a pre-field entry, an unrecorded) run, and that refusal's
-                own audit line landed.
-            AuditEntryNotWritten: from either of two places: the replacement committed but its
-                own audit line could not be appended, or nothing committed because the
-                eviction rail refused and that refusal's own line also could not be appended,
-                replacing ``EntryOwnedByRun`` itself.
+                different (or, for a pre-field entry, an unrecorded) run.
+            AuditEntryNotWritten: the write committed but its own audit line could not be
+                appended.
         """
         entry = _register_entry(
             self._project_path, name=name, checkpoint_path=checkpoint_path, config=config,

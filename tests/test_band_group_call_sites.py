@@ -273,7 +273,7 @@ def test_materialize_dataset_copies_every_sibling_and_the_manifest(tmp_path):
 
     state = {"image": {"cap.bandgroup": {"img_status": "completed", "detections": [
         {"action": "accepted", "class_name": "bud",
-         "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None},
+         "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None},
     ]}}}
     out = tmp_path / "out"
     result = materialize_dataset(state, str(src), str(out))
@@ -304,7 +304,7 @@ def test_materialize_dataset_dims_from_the_grouped_capture(tmp_path):
 
     state = {"image": {"cap.bandgroup": {"img_status": "completed", "detections": [
         {"action": "accepted", "class_name": "bud",
-         "gt_bbox_norm": [0.5, 0.5, 0.25, 0.25], "pred_bbox_norm": None},
+         "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.5, 0.5, 0.25, 0.25], "pred_bbox_norm": None},
     ]}}}
     out = tmp_path / "out"
     materialize_dataset(state, str(src), str(out))

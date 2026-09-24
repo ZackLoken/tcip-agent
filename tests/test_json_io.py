@@ -1,9 +1,10 @@
 """json_io: the canonical name-based per-image JSON label format (GT + predictions).
 
 Covers geometry round-trips (xyxy in memory <-> xywh on disk), score handling (predictions
-only), provenance persistence, the negative invariant (present-empty file == confirmed
-negative, missing file == unannotated), malformed-input robustness, and dataset-COCO
-assembly via to_coco_dataset (including a round-trip through format_io's COCO parser).
+only), the crowd flag, provenance persistence, the empty-document invariant (a present empty
+document and a missing one both read as no annotations; neither is a negative until a person
+confirms one), and malformed input: a supplied value that does not parse refuses the document by
+record, only an absent or null key reads as absent, and a document of another shape refuses.
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ from tcip_annotation.json_io import (
     read_annotations,
     require_reference_ground_truth,
     target_class_id,
-    to_coco_dataset,
     write_annotations,
 )
 from tcip_annotation.state import Annotation, BBox, Polygon, bbox_of
@@ -54,6 +54,123 @@ def test_gt_round_trip_geometry_and_subjects(tmp_path: Path) -> None:
         (10.0, 20.0, 110.5, 220.25),
         (0.0, 0.0, 5.0, 5.0),
     ]
+
+
+def test_the_crowd_flag_round_trips_through_the_writer_and_the_reader(tmp_path: Path) -> None:
+    path = tmp_path / "labels" / "IMG_crowd.json"
+    write_annotations(path, [Annotation(subject="bur", geometry=BBox(1.0, 2.0, 30.0, 40.0),
+                                        iscrowd=True),
+                             Annotation(subject="bur", geometry=BBox(50.0, 50.0, 60.0, 60.0))],
+                      100, 100)
+
+    crowd, single = _raw(path)["annotations"]
+    assert crowd["iscrowd"] is True and "iscrowd" not in single  # written only when set
+    got = read_annotations(path)
+    assert [a.iscrowd for a in got] == [True, False]
+
+
+def test_the_payload_route_keeps_the_crowd_flag_and_shares_the_decoders_checks() -> None:
+    from tcip_annotation.json_io import annotation_from_payload
+
+    kept = annotation_from_payload(
+        {"subject": "bur", "bbox": [1, 2, 30, 40], "iscrowd": True, "created_by": "user:a",
+         "attributes": {"stage": "ripe"}}, author="user:b", now="2026-01-01T00:00:00+00:00")
+    assert kept.iscrowd and kept.attributes == {"stage": "ripe"}
+    b = kept.geometry
+    assert isinstance(b, BBox) and (b.x1, b.y1, b.x2, b.y2) == (1.0, 2.0, 30.0, 40.0)
+    for bad in ({"attributes": {"stage": 12}}, {"attributes": {"stage": ""}}, {"iscrowd": 2},
+                {"iscrowd": "yes"}, {"bbox": [10, 10, 5, 5]}, {"bbox": ["1", "2", "3", "4"]}):
+        with pytest.raises(ValueError):
+            annotation_from_payload({"subject": "bur", **bad}, author=None, now="t")
+    assert not annotation_from_payload({"subject": "bur", "iscrowd": None}, author=None,
+                                       now="t").iscrowd
+
+
+@pytest.mark.parametrize("subject", [None, "", 7], ids=["absent", "empty", "not_a_string"])
+def test_a_record_naming_no_subject_is_refused_where_an_annotation_is_made(
+        tmp_path: Path, subject) -> None:
+    """Construction states the subject rule once: a direct constructor refuses, and the decoder,
+    reading through it, refuses the document naming the record."""
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    with pytest.raises(ValueError, match="non-empty string subject"):
+        Annotation(subject=subject)  # type: ignore[arg-type]
+    path = tmp_path / "labels" / "a.json"
+    write_annotations(path, [Annotation(subject="bur", geometry=BBox(1.0, 1.0, 5.0, 5.0))], 10, 10)
+    raw = _raw(path)
+    raw["annotations"].append({"bbox": [1, 1, 4, 4], **({} if subject is None else {"subject": subject})})
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(UnreadableLabelDocument, match=r"^record 1 .*non-empty string subject"):
+        read_annotations(path)
+
+
+def test_the_payload_route_reads_provenance_presence_as_the_decoder_does() -> None:
+    """A payload carrying a provenance key is a round-trip by the decoder's own presence rule (any
+    value but null), so every provenance key it carries is kept, an empty creator included; a
+    payload carrying none is a new shape stamped to its author."""
+    from tcip_annotation.json_io import annotation_from_payload
+
+    kept = annotation_from_payload(
+        {"subject": "bur", "created_by": "", "created_at": "2026-01-02", "accepted_by": "user:a",
+         "accepted_at": "2026-01-03", "accepted_by_rule": "exp:abc"}, author="user:b", now="t")
+    assert (kept.created_by, kept.created_at, kept.accepted_by, kept.accepted_at,
+            kept.accepted_by_rule) == ("", "2026-01-02", "user:a", "2026-01-03", "exp:abc")
+    new = annotation_from_payload({"subject": "bur", "accepted_by": "user:a"}, author="user:b",
+                                  now="t")
+    assert (new.created_by, new.created_at, new.accepted_by) == ("user:b", "t", None)
+
+
+@pytest.mark.parametrize("geometry", [
+    {"rings": []}, {"points": []}, {"points": [[1.0, 2.0]]}, {"rings": [[[1, 2], [3, 4]]]},
+    {"points": [[1.0, 2.0, 3.0], [4.0, 5.0], [6.0, 7.0]]},
+], ids=["no_rings", "no_points", "one_vertex", "two_point_ring", "three_value_vertex"])
+def test_a_payload_polygon_that_is_no_shape_refuses_rather_than_reading_as_absent(geometry) -> None:
+    # A supplied geometry that is empty or too short is a malformed value, refused by the same
+    # decoder a stored record passes, never read as a label with no geometry or dropped on write.
+    from tcip_annotation.json_io import annotation_from_payload
+
+    with pytest.raises(ValueError, match="polygon|segmentation|vertex"):
+        annotation_from_payload({"subject": "bur", **geometry}, author=None, now="t")
+
+
+def test_a_payload_polygon_translates_to_the_record_the_decoder_reads() -> None:
+    from tcip_annotation.json_io import annotation_from_payload
+
+    pairs = annotation_from_payload({"subject": "bur", "points": [[0, 0], [10, 0], [10, 10]]},
+                                    author=None, now="t")
+    mappings = annotation_from_payload(
+        {"subject": "bur", "rings": [[{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 10}]]},
+        author=None, now="t")
+    assert pairs.geometry == mappings.geometry == Polygon([[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]])
+    # A corner box lands on the stored grid through the one corner conversion.
+    box = annotation_from_payload({"subject": "bur", "bbox": [1.004, 2.0, 3.006, 4.0]},
+                                  author=None, now="t").geometry
+    assert (box.x1, box.y1, box.x2, box.y2) == (1.0, 2.0, 3.0, 4.0)
+
+
+def test_a_typed_record_whose_attributes_its_reader_refuses_is_refused_at_write(
+        tmp_path: Path) -> None:
+    path = tmp_path / "labels" / "IMG_attr.json"
+    with pytest.raises(ValueError, match="attributes"):
+        write_annotations(path, [Annotation(subject="bur", geometry=BBox(1.0, 2.0, 3.0, 4.0),
+                                            attributes={"stage": 12})], 100, 100)  # type: ignore[dict-item]
+    assert not path.exists()
+    write_annotations(path, [Annotation(subject="bur", geometry=BBox(1.0, 2.0, 3.0, 4.0),
+                                        attributes={"stage": "ripe"})], 100, 100)
+    assert read_annotations(path)[0].attributes == {"stage": "ripe"}
+
+
+def test_a_string_score_is_refused_by_the_reference_check(tmp_path: Path) -> None:
+    # A supplied score that does not parse once read as no score, so the record passed as ground
+    # truth; it now refuses where the numeric one refuses as an unadjudicated prediction.
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    reference = tmp_path / "reference"
+    reference.mkdir()
+    (reference / "a.json").write_text(json.dumps({"image": "a", "annotations": [
+        {"subject": "bud", "bbox": [1.0, 2.0, 3.0, 4.0], "score": "0.8"}]}), encoding="utf-8")
+    with pytest.raises(UnreadableLabelDocument, match="score"):
+        require_reference_ground_truth(reference)
 
 
 def test_gt_disk_schema_is_coco_xywh_without_score(tmp_path: Path) -> None:
@@ -148,43 +265,45 @@ def test_multi_ring_polygon_round_trip_keeps_every_ring_in_order(tmp_path: Path)
     assert (b.x1, b.y1, b.x2, b.y2) == (10.0, 10.0, 90.0, 50.0)
 
 
-def test_degenerate_ring_is_dropped_without_losing_its_siblings(tmp_path: Path) -> None:
-    # A ring that is not a shape is dropped individually; the annotation and its valid rings survive.
-    # (Before multi-ring support a bad first ring could take the whole annotation with it.)
-    path = tmp_path / "labels" / "IMG_partial.json"
-    write_annotations(
-        path,
-        [Annotation(subject="bud",
-                    geometry=Polygon([[(1.0, 1.0), (2.0, 2.0)], LEFT_LOBE, RIGHT_LOBE]))],
-        640, 480)
-
-    (rec,) = _raw(path)["annotations"]
-    assert len(rec["segmentation"]) == 2
-    (got,) = read_annotations(path)
-    assert got.geometry.rings == [LEFT_LOBE, RIGHT_LOBE]
+@pytest.mark.parametrize("rings", [
+    [[(1.0, 1.0), (2.0, 2.0)], LEFT_LOBE],   # a two-point ring beside a real one
+    [[(1.0, 1.0)]],                          # one vertex
+    [],                                      # no ring at all
+], ids=["two_point_beside_a_ring", "one_vertex", "no_ring"])
+def test_a_polygon_with_a_ring_that_is_no_shape_cannot_be_made(rings) -> None:
+    # A ring that cannot be a shape is refused where the polygon is made, never carried to a
+    # writer that would drop it and write back fewer rings than were stated.
+    with pytest.raises(ValueError, match="three or more points"):
+        Polygon(rings)
+    assert Polygon([LEFT_LOBE, RIGHT_LOBE]).rings == [LEFT_LOBE, RIGHT_LOBE]
 
 
-def test_read_drops_only_the_bad_ring_of_a_mixed_segmentation(tmp_path: Path) -> None:
-    # Same rule on the read side, from a hand-authored file: an unusable entry (too few coords, odd
-    # coord count, an RLE dict) is skipped per-entry, and the usable rings still form the polygon.
+@pytest.mark.parametrize("bad_ring", [
+    [1.0, 2.0, 3.0, 4.0],                 # < 3 points
+    [1, 2, 3, 4, 5, 6, 7],                # odd coord count
+    {"counts": "RLE", "size": [2, 2]},    # a run-length mask: the document carries rings only
+], ids=["short", "odd", "run_length"])
+def test_a_bad_ring_beside_good_ones_refuses_the_document_by_record(tmp_path: Path, bad_ring) -> None:
+    # A supplied ring that is not a ring is a malformed value, never a ring to drop quietly: the
+    # document refuses naming the record rather than reading back as fewer rings than it states.
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
     path = tmp_path / "mixed.json"
     payload = {
         "image": "mixed", "width": 100, "height": 100,
-        "annotations": [{
+        "annotations": [{"subject": "bud", "bbox": [1.0, 1.0, 2.0, 2.0]}, {
             "subject": "bud",
             "segmentation": [
                 [10.0, 10.0, 30.0, 10.0, 30.0, 50.0, 10.0, 50.0],
-                [1.0, 2.0, 3.0, 4.0],            # < 3 points
-                [1, 2, 3, 4, 5, 6, 7],           # odd coord count
-                {"counts": "RLE", "size": [2, 2]},
+                bad_ring,
                 [70.0, 12.0, 90.0, 12.0, 90.0, 48.0, 70.0, 48.0],
             ],
         }],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
 
-    (got,) = read_annotations(path)
-    assert got.geometry.rings == [LEFT_LOBE, RIGHT_LOBE]
+    with pytest.raises(UnreadableLabelDocument, match="record 1 (segmentation|a polygon)"):
+        read_annotations(path)
 
 
 def test_box_only_record_reads_as_single_bbox_annotation(tmp_path: Path) -> None:
@@ -293,14 +412,14 @@ def test_provenance_set_by_mutation_survives_write(tmp_path: Path) -> None:
     assert again.score == 0.5
 
 
-# -- negative invariant: present-empty == confirmed negative, missing == unannotated --
+# -- empty documents: keep_empty writes one, and neither it nor a missing file is a negative --
 
 
-def test_keep_empty_writes_present_confirmed_negative(tmp_path: Path) -> None:
+def test_keep_empty_writes_a_present_empty_document(tmp_path: Path) -> None:
     path = tmp_path / "labels" / "IMG_0005.json"
     write_annotations(path, [], 640, 480, keep_empty=True)
 
-    assert os.path.exists(path)  # present file == confirmed negative
+    assert os.path.exists(path)  # present, and still unannotated until a person confirms it
     assert _raw(path)["annotations"] == []
     assert read_annotations(path) == []
 
@@ -327,15 +446,15 @@ def test_missing_file_reads_empty(tmp_path: Path) -> None:
     assert read_annotations(path) == []
 
 
-def test_present_negative_is_distinct_from_missing(tmp_path: Path) -> None:
-    negative = tmp_path / "labels" / "confirmed_negative.json"
+def test_a_present_empty_document_and_a_missing_one_both_read_empty(tmp_path: Path) -> None:
+    present = tmp_path / "labels" / "present_empty.json"
     missing = tmp_path / "labels" / "unannotated.json"
-    write_annotations(negative, [], 640, 480, keep_empty=True)
+    write_annotations(present, [], 640, 480, keep_empty=True)
 
-    # Both read as empty, but only the confirmed negative exists on disk.
-    assert read_annotations(negative) == []
+    # Both read as empty and only one exists on disk; neither records a person's confirmation.
+    assert read_annotations(present) == []
     assert read_annotations(missing) == []
-    assert os.path.exists(negative)
+    assert os.path.exists(present)
     assert not os.path.exists(missing)
 
 
@@ -361,6 +480,25 @@ def test_json_that_is_not_a_dict_raises(tmp_path: Path) -> None:
 
         with pytest.raises(UnreadableLabelDocument):
             read_annotations(path)
+
+
+@pytest.mark.parametrize("payload, named", [
+    ({"images": [], "categories": [], "annotations": []}, "import_coco"),
+    ({"categories": [{"id": 1, "name": "bud"}],
+      "annotations": [{"subject": "bud", "bbox": [1, 1, 9, 9]}]}, "import_coco"),
+    ({"image": "a", "objects": [{"label": "bud"}], "annotations": []}, "'objects'"),
+], ids=["empty_coco", "subject_bearing_coco", "objects_schema"])
+def test_a_document_of_another_shape_is_refused_by_the_one_reader(
+    tmp_path: Path, payload: dict, named: str,
+) -> None:
+    """A dataset-level COCO, even an empty one or one whose records carry ``subject``, and the
+    old ``objects`` schema are never read as this image's annotations."""
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    path = tmp_path / "a.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(UnreadableLabelDocument, match=named):
+        read_annotations(path)
 
 
 def test_geometryless_subject_kept_as_image_level_label(tmp_path: Path) -> None:
@@ -397,22 +535,39 @@ def test_entry_without_subject_raises(tmp_path: Path) -> None:
         read_annotations(path)
 
 
-def test_bad_bbox_yields_no_box_geometry(tmp_path: Path) -> None:
+@pytest.mark.parametrize("key, value", [
+    ("bbox", [1.0, 2.0, 3.0]),                  # wrong length
+    ("bbox", [1, 2, 3, 4, 5]),                  # wrong length
+    ("bbox", "10,20,30,40"),                    # not a list
+    ("bbox", ["10", "20", "30", "40"]),         # numeric strings are not numbers
+    ("point", [5.0]),                           # not two numbers
+    ("point", ["5", "6"]),                      # not numbers
+    ("score", "0.8"),                           # not a number
+    ("score", True),                            # a flag is not a confidence
+    ("attributes", {"stage": ""}),              # an empty value name
+    ("attributes", {"stage": 12}),              # a value that is not a name
+    ("attributes", ["stage"]),                  # not a mapping
+    ("iscrowd", 2),                             # not a crowd flag
+    ("iscrowd", "yes"),                         # not a crowd flag
+])
+def test_a_supplied_malformed_value_refuses_the_document_by_record(
+        tmp_path: Path, key, value) -> None:
+    # A present value that is not what the schema states is never read as absent: an absent
+    # geometry, score or attribute is a different fact from a supplied one that did not parse.
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
     path = tmp_path / "a.json"
     payload = {
         "image": "a", "width": 100, "height": 100,
         "annotations": [
-            {"subject": "bud", "bbox": [1.0, 2.0, 3.0]},          # wrong length
-            {"subject": "bud", "bbox": [1, 2, 3, 4, 5]},          # wrong length
-            {"subject": "bud", "bbox": "10,20,30,40"},            # not a list
-            {"subject": "bud", "bbox": ["a", "b", "c", "d"]},     # non-numeric
+            {"subject": "bud", "bbox": [1.0, 2.0, 3.0, 4.0]},
+            {"subject": "bud", "segmentation": [[0.0, 0.0, 9.0, 0.0, 5.0, 9.0]], key: value},
         ],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
-    got = read_annotations(path)
-    # No malformed bbox becomes a garbage box.
-    assert len(got) == 4
-    assert all(a.geometry is None for a in got)
+
+    with pytest.raises(UnreadableLabelDocument, match=f"record 1 {key}"):
+        read_annotations(path)
 
 
 def test_stored_box_with_no_positive_extent_raises(tmp_path: Path) -> None:
@@ -429,26 +584,64 @@ def test_stored_box_with_no_positive_extent_raises(tmp_path: Path) -> None:
         read_annotations(path)
 
 
-def test_bad_segmentation_yields_no_polygon(tmp_path: Path) -> None:
+@pytest.mark.parametrize("segmentation", [
+    [[1.0, 2.0, 3.0, 4.0]],                        # < 3 points
+    [[1, 2, 3, 4, 5, 6, 7]],                       # odd coord count
+    {"counts": "RLE", "size": [2, 2]},             # a run-length mask: rings only on disk
+    [],                                            # empty
+    [["a", "b", "c", "d", "e", "f"]],              # non-numeric
+], ids=["short", "odd", "run_length", "empty", "non_numeric"])
+def test_a_bad_segmentation_refuses_rather_than_falling_back_to_the_box(
+        tmp_path: Path, segmentation) -> None:
+    # Geometry precedence runs over the keys present, never over the keys that parsed: a record
+    # stating a polygon that does not parse is not read as its box.
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    path = tmp_path / "a.json"
+    payload = {
+        "image": "a", "width": 100, "height": 100,
+        "annotations": [{"subject": "leaf", "segmentation": segmentation,
+                         "bbox": [1.0, 2.0, 3.0, 4.0]}],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(UnreadableLabelDocument, match="record 0 (segmentation|a polygon)"):
+        read_annotations(path)
+
+
+@pytest.mark.parametrize("bbox", [[0.0, 0.0, -1.0, 1.0], [0.0, 0.0, 0.0, 0.0]],
+                         ids=["negative_width", "zero_extent"])
+def test_a_box_with_no_extent_refuses_beside_valid_rings(tmp_path: Path, bbox) -> None:
+    # A supplied box is checked where it is read, whichever geometry wins precedence: valid rings
+    # beside it do not make an invalid box readable.
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    path = tmp_path / "a.json"
+    path.write_text(json.dumps({"image": "a", "annotations": [
+        {"subject": "bud", "segmentation": [[0.0, 0.0, 10.0, 0.0, 10.0, 10.0]], "bbox": bbox},
+    ]}), encoding="utf-8")
+
+    with pytest.raises(UnreadableLabelDocument, match="record 0 .*no positive extent"):
+        read_annotations(path)
+
+
+def test_an_absent_key_still_reads_as_absent(tmp_path: Path) -> None:
+    # The admitting half: a record with no geometry, score, attributes or crowd flag is an
+    # image-level ground-truth label, and a null reads as absent too.
     path = tmp_path / "a.json"
     payload = {
         "image": "a", "width": 100, "height": 100,
         "annotations": [
-            {"subject": "leaf", "segmentation": [[1.0, 2.0, 3.0, 4.0]]},        # < 3 points
-            {"subject": "leaf", "segmentation": [[1, 2, 3, 4, 5, 6, 7]]},       # odd coord count
-            {"subject": "leaf", "segmentation": {"counts": "RLE", "size": [2, 2]}},  # RLE dict
-            {"subject": "leaf", "segmentation": []},                             # empty
-            {"subject": "leaf", "segmentation": [["a", "b", "c", "d", "e", "f"]]},  # non-numeric
-            {"subject": "leaf"},                                                 # absent
+            {"subject": "leaf"},
+            {"subject": "bud", "bbox": [1.0, 2.0, 3.0, 4.0], "score": None, "attributes": None,
+             "segmentation": None, "point": None, "iscrowd": None},
         ],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
-    got = read_annotations(path)
-    # Every entry still reads back as its own annotation: an unusable segmentation costs the record
-    # its geometry, never the record itself (a dropped record would read as a smaller label set).
-    assert [a.subject for a in got] == ["leaf"] * 6
-    assert all(not isinstance(a.geometry, Polygon) for a in got)  # no bad ring becomes a polygon
-    assert all(a.geometry is None for a in got)  # and no other geometry is invented in its place
+
+    leaf, bud = read_annotations(path)
+    assert leaf.geometry is None and leaf.score is None and leaf.attributes == {}
+    assert isinstance(bud.geometry, BBox) and bud.score is None and not bud.iscrowd
 
 
 def test_annotations_null_or_absent_raises(tmp_path: Path) -> None:
@@ -469,24 +662,6 @@ def test_the_platforms_own_empty_document_still_reads_empty(tmp_path: Path) -> N
     path.write_text(json.dumps({"image": "a", "annotations": []}), encoding="utf-8")
 
     assert read_annotations(path) == []
-
-
-def test_write_skips_degenerate_polygon(tmp_path: Path) -> None:
-    # A <3-point polygon is not a shape; the writer must skip it so it can't be written as a record
-    # every reader then silently drops (which would masquerade as a confirmed negative).
-    path = tmp_path / "labels" / "a.json"
-    write_annotations(path, [Annotation(subject="bud", geometry=Polygon([[(1.0, 1.0), (2.0, 2.0)]])),
-                             Annotation(subject="leaf", geometry=Polygon([TRIANGLE]))], 100, 100)
-    got = read_annotations(path)
-    assert [(a.geometry.rings, a.subject) for a in got] == [([TRIANGLE], "leaf")]  # only the valid polygon
-    # write<->read symmetry: what a reader can't read, a writer must not write.
-    assert all(len(ring) >= 6 for o in _raw(path)["annotations"] for ring in o["segmentation"])
-
-    # A polygon whose every ring is degenerate yields no records -> removed (unannotated), not a
-    # bogus file.
-    only_bad = tmp_path / "labels" / "b.json"
-    write_annotations(only_bad, [Annotation(subject="bud", geometry=Polygon([[(1.0, 1.0), (2.0, 2.0)]]))], 100, 100)
-    assert not os.path.exists(only_bad)
 
 
 def test_readers_accept_a_document_of_only_valid_records(tmp_path: Path) -> None:
@@ -519,20 +694,21 @@ def test_a_non_dict_annotation_record_raises(tmp_path: Path, junk) -> None:
         read_annotations(path)
 
 
-def test_null_or_bad_score_reads_as_none(tmp_path: Path) -> None:
-    payload = {
-        "image": "a",
-        "annotations": [
-            {"subject": "bud", "bbox": [1.0, 2.0, 3.0, 4.0], "score": None},
-            {"subject": "leaf", "segmentation": [[0.0, 0.0, 9.0, 0.0, 5.0, 9.0]], "score": "high"},
-        ],
-    }
-    path = tmp_path / "a.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    got = read_annotations(path)
-    assert len(got) == 2
-    assert got[0].score is None  # null score -> None (a GT annotation), not dropped
-    assert got[1].score is None  # non-numeric score -> None, no raise
+def test_a_null_score_reads_as_ground_truth_and_a_bad_one_refuses(tmp_path: Path) -> None:
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    null = tmp_path / "null.json"
+    null.write_text(json.dumps({"image": "a", "annotations": [
+        {"subject": "bud", "bbox": [1.0, 2.0, 3.0, 4.0], "score": None}]}), encoding="utf-8")
+    (got,) = read_annotations(null)
+    assert got.score is None  # null score -> None (a GT annotation), not dropped
+
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"image": "a", "annotations": [
+        {"subject": "leaf", "segmentation": [[0.0, 0.0, 9.0, 0.0, 5.0, 9.0]], "score": "high"}]}),
+        encoding="utf-8")
+    with pytest.raises(UnreadableLabelDocument, match="record 0 score"):
+        read_annotations(bad)
 
 
 def test_non_finite_score_is_written_as_valid_json(tmp_path: Path) -> None:
@@ -550,26 +726,18 @@ def test_boolean_score_field_is_not_a_confidence(tmp_path: Path) -> None:
     """``true``/``false`` in a ``score`` field is not a confidence.
 
     Reading a boolean as 1.0/0.0 would turn ground truth into a maximum-confidence (or a
-    zero-confidence) prediction, and the score is the only thing separating the two.
+    zero-confidence) prediction, and the score is the only thing separating the two; reading it
+    as absent would turn a supplied value into no value, so the document refuses.
     """
-    payload = {
-        "image": "a", "width": 320, "height": 240,
-        "annotations": [
-            {"subject": "bud", "bbox": [10.0, 20.0, 100.0, 200.0], "score": True},
-            {"subject": "bud", "bbox": [5.0, 6.0, 30.0, 12.0], "score": False},
-        ],
-    }
-    path = tmp_path / "IMG_bool.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
+    from tcip_annotation.json_io import UnreadableLabelDocument
 
-    got = read_annotations(path)
-    assert len(got) == 2
-    assert [a.score for a in got] == [None, None]
-
-    # ...and the assembled dataset keeps them ground truth: no score key rides along.
-    coco = to_coco_dataset([(str(path), "IMG_bool.JPG")], subject="bud", id_map={"bud": 0})
-    assert len(coco["annotations"]) == 2
-    assert all("score" not in a for a in coco["annotations"])
+    for flag in (True, False):
+        payload = {"image": "a", "width": 320, "height": 240, "annotations": [
+            {"subject": "bud", "bbox": [10.0, 20.0, 100.0, 200.0], "score": flag}]}
+        path = tmp_path / f"IMG_{flag}.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        with pytest.raises(UnreadableLabelDocument, match="record 0 score"):
+            read_annotations(path)
 
 
 def test_polygon_wins_over_a_disagreeing_stored_box(tmp_path: Path) -> None:
@@ -594,149 +762,6 @@ def test_polygon_wins_over_a_disagreeing_stored_box(tmp_path: Path) -> None:
     assert got.geometry.rings == [SQUARE]
     b = bbox_of(got.geometry)
     assert (b.x1, b.y1, b.x2, b.y2) == (10.0, 20.0, 110.0, 220.0)
-
-    # Assembly re-derives the box from the rings rather than passing the stale one through.
-    coco = to_coco_dataset([(str(path), "IMG_stale.JPG")], subject="leaf", id_map={"leaf": 0})
-    (ann,) = coco["annotations"]
-    assert ann["bbox"] == [10.0, 20.0, 100.0, 200.0]
-    assert ann["area"] == 100.0 * 200.0
-
-
-def test_written_polygon_box_covers_only_the_rings_that_survive(tmp_path: Path) -> None:
-    """The box written beside a segmentation spans the kept rings, not the dropped ones.
-
-    A degenerate ring is never written, so a box that still counted its coordinates would describe a
-    region no segmentation supports and would stretch the instance toward stray points.
-    """
-    stray = [(500.0, 400.0), (501.0, 401.0)]  # 2 points: not a shape, dropped on write
-    path = tmp_path / "labels" / "IMG_stray.json"
-    write_annotations(path, [Annotation(subject="leaf", geometry=Polygon([SQUARE, stray]))], 640, 480)
-
-    (rec,) = _raw(path)["annotations"]
-    assert rec["segmentation"] == [[c for xy in SQUARE for c in xy]]
-    assert rec["bbox"] == [10.0, 20.0, 100.0, 200.0]
-
-    # The read side agrees, computed by the real box derivation over what was actually kept.
-    (got,) = read_annotations(path)
-    b = bbox_of(got.geometry)
-    assert [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1] == rec["bbox"]
-
-
-# -- to_coco_dataset ----------------------------------------------------------
-
-
-def _mixed_entries(tmp_path: Path) -> list[tuple[str, str]]:
-    """GT box + pred box (w/ provenance), a polygon pred, a confirmed negative, a missing file."""
-    d = tmp_path / "IMG_0001.json"
-    write_annotations(
-        d,
-        [Annotation(subject="bud", geometry=BBox(10.0, 20.0, 110.0, 220.0)),
-         Annotation(subject="bud", geometry=BBox(5.0, 5.0, 15.0, 25.0), score=0.875, **PROV)],
-        640, 480,
-    )
-    s = tmp_path / "IMG_0002.json"
-    write_annotations(s, [Annotation(subject="bud", geometry=Polygon([SQUARE]), score=0.5, created_by="sam")], 800, 600)
-    neg = tmp_path / "IMG_0003.json"
-    write_annotations(neg, [], 640, 480, keep_empty=True)
-    missing = tmp_path / "IMG_0004.json"
-    return [(str(d), "IMG_0001.JPG"), (str(s), "IMG_0002.JPG"),
-            (str(neg), "IMG_0003.JPG"), (str(missing), "IMG_0004.JPG")]
-
-
-def test_to_coco_dataset_assembles_mixed_entries(tmp_path: Path) -> None:
-    coco = to_coco_dataset(_mixed_entries(tmp_path), subject="bud", id_map={"bud": 0},
-                           confirmed_negative_names={"IMG_0003.JPG"})
-
-    assert coco["categories"] == [{"id": 0, "name": "bud"}]
-    # Present files yield an images record, including IMG_0003's empty file because a human
-    # confirmed it negative (an empty file alone never trains as a negative). The missing
-    # (unannotated) IMG_0004 is skipped entirely.
-    assert [i["file_name"] for i in coco["images"]] == [
-        "IMG_0001.JPG", "IMG_0002.JPG", "IMG_0003.JPG"]
-    assert [i["id"] for i in coco["images"]] == [1, 2, 3]
-    assert coco["images"][0]["width"] == 640 and coco["images"][0]["height"] == 480
-    assert coco["images"][1]["width"] == 800 and coco["images"][1]["height"] == 600
-
-    anns = coco["annotations"]
-    assert len(anns) == 3  # 2 boxes + 1 polygon; the negative contributes none
-    assert [a["id"] for a in anns] == [1, 2, 3]
-    assert {a["image_id"] for a in anns} == {1, 2}
-    for a in anns:
-        assert a["iscrowd"] == 0
-        assert a["category_id"] == 0  # scoped to the single subject
-        assert len(a["bbox"]) == 4 and "area" in a
-
-    gt_box, pred_box, seg = anns
-    assert gt_box["bbox"] == [10.0, 20.0, 100.0, 200.0]
-    assert gt_box["area"] == 100.0 * 200.0
-    assert "score" not in gt_box and "created_by" not in gt_box
-
-    # score + provenance ride along as COCO-extension keys.
-    assert pred_box["score"] == 0.875
-    for k, v in PROV.items():
-        assert pred_box[k] == v
-
-    # Polygon annotations carry segmentation and a bbox derived from the polygon.
-    assert seg["segmentation"] == [[10.0, 20.0, 110.0, 20.0, 110.0, 220.0, 10.0, 220.0]]
-    assert seg["bbox"] == [10.0, 20.0, 100.0, 200.0]
-    assert seg["area"] == 100.0 * 200.0
-    assert seg["score"] == 0.5 and seg["created_by"] == "sam"
-
-    # The confirmed-negative image (id 3) is present but carries no annotations.
-    assert not [a for a in anns if a["image_id"] == 3]
-
-
-def test_to_coco_dataset_round_trips_through_format_io_parser(tmp_path: Path) -> None:
-    from tcip_annotation.format_io import parse_coco_annotations
-
-    coco = to_coco_dataset(_mixed_entries(tmp_path), subject="bud", id_map={"bud": 0})
-
-    anns1 = parse_coco_annotations(coco, image_id=1)
-    assert [a.subject for a in anns1] == ["bud", "bud"]
-    assert [(a.geometry.x1, a.geometry.y1, a.geometry.x2, a.geometry.y2) for a in anns1] == [
-        (10.0, 20.0, 110.0, 220.0),
-        (5.0, 5.0, 15.0, 25.0),
-    ]
-
-    anns2 = parse_coco_annotations(coco, file_name="IMG_0002.JPG")
-    assert len(anns2) == 1 and isinstance(anns2[0].geometry, Polygon)
-    assert anns2[0].geometry.rings == [SQUARE]
-    assert anns2[0].subject == "bud"
-
-    # No confirmed negatives were passed, so the empty IMG_0003 and the missing IMG_0004 are absent.
-    file_names = {i["file_name"] for i in coco["images"]}
-    assert "IMG_0003.JPG" not in file_names
-    assert "IMG_0004.JPG" not in file_names
-    assert parse_coco_annotations(coco, image_id=99) == []  # no such image
-
-
-def test_to_coco_dataset_keeps_every_ring_of_a_multi_ring_instance(tmp_path: Path) -> None:
-    # Training assembly must carry the whole occlusion-split instance: one COCO annotation whose
-    # segmentation lists both rings, with the box/area spanning their union.
-    from tcip_annotation.format_io import parse_coco_annotations
-
-    path = tmp_path / "IMG_multi.json"
-    write_annotations(
-        path, [Annotation(subject="bud", geometry=Polygon([LEFT_LOBE, RIGHT_LOBE]))], 200, 200)
-
-    coco = to_coco_dataset([(str(path), "IMG_multi.JPG")], subject="bud", id_map={"bud": 0})
-    (ann,) = coco["annotations"]
-    assert ann["segmentation"] == [
-        [10.0, 10.0, 30.0, 10.0, 30.0, 50.0, 10.0, 50.0],
-        [70.0, 12.0, 90.0, 12.0, 90.0, 48.0, 70.0, 48.0],
-    ]
-    assert ann["bbox"] == [10.0, 10.0, 80.0, 40.0]
-    assert ann["area"] == 80.0 * 40.0
-
-    # ...and it survives back through the COCO parser as one two-ring polygon.
-    (parsed,) = parse_coco_annotations(coco, file_name="IMG_multi.JPG")
-    assert parsed.geometry.rings == [LEFT_LOBE, RIGHT_LOBE]
-
-
-def test_to_coco_dataset_empty_entries(tmp_path: Path) -> None:
-    coco = to_coco_dataset([], subject="bud", id_map={"bud": 0})
-    assert coco == {"images": [], "annotations": [], "categories": [{"id": 0, "name": "bud"}],
-                    "excluded_incomplete_attribute": []}
 
 
 # -- target_class_id: unlabeled vs. undecodable -------------------------------
@@ -769,168 +794,16 @@ def test_target_class_id_distinguishes_unlabeled_from_undecodable() -> None:
     assert target_class_id(labeled, "bud", "opening", id_map, allow_unlabeled=True) == 1
 
 
-def test_to_coco_dataset_excludes_the_whole_image_when_any_instance_is_unlabeled(
-    tmp_path: Path,
-) -> None:
-    """An instance the annotator hasn't assessed for `attribute` yet must not abort the whole
-    assembly with a raise, and must also not be silently narrowed to just its labeled subset,
-    training the image's other real objects as background. The whole image is excluded and
-    disclosed, the same treatment a missing label file already gets. A genuinely undecodable
-    value still raises: that distinction is unaffected."""
-    mixed_path = tmp_path / "IMG_A.json"
-    write_annotations(mixed_path, [
-        Annotation(subject="bud", geometry=BBox(10, 10, 30, 30),
-                  attributes={"opening": "closed"}),
-        Annotation(subject="bud", geometry=BBox(40, 40, 60, 60), attributes={}),  # unlabeled
-    ], 100, 100)
-    fully_labeled_path = tmp_path / "IMG_B.json"
-    write_annotations(fully_labeled_path, [
-        Annotation(subject="bud", geometry=BBox(10, 10, 30, 30),
-                  attributes={"opening": "open"}),
-    ], 100, 100)
+def test_whole_image_rating_never_becomes_a_target(tmp_path) -> None:
+    """A geometry-less annotation is a whole-image rating, not a detection or segmentation target:
+    it has no box to train or match on, so it takes no class id, and it carries no attribute gap."""
+    from tcip_mcp.pipelines.data.label_queries import json_det_targets
 
-    coco = to_coco_dataset(
-        [(str(mixed_path), "IMG_A.JPG"), (str(fully_labeled_path), "IMG_B.JPG")],
-        subject="bud", id_map={"open": 0, "closed": 1}, attribute="opening",
-    )
-
-    # The mixed image is excluded wholesale (not present at all, not even with its labeled
-    # instance), and the exclusion is disclosed, never silent.
-    assert [i["file_name"] for i in coco["images"]] == ["IMG_B.JPG"]
-    assert len(coco["annotations"]) == 1
-    assert coco["annotations"][0]["category_id"] == 0  # "open", from IMG_B only
-    # Names, not just a count: the downstream partition needs to know which images left, or it
-    # attributes their absence to whichever category it resembles and reports a false reason.
-    assert coco["excluded_incomplete_attribute"] == ["IMG_A.JPG"]
-
-    undecodable_path = tmp_path / "IMG_C.json"
-    write_annotations(undecodable_path, [
-        Annotation(subject="bud", geometry=BBox(10, 10, 30, 30),
-                  attributes={"opening": "not-a-real-value"}),
-    ], 100, 100)
-    try:
-        to_coco_dataset(
-            [(str(undecodable_path), "IMG_C.JPG")],
-            subject="bud", id_map={"open": 0, "closed": 1}, attribute="opening",
-        )
-        raise AssertionError("expected a ValueError")
-    except ValueError:
-        pass
-
-
-# -- subject scoping, class ids, and geometry-less labels in assembly ---------
-
-
-def test_an_image_empty_of_this_subject_is_no_negative_without_confirmation(tmp_path: Path) -> None:
-    """A negative is confirmed by a human, per subject, never inferred from an absence.
-
-    An image full of another subject's annotations holds no information about this one, so admitting
-    it as a negative would train real objects as background on the strength of a scope mismatch.
-    """
-    other_subject = tmp_path / "IMG_leaf.json"
-    write_annotations(other_subject, [
-        Annotation(subject="leaf", geometry=BBox(10.0, 20.0, 110.0, 220.0)),
-        Annotation(subject="leaf", geometry=BBox(200.0, 30.0, 240.0, 90.0)),
-    ], 640, 480)
-    confirmed = tmp_path / "IMG_conf.json"
-    write_annotations(confirmed, [], 640, 480, keep_empty=True)
-    populated = tmp_path / "IMG_cat.json"
-    write_annotations(populated, [Annotation(subject="bud", geometry=BBox(5.0, 6.0, 35.0, 26.0))],
-                      640, 480)
-
-    coco = to_coco_dataset(
-        [(str(other_subject), "IMG_leaf.JPG"), (str(confirmed), "IMG_conf.JPG"),
-         (str(populated), "IMG_cat.JPG")],
-        subject="bud", id_map={"bud": 0}, confirmed_negative_names={"IMG_conf.JPG"},
-    )
-
-    assert [i["file_name"] for i in coco["images"]] == ["IMG_conf.JPG", "IMG_cat.JPG"]
-    (ann,) = coco["annotations"]
-    by_id = {i["id"]: i["file_name"] for i in coco["images"]}
-    assert by_id[ann["image_id"]] == "IMG_cat.JPG"
-    assert ann["bbox"] == [5.0, 6.0, 30.0, 20.0]
-
-
-def test_categories_and_class_ids_follow_the_run_id_map(tmp_path: Path) -> None:
-    """Class ids come from the run's own name to id assignment, which is neither dense nor ordered
-    the way the names are, and the emitted categories cover exactly the ids the annotations use."""
-    id_map = {"closed": 7, "open": 3}
-    closed_img = tmp_path / "IMG_closed.json"
-    write_annotations(closed_img, [Annotation(subject="bud", geometry=BBox(10.0, 20.0, 40.0, 90.0),
-                                               attributes={"opening": "closed"})], 320, 240)
-    open_img = tmp_path / "IMG_open.json"
-    write_annotations(open_img, [Annotation(subject="bud", geometry=BBox(1.0, 2.0, 61.0, 12.0),
-                                                 attributes={"opening": "open"})], 320, 240)
-
-    coco = to_coco_dataset(
-        [(str(closed_img), "IMG_closed.JPG"), (str(open_img), "IMG_open.JPG")],
-        subject="bud", id_map=id_map, attribute="opening",
-    )
-
-    assert coco["categories"] == [{"id": 3, "name": "open"}, {"id": 7, "name": "closed"}]
-    by_image = {i["id"]: i["file_name"] for i in coco["images"]}
-    assert {by_image[a["image_id"]]: a["category_id"] for a in coco["annotations"]} == {
-        "IMG_closed.JPG": 7, "IMG_open.JPG": 3}
-    # Every annotation's class id is one the emitted categories declare.
-    assert {a["category_id"] for a in coco["annotations"]} <= {c["id"] for c in coco["categories"]}
-
-
-def test_whole_image_rating_is_kept_but_never_becomes_a_target(tmp_path: Path) -> None:
-    """A geometry-less annotation is a whole-image rating, not a detection or segmentation target.
-
-    It has no box to train or match on, so it takes no class id and adds no COCO annotation; it also
-    carries no attribute gap, so its presence never pulls a fully labeled image into the
-    incomplete-attribute exclusion.
-    """
-    id_map = {"closed": 7, "open": 3}
-    rating = Annotation(subject="bud", attributes={"vigor": "high"})
-    assert target_class_id(rating, "bud", None, {"bud": 0}) is None
-    assert target_class_id(rating, "bud", "opening", id_map, allow_unlabeled=True) is None
-
-    path = tmp_path / "IMG_rated.json"
-    write_annotations(path, [
-        Annotation(subject="bud", geometry=BBox(10.0, 20.0, 40.0, 90.0),
-                   attributes={"opening": "closed"}),
-        rating,
-    ], 320, 240)
-
-    coco = to_coco_dataset([(str(path), "IMG_rated.JPG")], subject="bud", id_map=id_map,
-                           attribute="opening")
-    assert coco["excluded_incomplete_attribute"] == []
-    assert [i["file_name"] for i in coco["images"]] == ["IMG_rated.JPG"]
-    (ann,) = coco["annotations"]
-    assert ann["category_id"] == 7
-    assert ann["bbox"] == [10.0, 20.0, 30.0, 70.0]
-
-
-def test_rating_only_image_counts_as_annotated_with_no_targets(tmp_path: Path) -> None:
-    """An image whose only annotation is a whole-image rating is annotated, not unannotated: it
-    enters the dataset with zero targets rather than being dropped or excluded as incomplete."""
-    id_map = {"closed": 7, "open": 3}
-    path = tmp_path / "IMG_rating_only.json"
-    write_annotations(path, [Annotation(subject="bud", attributes={"vigor": "low"})], 320, 240)
-
-    coco = to_coco_dataset([(str(path), "IMG_rating_only.JPG")], subject="bud", id_map=id_map,
-                           attribute="opening")
-    assert [i["file_name"] for i in coco["images"]] == ["IMG_rating_only.JPG"]
-    assert coco["annotations"] == []
-    assert coco["excluded_incomplete_attribute"] == []
-    assert coco["images"][0]["width"] == 320 and coco["images"][0]["height"] == 240
-
-
-def test_to_coco_dataset_refuses_a_corrupt_document_behind_a_confirmed_negative_name(
-    tmp_path: Path,
-) -> None:
-    # A confirmed negative is supposed to be an empty label file plus a human's Complete; a
-    # corrupt document behind that name must never assemble as a fabricated zero-object image.
-    from tcip_annotation.json_io import UnreadableLabelDocument
-
-    path = tmp_path / "IMG_bad.json"
-    path.write_text("not json {][", encoding="utf-8")
-
-    with pytest.raises(UnreadableLabelDocument):
-        to_coco_dataset([(str(path), "IMG_bad.JPG")], subject="bud", id_map={"bud": 0},
-                        confirmed_negative_names={"IMG_bad.JPG"})
+    path = tmp_path / "rating.json"
+    write_annotations(path, [Annotation(subject="bud", attributes={"vigor": "high"})], 10, 10)
+    assert json_det_targets(str(path), "bud", None, {"bud": 0})[0]["boxes"] == []
+    target, n_unlabeled = json_det_targets(str(path), "bud", "opening", {"closed": 7, "open": 3})
+    assert target["boxes"] == [] and n_unlabeled == 0
 
 
 # -- the loader, the parser, and the sidecar exclusion ------------------------

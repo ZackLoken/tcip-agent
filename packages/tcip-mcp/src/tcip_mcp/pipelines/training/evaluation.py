@@ -22,7 +22,7 @@ import contextlib
 import io
 import logging
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, cast
 
 import numpy as np
@@ -154,7 +154,15 @@ def compute_composite_objective(
 # pycocotools detection / instance_seg metrics
 # ====================================================================
 
-def build_coco_image_record(width: int, height: int, gt: list[dict], dt: list[dict],
+def precision_recall_f1(tp: int, fp: int, fn: int) -> dict[str, float]:
+    """Precision, recall and F1 from counts: each ``0.0`` when its denominator is empty."""
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    return {"precision": precision, "recall": recall, "f1": f1}
+
+
+def build_coco_image_record(width: float, height: float, gt: list[dict], dt: list[dict],
                             image_id=None) -> dict:
     """One per-image entry: ``{'width','height','gt':[ann...],'dt':[res...]}`` (+ optional image_id)."""
     rec = {"width": int(width), "height": int(height), "gt": list(gt), "dt": list(dt)}
@@ -233,34 +241,32 @@ def coco_detection_metrics(
     Returns mAP at the standard 100-detection cap (``map``/``map50``/``map75``, comparable across
     runs and caps) plus the same at the operating cap (``map_at_maxdets``/``map50_at_maxdets``),
     and operating-point ``precision``/``recall``/``f1``/``tp``/``fp``/``fn`` with per-image counts.
-    Short-circuits to all-zero metrics (no exception) for empty predictions
-    (``loadRes([])`` raises ``IndexError``), empty GT (COCOeval ``stats == -1``),
-    or a fully empty set.
+    Short-circuits to all-zero metrics, every object a miss, when there is no prediction at all
+    (``loadRes([])`` raises ``IndexError``). A reference with no object, empty or crowd regions
+    alone, is still evaluated: each detection outside a crowd region is a false positive.
     """
     images, annotations, results = [], [], []
     cat_ids: set[int] = set()
     ann_id = 1
-    n_gt = n_pred = 0
+    n_pred = 0
+    # Objects each image's ground truth holds: a crowd region is none, it is COCOeval's ignore.
+    n_objects = [len(gt_objects(rec)) for rec in per_image]
     for img_id, rec in enumerate(per_image, start=1):
         images.append({"id": img_id, "width": int(rec.get("width", 0)), "height": int(rec.get("height", 0))})
         for ann in rec.get("gt", []):
             a = dict(ann)
             a["id"] = ann_id
             a["image_id"] = img_id
-            a.setdefault("iscrowd", 0)
-            if "area" not in a:
-                bb = a["bbox"]
-                a["area"] = float(bb[2] * bb[3])
             annotations.append(a)
             cat_ids.add(int(a["category_id"]))
             ann_id += 1
-            n_gt += 1
         for res in rec.get("dt", []):
             r = dict(res)
             r["image_id"] = img_id
             results.append(r)
             cat_ids.add(int(r["category_id"]))
             n_pred += 1
+    n_gt = sum(n_objects)
 
     base = {
         "map": 0.0, "map50": 0.0, "map75": 0.0,
@@ -269,13 +275,12 @@ def coco_detection_metrics(
         "tp": 0, "fp": 0, "fn": n_gt,
         "n_images": len(per_image), "n_gt": n_gt, "n_pred": n_pred,
         "per_image_counts": [
-            {"image_id": i + 1, "tp": 0, "fp": 0, "fn": len(rec.get("gt", []))}
-            for i, rec in enumerate(per_image)
+            {"image_id": i + 1, "tp": 0, "fp": 0, "fn": n} for i, n in enumerate(n_objects)
         ],
         "iou_type": iou_type, "iou_threshold": iou_threshold,
         "conf_threshold": conf_threshold, "max_dets": max_dets,
     }
-    if n_pred == 0 or n_gt == 0:
+    if n_pred == 0:
         return base
 
     from pycocotools.coco import COCO
@@ -287,10 +292,7 @@ def coco_detection_metrics(
         coco_gt = COCO()
         coco_gt.dataset = {"images": images, "annotations": annotations, "categories": categories}
         coco_gt.createIndex()
-        try:
-            coco_dt = coco_gt.loadRes(results)
-        except IndexError:
-            return base
+        coco_dt = coco_gt.loadRes(results)
         coco_eval = COCOeval(coco_gt, coco_dt, iouType=iou_type)
         # Include 100 so map/map50/map75 stay the standard, cap-comparable AP; max_dets adds the operating-cap figures.
         coco_eval.params.maxDets = sorted({1, 100, int(max_dets)})
@@ -305,16 +307,10 @@ def coco_detection_metrics(
         counts = _counts_at_operating_point(coco_eval, iou_threshold, conf_threshold)
 
     tp, fp, fn = counts["tp"], counts["fp"], counts["fn"]
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
     return {
         "map": max(m_ap, 0.0), "map50": max(m_ap50, 0.0), "map75": max(m_ap75, 0.0),
         "map_at_maxdets": max(m_ap_md, 0.0), "map50_at_maxdets": max(m_ap50_md, 0.0),
-        # map/map50/map75 are standard COCO AP@100 as of this marker; older stored metrics
-        # (no marker) used maxDets=max_dets and are not numerically comparable.
-        "map_convention": "coco_ap100",
-        "precision": precision, "recall": recall, "f1": f1,
+        **precision_recall_f1(tp, fp, fn),
         "tp": tp, "fp": fp, "fn": fn,
         "n_images": len(per_image), "n_gt": n_gt, "n_pred": n_pred,
         "per_image_counts": counts["per_image_counts"],
@@ -334,6 +330,20 @@ def coco_detection_metrics(
 # count (Sigma pred ~= Sigma gt) for a trait whose recorded count_objective/localization say so
 # (traits.py, neither is authored, both are derived/decided once and recorded).
 
+def gt_objects(rec: dict, *, crowd: bool = False) -> list[dict]:
+    """A per-image record's ground-truth objects: every ``gt`` entry but a crowd region, which is
+    COCO's ignore region and never one object in a count, a size or a spacing; with ``crowd``, the
+    crowd regions instead, the other half of the one split. The one selector over evaluation
+    records; every record builder states the flag."""
+    return [a for a in rec.get("gt", []) if bool(a["iscrowd"]) is crowd]
+
+
+def gt_facts(rec: dict) -> list:
+    """A per-image record's ground truth as content: each record's class, box and crowd flag, in
+    a fixed order. The one projection every content identity of ground truth hashes."""
+    return sorted([g["category_id"], g["bbox"], g["iscrowd"]] for g in rec["gt"])
+
+
 def _centers_xywh(anns: list[dict]) -> list[tuple[float, float]]:
     return [(a["bbox"][0] + a["bbox"][2] / 2.0, a["bbox"][1] + a["bbox"][3] / 2.0) for a in anns]
 
@@ -351,7 +361,7 @@ def gt_class_avg_size(per_image: list[dict], class_id: int | None = None) -> flo
     """
     sizes = [
         _char_size_xywh(a)
-        for rec in per_image for a in rec.get("gt", [])
+        for rec in per_image for a in gt_objects(rec)
         if class_id is None or a["category_id"] == class_id
     ]
     return float(np.mean(sizes)) if sizes else 0.0
@@ -379,13 +389,13 @@ def gt_class_typical_count(per_image: list[dict], class_id: int | None = None) -
     (:func:`operating_point._bias_equivalence_ok`).
 
     Deliberately GT-only and conf-independent, a distinct notion of "present" from
-    ``_count_stats_at_conf``'s ``n_present`` (``gt or dt``, at one conf): a class with detections but
+    ``_count_stats_at_conf``'s ``n_present`` (a counted object or detection, at one conf): a class with detections but
     no real GT anywhere has no genuine "typical count" to speak of (it should derive 0, not borrow
     density from its own false positives), and the relative tolerance must not shift as the sweep
     moves through conf values just because a different set of low-score detections happens to survive.
     """
     counts = [
-        sum(1 for a in rec.get("gt", []) if class_id is None or a["category_id"] == class_id)
+        sum(1 for a in gt_objects(rec) if class_id is None or a["category_id"] == class_id)
         for rec in per_image
     ]
     return mean_of_present_counts(counts)
@@ -462,13 +472,21 @@ def center_match_pairs(gt_centers: list[tuple[float, float]], dt_centers: list[t
 
 
 def _center_match_image(gt: list[dict], dt: list[dict], tolerance: float) -> tuple[int, int, int]:
-    """tp/fp/fn under the count's score-first policy (``dt`` pre-sorted by score descending)."""
-    gt_centers = _centers_xywh(gt)
+    """tp/fp/fn under the count's score-first policy (``dt`` pre-sorted by score descending).
+
+    COCO's crowd semantics: a crowd region is no object to miss, and a detection matching no
+    object whose centre lies inside a crowd region's box is neither a true nor a false positive.
+    """
+    objects = gt_objects({"gt": gt})
+    crowds = [a["bbox"] for a in gt_objects({"gt": gt}, crowd=True)]
     dt_centers = _centers_xywh(dt)
     # The count's identity question: a duplicate claim on one ground truth is resolved by keeping
     # the higher-confidence detection, never by geometry alone.
-    tp = len(center_match_pairs(gt_centers, dt_centers, tolerance, policy="score_first"))
-    return tp, len(dt) - tp, len(gt_centers) - tp
+    matched = {di for _, di in center_match_pairs(
+        _centers_xywh(objects), dt_centers, tolerance, policy="score_first")}
+    ignored = sum(1 for di, (cx, cy) in enumerate(dt_centers) if di not in matched and any(
+        x <= cx <= x + w and y <= cy <= y + h for x, y, w, h in crowds))
+    return len(matched), len(dt) - len(matched) - ignored, len(objects) - len(matched)
 
 
 def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
@@ -504,7 +522,7 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
     from tcip_mcp.traits import CENTER_MATCH, get_trait
 
     spec = get_trait(trait_name)
-    boxes_per_image = [[a["bbox"] for a in rec.get("gt", [])
+    boxes_per_image = [[a["bbox"] for a in gt_objects(rec)
                         if class_id is None or a["category_id"] == class_id]
                        for rec in per_image]
 
@@ -617,29 +635,13 @@ def governing_counts(per_image: list[dict], criterion: dict, *, conf_threshold: 
         # Deliberately uncapped by max_dets, unlike the iou_match branch below: a count
         # trait's total is every conf-surviving detection, not the COCOeval detection-cap
         # convention that AP@0.5 comparability uses.
-        tol = float(criterion["tolerance"])
-        tp = fp = fn = 0
-        for rec in per_image:
-            gt = [a for a in rec.get("gt", []) if class_id is None or a["category_id"] == class_id]
-            dt = sorted(
-                (d for d in rec.get("dt", [])
-                 if _dt_score(d) >= conf_threshold
-                 and (class_id is None or d["category_id"] == class_id)),
-                key=lambda d: -_dt_score(d),
-            )
-            t, f, n = _center_match_image(gt, dt, tol)
-            tp += t
-            fp += f
-            fn += n
+        m = _count_stats_at_conf(per_image, tolerance=float(criterion["tolerance"]),
+                                 conf=conf_threshold, class_id=class_id)
     else:
         m = coco_detection_metrics(per_image, iou_threshold=criterion["iou_threshold"],
                                    conf_threshold=conf_threshold, max_dets=max_dets)
-        tp, fp, fn = int(m["tp"]), int(m["fp"]), int(m["fn"])
-    precision = tp / (tp + fp) if (tp + fp) else 0.0
-    recall = tp / (tp + fn) if (tp + fn) else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
-    return {"tp": tp, "fp": fp, "fn": fn, "precision": round(precision, 6),
-            "recall": round(recall, 6), "f1": round(f1, 6), "criterion": criterion}
+    return {"tp": int(m["tp"]), "fp": int(m["fp"]), "fn": int(m["fn"]),
+            **{k: round(m[k], 6) for k in ("precision", "recall", "f1")}, "criterion": criterion}
 
 
 def _count_stats_at_conf(per_image: list[dict], *, tolerance: float, conf: float,
@@ -679,15 +681,11 @@ def _count_stats_at_conf(per_image: list[dict], *, tolerance: float, conf: float
         fp += f
         fn += n
         biases.append(f - n)
-        if gt or dt:
+        if t + n + f:  # a counted object or detection; one ignored in a crowd region is neither
             present_biases.append(f - n)
-    precision = tp / (tp + fp) if (tp + fp) else 0.0
-    recall = tp / (tp + fn) if (tp + fn) else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
     abs_biases = [abs(b) for b in biases]
     return {
-        "tp": tp, "fp": fp, "fn": fn,
-        "precision": precision, "recall": recall, "f1": f1,
+        "tp": tp, "fp": fp, "fn": fn, **precision_recall_f1(tp, fp, fn),
         "count_bias_mean": float(np.mean(biases)) if biases else 0.0,
         "abs_count_error_mean": float(np.mean(abs_biases)) if biases else 0.0,
         # Tail dispersion, a p90 of |bias|, not another mean, since a mean can hide one
@@ -696,7 +694,7 @@ def _count_stats_at_conf(per_image: list[dict], *, tolerance: float, conf: float
         "count_error_p90": float(np.quantile(abs_biases, 0.9)) if abs_biases else 0.0,
         "count_bias_std": float(np.std(biases, ddof=1)) if len(biases) > 1 else 0.0,
         "n_images": len(biases),
-        # Images that actually carried this class (gt or a surviving dt), distinct from n_images
+        # Images holding a counted object or detection of this class, distinct from n_images
         # (the whole holdout) because a scope scarce in the reference gets the denominator of both
         # its bias and its standard error from how much evidence there really is, not diluted by
         # images that say nothing about it.
@@ -850,6 +848,44 @@ def _mask_to_rle(mask) -> dict:
     return mask_utils.encode(binary)
 
 
+def gt_record(bbox: list[float], category_id: int, crowd: Any) -> dict:
+    """One ground-truth evaluation record: its ``[x, y, w, h]`` box, the ``area`` that box
+    states and its crowd flag. The one shape every ground-truth record is built in."""
+    return {"category_id": int(category_id), "bbox": bbox, "area": float(bbox[2] * bbox[3]),
+            "iscrowd": int(crowd)}
+
+
+def dt_record(bbox: list[float], category_id: Any, score: Any) -> dict:
+    """One detection's evaluation record: its ``[x, y, w, h]`` box as given, its class and its
+    score. The one shape every detection record is built in, whatever coordinates it is on."""
+    return {"category_id": int(category_id), "bbox": bbox, "score": float(score)}
+
+
+def detection_record(box: Sequence[float], label: Any, score: Any) -> dict:
+    """One detection's evaluation record from a predictor's corner ``box``, on the stored grid
+    (:func:`~tcip_annotation.json_io.xywh`): the one conversion every reader of predictor output
+    scores through, so a detection is compared on the grid its ground truth is stored on."""
+    return dt_record(xywh(*box), label, score)
+
+
+def gt_records(target: Mapping[str, Any]) -> list[dict]:
+    """A target's rows, corner ``boxes`` beside ``labels`` and the crowd flag, as evaluation
+    ground-truth records on the stored grid (:func:`~tcip_annotation.json_io.xywh`): the one
+    conversion from a target, a tensor, array or list one alike, to records every reader shares.
+    A bespoke target that states no crowd flag reads through
+    :func:`~tcip_mcp.pipelines.data.datasets.crowd_of`."""
+    from tcip_mcp.pipelines.data.datasets import crowd_of
+
+    def rows(values: Any) -> list:
+        return values.tolist() if hasattr(values, "tolist") else list(values)
+
+    if not len(target["boxes"]):
+        return []
+    return [gt_record(xywh(*box), lab, crowd)
+            for box, lab, crowd in zip(rows(target["boxes"]), rows(target["labels"]),
+                                       rows(crowd_of(target)))]
+
+
 def records_from_detector(target: dict, output: dict, *, width: int, height: int,
                           include_masks: bool = False, detections_cap: int | None = None) -> dict:
     """torchvision GT target + detector output -> one COCO per-image record.
@@ -862,26 +898,18 @@ def records_from_detector(target: dict, output: dict, *, width: int, height: int
     image's raw detection count reached that cap, so a reviewer can see per-image cap
     saturation without re-deriving it later from a number that's no longer available by then.
     """
-    gt = []
-    gboxes = target.get("boxes")
-    gmasks = target.get("masks") if include_masks else None
-    if gboxes is not None and len(gboxes):
-        glabels = target["labels"].detach().cpu().tolist()
-        for i, ((x1, y1, x2, y2), c) in enumerate(zip(gboxes.detach().cpu().tolist(), glabels)):
-            ann = {"category_id": int(c), "bbox": xywh(x1, y1, x2, y2),
-                   "area": float((x2 - x1) * (y2 - y1)), "iscrowd": 0}
-            if gmasks is not None and i < len(gmasks):
-                ann["segmentation"] = _mask_to_rle(gmasks[i])
-            gt.append(ann)
+    gt = gt_records(target)
+    if include_masks and target.get("masks") is not None:
+        for ann, mask in zip(gt, target["masks"]):
+            ann["segmentation"] = _mask_to_rle(mask)
     dt = []
     pboxes = output.get("boxes")
     pmasks = output.get("masks") if include_masks else None
     if pboxes is not None and len(pboxes):
         plabels = output["labels"].detach().cpu().tolist()
         pscores = output["scores"].detach().cpu().tolist()
-        for i, ((x1, y1, x2, y2), c, s) in enumerate(
-                zip(pboxes.detach().cpu().tolist(), plabels, pscores)):
-            res = {"category_id": int(c), "bbox": xywh(x1, y1, x2, y2), "score": float(s)}
+        for i, (box, c, s) in enumerate(zip(pboxes.detach().cpu().tolist(), plabels, pscores)):
+            res = detection_record(box, c, s)
             if pmasks is not None and i < len(pmasks):
                 res["segmentation"] = _mask_to_rle(pmasks[i])
             dt.append(res)
@@ -911,7 +939,9 @@ def records_from_annotation(gt, preds, *, width: int, height: int, force_segm: b
     ``name_id`` entry: neither has a box to score, and emitting one would put a fabricated extent into
     a delivery-grade AP, as GT nothing can match, or as a detection matching nothing.
     """
-    from tcip_annotation.state import bbox_of, box_derivable, polygonal
+    from tcip_annotation.state import (
+        bbox_of, box_derivable, is_detection, polygonal, prediction_score,
+    )
 
     def _scorable(a) -> bool:
         return box_derivable(a.geometry)
@@ -936,21 +966,16 @@ def records_from_annotation(gt, preds, *, width: int, height: int, force_segm: b
         if not _scorable(a):
             return None
         box = bbox_of(a.geometry)
-        rec: dict = {"category_id": name_id[a.subject],
-                     "bbox": xywh(box.x1, box.y1, box.x2, box.y2)}
-        if is_pred:
-            rec["score"] = float(a.score if a.score is not None else 0.0)
-        else:
-            rec["area"] = float((box.x2 - box.x1) * (box.y2 - box.y1))
-            rec["iscrowd"] = 0
+        corners = (box.x1, box.y1, box.x2, box.y2)
+        rec = (detection_record(corners, name_id[a.subject], prediction_score(a)) if is_pred else gt_record(xywh(*corners), name_id[a.subject], a.iscrowd))
         if polygonal(a.geometry):
-            rec["segmentation"] = [_poly_flat(ring) for ring in a.geometry.rings if len(ring) >= 3]
+            rec["segmentation"] = [_poly_flat(ring) for ring in a.geometry.rings]
         elif use_segm:
             rec["segmentation"] = _box_seg(box.x1, box.y1, box.x2, box.y2)
         return rec
 
     gt_recs = [r for r in (_record(a, is_pred=False) for a in gt) if r is not None]
-    dt_recs = [r for r in (_record(a, is_pred=True) for a in preds) if r is not None]
+    dt_recs = [_record(a, is_pred=True) for a in preds if is_detection(a)]
     return iou_type, build_coco_image_record(width, height, gt_recs, dt_recs)
 
 
@@ -980,11 +1005,9 @@ def classification_metrics(pred_labels: torch.Tensor, targets: torch.Tensor, num
         fn = int(((pred != c) & (gt == c)).sum())
         support = int((gt == c).sum())
         pred_count = int((pred == c).sum())
-        p = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        r = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1 = 2 * p * r / (p + r) if (p + r) > 0 else 0.0
-        f1s.append(f1)
-        per_class[c] = {"precision": p, "recall": r, "f1": f1, "support": support,
+        prf = precision_recall_f1(tp, fp, fn)
+        f1s.append(prf["f1"])
+        per_class[c] = {**prf, "support": support,
                         "count_bias": (pred_count - support) / support if support > 0 else 0.0}
     return {
         "accuracy": accuracy,
@@ -1209,19 +1232,23 @@ def evaluate(
             # Loss pass over the full batch, all-negative (empty-box) images contribute their
             # background/objectness loss, so val_loss penalizes false positives on empty frames and
             # matches the train loop's distribution. BN stays eval via the train()+BN.eval() trick.
+            # The heads get the train loop's own targets; scoring below reads every row.
+            from tcip_mcp.pipelines.data.datasets import instance_targets
+
+            head_targets = instance_targets(targets)
             if detector is not None:
                 detector.train()
                 for m in detector.modules():
                     if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
                         m.eval()
-                ld = detector(images, targets)
+                ld = detector(images, head_targets)
                 total_loss += float(sum(ld.values()).item())
                 n_loss += 1
             else:
                 model.training = True
                 for head in getattr(model, "heads", []):
                     head.training = True
-                ld = model(images, targets)
+                ld = model(images, head_targets)
                 # sum() over an untyped model's loss dict resolves, by mypy's overload matching on
                 # Any, to its int overload rather than the runtime Tensor the values actually are.
                 total_loss += (

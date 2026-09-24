@@ -42,7 +42,7 @@ def _write_bare_trait(name: str, **extra) -> None:
 
 
 def _per_image(boxes: list[tuple[float, float, float, float]]) -> list[dict]:
-    return [{"gt": [{"bbox": list(b), "category_id": 0} for b in boxes]}]
+    return [{"gt": [{"bbox": list(b), "category_id": 0, "iscrowd": 0} for b in boxes]}]
 
 
 def test_every_count_objective_label_the_calibration_path_can_stamp_is_registered():

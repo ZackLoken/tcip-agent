@@ -23,7 +23,7 @@ from tcip_store.layout_claims import (
     CURATED, EXPERIMENTS, HPO_ROOT, PREDICTION_BUCKET, ROOT, RUN, SPLITS, STATE, SWEEP,
 )
 
-from tcip_annotation import format_io, json_io, review_engine  # noqa: F401
+from tcip_annotation import json_io, review_engine  # noqa: F401
 from tcip_mcp import (  # noqa: F401
     audit,
     dataset_layout,

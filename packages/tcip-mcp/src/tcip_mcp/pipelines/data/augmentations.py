@@ -55,6 +55,14 @@ def _resize_masks(masks: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:
     return resized.squeeze(1).to(masks.dtype)
 
 
+def _keep_rows(target: dict, valid: torch.Tensor) -> None:
+    """Keep the per-box rows ``valid`` marks in every per-box tensor beside ``boxes``, so a
+    transform dropping a degenerate box drops its label and crowd flag with it."""
+    for key in ("labels", "iscrowd"):
+        if torch.is_tensor(target.get(key)):
+            target[key] = target[key][valid]
+
+
 class RandomHorizontalFlip:
     """Flip image, boxes, and masks horizontally with probability p."""
 
@@ -175,8 +183,7 @@ class RandomResizedCrop:
                 # Filter out degenerate boxes
                 valid = (boxes[:, 2] - boxes[:, 0] > 1) & (boxes[:, 3] - boxes[:, 1] > 1)
                 target["boxes"] = boxes[valid]
-                if "labels" in target:
-                    target["labels"] = target["labels"][valid]
+                _keep_rows(target, valid)
                 masks = target.get("masks")
                 if torch.is_tensor(masks) and masks.ndim == 3:
                     target["masks"] = masks[valid]
@@ -263,8 +270,7 @@ class RandomRotation:
             nb[:, [1, 3]] = nb[:, [1, 3]].clamp(min=0, max=h)
             valid = (nb[:, 2] - nb[:, 0] > 1) & (nb[:, 3] - nb[:, 1] > 1)
             target["boxes"] = nb[valid]
-            if "labels" in target and torch.is_tensor(target["labels"]):
-                target["labels"] = target["labels"][valid]
+            _keep_rows(target, valid)
             masks = target.get("masks")
             if torch.is_tensor(masks) and masks.ndim == 3 and len(masks) == len(valid):
                 import numpy as np

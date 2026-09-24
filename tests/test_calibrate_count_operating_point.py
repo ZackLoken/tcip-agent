@@ -255,6 +255,17 @@ def test_calibrate_count_operating_point_earns_a_validated_stamp(
     assert on_disk["trait"] == "bud_opening"
     assert on_disk["shippable_issues"] == []
 
+    # Every act under the door is its library's line, and the door writes none of its own.
+    import tcip_store as ts
+
+    from tcip_mcp.audit import audit_log_key
+
+    tools = sorted(r["tool"] for key in dict.fromkeys((audit_log_key(), audit_log_key(dataset_root)))
+                   for r in ts.read_log(key).records)
+    assert "calibrate_count_operating_point" not in tools
+    assert tools.count("stamp_written") == 2  # the producing run's stamp and this merge
+    assert tools.count("experiment_validation_recorded") == 1
+
 
 def test_calibrate_count_operating_point_refuses_when_earned_conf_differs_from_production(
     monkeypatch, tmp_path,

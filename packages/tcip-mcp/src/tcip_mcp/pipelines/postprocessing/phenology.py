@@ -43,6 +43,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+from tcip_mcp.dataset_layout import label_filename
 from tcip_mcp.operationalization import OperationalizationBasis
 from tcip_mcp.pipelines.resolution import Acknowledgement, bucket_scope
 
@@ -485,7 +486,7 @@ def per_plant_series(
                 acc[3] += 1
                 continue
             total, positive, unclassified = count_by_class(
-                pred_path / f"{stem}.json", id_map, positive_value, scope=scope)
+                pred_path / label_filename(stem), id_map, positive_value, scope=scope)
             acc[0] += total
             acc[1] += positive
             acc[2] += unclassified

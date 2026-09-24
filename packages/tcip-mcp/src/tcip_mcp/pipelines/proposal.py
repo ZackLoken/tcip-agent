@@ -51,7 +51,7 @@ def neutral_candidate(raw: dict, *, engine: str, score_key: str, meta_keys: tupl
         "bbox": raw["bbox"],
         "area": raw["area"],
         "rings": raw["rings"],
-        "score": float(raw.get(score_key, 0.0)),
+        "score": float(raw[score_key]),
         "engine": engine,
         "engine_meta": {k: raw[k] for k in meta_keys if k in raw},
     }

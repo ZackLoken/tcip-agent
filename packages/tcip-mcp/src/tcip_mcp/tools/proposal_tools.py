@@ -12,12 +12,12 @@ ground truth.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import tcip_store as ts
 from tcip_store.file_backend import RootedFileLocator
 
-from tcip_annotation import Annotation, BBox, Polygon
+from tcip_annotation import Annotation, BBox, Polygon, bbox_of
 from tcip_annotation.json_io import stored_box_extent_ok
 from tcip_annotation.sam_wrapper import grid_to_rect
 from tcip_annotation.viz import render_candidates, render_detections
@@ -323,12 +323,15 @@ def propose_annotations(
             "candidates": [],
         }
 
-    # A bespoke engine's candidates are its own dicts, so what a segmenter returns natively
-    # (an array, a numpy scalar) is named here rather than stored as a repr of itself.
+    # An engine's own candidates are refused here, where they arrive, when unstorable, no polygon
+    # or stating no confidence of their own.
     try:
         ts.check_json_value(candidates, path="candidates")
-    except (TypeError, ValueError) as exc:
-        return {"error": f"Engine {engine!r} proposed a candidate the store cannot hold: {exc}"}
+        for candidate in candidates:
+            Polygon(rings=candidate["rings"])
+            candidate["score"] = float(candidate["score"])
+    except (KeyError, TypeError, ValueError) as exc:
+        return {"error": f"Engine {engine!r} proposed a candidate this platform cannot hold: {exc}"}
 
     from tcip_mcp.tools.vision_tools import _display_for_path
 
@@ -435,25 +438,22 @@ def _stage_assignments_regime(image_path: str, img: Path, address: StagingAddres
     # Build name-based predictions (created_by=<engine>, score = the proposal score); each keeps
     # every ring, so an occlusion-split object stays split rather than its largest fragment.
     from datetime import datetime, timezone
-    from tcip_annotation.state import Polygon as _Polygon
     staged_at = datetime.now(timezone.utc).isoformat()
     proposals: list[Annotation] = []
     n_poly = 0
 
-    for assign in assignments:
-        cid = assign["candidate_id"]
-        subject = assign.get("subject")
-        cand = cand_map.get(cid)
-        if cand is None or not subject:
+    for i, assign in enumerate(assignments):
+        cand = cand_map.get(assign["candidate_id"])
+        if cand is None:
             continue
-        score = float(cand.get("score", 0.0))  # neutral proposal score, in [0, 1]
-        rings = [[(float(x), float(y)) for x, y in ring]
-                 for ring in cand["rings"] if len(ring) >= 3]
-        if rings:
+        rings = [[(float(x), float(y)) for x, y in ring] for ring in cand["rings"]]
+        try:
             proposals.append(Annotation(
-                subject=str(subject), geometry=_Polygon(rings=rings),
-                score=score, created_by=engine, created_at=staged_at))
-            n_poly += 1
+                subject=assign.get("subject", ""), geometry=Polygon(rings=rings),
+                score=cand["score"], created_by=engine, created_at=staged_at))
+        except ValueError as exc:
+            return {"error": f"assignment {i}: {exc}"}
+        n_poly += 1
 
     # Stage into the predictions tree through the shared review-state-guarded helper: model output
     # for a human to accept on the Review canvas, never written straight to ground truth.
@@ -616,19 +616,16 @@ def _stage_explicit_regime(image_path: str, img: Path, address: StagingAddress,
     def _unnormalized(vals) -> bool:
         return any(v < -0.01 or v > 1.5 for v in vals)
 
-    norm_boxes: list[tuple[str, float, float, float, float, float]] = []
+    norm_boxes: list[tuple[Any, float, float, float, float, float]] = []
     for i, b in enumerate(boxes):
         try:
             cx, cy, w, h = float(b["cx"]), float(b["cy"]), float(b["w"]), float(b["h"])
-            conf = float(b.get("conf", 1.0))
-            subject = str(b["subject"])
+            conf = float(b["conf"])
         except (KeyError, TypeError, ValueError):
-            return {"error": f"box {i} needs a subject and numeric conf, cx, cy, w, h (normalized): {b!r}"}
-        if not subject:
-            return {"error": f"box {i} needs a non-empty subject"}
+            return {"error": f"box {i} needs numeric conf, cx, cy, w, h (normalized): {b!r}"}
         if _unnormalized((cx, cy, w, h)):
             return {"error": f"box {i} coords {(cx, cy, w, h)} look un-normalized; cx/cy/w/h must be in [0,1]"}
-        norm_boxes.append((subject, conf, cx, cy, w, h))
+        norm_boxes.append((b.get("subject", ""), conf, cx, cy, w, h))
 
     try:
         img_source = resolve_image_source(img.parent, img.stem)
@@ -642,16 +639,19 @@ def _stage_explicit_regime(image_path: str, img: Path, address: StagingAddress,
     _PIXEL_MARGIN = 1.0
 
     def _spans_a_pixel(ring: list[tuple[float, float]]) -> bool:
-        xs, ys = [x for x, _ in ring], [y for _, y in ring]
-        return (max(xs) - min(xs)) >= 1.0 and (max(ys) - min(ys)) >= 1.0
+        b = bbox_of(Polygon(rings=[ring]))
+        return b.x2 - b.x1 >= 1.0 and b.y2 - b.y1 >= 1.0
 
     def _out_of_pixel_bounds(ring: list[tuple[float, float]]) -> bool:
         return (any(x < -_PIXEL_MARGIN or x > img_w + _PIXEL_MARGIN for x, _ in ring)
                 or any(y < -_PIXEL_MARGIN or y > img_h + _PIXEL_MARGIN for _, y in ring))
 
+    from datetime import datetime, timezone
+    created_at = datetime.now(timezone.utc).isoformat()
+
     # Each polygon carries exactly one of two keys, folded into pixel-space rings as it is parsed;
     # the fold needs img_w/img_h, resolved above.
-    resolved_polys: list[tuple[str, float, list[list[tuple[float, float]]]]] = []
+    polygon_proposals: list[Annotation] = []
     for i, p in enumerate(polygons):
         has_points = "points" in p
         has_rings = "rings" in p
@@ -660,64 +660,57 @@ def _stage_explicit_regime(image_path: str, img: Path, address: StagingAddress,
             return {"error": f"polygon {i} must carry exactly one of 'points' or 'rings', got "
                              f"{offered}: {p!r}"}
         try:
-            conf = float(p.get("conf", 1.0))
-            subject = str(p["subject"])
+            conf = float(p["conf"])
         except (KeyError, TypeError, ValueError):
-            return {"error": f"polygon {i} needs a subject and numeric conf: {p!r}"}
-        if not subject:
-            return {"error": f"polygon {i} needs a non-empty subject"}
+            return {"error": f"polygon {i} needs a numeric conf: {p!r}"}
 
         if has_points:
             try:
                 pts = [(float(x), float(y)) for x, y in p["points"]]
             except (TypeError, ValueError):
                 return {"error": f"polygon {i} points must be [x, y] pairs (normalized): {p!r}"}
-            if len(pts) < 3:
-                return {"error": f"polygon {i} needs at least 3 points, got {len(pts)}"}
             if _unnormalized([v for xy in pts for v in xy]):
                 return {"error": f"polygon {i} points look un-normalized; x/y must be in [0,1]"}
             rings_px = [[(x * img_w, y * img_h) for x, y in pts]]
         else:
             try:
-                rings = [[ring_vertex(v) for v in ring] for ring in p["rings"]]
+                rings_px = [[(float(x), float(y)) for x, y in map(ring_vertex, ring)]
+                            for ring in p["rings"]]
             except (TypeError, ValueError, KeyError):
                 return {"error": f"polygon {i} rings must be a list of rings of [x, y] pairs or "
                                  f"{{'x':, 'y':}} mappings (pixel coordinates): {p!r}"}
-            short = [j for j, ring in enumerate(rings) if len(ring) < 3]
-            if short:
-                return {"error": f"polygon {i} ring(s) {short} need at least 3 points"}
-            sub_pixel = [j for j, ring in enumerate(rings) if not _spans_a_pixel(ring)]
+        try:
+            proposal = Annotation(subject=p.get("subject", ""), geometry=Polygon(rings=rings_px),
+                                  score=conf, created_by=model_name, created_at=created_at)
+        except ValueError as exc:
+            return {"error": f"polygon {i}: {exc}"}
+        if has_rings:
+            sub_pixel = [j for j, ring in enumerate(rings_px) if not _spans_a_pixel(ring)]
             if sub_pixel:
                 return {"error": f"polygon {i} ring(s) {sub_pixel} span under a pixel in an axis; "
                                  f"rings are pixel coordinates, not normalized ones: {p!r}"}
-            if any(_out_of_pixel_bounds(ring) for ring in rings):
+            if any(_out_of_pixel_bounds(ring) for ring in rings_px):
                 return {"error": f"polygon {i} rings look out of the image's pixel bounds "
-                                 f"({img_w}x{img_h}): {rings!r}"}
-            rings_px = rings
-        resolved_polys.append((subject, conf, rings_px))
-
-    from datetime import datetime, timezone
-    created_at = datetime.now(timezone.utc).isoformat()
+                                 f"({img_w}x{img_h}): {rings_px!r}"}
+        polygon_proposals.append(proposal)
 
     # A box of nothing is no detection: dropped rather than staged, so it never reaches the
     # accept branch (which would otherwise hand the persistence boundary a degenerate proposal).
     box_proposals: list[Annotation] = []
     dropped_boxes = 0
-    for (subject, conf, cx, cy, w, h) in norm_boxes:
-        box = BBox((cx - w / 2) * img_w, (cy - h / 2) * img_h,
-                  (cx + w / 2) * img_w, (cy + h / 2) * img_h)
+    for i, (subject, conf, cx, cy, w, h) in enumerate(norm_boxes):
+        box = BBox.from_normalized_centre((cx, cy, w, h), img_w, img_h)
+        try:
+            proposal = Annotation(subject=subject, geometry=box, score=conf,
+                                  created_by=model_name, created_at=created_at)
+        except ValueError as exc:
+            return {"error": f"box {i}: {exc}"}
         if not stored_box_extent_ok(box):
             dropped_boxes += 1
             continue
-        box_proposals.append(Annotation(subject=subject, geometry=box, score=conf,
-                                        created_by=model_name, created_at=created_at))
+        box_proposals.append(proposal)
 
-    proposals: list[Annotation] = box_proposals + [
-        Annotation(subject=subject,
-                   geometry=Polygon(rings=rings_px),
-                   score=conf, created_by=model_name, created_at=created_at)
-        for (subject, conf, rings_px) in resolved_polys
-    ]
+    proposals: list[Annotation] = box_proposals + polygon_proposals
 
     try:
         staged = stage_prediction_shapes(
@@ -740,8 +733,8 @@ def _stage_explicit_regime(image_path: str, img: Path, address: StagingAddress,
                 "reviewed predictions stay intact; " + note)
 
     return {
-        "staged": len(box_proposals) + len(resolved_polys),
-        "n_detect": len(box_proposals), "n_segment": len(resolved_polys),
+        "staged": len(proposals),
+        "n_detect": len(box_proposals), "n_segment": len(polygon_proposals),
         "dropped_nonpositive_boxes": dropped_boxes,
         "path": staged["path"],
         "model_name": model_name, "bucket": bucket, "bucket_redirected": staged["redirected"],

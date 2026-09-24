@@ -68,6 +68,21 @@ def test_the_whole_mosaic_pass_runs_at_the_cap_its_sidecar_records(tmp_path, mon
     # same state the predictor was already in.
     assert any(p["max_dets"] is not None for p in passes[:-1])
 
+    # The raster bucket's publication and its stamp are each recorded once, by the library that
+    # made them, never the door; the raster the pass read is the stamp's fact.
+    import tcip_store as ts
+
+    from tcip_mcp.audit import audit_log_key
+
+    rows = [r for key in dict.fromkeys((audit_log_key(), audit_log_key(exp["root"]),
+                                        audit_log_key(tmp_path), audit_log_key(out_dir)))
+            for r in ts.read_log(key).records]
+    published = [r for r in rows if r["tool"] == "prediction_bucket_published"]
+    stamped = [r for r in rows if r["tool"] == "stamp_written"]
+    assert [r["arguments"]["predictions_dir"] for r in published] == [str(out_dir)]
+    assert [r["stamp"]["raster_path"] for r in stamped] == [str(exp["raster_path"])]
+    assert not [r for r in rows if r["tool"] == "run_inference"]
+
 
 def test_a_raster_trait_export_with_no_reserved_region_names_the_audited_delivery_door(tmp_path):
     """The refusal is the agent's only in-code pointer to the door that can still deliver a

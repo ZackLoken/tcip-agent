@@ -189,6 +189,19 @@ class ClassScope:
                     if isinstance(id_map, dict) and id_map else None),
         )
 
+    def named_subject(self, source: str) -> str:
+        """The subject this class space names, refused by ``source`` when it names none: the one
+        refusal for every read of per-image label documents under a scope (an admission, a
+        selection, a calibration reference). A run or draw over a mask raster or a table records
+        none, and neither a trait nor a labels directory supplies it."""
+        if self.subject is None:
+            raise ValueError(
+                f"{source} records no subject (data.subject), so nothing names the class whose "
+                "records of a per-image label document it reads: neither a trait nor a labels "
+                "directory supplies one. State the subject the run or draw is scoped by."
+            )
+        return self.subject
+
     def onto(self, data_cfg: "MutableMapping[str, Any]") -> None:
         """Record this class space on a run's own data config, in the one empty form every reader
         of it expects: ``None`` where nothing scopes the run, never an empty map beside a missing
@@ -226,8 +239,8 @@ class Selection:
     def scope(self) -> ClassScope:
         """The class space this selection was drawn under, empty for ground truth no registry
         scopes."""
-        return ClassScope(subject=self.subject or None, attribute=self.attribute or None,
-                          id_map=dict(self.id_map) if self.id_map else None)
+        return ClassScope.recorded_in(
+            {"subject": self.subject, "attribute": self.attribute, "id_map": self.id_map})
 
     def on(self, side: str) -> list[Sample]:
         """This selection's samples on one side, in recorded order."""
@@ -253,12 +266,11 @@ def unscoped_document_issue(selection: Selection, selection_dir: str | Path) -> 
     mask raster or a table row records no subject because none scopes it, which is not this
     refusal: only the document shape is subject-scoped.
     """
-    if selection.samples and selection.samples[0].shape == DOCUMENT and not selection.subject:
-        return (
-            f"the selection at {selection_dir} records no subject: a read over per-image label "
-            "documents is scoped by the subject the selection was drawn under, and one drawn "
-            "without a subject names no class space to read them in."
-        )
+    if selection.samples and selection.samples[0].shape == DOCUMENT:
+        try:
+            selection.scope.named_subject(f"the selection at {selection_dir}")
+        except ValueError as exc:
+            return str(exc)
     return None
 
 

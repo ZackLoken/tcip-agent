@@ -411,7 +411,10 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
     set((s) => ({
       canvas: withContentDirty({
         ...s.canvas,
-        imageAnnotations: [...s.canvas.imageAnnotations, { subject, attributes: {} }],
+        imageAnnotations: [
+          ...s.canvas.imageAnnotations,
+          { subject, attributes: {}, iscrowd: false },
+        ],
       }),
     }));
   },

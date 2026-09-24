@@ -22,6 +22,21 @@ class BBox:
     x2: float
     y2: float
 
+    @classmethod
+    def from_normalized_centre(cls, box, img_w: float, img_h: float) -> "BBox":
+        """A normalized centre-form ``[cx, cy, w, h]`` scaled to an ``img_w`` x ``img_h`` image:
+        the one conversion every reader of a verdict's or a staged proposal's box takes."""
+        cx, cy, w, h = (float(v) for v in box)
+        return cls((cx - w / 2) * img_w, (cy - h / 2) * img_h,
+                   (cx + w / 2) * img_w, (cy + h / 2) * img_h)
+
+
+def is_ring(ring) -> bool:
+    """Whether ``ring`` can be a shape: three or more points. The one statement of the rule, read
+    by :class:`Polygon`'s construction (which refuses a ring that is not one) and by the contour
+    extractor (which drops such a contour, a stray pixel beside a real component)."""
+    return len(ring) >= 3
+
 
 @dataclass
 class Polygon:
@@ -31,9 +46,19 @@ class Polygon:
     more than one: an occlusion-split instance (a leaf crossed by a stem, a fruit behind a branch,
     routine in this imagery) is genuinely more than one region, and holding every ring is what makes
     that a represented fact instead of a silently truncated one.
+
+    A polygon is valid where it is made: at least one ring, every ring three or more points, or
+    ``ValueError``. A ring that cannot be a shape is refused where it is produced, never carried
+    to a reader or a writer that would have to drop it.
     """
 
     rings: list[list[tuple[float, float]]]
+
+    def __post_init__(self) -> None:
+        if not self.rings or not all(is_ring(ring) for ring in self.rings):
+            raise ValueError(
+                f"a polygon needs at least one ring of three or more points; got rings of "
+                f"{[len(ring) for ring in self.rings]} points")
 
 
 @dataclass
@@ -43,7 +68,7 @@ class Point:
 
     Deliberately has no bounding box and no area: a Point is not a detection/segmentation target, and
     :func:`bbox_of` refuses one rather than fabricate a degenerate zero-area box that could silently
-    pass as a real one (a real hazard: a fabricated zero-area box entering an assembled COCO dataset
+    pass as a real one (a real hazard: a fabricated zero-area box entering a loader's targets
     as a training target, or matching nothing at any IoU in delivery-grade evaluation while reading
     as a legitimate miss rather than a category error). Every consumer that assembles training
     targets, computes IoU/matching, or reads a delivery-grade box must filter Point geometries out
@@ -69,17 +94,36 @@ class Annotation:
     truth, who accepted it. ``accepted_by_rule`` names the validation record a rule-based
     admission was verified against (``<experiment_id>:<record_digest>``), set only by the
     producer that verified the claim; it is never a substitute for ``accepted_by``.
+
+    ``iscrowd`` (COCO's own spelling) marks a region holding many objects of ``subject`` that
+    were not separated: it is never one instance, so it never trains as a positive box, never
+    counts as a missed object at evaluation and never counts as one object in a count.
+
+    An annotation names what it is about where it is made: ``subject`` a non-empty string, or
+    ``ValueError``. A record with no subject is undecodable by name, so no door carries one.
     """
 
     subject: str
     geometry: BBox | Polygon | Point | None = None
     attributes: dict[str, str] = field(default_factory=dict)
     score: float | None = None
+    iscrowd: bool = False
     created_by: str | None = None
     created_at: str | None = None
     accepted_by: str | None = None
     accepted_at: str | None = None
     accepted_by_rule: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.subject, str) or not self.subject:
+            raise ValueError(f"an annotation needs a non-empty string subject; got {self.subject!r}")
+
+
+def instances(annotations: list[Annotation], *, crowd: bool = False) -> list[Annotation]:
+    """The annotations that are each one object: every one but a crowd region; with ``crowd``,
+    the crowd regions instead, the other half of the one split. The one place an
+    annotation-level count, pairing or size asks which records are objects."""
+    return [a for a in annotations if a.iscrowd == crowd]
 
 
 def box_derivable(geometry: "BBox | Polygon | Point | None") -> TypeGuard[BBox | Polygon]:
@@ -92,6 +136,20 @@ def box_derivable(geometry: "BBox | Polygon | Point | None") -> TypeGuard[BBox |
     once this has answered.
     """
     return geometry is not None and not isinstance(geometry, Point)
+
+
+def is_detection(a: Annotation) -> bool:
+    """Whether ``a`` is one detected object: one object (:func:`instances`) with a box or region
+    (:func:`box_derivable`). The one selection every match and detection count reads."""
+    return bool(instances([a])) and box_derivable(a.geometry)
+
+
+def prediction_score(a: Annotation) -> float:
+    """A prediction's confidence, the model's own statement, or ``ValueError`` naming the record
+    that states none: the one read of it every match, threshold and score record takes."""
+    if a.score is None:
+        raise ValueError(f"a prediction states its 'score'; this {a.subject!r} record states none")
+    return a.score
 
 
 def polygonal(geometry: "BBox | Polygon | Point | None") -> TypeGuard[Polygon]:

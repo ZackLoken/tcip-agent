@@ -33,6 +33,7 @@ from tcip_mcp.pipelines.resolution import (  # noqa: E402
     VALIDATED_REVIEW_CONFIRMED,
 )
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
+    build_coco_image_record,
     gt_class_avg_size,
     pick_count_unbiased,
     derive_operating_point_curve,
@@ -42,6 +43,7 @@ _IDENTITY = {"checkpoint_sha256": "sha-model-a", "experiment_id": None}
 N_IMAGES = 16
 N_MATCHED = 12
 N_SWAPPED = 3
+FRAME = 1024  # a frame holding every GT-door box the fixtures below lay out
 
 # no built-in traits, seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
 # test's pinned platform state root so resolve_operating_point("bud_opening", ...) keeps resolving by default.
@@ -56,7 +58,7 @@ def _hermetic_platform_root(tmp_path):
 
 def _entry(action, cid, gt, pred, conf):
     return {"match_type": "TP" if pred and gt else ("FP" if pred else "FN"), "action": action,
-            "class_id": cid, "gt_bbox_norm": gt, "pred_bbox_norm": pred, "conf": conf,
+            "class_id": cid, "iscrowd": False, "reviewed_by": "", "class_name": "", "missed_object_attested": False, "gt_bbox_norm": gt, "pred_bbox_norm": pred, "conf": conf,
             "producer_identity": _IDENTITY, "conf_threshold": 0.01}
 
 
@@ -105,10 +107,10 @@ def _gt_records(prefix, n, *, swap_classes, classes=(1, 2), offset=0.0):
         for k in range(8):
             box = [100.0 * k + 3.0 * i + offset, 50.0 + i, 40.0, 40.0]
             cat = classes[0] if k < 4 else classes[1]
-            gt.append({"bbox": box, "category_id": cat})
+            gt.append({"bbox": box, "category_id": cat, "iscrowd": 0})
             dt.append({"bbox": box, "category_id": classes[1] if swap_classes else cat,
                        "score": 0.9})
-        recs.append({"image_id": f"{prefix}{i}", "gt": gt, "dt": dt})
+        recs.append(build_coco_image_record(FRAME, FRAME, gt, dt, image_id=f"{prefix}{i}"))
     return recs
 
 
@@ -229,13 +231,13 @@ def _sparse_class_records(prefix, n_images, *, offset=0.0):
         gt, dt = [], []
         for k in range(2):
             box = [100.0 * k + offset, 50.0 + i, 40.0, 40.0]
-            gt.append({"bbox": box, "category_id": 1})
+            gt.append({"bbox": box, "category_id": 1, "iscrowd": 0})
             dt.append({"bbox": box, "category_id": 1, "score": 0.9})
         if i < 2:
             for k in range(4):
                 box = [500.0 + 100.0 * k + offset, 50.0 + i, 40.0, 40.0]
-                gt.append({"bbox": box, "category_id": 2})  # no dt: guaranteed FN
-        recs.append({"image_id": f"{prefix}{i}", "gt": gt, "dt": dt})
+                gt.append({"bbox": box, "category_id": 2, "iscrowd": 0})  # no dt: guaranteed FN
+        recs.append(build_coco_image_record(FRAME, FRAME, gt, dt, image_id=f"{prefix}{i}"))
     return recs
 
 
@@ -245,9 +247,9 @@ def _sparse_class_calibration(prefix, n, *, offset):
         gt, dt = [], []
         for cat in (1, 2):
             box = [100.0 * cat + offset, 50.0 + i, 40.0, 40.0]
-            gt.append({"bbox": box, "category_id": cat})
+            gt.append({"bbox": box, "category_id": cat, "iscrowd": 0})
             dt.append({"bbox": box, "category_id": cat, "score": 0.9})
-        recs.append({"image_id": f"{prefix}{i}", "gt": gt, "dt": dt})
+        recs.append(build_coco_image_record(FRAME, FRAME, gt, dt, image_id=f"{prefix}{i}"))
     return recs
 
 
@@ -364,18 +366,18 @@ def test_pick_serves_the_worst_class_not_the_pooled_total():
             for cat in (1, 2):
                 # one real object each, found; plus one spurious detection that survives everywhere.
                 box = [200.0 * cat + offset, 50.0, 40.0, 40.0]
-                gt.append({"bbox": box, "category_id": cat})
+                gt.append({"bbox": box, "category_id": cat, "iscrowd": 0})
                 dt.append({"bbox": box, "category_id": cat, "score": 0.95})
                 dt.append({"bbox": [200.0 * cat + offset, 400.0, 40.0, 40.0],
                            "category_id": cat, "score": 0.95})
             for k in range(3):                      # three real class-3 objects...
                 gt.append({"bbox": [700.0 + 100.0 * k + offset, 50.0, 40.0, 40.0],
-                           "category_id": 3})
+                           "category_id": 3, "iscrowd": 0})
             # ...one found confidently, one only hesitantly, one missed outright. Raising conf past
             # the hesitant one buys pooled balance by dropping a real class-3 object.
             dt.append({"bbox": [700.0 + offset, 50.0, 40.0, 40.0], "category_id": 3, "score": 0.95})
             dt.append({"bbox": [800.0 + offset, 50.0, 40.0, 40.0], "category_id": 3, "score": 0.4})
-            recs.append({"image_id": f"{prefix}{i}", "gt": gt, "dt": dt})
+            recs.append(build_coco_image_record(FRAME, FRAME, gt, dt, image_id=f"{prefix}{i}"))
         return recs
 
     recs = build("w", 0.0)
@@ -425,7 +427,7 @@ def test_pick_serves_the_worst_class_not_the_pooled_total_admits_it_when_dense_e
             gt, dt = [], []
             for cat in (1, 2):
                 box = [200.0 * cat + offset, 50.0, 40.0, 40.0]
-                gt.append({"bbox": box, "category_id": cat})
+                gt.append({"bbox": box, "category_id": cat, "iscrowd": 0})
                 dt.append({"bbox": box, "category_id": cat, "score": 0.95})
                 dt.append({"bbox": [200.0 * cat + offset, 400.0, 40.0, 40.0],
                            "category_id": cat, "score": 0.95})
@@ -434,11 +436,11 @@ def test_pick_serves_the_worst_class_not_the_pooled_total_admits_it_when_dense_e
                 # boost as class 3 to clear the new relative tolerance.
                 for k in range(200):
                     box2 = [3000.0 + 4000.0 * cat + 60.0 * k + offset, 900.0, 40.0, 40.0]
-                    gt.append({"bbox": box2, "category_id": cat})
+                    gt.append({"bbox": box2, "category_id": cat, "iscrowd": 0})
                     dt.append({"bbox": box2, "category_id": cat, "score": 0.95})
             for k in range(3):
                 gt.append({"bbox": [700.0 + 100.0 * k + offset, 50.0, 40.0, 40.0],
-                           "category_id": 3})
+                           "category_id": 3, "iscrowd": 0})
             dt.append({"bbox": [700.0 + offset, 50.0, 40.0, 40.0], "category_id": 3, "score": 0.95})
             dt.append({"bbox": [800.0 + offset, 50.0, 40.0, 40.0], "category_id": 3, "score": 0.4})
             # 200 background class-3 objects, always found (score 0.95, survives every conf on this
@@ -446,9 +448,9 @@ def test_pick_serves_the_worst_class_not_the_pooled_total_admits_it_when_dense_e
             # other, in their own row far from the rest of the layout.
             for k in range(200):
                 box = [1500.0 + 60.0 * k + offset, 900.0, 40.0, 40.0]
-                gt.append({"bbox": box, "category_id": 3})
+                gt.append({"bbox": box, "category_id": 3, "iscrowd": 0})
                 dt.append({"bbox": box, "category_id": 3, "score": 0.95})
-            recs.append({"image_id": f"{prefix}{i}", "gt": gt, "dt": dt})
+            recs.append(build_coco_image_record(FRAME, FRAME, gt, dt, image_id=f"{prefix}{i}"))
         return recs
 
     recs = build("w", 0.0)
@@ -522,15 +524,15 @@ def _floor_matters_records(prefix, offset):
         gt, dt = [], []
         for k in range(20):
             box = [50.0 + 30.0 * k + offset, 50.0, 20.0, 20.0]
-            gt.append({"bbox": box, "category_id": 1})
+            gt.append({"bbox": box, "category_id": 1, "iscrowd": 0})
             dt.append({"bbox": box, "category_id": 1, "score": 0.95})
         for k in range(2):
             box = [50.0 + 30.0 * k + offset, 900.0, 20.0, 20.0]
-            gt.append({"bbox": box, "category_id": 2})
+            gt.append({"bbox": box, "category_id": 2, "iscrowd": 0})
             dt.append({"bbox": box, "category_id": 2, "score": 0.95})
         if i == 0:
             dt.append({"bbox": [2000.0 + offset, 900.0, 20.0, 20.0], "category_id": 2, "score": 0.95})
-        recs.append({"image_id": f"{prefix}{i}", "gt": gt, "dt": dt})
+        recs.append(build_coco_image_record(FRAME, FRAME, gt, dt, image_id=f"{prefix}{i}"))
     return recs
 
 
@@ -566,7 +568,7 @@ def test_a_class_present_on_exactly_one_holdout_image_cannot_be_validated_by_it_
             gt, dt = [], []
             for k in range(20):
                 box = [50.0 + 30.0 * k + offset, 50.0, 20.0, 20.0]
-                gt.append({"bbox": box, "category_id": 1})
+                gt.append({"bbox": box, "category_id": 1, "iscrowd": 0})
                 dt.append({"bbox": box, "category_id": 1, "score": 0.95})
             if i == 0:
                 # class 2 exists only on this one image: 150 real objects, a small (2%) real
@@ -574,12 +576,12 @@ def test_a_class_present_on_exactly_one_holdout_image_cannot_be_validated_by_it_
                 # of density would admit it, if one image were enough evidence to trust at all.
                 for k in range(150):
                     box = [50.0 + 30.0 * k + offset, 900.0, 20.0, 20.0]
-                    gt.append({"bbox": box, "category_id": 2})
+                    gt.append({"bbox": box, "category_id": 2, "iscrowd": 0})
                     dt.append({"bbox": box, "category_id": 2, "score": 0.95})
                 for k in range(3):
                     dt.append({"bbox": [10000.0 + 30.0 * k + offset, 900.0, 20.0, 20.0],
                               "category_id": 2, "score": 0.95})
-            recs.append({"image_id": f"{prefix}{i}", "gt": gt, "dt": dt})
+            recs.append(build_coco_image_record(FRAME, FRAME, gt, dt, image_id=f"{prefix}{i}"))
         return recs
 
     b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h", staged_conf_floor=0.05,

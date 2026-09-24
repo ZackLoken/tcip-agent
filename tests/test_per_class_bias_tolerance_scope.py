@@ -41,11 +41,11 @@ def _records(prefix: str, offset: float, *, spurious: bool) -> list[dict]:
         gt, dt = [], []
         for k in range(DENSE_PER_IMAGE):
             box = [offset + 50.0 * k, 100.0 + 10.0 * i, 20.0, 20.0]
-            gt.append({"bbox": box, "category_id": 1})
+            gt.append({"bbox": box, "category_id": 1, "iscrowd": 0})
             dt.append({"bbox": box, "category_id": 1, "score": 0.9})
         for k in range(RARE_PER_IMAGE):
             box = [offset + 50.0 * k, 900.0 + 10.0 * i, 20.0, 20.0]
-            gt.append({"bbox": box, "category_id": 2})
+            gt.append({"bbox": box, "category_id": 2, "iscrowd": 0})
             dt.append({"bbox": box, "category_id": 2, "score": 0.9})
         if spurious:
             for k in range(SPURIOUS_PER_IMAGE):

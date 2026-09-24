@@ -12,14 +12,12 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from tcip_mcp.audit import audited
 from tcip_mcp.server import mcp
 
 logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
-@audited(scope_arg="dataset_root")
 def redraw_calibration_holdout(
     dataset_root: str,
     labels_dir: str | None = None,
@@ -114,11 +112,9 @@ def redraw_calibration_holdout(
     from datetime import datetime, timezone
 
     from tcip_annotation.json_io import UnreadableLabelDocument
-    from tcip_store import DecodeError, store
 
-    from tcip_mcp.audit import dataset_scope_of, record_event_or_raise
     from tcip_mcp.pipelines.data.splits import (
-        cal_holdout_lock_key, cal_holdout_scope_root, count_label_lines, label_image_stems,
+        cal_holdout_scope_root, count_label_lines, label_image_stems,
         resolve_locked_cal_holdout_split,
     )
     from tcip_mcp.pipelines.resolution import dataset_hash
@@ -164,18 +160,6 @@ def redraw_calibration_holdout(
         # it never parses one, so it cannot raise the named error the other reads here guard for.
         identity_hash = dataset_hash(labels_dir, stems=selection_stems)
 
-    try:
-        old_lock = store.read(cal_holdout_lock_key(identity_hash, scope_root=scope_root),
-                              default=None)
-    except DecodeError:
-        # A redraw is the recovery for a lock whose bytes do not decode, so an unreadable one
-        # is redrawn over rather than blocking the call; the entry it replaces is unknowable.
-        logger.warning("the locked split for %s does not decode; redrawing over it",
-                       identity_hash, exc_info=True)
-        old_lock = None
-    old_membership = ({"calibration": old_lock.get("calibration", []),
-                       "holdout": old_lock.get("holdout", [])} if old_lock else None)
-
     if selection_stems is not None:
         # Set only inside the selection_dir branch above, which already required labels_dir.
         assert labels_dir is not None, "selection_stems is only set where labels_dir was required"
@@ -201,36 +185,24 @@ def redraw_calibration_holdout(
             }
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
-    elif old_lock:
-        stems = sorted(set(old_lock.get("calibration", [])) | set(old_lock.get("holdout", [])))
-        annotation_counts = None
     else:
-        return {"error": f"no existing lock for identity_hash={identity_hash!r}, and no "
-                          "labels_dir to derive stems from"}
+        # No labels to re-scan: the library takes the existing lock's own members as the universe.
+        stems, annotation_counts = None, None
 
-    new_lock = resolve_locked_cal_holdout_split(
-        stems, identity_hash=identity_hash, scope_root=scope_root,
-        annotation_counts=annotation_counts,
-        group_by=(group_by or "tile_prefix"), group_key_map=group_key_map,
-        holdout_ratio=holdout_ratio, seed=seed,
-        force_redraw=True, timestamp=datetime.now(timezone.utc).isoformat(),
-        selection_dir=selection_dir,
-    )
+    try:
+        new_lock = resolve_locked_cal_holdout_split(
+            stems, identity_hash=identity_hash, scope_root=scope_root,
+            annotation_counts=annotation_counts,
+            group_by=(group_by or "tile_prefix"), group_key_map=group_key_map,
+            holdout_ratio=holdout_ratio, seed=seed,
+            force_redraw=True, timestamp=datetime.now(timezone.utc).isoformat(),
+            selection_dir=selection_dir, reason=reason,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
     new_membership = {"calibration": new_lock["calibration"], "holdout": new_lock["holdout"]}
-
-    # A distinct tool name under the same scope: @audited logs the call, this logs what it made;
-    # the lock above is already redrawn, so a failed append raises rather than staying silent.
-    record_event_or_raise(
-        "redraw_calibration_holdout_result",
-        {"identity_hash": identity_hash, "group_by": group_by, "group_key_map": group_key_map,
-         "seed": seed, "holdout_ratio": holdout_ratio, "reason": reason,
-         "selection_dir": selection_dir},
-        scope=dataset_scope_of(str(scope_root)),
-        old_membership=old_membership, new_membership=new_membership,
-    )
-
     return {"identity_hash": identity_hash, "reason": reason,
-            "old_membership": old_membership, "new_membership": new_membership}
+            "old_membership": new_lock["old_membership"], "new_membership": new_membership}
 
 
 def _scalar_predictions(predictor, image_source, stems: list[str], suffix: str) -> dict[str, float]:
@@ -264,7 +236,6 @@ _ORDINAL_REGRESSION_TASKS = {
 
 
 @mcp.tool()
-@audited
 def calibrate_scalar_operating_point(
     trait_name: str,
     task: str,
@@ -476,7 +447,6 @@ def calibrate_scalar_operating_point(
 
 
 @mcp.tool()
-@audited(scope_arg="dataset_root")
 def calibrate_count_operating_point(
     checkpoint_path: str,
     trait: str,

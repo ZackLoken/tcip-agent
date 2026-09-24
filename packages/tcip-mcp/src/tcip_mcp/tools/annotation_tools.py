@@ -8,23 +8,14 @@ proposal_tools.py. This module keeps label I/O and scoring.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast, get_args
 
-from tcip_annotation import (
-    Annotation,
-    BBox,
-    Point,
-    compute_matches,
-    detect_format,
-    load_annotations_any,
-    save_annotations_any,
-)
-from tcip_annotation.format_io import AnnotFormat
-from tcip_annotation.state import box_derivable, polygonal
+from tcip_annotation import Annotation, compute_matches
+from tcip_annotation.state import box_derivable
 from tcip_annotation.json_io import (
-    _PROV_KEYS, UnreadableLabelDocument, annotation_from_payload,
+    UnreadableLabelDocument, annotation_from_payload, client_annotation, write_annotations,
 )
 from tcip_annotation.json_io import read_annotations as read_labels
+from tcip_annotation.json_io import read_predictions
 
 from tcip_mcp.dataset_layout import (
     annotation_path_for_image,
@@ -36,14 +27,6 @@ from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_sourc
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
-
-
-def _checked_fmt(fmt: str) -> AnnotFormat | None:
-    """``fmt`` narrowed to :data:`AnnotFormat`, or ``None`` naming it not one of the two the
-    on-disk label formats admit (see the package ``CLAUDE.md``: json/coco only)."""
-    # get_args returns a runtime tuple, so the membership test below is not a static Literal
-    # narrowing; the cast reflects the check just made, not an unvalidated value.
-    return cast(AnnotFormat, fmt) if fmt in get_args(AnnotFormat) else None
 
 
 def _dims_for(image_path: str) -> tuple[int, int]:
@@ -58,85 +41,47 @@ def _dims_for(image_path: str) -> tuple[int, int]:
 
 
 
-def _ann_dict(a: Annotation) -> dict:
-    """A name-based annotation as a plain JSON dict for a tool response.
-
-    ``rings`` (not ``points``) for a polygon, a stored annotation can genuinely carry more than
-    one ring (an occlusion-split instance_seg prediction), so the read side always represents every
-    ring rather than silently reporting only the first. ``point`` is the same ``[x, y]`` key the
-    on-disk schema uses, so a prompt/keypoint reads back as itself instead of as a geometry-less label.
-
-    Provenance travels out under the schema's own key names, and only where the record holds it, so
-    who authored a label, who accepted it, and which rule (if any) pre-admitted it are readable
-    here rather than write-only. A reference's admissibility turns on these fields
-    (:func:`tcip_annotation.json_io.require_reference_ground_truth`), so a reader that dropped them
-    could not tell agent-authored ground truth from a person's, or an unsigned rule admission from
-    a signed one.
-    """
-    d: dict = {"subject": a.subject, "attributes": dict(a.attributes)}
-    if isinstance(a.geometry, BBox):
-        d["bbox"] = [a.geometry.x1, a.geometry.y1, a.geometry.x2, a.geometry.y2]
-    elif polygonal(a.geometry):
-        d["rings"] = [[[p[0], p[1]] for p in ring] for ring in a.geometry.rings]
-    elif isinstance(a.geometry, Point):
-        d["point"] = [a.geometry.x, a.geometry.y]
-    if a.score is not None:
-        d["score"] = a.score
-    for k in _PROV_KEYS:
-        v = getattr(a, k, None)
-        if v is not None:
-            d[k] = v
-    return d
-
-
-def read_annotations(image_path: str, fmt: str | None = None) -> dict:
+def read_annotations(image_path: str) -> dict:
     """Load the ground-truth labels and predictions for a single image.
 
     Not an MCP tool: no script wraps it, per the admission standard (packages/tcip-mcp/CLAUDE.md);
     an agent reads a label file through this function directly.
 
-    Both are the name-based per-image schema, one file per image, all subjects. Reads the canonical
-    per-image JSON (an ``annotations`` key) or an assembled dataset-level COCO (an
-    ``images``/``categories`` key), detected from the file's own keys unless ``fmt`` is given. An
-    unrecognized store returns an ``error`` rather than a guess.
+    Both are the name-based per-image schema, one file per image, all subjects. A present document
+    this schema cannot read returns an ``error`` rather than a guess.
 
     Args:
         image_path: Absolute path to the image file.
-        fmt: Force annotation format ('json' or 'coco'). Detected from the file's keys if omitted.
     """
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
-    checked_fmt = _checked_fmt(fmt) if fmt is not None else None
-    if fmt is not None and checked_fmt is None:
-        return {"error": f"fmt must be one of {get_args(AnnotFormat)}, got {fmt!r}"}
 
     w, h = _dims_for(image_path)
     result: dict = {"image": image_path, "width": w, "height": h}
 
-    gt_path = find_gt_label(image_path, fmt=fmt)
+    gt_path = find_gt_label(image_path)
     if gt_path is not None:
         try:
-            file_fmt = checked_fmt or detect_format(str(gt_path))
-            anns = load_annotations_any(str(gt_path), fmt=file_fmt, file_name=img.name)
-        except (ValueError, UnreadableLabelDocument) as exc:
+            anns = read_labels(str(gt_path))
+        except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
         result["labels"] = {
-            "path": str(gt_path), "format": file_fmt, "count": len(anns),
+            "path": str(gt_path), "count": len(anns),
             "subjects": sorted({a.subject for a in anns}),
-            "annotations": [_ann_dict(a) for a in anns],
+            "annotations": [client_annotation(a) for a in anns],
         }
 
     pred_path = find_prediction(image_path)
     if pred_path is not None:
         try:
-            preds = read_labels(str(pred_path))
+            preds = read_predictions(str(pred_path))
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
         result["predictions"] = {
             "path": str(pred_path), "count": len(preds),
             "subjects": sorted({a.subject for a in preds}),
-            "annotations": [_ann_dict(a) for a in preds],
+            "annotations": [client_annotation(a) for a in preds],
         }
 
     return result
@@ -147,7 +92,6 @@ def read_annotations(image_path: str, fmt: str | None = None) -> dict:
 def save_annotations(
     image_path: str,
     annotations: list[dict] | None = None,
-    fmt: str = "json",
     date: str | None = None,
     path: str | None = None,
     created_by: str | None = None,
@@ -168,7 +112,6 @@ def save_annotations(
         image_path: Absolute path to the image file.
         annotations: List of ``{subject, bbox?/points?/rings?/point?, attributes?}`` dicts (pixel
             coords).
-        fmt: Output format, 'json' (canonical per-image, default) or 'coco'.
         date: Capture date; derived from the image path when omitted.
         path: Explicit label path (overrides the canonical location).
         created_by: Producer stamped on each written annotation. Omit to leave provenance unset.
@@ -176,16 +119,10 @@ def save_annotations(
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
-    checked_fmt = _checked_fmt(fmt)
-    if checked_fmt is None:
-        return {"error": f"fmt must be one of {get_args(AnnotFormat)}, got {fmt!r}"}
 
     anns_in = annotations or []
     if not anns_in:
         return {"error": "provide at least one annotation to save (each carrying a subject)"}
-    for i, a in enumerate(anns_in):
-        if not isinstance(a, dict) or not a.get("subject"):
-            return {"error": f"annotation {i} needs a non-empty subject: {a!r}"}
 
     from tcip_mcp.workspace import is_valid_name
 
@@ -197,15 +134,16 @@ def save_annotations(
     from datetime import datetime, timezone
     _now = datetime.now(timezone.utc).isoformat()
 
-    try:
-        typed = [annotation_from_payload(a, author=created_by, now=_now) for a in anns_in]
-    except ValueError as exc:
-        return {"error": str(exc)}
+    typed = []
+    for i, a in enumerate(anns_in):
+        try:
+            typed.append(annotation_from_payload(a, author=created_by, now=_now))
+        except ValueError as exc:
+            return {"error": f"annotation {i} {exc}"}
 
-    out_path = Path(path) if path else annotation_path_for_image(image_path, fmt, date=date)
+    out_path = Path(path) if path else annotation_path_for_image(image_path, date=date)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    save_annotations_any(
-        str(out_path), typed, w, h, fmt=checked_fmt, file_name=img.name, keep_empty=True)
+    write_annotations(str(out_path), typed, w, h, keep_empty=True)
 
     try:
         from tcip_mcp.web_client import PANEL_EVENT_LABELS_WRITTEN, post_panel_event
@@ -215,7 +153,7 @@ def save_annotations(
     except Exception:
         pass
 
-    return {"written": [str(out_path)], "format": fmt, "count": len(typed)}
+    return {"written": [str(out_path)], "count": len(typed)}
 
 
 def _load_image_annotations(image_path: str, *, _checked_bucket_dirs: set | None = None):
@@ -242,7 +180,7 @@ def _load_image_annotations(image_path: str, *, _checked_bucket_dirs: set | None
 
     gt_path = find_gt_label(image_path)
     if gt_path:
-        gt = load_annotations_any(str(gt_path), file_name=img.name)
+        gt = read_labels(str(gt_path))
     pred_path = find_prediction(image_path)
     if pred_path:
         bucket_dir = Path(pred_path).parent
@@ -250,40 +188,24 @@ def _load_image_annotations(image_path: str, *, _checked_bucket_dirs: set | None
             bucket_scope(bucket_dir)
             if _checked_bucket_dirs is not None:
                 _checked_bucket_dirs.add(bucket_dir)
-        preds = read_labels(str(pred_path))
+        preds = read_predictions(str(pred_path))
 
     iou_type, record = records_from_annotation(gt, preds, width=w, height=h)
     return iou_type, record, (gt, preds), w, h
 
 
-def _add_geom(d: dict, a: Annotation) -> None:
-    if isinstance(a.geometry, BBox):
-        b = a.geometry
-        d["box"] = [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1]
-    elif polygonal(a.geometry):
-        d["polygon_rings"] = [[[pt[0], pt[1]] for pt in ring] for ring in a.geometry.rings]
-    elif isinstance(a.geometry, Point):
-        d["point"] = [a.geometry.x, a.geometry.y]
-
-
 def _detection_breakdown(matches: dict, gt: list[Annotation], preds: list[Annotation]) -> list[dict]:
-    """Per-detection TP/FP/FN records (geometry + IoU + confidence + class name) from a match result."""
-    detections: list[dict] = []
-    for m in matches["tp"]:
-        d = {"tag": "tp", "class_name": m["class_name"], "iou": m["iou"], "confidence": m["conf"],
-             "gt_idx": m["gt_idx"], "pred_idx": m["pred_idx"]}
-        _add_geom(d, preds[m["pred_idx"]])
-        detections.append(d)
-    for m in matches["fp"]:
-        d = {"tag": "fp", "class_name": m["class_name"], "confidence": m["conf"],
-             "pred_idx": m["pred_idx"]}
-        _add_geom(d, preds[m["pred_idx"]])
-        detections.append(d)
-    for m in matches["fn"]:
-        d = {"tag": "fn", "class_name": m["class_name"], "confidence": 0, "gt_idx": m["gt_idx"]}
-        _add_geom(d, gt[m["gt_idx"]])
-        detections.append(d)
-    return detections
+    """Per-detection TP/FP/FN records from a match result: the annotation each names, projected
+    as every read door projects one (:func:`~tcip_annotation.json_io.client_annotation`), with
+    its tag, IoU, confidence and class name."""
+    return (
+        [{**client_annotation(preds[m["pred_idx"]]), "tag": "tp", "class_name": m["class_name"],
+          "iou": m["iou"], "confidence": m["conf"], "gt_idx": m["gt_idx"],
+          "pred_idx": m["pred_idx"]} for m in matches["tp"]]
+        + [{**client_annotation(preds[m["pred_idx"]]), "tag": "fp", "class_name": m["class_name"],
+            "confidence": m["conf"], "pred_idx": m["pred_idx"]} for m in matches["fp"]]
+        + [{**client_annotation(gt[m["gt_idx"]]), "tag": "fn", "class_name": m["class_name"],
+            "confidence": 0, "gt_idx": m["gt_idx"]} for m in matches["fn"]])
 
 
 def _apply_governing_criterion(out: dict, records: list, *, trait: str | None,
@@ -490,7 +412,11 @@ def score_predictions(
         path: Absolute path to an image file (single-image match) or a dataset root (aggregate).
         iou_threshold: IoU threshold for a positive match (the AP@0.5 comparability convention).
         conf_threshold: Minimum confidence to consider a prediction.
-        detail: Single-image only, also return the per-detection ``detections`` breakdown.
+        detail: Single-image only, also return the per-detection ``detections`` breakdown: each
+            entry the annotation it names in the one client projection every read door returns
+            (``client_annotation``: corner ``bbox``, ``rings`` or ``point``, ``subject``,
+            ``attributes``, ``iscrowd``, ``score`` and the provenance it holds) beside its
+            ``tag``, ``class_name``, ``confidence``, ``iou`` and indices.
         trait: When set, the trait's derived localization criterion governs the reported TP/FP/FN
             count; map50 stays a labeled comparability metric. Absent -> the IoU convention governs.
     """

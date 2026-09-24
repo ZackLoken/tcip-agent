@@ -93,7 +93,10 @@ def test_registry_derivation_reports_a_document_it_cannot_read(
     labels = tmp_path / "annotations" / "2026-03-02"
     labels.mkdir(parents=True)
     write_annotations(str(labels / "IMG_A.json"), [_box("bud", 12, 30, 48, 140)], 900, 500)
-    write_annotations(str(labels / "IMG_B.json"), [_box("", 700, 100, 760, 220)], 900, 500)
+    # No platform producer can make a record without a subject; a foreign or hand-edited file can.
+    (labels / "IMG_B.json").write_text(json.dumps({
+        "image": "IMG_B", "width": 900, "height": 500,
+        "annotations": [{"subject": "", "bbox": [700, 100, 60, 120]}]}), encoding="utf-8")
 
     body = client.get(
         "/api/subjects/load",

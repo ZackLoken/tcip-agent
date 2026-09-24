@@ -255,7 +255,12 @@ describe("ReviewTab image-status batch fetch", () => {
 });
 
 describe("ReviewTab review-route scoping", () => {
-  const gtAnn: Annotation = { subject: "subject_a", bbox: [10, 10, 50, 50], attributes: {} };
+  const gtAnn: Annotation = {
+    subject: "subject_a",
+    iscrowd: false,
+    bbox: [10, 10, 50, 50],
+    attributes: {},
+  };
 
   it("scopes every review call to the dataset root, never to the project root", async () => {
     matchesSpy.mockResolvedValue(matchesRes([det()], { gt: [gtAnn] }));
@@ -400,7 +405,12 @@ describe("ReviewTab validation-reference affordance", () => {
 });
 
 describe("ReviewTab audit-gap handling", () => {
-  const gtAnn: Annotation = { subject: "subject_a", bbox: [10, 10, 50, 50], attributes: {} };
+  const gtAnn: Annotation = {
+    subject: "subject_a",
+    iscrowd: false,
+    bbox: [10, 10, 50, 50],
+    attributes: {},
+  };
   const gapMessage = "gui_review_action completed and its audit entry could not be written";
 
   beforeEach(() => {
@@ -658,7 +668,12 @@ describe("ReviewTab detection nav bounds", () => {
 });
 
 describe("ReviewTab in-place edit", () => {
-  const gtAnn: Annotation = { subject: "subject_a", bbox: [10, 10, 50, 50], attributes: {} };
+  const gtAnn: Annotation = {
+    subject: "subject_a",
+    iscrowd: false,
+    bbox: [10, 10, 50, 50],
+    attributes: {},
+  };
 
   function seedEditableMatches() {
     matchesSpy.mockResolvedValue(matchesRes([det()], { gt: [gtAnn] }));
@@ -723,7 +738,15 @@ describe("ReviewTab in-place edit", () => {
   it("an FP edit commits the prediction shape (added to GT, not replacing)", async () => {
     matchesSpy.mockResolvedValue(
       matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0 })], {
-        preds: [{ subject: "subject_a", bbox: [100, 100, 140, 150], attributes: {}, score: 0.7 }],
+        preds: [
+          {
+            subject: "subject_a",
+            iscrowd: false,
+            bbox: [100, 100, 140, 150],
+            attributes: {},
+            score: 0.7,
+          },
+        ],
       }),
     );
     render(<ReviewTab />);
@@ -755,7 +778,12 @@ describe("ReviewTab in-place edit", () => {
 });
 
 describe("ReviewTab recorded verdict", () => {
-  const gtAnn: Annotation = { subject: "leaf", bbox: [14, 22, 52, 70], attributes: {} };
+  const gtAnn: Annotation = {
+    subject: "leaf",
+    iscrowd: false,
+    bbox: [14, 22, 52, 70],
+    attributes: {},
+  };
 
   beforeEach(() => {
     vi.spyOn(api.review, "backupLabels").mockResolvedValue({ status: "ok", files_backed_up: 0 });
@@ -764,7 +792,9 @@ describe("ReviewTab recorded verdict", () => {
   it("shows a rejected prediction as rejected, both in the store and on the canvas badge", async () => {
     matchesSpy.mockResolvedValue(
       matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0, bbox: [24, 32, 68, 90] })], {
-        preds: [{ subject: "leaf", bbox: [24, 32, 68, 90], attributes: {}, score: 0.7 }],
+        preds: [
+          { subject: "leaf", iscrowd: false, bbox: [24, 32, 68, 90], attributes: {}, score: 0.7 },
+        ],
       }),
     );
     // Discarding a prediction leaves ground truth untouched, so the route reports no annotation
@@ -992,8 +1022,10 @@ describe("ReviewTab class filter", () => {
   it("offers every subject present on the image, from the unfiltered gt/pred lists", async () => {
     matchesSpy.mockResolvedValue(
       matchesRes([det()], {
-        gt: [{ subject: "subject_a", bbox: [10, 10, 50, 50], attributes: {} }],
-        preds: [{ subject: "leaf", bbox: [60, 60, 90, 90], attributes: {}, score: 0.5 }],
+        gt: [{ subject: "subject_a", iscrowd: false, bbox: [10, 10, 50, 50], attributes: {} }],
+        preds: [
+          { subject: "leaf", iscrowd: false, bbox: [60, 60, 90, 90], attributes: {}, score: 0.5 },
+        ],
       }),
     );
     render(<ReviewTab />);
@@ -1008,8 +1040,10 @@ describe("ReviewTab class filter", () => {
   it("re-fetches matches scoped to the picked class", async () => {
     matchesSpy.mockResolvedValue(
       matchesRes([det()], {
-        gt: [{ subject: "subject_a", bbox: [10, 10, 50, 50], attributes: {} }],
-        preds: [{ subject: "leaf", bbox: [60, 60, 90, 90], attributes: {}, score: 0.5 }],
+        gt: [{ subject: "subject_a", iscrowd: false, bbox: [10, 10, 50, 50], attributes: {} }],
+        preds: [
+          { subject: "leaf", iscrowd: false, bbox: [60, 60, 90, 90], attributes: {}, score: 0.5 },
+        ],
       }),
     );
     render(<ReviewTab />);
@@ -1028,10 +1062,18 @@ describe("ReviewTab class filter", () => {
   it("offers the confirmed/predicted values under a classified scope, not object-class subjects", async () => {
     matchesSpy.mockResolvedValue(
       matchesRes([det()], {
-        gt: [{ subject: "subject_a", bbox: [10, 10, 50, 50], attributes: { ripeness: "ripe" } }],
+        gt: [
+          {
+            subject: "subject_a",
+            iscrowd: false,
+            bbox: [10, 10, 50, 50],
+            attributes: { ripeness: "ripe" },
+          },
+        ],
         preds: [
           {
             subject: "subject_a",
+            iscrowd: false,
             bbox: [60, 60, 90, 90],
             attributes: { ripeness: "unripe" },
             score: 0.5,
@@ -1274,7 +1316,7 @@ describe("ReviewTab symbology", () => {
   it("draws the focused FN as a dashed under-review box, not a solid one", async () => {
     matchesSpy.mockResolvedValue(
       matchesRes([det({ det_type: "fn", pred_idx: null, gt_idx: 0 })], {
-        gt: [{ subject: "subject_a", bbox: [10, 10, 50, 50], attributes: {} }],
+        gt: [{ subject: "subject_a", iscrowd: false, bbox: [10, 10, 50, 50], attributes: {} }],
       }),
     );
     render(<ReviewTab />);
@@ -1294,8 +1336,10 @@ describe("ReviewTab symbology", () => {
     // drawing the ground truth alone asks for that judgement with nothing to compare against.
     matchesSpy.mockResolvedValue(
       matchesRes([det({ det_type: "tp", gt_idx: 0, pred_idx: 0, bbox: [12, 20, 48, 66] })], {
-        gt: [{ subject: "leaf", bbox: [12, 20, 48, 66], attributes: {} }],
-        preds: [{ subject: "leaf", bbox: [17, 25, 61, 79], attributes: {}, score: 0.8 }],
+        gt: [{ subject: "leaf", iscrowd: false, bbox: [12, 20, 48, 66], attributes: {} }],
+        preds: [
+          { subject: "leaf", iscrowd: false, bbox: [17, 25, 61, 79], attributes: {}, score: 0.8 },
+        ],
       }),
     );
     render(<ReviewTab />);
@@ -1336,9 +1380,10 @@ describe("ReviewTab symbology", () => {
         ],
         {
           gt: [
-            { subject: "subject_a", bbox: [0, 0, 10, 10], attributes: {} },
+            { subject: "subject_a", iscrowd: false, bbox: [0, 0, 10, 10], attributes: {} },
             {
               subject: "leaf",
+              iscrowd: false,
               rings: [
                 [
                   [40, 40],
@@ -1367,7 +1412,7 @@ describe("ReviewTab symbology", () => {
     // fabricated extent) and never nothing (a real annotation silently absent from review).
     matchesSpy.mockResolvedValue(
       matchesRes([det({ det_type: "fn", pred_idx: null, gt_idx: 0, bbox: [200, 300, 200, 300] })], {
-        gt: [{ subject: "tip", point: [200, 300], attributes: {} }],
+        gt: [{ subject: "tip", iscrowd: false, point: [200, 300], attributes: {} }],
       }),
     );
     render(<ReviewTab />);
@@ -1388,6 +1433,7 @@ describe("ReviewTab symbology", () => {
         preds: [
           {
             subject: "subject_a",
+            iscrowd: false,
             rings: [
               [
                 [0, 0],
@@ -1446,10 +1492,22 @@ describe("ReviewTab confirm-admitted", () => {
           det({ det_type: "fn", pred_idx: null, gt_idx: 0, conf: null, bbox: [90, 90, 110, 110] }),
         ],
         {
-          gt: [{ subject: "subject_a", bbox: [90, 90, 110, 110], attributes: {} }],
+          gt: [{ subject: "subject_a", iscrowd: false, bbox: [90, 90, 110, 110], attributes: {} }],
           preds: [
-            { subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
-            { subject: "subject_a", bbox: [50, 50, 70, 70], attributes: {}, score: 0.3 },
+            {
+              subject: "subject_a",
+              iscrowd: false,
+              bbox: [10, 10, 30, 30],
+              attributes: {},
+              score: 0.9,
+            },
+            {
+              subject: "subject_a",
+              iscrowd: false,
+              bbox: [50, 50, 70, 70],
+              attributes: {},
+              score: 0.3,
+            },
           ],
         },
       ),
@@ -1476,7 +1534,13 @@ describe("ReviewTab confirm-admitted", () => {
           attribute: "state",
           subject: "bud",
           preds: [
-            { subject: "open", bbox: [10, 10, 30, 30], attributes: { state: "open" }, score: 0.9 },
+            {
+              subject: "open",
+              iscrowd: false,
+              bbox: [10, 10, 30, 30],
+              attributes: { state: "open" },
+              score: 0.9,
+            },
           ],
         },
       ),
@@ -1497,7 +1561,17 @@ describe("ReviewTab confirm-admitted", () => {
     matchesSpy.mockResolvedValue(
       matchesRes(
         [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
-        { preds: [{ subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 }] },
+        {
+          preds: [
+            {
+              subject: "subject_a",
+              iscrowd: false,
+              bbox: [10, 10, 30, 30],
+              attributes: {},
+              score: 0.9,
+            },
+          ],
+        },
       ),
     );
     render(<ReviewTab />);
@@ -1521,10 +1595,22 @@ describe("ReviewTab confirm-admitted", () => {
           }),
         ],
         {
-          gt: [{ subject: "subject_a", bbox: [40, 40, 60, 60], attributes: {} }],
+          gt: [{ subject: "subject_a", iscrowd: false, bbox: [40, 40, 60, 60], attributes: {} }],
           preds: [
-            { subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
-            { subject: "subject_a", bbox: [40, 40, 60, 60], attributes: {}, score: 0.8 },
+            {
+              subject: "subject_a",
+              iscrowd: false,
+              bbox: [10, 10, 30, 30],
+              attributes: {},
+              score: 0.9,
+            },
+            {
+              subject: "subject_a",
+              iscrowd: false,
+              bbox: [40, 40, 60, 60],
+              attributes: {},
+              score: 0.8,
+            },
           ],
         },
       ),
@@ -1537,7 +1623,17 @@ describe("ReviewTab confirm-admitted", () => {
     matchesSpy.mockResolvedValue(
       matchesRes(
         [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
-        { preds: [{ subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 }] },
+        {
+          preds: [
+            {
+              subject: "subject_a",
+              iscrowd: false,
+              bbox: [10, 10, 30, 30],
+              attributes: {},
+              score: 0.9,
+            },
+          ],
+        },
       ),
     );
     render(<ReviewTab />);
@@ -1564,8 +1660,8 @@ describe("ReviewTab confirm-admitted", () => {
       bbox: [50, 50, 70, 70],
     });
     const preds: Annotation[] = [
-      { subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
-      { subject: "subject_a", bbox: [50, 50, 70, 70], attributes: {}, score: 0.85 },
+      { subject: "subject_a", iscrowd: false, bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
+      { subject: "subject_a", iscrowd: false, bbox: [50, 50, 70, 70], attributes: {}, score: 0.85 },
     ];
     matchesSpy.mockResolvedValue(matchesRes([fp1, fp2], { preds }));
 
@@ -1634,7 +1730,9 @@ describe("ReviewTab confirm-admitted", () => {
     matchesSpy.mockResolvedValue(
       matchesRes(
         [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 1.0, bbox: [10, 10, 30, 30] })],
-        { preds: [{ subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {} }] },
+        {
+          preds: [{ subject: "subject_a", iscrowd: false, bbox: [10, 10, 30, 30], attributes: {} }],
+        },
       ),
     );
     render(<ReviewTab />);
@@ -1652,7 +1750,15 @@ describe("ReviewTab confirm-admitted", () => {
       matchesRes(
         [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
         {
-          preds: [{ subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.89999 }],
+          preds: [
+            {
+              subject: "subject_a",
+              iscrowd: false,
+              bbox: [10, 10, 30, 30],
+              attributes: {},
+              score: 0.89999,
+            },
+          ],
         },
       ),
     );
@@ -1666,7 +1772,17 @@ describe("ReviewTab confirm-admitted", () => {
     matchesSpy.mockResolvedValue(
       matchesRes(
         [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
-        { preds: [{ subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 }] },
+        {
+          preds: [
+            {
+              subject: "subject_a",
+              iscrowd: false,
+              bbox: [10, 10, 30, 30],
+              attributes: {},
+              score: 0.9,
+            },
+          ],
+        },
       ),
     );
     render(<ReviewTab />);
@@ -1679,7 +1795,17 @@ describe("ReviewTab confirm-admitted", () => {
     matchesSpy.mockResolvedValue(
       matchesRes(
         [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
-        { preds: [{ subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 }] },
+        {
+          preds: [
+            {
+              subject: "subject_a",
+              iscrowd: false,
+              bbox: [10, 10, 30, 30],
+              attributes: {},
+              score: 0.9,
+            },
+          ],
+        },
       ),
     );
     render(<ReviewTab />);
@@ -1701,7 +1827,17 @@ describe("ReviewTab confirm-admitted", () => {
     matchesSpy.mockResolvedValue(
       matchesRes(
         [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
-        { preds: [{ subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 }] },
+        {
+          preds: [
+            {
+              subject: "subject_a",
+              iscrowd: false,
+              bbox: [10, 10, 30, 30],
+              attributes: {},
+              score: 0.9,
+            },
+          ],
+        },
       ),
     );
     render(<ReviewTab />);
@@ -1729,7 +1865,17 @@ describe("ReviewTab confirm-admitted", () => {
     matchesSpy.mockResolvedValue(
       matchesRes(
         [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
-        { preds: [{ subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 }] },
+        {
+          preds: [
+            {
+              subject: "subject_a",
+              iscrowd: false,
+              bbox: [10, 10, 30, 30],
+              attributes: {},
+              score: 0.9,
+            },
+          ],
+        },
       ),
     );
     render(<ReviewTab />);
@@ -1761,8 +1907,20 @@ describe("ReviewTab confirm-admitted", () => {
         [det({ det_type: "fp", gt_idx: null, pred_idx: 0, conf: 0.9, bbox: [10, 10, 30, 30] })],
         {
           preds: [
-            { subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
-            { subject: "subject_a", bbox: [50, 50, 70, 70], attributes: {}, score: 0.6 },
+            {
+              subject: "subject_a",
+              iscrowd: false,
+              bbox: [10, 10, 30, 30],
+              attributes: {},
+              score: 0.9,
+            },
+            {
+              subject: "subject_a",
+              iscrowd: false,
+              bbox: [50, 50, 70, 70],
+              attributes: {},
+              score: 0.6,
+            },
           ],
         },
       ),
@@ -1793,8 +1951,8 @@ describe("ReviewTab confirm-admitted", () => {
       bbox: [50, 50, 70, 70],
     });
     const preds: Annotation[] = [
-      { subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
-      { subject: "subject_a", bbox: [50, 50, 70, 70], attributes: {}, score: 0.85 },
+      { subject: "subject_a", iscrowd: false, bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
+      { subject: "subject_a", iscrowd: false, bbox: [50, 50, 70, 70], attributes: {}, score: 0.85 },
     ];
     matchesSpy.mockResolvedValue(matchesRes([fp1, fp2], { preds }));
 
@@ -1843,7 +2001,7 @@ describe("ReviewTab confirm-admitted", () => {
       bbox: [10, 10, 30, 30],
     });
     const preds: Annotation[] = [
-      { subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
+      { subject: "subject_a", iscrowd: false, bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
     ];
     matchesSpy.mockResolvedValue(matchesRes([fp1], { preds }));
     vi.spyOn(api.review, "action").mockRejectedValueOnce(new Error("network exploded"));
@@ -1876,7 +2034,7 @@ describe("ReviewTab confirm-admitted", () => {
       bbox: [10, 10, 30, 30],
     });
     const preds: Annotation[] = [
-      { subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
+      { subject: "subject_a", iscrowd: false, bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
     ];
     matchesSpy.mockResolvedValue(matchesRes([fp1], { preds }));
     const actionSpy = vi.spyOn(api.review, "action").mockResolvedValue({
@@ -1911,7 +2069,7 @@ describe("ReviewTab confirm-admitted", () => {
       bbox: [10, 10, 30, 30],
     });
     const preds: Annotation[] = [
-      { subject: "subject_a", bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
+      { subject: "subject_a", iscrowd: false, bbox: [10, 10, 30, 30], attributes: {}, score: 0.9 },
     ];
     matchesSpy.mockResolvedValue(matchesRes([fp1], { preds }));
     let resolveAction!: (v: unknown) => void;
@@ -1956,6 +2114,7 @@ describe("ReviewTab confirm-admitted", () => {
 describe("ReviewTab in-place edit scope", () => {
   const multiRingPred: Annotation = {
     subject: "subject_a",
+    iscrowd: false,
     rings: [
       [
         [0, 0],
@@ -1993,7 +2152,7 @@ describe("ReviewTab in-place edit scope", () => {
     // either from a point would write a fabricated extent into ground truth.
     matchesSpy.mockResolvedValue(
       matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0, bbox: [20, 20, 20, 20] })], {
-        preds: [{ subject: "tip", point: [20, 20], attributes: {}, score: 0.9 }],
+        preds: [{ subject: "tip", iscrowd: false, point: [20, 20], attributes: {}, score: 0.9 }],
       }),
     );
     render(<ReviewTab />);
@@ -2007,7 +2166,15 @@ describe("ReviewTab in-place edit scope", () => {
   it("still opens the editor for a box detection (the point refusal is scoped, not blanket)", async () => {
     matchesSpy.mockResolvedValue(
       matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0, bbox: [0, 0, 10, 10] })], {
-        preds: [{ subject: "subject_a", bbox: [0, 0, 10, 10], attributes: {}, score: 0.9 }],
+        preds: [
+          {
+            subject: "subject_a",
+            iscrowd: false,
+            bbox: [0, 0, 10, 10],
+            attributes: {},
+            score: 0.9,
+          },
+        ],
       }),
     );
     render(<ReviewTab />);

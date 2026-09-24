@@ -1,6 +1,6 @@
 ---
 name: annotation
-description: "Annotation and review workflows for TCIP's native per-image JSON labels, and the dataset-level COCO exported from them. Covers engine-assisted auto-labeling (a method-neutral proposal seam; SAM is the built-in reference engine), review cycles with IoU matching, active learning scoring, and quality metrics. Load when labeling or reviewing image annotations, scoring unlabeled images for active learning, running engine-assisted auto-labeling, or preparing/QCing training data."
+description: "Annotation and review workflows for TCIP's native per-image JSON labels, and the import of an external dataset-level COCO into them. Covers engine-assisted auto-labeling (a method-neutral proposal seam; SAM is the built-in reference engine), review cycles with IoU matching, active learning scoring, and quality metrics. Load when labeling or reviewing image annotations, scoring unlabeled images for active learning, running engine-assisted auto-labeling, or preparing/QCing training data."
 ---
 
 # Annotation Workflow
@@ -12,48 +12,63 @@ The on-disk default for both GT and predictions is one per-image, COCO-shaped `.
 `accepted_at` / `accepted_by_rule` provenance per object. `stage_proposals` writes this schema
 without reading any label document (its `assignments` regime reads back the proposal record
 `propose_annotations` staged in a prior run, not a label file); `run_inference` reads it only
-when it calibrates a confidence operating point. A dataset-level
-COCO document is an export built from these per-image files (`tcip_annotation.json_io`'s
-`to_coco_dataset`), never a shape anything here trains on. An unspecified format resolves to `.json`
-(`dataset_layout.py`'s `label_ext()`). A breeder can confirm every prediction a bucket's own
+when it calibrates a confidence operating point. It is the one label document shape the platform
+writes; object ground truth trains from it, beside the mask rasters and tables other tasks read.
+A breeder can confirm every prediction a bucket's own
 validated count operating point pre-admits in one Review action; on a false positive this writes
 `accepted_by_rule` beside the person's `accepted_by` on the ground-truth record it adds, while a
 matched prediction's confirmation is a verdict alone and its ground-truth record is left as it
 was.
 
-## Import/export formats
+## Reading labels, and importing an external COCO
 
-| Format | Files | Coordinates | Recognized by |
-|--------|-------|------------|---------------|
-| json | One `.json` per image (canonical) | Pixel coordinates | an `annotations` key, no `images`/`categories` key |
-| coco | Single `.json` for the dataset | Pixel coordinates | an `images`/`categories` key |
+Nothing here trains or calibrates on a dataset-level COCO file (an `images` or `categories`
+key): the per-image reader refuses one wherever it sits, naming `import_coco`, and every
+training, calibration and review reader reads through it. An external COCO export becomes
+per-image documents on the way in through `import_coco(document, dataset_root, date)`, over
+images `ingest_images` already placed. `date` names the capture: the dated bucket under
+`images/`, or the flat `images/` root for a dataset with no dated buckets. Every declared category
+must be a subject the dataset's registry declares. An ordinary image is the capture's image with
+exactly the document's `file_name`; a `.bandgroup` capture is tied by stem. An image with no
+annotations writes nothing. Before anything is written the import reports every fault it finds
+together and refuses: a malformed, repeated or unregistered category, a record the reader or the
+writer refuses (a record's `image_id` and its content are checked independently, so one record
+can report both), an image id that is not an integer or is listed twice, an image not in the
+capture, a stated frame the image does not have, or an existing per-image document. The writes are
+then create-only, one document at a time: a label placed meanwhile raises on its document and
+leaves those written before it. A crowd region keeps its `iscrowd` flag, and a run-length mask
+becomes the rings `mask_contours.mask_to_polygon_rings` extracts from it. The records keep the
+provenance the COCO carried and gain none. Once a document is written, the import's audit event
+records the document's path, the digest of the bytes read and the documents written, and on a
+later failed write the one that failed; an import that wrote no document, whether refused, failed
+on its first write or carrying no annotations, changed nothing and leaves no line.
 
-These are import and export shapes. Nothing here trains or calibrates on a dataset-level COCO
-file: geometry ground truth is the per-image document, and every loader reads each sample's own.
-An external COCO export becomes per-image documents on the way in, and one left sitting in a run's
-`labels_dir` is refused by name rather than shadowing the per-image files beside it.
+A record carrying `iscrowd` is a region of unseparated objects, never one instance: the built-in
+detection and instance heads train its region as background (they read no crowd flag, so a crowd
+box handed to them would train as one object), a detection inside it is neither a true nor a
+false positive at evaluation, and it counts as no object wherever a ground-truth count is formed
+or an object is paired, the classifier calibration's pairing included. Every loader target keeps
+it under `iscrowd`, so a `train(ctx)` of your own can act on it.
 
-Both are read by `format_io.load_annotations` / written by `save_annotations`; the read side is
-wrapped for the agent by `annotation_tools.read_annotations`, a library call, not a tool of its
-own. A missing label file
-reads as no annotations; a present one either reader cannot make sense of raises
-`json_io.UnreadableLabelDocument` naming the file or the malformed record's index, rather than
-reading short. For json, the per-image reader (`json_io._annotations_of`) refuses: undecodable
-text, a non-dict document, an `annotations` value that is not a list, a record that is not a
-dict, a record with no string subject, and a record whose stored box has no positive extent. For
-coco, `format_io.parse_coco_annotations` refuses on the same terms: a record whose `category_id`
-will not coerce to `int`, or has no name in the document's own `categories`. An unreadable file
-is not the same fact as no file.
+The per-image document is read by `json_io.read_annotations`, wrapped for the agent by
+`annotation_tools.read_annotations`, a library call, not a tool of its own, and written by
+`save_annotations`. A missing label file reads as no annotations; a present one the reader cannot
+make sense of raises `json_io.UnreadableLabelDocument` naming the file or the malformed record's
+index, rather than reading short: undecodable text, a non-dict document, a dataset-level COCO or
+the old `objects` schema, an `annotations` value that is not a list, a record that is not a dict,
+a record with no string subject, and a record carrying a value that is not what the schema states,
+whichever geometry the record resolves to (a `bbox` that is not four numbers or has no positive
+extent, a `segmentation` that is not rings of three or more points, a `point` that is not two
+numbers, a `score` that is not a number, an attribute value that is not a non-empty name, an
+`iscrowd` that is not 0, 1, true or false). An absent or `null` value reads as absent, for every
+optional field. A shape `save_annotations` or the Annotate tab saves is translated into this
+record and decoded by the same decoder, so it is refused for the same values. The import's COCO
+reader, `format_io.parse_coco_annotations`, names each record's subject from the document's own
+`categories` and hands each record to that same decoder. An unreadable file is not the same fact
+as no file.
 
-`format_io.detect_format` raises its own `ValueError`, apart from the reader's refusals above,
-for a missing path, a directory holding no label documents, or a present document that decodes
-but matches neither format's shape, so a misdetected format never reads real annotations as
-empty either; it also refuses the old `objects` label schema outright rather than sniffing it,
-since that schema is converted once and never read in place.
-
-A collaborator's delivery in some other schema is yours to convert: read a sample, write a
-one-off converter script, and emit the canonical per-image JSON. The platform carries no built-in
-importers.
+A collaborator's delivery in a schema other than COCO is yours to convert: read a sample, write a
+one-off converter script, and emit the canonical per-image JSON. COCO is the one built-in import.
 
 ## Coordinate frame: upright, EXIF applied once
 
@@ -77,7 +92,8 @@ bearing (denormalizing, cropping, drawing); go through `load_image`.
 
 | Tool | Purpose |
 |------|---------|
-| `save_annotations` | Write annotations to any supported format |
+| `save_annotations` | Write an image's per-image label document |
+| `import_coco` | Convert an external dataset-level COCO into per-image label documents |
 | `segment_prompt` | Engine-assisted polygon generation from point/box/grid prompts (`engine='sam'` default) |
 | `push_panel_event` | Push an arbitrary event to a GUI panel over the tcip-web backend for a named `project_root`, not restricted to images/annotations; refuses when the GUI's open project does not agree |
 | `prioritize_review_queue` | Rank unlabeled images by active-learning uncertainty/diversity for the next review batch |
@@ -107,7 +123,7 @@ Do not promise an engine that isn't built; SAM is the one that ships as a runnab
 1. User clicks a point or draws a rough box on the annotation canvas (or the agent names a grid cell)
 2. `segment_prompt(image_path, points=/box=/grid_cells=, engine='sam')` returns precise polygon
    `rings`, one per connected region of the mask, so a partly-occluded object comes back whole
-3. The rings are saved as one polygon annotation in the project's configured annotation format
+3. The rings are saved as one polygon annotation in the image's per-image label document
 4. Supports point prompts (positive/negative), box prompts, and grid-cell references
 
 ### Vision-guided auto-labeling (the engine is the "hands", the agent's vision the "eyes")
@@ -234,8 +250,8 @@ frames → they accept on the canvas → only then does it become GT. See
   `.tcip/state/image_status.json`, scoped to the subject. Each entry there is a record, not a bare
   token: it carries `recorded_by` and `recorded_at`, so a person's own Complete is legible against
   one a review harvest transcribed. Write through `record_image_statuses` /
-  `replace_image_status_store` rather than by hand. `to_coco_dataset` silently skips an
-  empty file that is not in that set, treating it as unannotated. You cannot manufacture
+  `replace_image_status_store` rather than by hand. Training admission treats an empty file
+  that is not in that set as unannotated. You cannot manufacture
   negatives; writing empty label files does not create them; only the human's Complete does.
   `tcip doctor <root>` runs separate checks bound to what each one reads:
   `check_negatives` reads the status store through the same seam `check_data_quality` does,

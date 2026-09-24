@@ -289,6 +289,7 @@ def test_a_whole_directory_lock_and_a_selection_lock_coexist(tmp_path: Path):
         ["a", "b"], identity_hash="selection_ident", scope_root=tmp_path,
         selection_dir="some/selection/dir")
 
+    assert whole.pop("old_membership") is None and scoped.pop("old_membership") is None
     assert whole["selection_dir"] is None
     assert scoped["selection_dir"] == "some/selection/dir"
     assert set(whole["calibration"]) | set(whole["holdout"]) == {"a", "b", "c", "d"}

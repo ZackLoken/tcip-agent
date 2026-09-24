@@ -186,22 +186,6 @@ def test_save_annotations_refuses_missing_subject(tmp_path):
     assert ok.get("count") == 1 and (tmp_path / "y.json").is_file()
 
 
-def test_save_annotations_refuses_an_unrecognized_fmt(tmp_path):
-    """An fmt outside {json, coco} is a named refusal, not an uncaught ValueError from the writer
-    this tool calls into."""
-    from tcip_mcp.tools.annotation_tools import save_annotations
-
-    images_dir = tmp_path / "images"
-    _write_image(images_dir, "img_001")
-    img = str(images_dir / "img_001.jpg")
-
-    res = save_annotations(
-        img, annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}],
-        fmt="xml", path=str(tmp_path / "x.json"))
-    assert "error" in res and "fmt" in res["error"]
-    assert not (tmp_path / "x.json").exists()
-
-
 # (g2) save_annotations prefers points over bbox (aligned with the web converters), so a payload
 # carrying both geometries writes the polygon, never collapsing it to a box-only record (which
 # would double-count against the polygon's own derived box on the next load).
@@ -234,22 +218,29 @@ def test_save_annotations_prefers_points_over_bbox(tmp_path):
     obj = json.loads(out.read_text())["annotations"][0]
     assert "segmentation" in obj  # written as a polygon (its derived bbox rides along)
 
-    # An empty points list falls through to bbox (truthy check, matching the web converters) rather
-    # than saving a degenerate Polygon(rings=[[]]) while the tool reports success.
-    box_out = tmp_path / "emptypts.json"
-    res2 = save_annotations(
-        img,
-        annotations=[{"subject": "bud", "points": [], "bbox": [10, 20, 110, 220]}],
-        path=str(box_out),
-    )
-    assert res2.get("count") == 1
-    (box_ann,) = json_io.read_annotations(str(box_out))
-    assert isinstance(box_ann.geometry, BBox)  # empty points -> saved as the box, not dropped
+
+# A supplied polygon that is empty or too short is a malformed value, refused by name before
+# anything is written, never read as no geometry nor saved and then dropped on write.
+@pytest.mark.parametrize("geometry", [
+    {"rings": []}, {"points": []}, {"points": [[10, 20]]},
+    {"points": [], "bbox": [10, 20, 110, 220]},
+], ids=["no_rings", "no_points", "one_vertex", "no_points_beside_a_box"])
+def test_save_annotations_refuses_a_polygon_that_is_no_shape(tmp_path, geometry):
+    from tcip_mcp.tools.annotation_tools import save_annotations
+
+    images_dir = tmp_path / "images"
+    _write_image(images_dir, "img_001")
+    out = tmp_path / "refused.json"
+
+    res = save_annotations(str(images_dir / "img_001.jpg"),
+                           annotations=[{"subject": "bud", **geometry}], path=str(out))
+
+    assert "polygon" in res.get("error", "") and not out.exists()
 
 
 # (g3) segment_prompt's own output is multi-ring ({x,y} dict vertices); an occlusion-split mask
 # accepted from it must not silently save as a geometry-less annotation. Both ring-vertex shapes
-# this module produces ({x,y} dicts from segment_prompt, [x,y] pairs from _ann_dict's read side)
+# this module produces ({x,y} dicts from segment_prompt, [x,y] pairs from the client projection)
 # must round-trip through the write door.
 def test_save_annotations_accepts_rings(tmp_path):
     from tcip_mcp.tools.annotation_tools import save_annotations
@@ -278,7 +269,7 @@ def test_save_annotations_accepts_rings(tmp_path):
     assert ann.geometry.rings[0] == [(10.0, 20.0), (110.0, 20.0), (110.0, 220.0)]
     assert ann.geometry.rings[1] == [(300.0, 300.0), (340.0, 300.0), (340.0, 340.0)]
 
-    # Round-trip shape ([x,y] pairs, as _ann_dict's own "rings" reader output uses) also works.
+    # Round-trip shape ([x,y] pairs, as the client projection's "rings" uses) also works.
     out2 = tmp_path / "rings_listshape.json"
     res2 = save_annotations(
         img,
@@ -356,7 +347,7 @@ def test_records_from_annotation_honors_a_global_name_id():
     assert {r["category_id"] for r in rec["dt"]} == {2}
 
 
-# (j) the COCO-assembled loader must match images by their real on-disk name, not a case-normalized
+# (j) the detection loader must match images by their real on-disk name, not a case-normalized
 # one: real drone frames use an uppercase .JPG, and matching against a fabricated ".jpg" silently
 # yields zero boxes (an all-empty training set). A miscased probe opens the file anyway on a
 # case-insensitive filesystem, so the match is made on the real on-disk name.
@@ -375,5 +366,5 @@ def test_uppercase_extension_image_still_yields_boxes(tmp_path):
     ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
     assert ds.num_samples == 1
     _img, target = ds[0]
-    assert target["boxes"].shape[0] == 1  # the bud box survived the COCO name match
+    assert target["boxes"].shape[0] == 1  # the bud box survived the name match
     assert len(target["labels"]) == 1

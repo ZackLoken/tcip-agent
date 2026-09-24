@@ -126,3 +126,46 @@ def test_worker_writes_every_prediction_file_and_the_sidecar_on_a_full_pass(tmp_
                                  "error", "warning", "audit_warning", "dropped_nonpositive_boxes",
                                  "platform_root"}
     assert [Path(p).stem for p in written] == ["a", "b"]
+
+
+def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_records(tmp_path, monkeypatch):
+    """The GUI worker publishes through the MCP door's own publisher: each run leaves the stamp's
+    line and the publication's line and nothing else in its dataset's log, and each links the
+    bucket into its run's lineage."""
+    pytest.importorskip("fastapi")
+    import tcip_store as ts
+
+    from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.experiments import create_experiment, get_experiment_lineage, update_status
+    from tcip_mcp.tools.inference_tools import run_inference
+    from tcip_web.routes.inference import _worker
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    images_dir = _two_images(tmp_path)
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
+    dataset = tmp_path / "orchard"
+    rows: dict[str, list[dict]] = {}
+    for door in ("gui", "mcp"):
+        exp_id = f"exp-{door}"
+        create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
+        update_status(exp_id, "running")
+        ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name=f"model-{door}",
+                                     filename=f"{door}.pt", stamp={"experiment_id": exp_id})
+        out = dataset / "predictions" / door / "2025-06-01"
+        before = len(ts.read_log(audit_log_key(dataset)).records)
+        if door == "gui":
+            _worker(_job(door, images_dir, out, ckpt, tmp_path))
+        else:
+            result = run_inference(ckpt, str(images_dir), output_dir=str(out), tile=False)
+            assert "error" not in result, result
+        rows[door] = ts.read_log(audit_log_key(dataset)).records[before:]
+        assert get_experiment_lineage(exp_id)["lineage"]["predictions"] == str(out)
+
+    def shape(records: list[dict]) -> list[tuple]:
+        return [(r["tool"], sorted(r["arguments"]), r["arguments"].get("lineage_linked"))
+                for r in records]
+
+    assert shape(rows["gui"]) == shape(rows["mcp"])
+    assert shape(rows["gui"])[-1] == (
+        "prediction_bucket_published", ["lineage_linked", "predictions_dir", "written"], True)

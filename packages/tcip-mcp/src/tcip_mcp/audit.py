@@ -109,16 +109,19 @@ class AuditEntryNotWritten(RuntimeError):
     same "committed and unrecorded, do not blind-retry" shape, for a call site with no tool body
     of its own to have already run. A sibling rather than a subclass, since the two guard different
     things (a decorator's own control flow around a body versus an explicit call with none), not
-    one specialization of the other.
+    one specialization of the other. ``arguments`` are the facts the unwritten line would have
+    carried, so a caller can name what committed without reading it back.
     """
 
-    def __init__(self, tool: str, cause: BaseException) -> None:
+    def __init__(self, tool: str, cause: BaseException, *,
+                 arguments: dict[str, Any] | None = None) -> None:
         super().__init__(
             f"{tool} completed and its audit entry could not be written: {cause}. Whatever the "
             "call changed is committed and unrecorded, so do not retry it blind: repair the "
             "audit log's destination, then reconcile the trail against what the call did."
         )
         self.tool = tool
+        self.arguments = arguments or {}
 
 
 def platform_audit_scope() -> Path:
@@ -210,8 +213,7 @@ def _write_entry(entry: dict[str, Any], scope: str | Path | None = None) -> None
     running in a background thread; its close event (``run_training_envelope``, in a ``finally``)
     does record after its own mutation, ``_finalize_run`` having already closed the run and
     registered the model, so a lost line there shows in the trail as a run with no close event
-    rather than as a raised error. Its two ``model_registration_failed`` lines
-    (``_finalize_run``) are themselves recording a registration failure. The worker's crash path
+    rather than as a raised error. The worker's crash path
     (``subprocess_worker.run``) likewise records after its own ``update_status`` call: a lost
     line there shows as a run marked failed with no matching event, never a raised error, since
     the crash it names already happened. The web ``phenology_measurement`` view
@@ -264,7 +266,7 @@ def record_event_or_raise(
         append(_stamp_scope(entry, scope), entry)
     except Exception as exc:
         logger.warning("Failed to write the audit entry for %s", tool, exc_info=True)
-        raise AuditEntryNotWritten(tool, exc) from exc
+        raise AuditEntryNotWritten(tool, exc, arguments=arguments) from exc
 
 
 def dataset_scope_of(value: Any) -> Path | None:
@@ -321,6 +323,11 @@ def audited(
     cwd. Pass the resolver the body itself calls, so the scope is resolved along the identical
     path the write takes; a second implementation of that anchoring would file entries at a
     location the tool never wrote to.
+
+    The one statement of what a call leaves: a body that returns leaves its ``ok`` line, except a
+    body returning a dict whose ``"error"`` is set, the refusal every tool returns, leaves no line,
+    since a refusal is no act and whatever such a call committed first is recorded by the library
+    that committed it; a body that raises leaves its ``exception`` line.
 
     Three outcomes an entry can fail on, and what each does, all decided by the fact that the
     entry is written after the body:
@@ -389,6 +396,8 @@ def audited(
                     # The body's exception is the caller's answer; this one never displaces it.
                     logger.warning("Failed to audit the failed %s call", tool_name, exc_info=True)
                 raise
+            if isinstance(result, dict) and result.get("error") is not None:
+                return result  # a refusal returned as the error dict every tool returns: no act
             entry["status"] = "ok"
             try:
                 record()

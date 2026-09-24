@@ -216,28 +216,14 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
                "measurement against this selection by name.",
     }
 
-ROOT_LABEL_CANDIDATES = ("annotations.json", "labels.json", "instances.json")
-"""Candidate filenames for one assembled dataset-level label document at a dataset's root,
-checked in this order; the first one present on disk is the dataset's label store. Shared by
-:func:`_scan_dataset` and the doctor's own ``check_data_quality`` so both name the same three
-candidates."""
-
 
 def _scan_dataset(root: str) -> dict:
     """Scan a directory tree for images and labels.
 
     Labels are the name-based per-image JSON (one file per image, all subjects) under
     ``annotations/<date>/`` (no detect/segment split), a review baseline directory's copies
-    excluded, plus a single assembled dataset-level COCO at the root if one is present: the root
-    candidate sits beside the per-image tree, never in place of it, so a dataset carrying both
-    reports every one of them.
-
-    An unreadable first-sorted label (undecodable, non-dict, or otherwise malformed) raises
-    :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than being folded into "format
-    undetectable": the caller reports it as the named file it is, not a guess. ``format`` is an
-    informational best guess (the per-image tree's first-sorted label's shape, or the root
-    candidate's when there is no per-image tree), not a claim every label file shares it; the
-    doctor's own ``check_data_quality`` decides format per file instead.
+    excluded. The census reads no document: what each holds is its reader's answer, asked per
+    file by the doctor's own ``check_data_quality``.
 
     ``labels`` is a raw ``rglob``, so it counts a file whose name is reserved for a prediction
     bucket's own provenance stamp the way :func:`~tcip_mcp.dataset_layout.subjects_on_date` and
@@ -263,7 +249,8 @@ def _scan_dataset(root: str) -> dict:
     from tcip_annotation.json_io import is_sidecar_name, prediction_documents
     from tcip_annotation.review_engine import BASELINE_DIRNAME
     from tcip_mcp.dataset_layout import (
-        annotation_root, image_root, is_cleared_bucket, prediction_root,
+        LABEL_SUFFIX, annotation_root, image_root, is_cleared_bucket, label_filename,
+        prediction_root,
     )
     from tcip_mcp.pipelines.image_utils import BandGroupRef, IMAGE_EXTS, list_logical_images
 
@@ -274,7 +261,6 @@ def _scan_dataset(root: str) -> dict:
     preds: list[str] = []
     reserved_name_labels: list[str] = []
     reserved_name_images: list[str] = []
-    detected_format: str | None = None
 
     # Find images through the platform's own bucket enumeration: a stem collision refuses here
     # too, and a grouped capture counts once, its own manifest.
@@ -285,14 +271,14 @@ def _scan_dataset(root: str) -> dict:
             for source in list_logical_images(bucket).values():
                 f = source.manifest_path if isinstance(source, BandGroupRef) else source
                 images.append(str(f))
-                if is_sidecar_name(f"{f.stem}.json"):
+                if is_sidecar_name(label_filename(f.stem)):
                     reserved_name_images.append(str(f))
     else:
         # No canonical images/ tree, so no bucket contract to route through this walk.
         for f in sorted(root_path.rglob("*")):
             if f.is_file() and f.suffix.lower() in image_exts:
                 images.append(str(f))
-                if is_sidecar_name(f"{f.stem}.json"):
+                if is_sidecar_name(label_filename(f.stem)):
                     reserved_name_images.append(str(f))
 
     # Ground-truth labels: annotations/[<date>/]<stem>.json (one file per image, every subject),
@@ -300,27 +286,10 @@ def _scan_dataset(root: str) -> dict:
     ann_dir = annotation_root(root_path)
     if ann_dir.is_dir():
         labels = [
-            str(f) for f in sorted(ann_dir.rglob("*.json"))
+            str(f) for f in sorted(ann_dir.rglob(f"*{LABEL_SUFFIX}"))
             if f.is_file() and BASELINE_DIRNAME not in f.parts
         ]
         reserved_name_labels = [f for f in labels if is_sidecar_name(Path(f).name)]
-        if labels:
-            try:
-                from tcip_annotation.format_io import detect_format
-                detected_format = detect_format(labels[0])
-            except ValueError:
-                detected_format = None  # unrecognized: report nothing rather than a guess
-
-    # A single COCO JSON at the dataset root: one more present label beside the per-image tree.
-    root_candidate = _root_label_candidate(root, set(labels))
-    if root_candidate is not None:
-        labels.append(root_candidate)
-        if detected_format is None:
-            try:
-                from tcip_annotation.format_io import detect_format
-                detected_format = detect_format(root_candidate)
-            except ValueError:
-                pass
 
     # Predictions: predictions/<model>/[<date>/]<stem>.json; each model/date bucket is walked on
     # its own through prediction_documents, so the bucket's own stamps are excluded everywhere.
@@ -328,13 +297,13 @@ def _scan_dataset(root: str) -> dict:
     if pred_dir.is_dir():
         preds = [
             str(f)
-            for bucket in sorted({p.parent for p in pred_dir.rglob("*.json")})
+            for bucket in sorted({p.parent for p in pred_dir.rglob(f"*{LABEL_SUFFIX}")})
             if not is_cleared_bucket(bucket)
             for f in prediction_documents(bucket)
         ]
 
     return {
-        "images": images, "labels": labels, "predictions": preds, "format": detected_format,
+        "images": images, "labels": labels, "predictions": preds,
         "reserved_name_labels": reserved_name_labels, "reserved_name_images": reserved_name_images,
     }
 
@@ -345,8 +314,7 @@ def scan_dataset(folder_path: str) -> dict:
     Not an MCP tool: run through ``tcip scan-dataset``, per the admission standard
     (packages/tcip-mcp/CLAUDE.md), while staying importable for its in-package callers.
 
-    Reads the name-based per-image JSON labels (one file per image, all subjects), or an assembled
-    dataset-level COCO.
+    Reads the name-based per-image JSON labels (one file per image, all subjects).
 
     Expects the canonical layout (see tcip_mcp.dataset_layout):
         images/<date>/  annotations/<date>/<stem>.json  predictions/<model>/<date>/<stem>.json
@@ -364,13 +332,12 @@ def scan_dataset(folder_path: str) -> dict:
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
 
-    from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
     from tcip_store import SchemaVersionRefused
 
     try:
         scan = _scan_dataset(folder_path)
-    except (UnreadableLabelDocument, AmbiguousImageStem) as exc:
+    except AmbiguousImageStem as exc:
         return {"error": str(exc)}
     except SchemaVersionRefused as exc:
         return {"error": f"a .bandgroup manifest under {folder_path} could not be read: {exc}"}
@@ -383,7 +350,6 @@ def scan_dataset(folder_path: str) -> dict:
 
     return {
         "path": folder_path,
-        "format": scan.get("format"),
         "image_count": len(scan["images"]),
         "labels_count": len(scan["labels"]),
         "predictions_count": len(scan["predictions"]),
@@ -395,25 +361,6 @@ def scan_dataset(folder_path: str) -> dict:
     }
 
 
-def _root_label_candidate(folder_path: str, already_present: set) -> str | None:
-    """The dataset root's own assembled-label candidate, if one is present and not already
-    counted among ``already_present``.
-
-    The one walk of ``ROOT_LABEL_CANDIDATES`` in their declared first-match order, called by
-    :func:`_scan_dataset` before the candidate joins its ``labels`` list and by any other caller
-    that has its own already-counted set to check the candidate against, so a present root
-    candidate can never be walked for twice by two diverging implementations. A candidate whose
-    format cannot be determined is still returned: it is a present label file, not evidence the
-    dataset carries none, and detecting its format is left to the caller.
-    """
-    root_path = Path(folder_path)
-    for candidate in ROOT_LABEL_CANDIDATES:
-        cpath = root_path / candidate
-        if cpath.is_file():
-            return None if str(cpath) in already_present else str(cpath)
-    return None
-
-
 
 def _split_date_dirs(folder_path: str | Path) -> list[tuple[str | None, Path, Path]]:
     """Every ``(date, labels_dir, images_dir)`` a dataset's per-image label tree holds: one entry
@@ -423,10 +370,7 @@ def _split_date_dirs(folder_path: str | Path) -> list[tuple[str | None, Path, Pa
     the draw. A fully flat dataset (no date subdirectories at all) yields exactly that one
     dateless entry.
 
-    Empty when the dataset holds no per-image label tree at all (a root-level assembled COCO
-    only, which :func:`_scan_dataset` counts as a label but this never walks): the platform's own
-    admission for the tasks a selection can bind to draws through the per-image tree, never
-    that document.
+    Empty when the dataset holds no per-image label tree at all.
     """
     from tcip_annotation.json_io import prediction_documents
     from tcip_mcp.dataset_layout import (
@@ -683,8 +627,8 @@ def draw_splits(
         if not date_dirs:
             return {"error": f"{folder_path} holds no per-image label tree (annotations/<date>/ "
                              "or a flat annotations/) for draw_splits to draw a subject-scoped "
-                             "selection from; a dataset-level assembled COCO at the root is not "
-                             "walked here."}
+                             "selection from; an external COCO document is converted into one "
+                             "by import_coco first."}
         entries_by_images_dir: dict[Path, list[str]] = {}
         for entry_date, _, entry_images_dir in date_dirs:
             entries_by_images_dir.setdefault(entry_images_dir, []).append(

@@ -53,17 +53,13 @@ def _patch_experiment_config(experiment_id: str, action: str,
         key, st_key = config_key(experiment_id), status_key(experiment_id)
         if not store.exists(key):
             return
-        try:
-            with store.transaction(key, st_key) as txn:
-                state = (txn.read(st_key, default={}) or {}).get("state")
-                refuse_if_terminal(experiment_id, action, state)
-                cfg = txn.read(key, default={})
-                data_cfg = cfg.setdefault("data", {})
-                mutate(data_cfg)
-                txn.write(key, cfg)
-        except ExperimentTerminal as exc:
-            from tcip_mcp.experiments import audit_refusal_reraising
-            audit_refusal_reraising(experiment_id, action, {}, exc)
+        with store.transaction(key, st_key) as txn:
+            state = (txn.read(st_key, default={}) or {}).get("state")
+            refuse_if_terminal(experiment_id, action, state)
+            cfg = txn.read(key, default={})
+            data_cfg = cfg.setdefault("data", {})
+            mutate(data_cfg)
+            txn.write(key, cfg)
     except ExperimentTerminal:
         raise
     except Exception:
@@ -155,8 +151,7 @@ def run(experiment_id: str, output_dir: str, resume_from: str) -> None:
     try:
         ctx = _prepare_run_context(experiment_id, output_dir, resume_from, store)
     except ExperimentTerminal:
-        # Already audited, and the record already terminal, by the raiser itself.
-        raise
+        raise  # the record is already terminal: nothing to reconcile, and a refusal has no line
     except Exception as exc:
         # No run_training_envelope has opened its own "training_run" audit event yet, so
         # without this the record stays running and the crash goes unaudited.
@@ -165,13 +160,7 @@ def run(experiment_id: str, output_dir: str, resume_from: str) -> None:
             from tcip_mcp.audit import record_event
             from tcip_mcp.experiments import update_status
 
-            try:
-                # A terminal record's own refusal-append can raise AuditEntryNotWritten here;
-                # that must not stop the training_run event below from being written.
-                update_status(experiment_id, "failed", error=str(exc))
-            except Exception:
-                logger.warning("could not mark run %s failed after its own setup crash",
-                               experiment_id, exc_info=True)
+            update_status(experiment_id, "failed", error=str(exc))
             record_event("training_run", {"experiment_id": experiment_id}, status="failed")
         except Exception:
             logger.warning("could not reconcile run %s to failed after its own setup crash",

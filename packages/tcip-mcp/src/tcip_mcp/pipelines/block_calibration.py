@@ -92,10 +92,11 @@ def _band_rects(
 
 
 def _select_gt_for_band(
-    gt_boxes_xyxy: np.ndarray, gt_labels: np.ndarray, band_rect: tuple[int, int, int, int],
-) -> tuple[np.ndarray, np.ndarray]:
-    """This band's own GT: boxes whose center lands in ``band_rect``, kept at their full extent
-    (never clipped) and translated to the band's own local (inner-rect-relative) pixel space.
+    gt: dict[str, np.ndarray], band_rect: tuple[int, int, int, int],
+) -> dict[str, np.ndarray]:
+    """This band's own GT, the rows of ``gt`` (xyxy ``boxes`` with their ``labels`` and
+    ``iscrowd``) whose box center lands in ``band_rect``, each box kept at its full extent (never
+    clipped) and translated to the band's own local (inner-rect-relative) pixel space.
 
     Mirrors the DT side's own inclusion rule exactly (:func:`_band_records`'s center-in-inner-rect
     keep test) rather than clipping GT to the rect: a straddling object must be included or
@@ -103,16 +104,15 @@ def _select_gt_for_band(
     boundary (a clipped-but-kept GT box paired against a dropped, off-center detection reads as a
     false negative that a real delivered pass would never report).
     """
-    if len(gt_boxes_xyxy) == 0:
-        return gt_boxes_xyxy, gt_labels
+    boxes = gt["boxes"]
     x0, y0, x1, y1 = band_rect
-    cx = (gt_boxes_xyxy[:, 0] + gt_boxes_xyxy[:, 2]) / 2.0
-    cy = (gt_boxes_xyxy[:, 1] + gt_boxes_xyxy[:, 3]) / 2.0
+    cx = (boxes[:, 0] + boxes[:, 2]) / 2.0
+    cy = (boxes[:, 1] + boxes[:, 3]) / 2.0
     keep = (cx >= x0) & (cx < x1) & (cy >= y0) & (cy < y1)
-    kept = gt_boxes_xyxy[keep].astype(np.float64, copy=True)
+    kept = boxes[keep].astype(np.float64, copy=True)
     kept[:, [0, 2]] -= x0
     kept[:, [1, 3]] -= y0
-    return kept, gt_labels[keep]
+    return {"boxes": kept, "labels": gt["labels"][keep], "iscrowd": gt["iscrowd"][keep]}
 
 
 def _check_completeness(
@@ -251,18 +251,15 @@ def resolve_block_calibration_records(
     config = store.read(config_key(experiment_id), default={})
     data_cfg = (config.get("data") if isinstance(config, dict) else None) or {}
     labels_dir, images_dir = data_cfg.get("labels_dir"), data_cfg.get("images_dir")
-    subject, attribute = data_cfg.get("subject"), data_cfg.get("attribute")
     if not labels_dir or not images_dir:
         raise BlockCalibrationRefused(
             f"block calibration refused: experiment {experiment_id!r}'s config.json carries no "
             "data.labels_dir/data.images_dir to resolve the training mosaic's own files from."
         )
-    if not subject:
-        raise BlockCalibrationRefused(
-            f"block calibration refused: experiment {experiment_id!r}'s training config carries "
-            "no registered subject; block calibration reads ground truth through the registry the "
-            "same way every other calibration path does."
-        )
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
+    scope = ClassScope.recorded_in(data_cfg)
+    subject, attribute = scope.named_subject(f"experiment {experiment_id!r}"), scope.attribute
 
     from tcip_mcp.dataset_layout import dataset_root_of
 
@@ -286,8 +283,10 @@ def resolve_block_calibration_records(
             "through that map, so there is nothing to read it with."
         )
 
-    gt_path = str(Path(labels_dir) / f"{stem}.json")
-    gt_boxes, gt_labels, n_unlabeled = json_det_targets(gt_path, subject, attribute, id_map)
+    from tcip_mcp.dataset_layout import label_filename
+
+    gt_path = str(Path(labels_dir) / label_filename(stem))
+    target, n_unlabeled = json_det_targets(gt_path, subject, attribute, id_map)
     if n_unlabeled:
         raise BlockCalibrationRefused(
             f"block calibration refused: {n_unlabeled} instance(s) in {stem!r} are unlabeled for "
@@ -298,8 +297,9 @@ def resolve_block_calibration_records(
             "silently bias the calibrated confidence. Label every instance for this attribute in "
             "the reserved regions, or calibrate a trait with no attribute scope."
         )
-    gt_boxes_arr = np.asarray(gt_boxes, dtype=np.float32).reshape(-1, 4)
-    gt_labels_arr = np.asarray(gt_labels, dtype=np.int64)
+    gt = {"boxes": np.asarray(target["boxes"], dtype=np.float32).reshape(-1, 4),
+          "labels": np.asarray(target["labels"], dtype=np.int64),
+          "iscrowd": np.asarray(target["iscrowd"], dtype=bool)}
 
     tile_size, overlap = int(spatial["tile_size"]), float(spatial["overlap"])
     if tile_size != int(export_tile_size):
@@ -328,14 +328,18 @@ def resolve_block_calibration_records(
     def _in_regions(cx: float, cy: float, regions: list) -> bool:
         return any(rx0 <= cx < rx1 and ry0 <= cy < ry1 for rx0, ry0, rx1, ry1 in regions)
 
-    centers = (gt_boxes_arr[:, :2] + gt_boxes_arr[:, 2:]) / 2.0 if len(gt_boxes_arr) else gt_boxes_arr
-    # One real spatial scale, pooled across both reserved regions' own GT.
+    from tcip_mcp.pipelines.data.datasets import object_rows
+
+    objects = gt["boxes"][object_rows(gt["iscrowd"])]
+    centers = (objects[:, :2] + objects[:, 2:]) / 2.0 if len(objects) else objects
+    # One real spatial scale, pooled across both reserved regions' own GT objects: a crowd region
+    # is no object, so its extent says nothing about their spacing.
     reserved_mask = np.array([
         _in_regions(cx, cy, cal_region) or _in_regions(cx, cy, test_region) for cx, cy in centers
     ], dtype=bool) if len(centers) else np.zeros((0,), dtype=bool)
     reserved_boxes_xywh = [
         [x1, y1, x2 - x1, y2 - y1]
-        for (x1, y1, x2, y2) in gt_boxes_arr[reserved_mask].tolist()
+        for (x1, y1, x2, y2) in objects[reserved_mask].tolist()
     ]
     training_source = resolve_image_source(images_dir, stem)
 
@@ -373,11 +377,9 @@ def resolve_block_calibration_records(
         ) from exc
 
     def _band_gt_counts(bands: dict[str, tuple[int, int, int, int]]) -> dict[str, int]:
-        counts = {}
-        for name, rect in bands.items():
-            b, _l = _select_gt_for_band(gt_boxes_arr, gt_labels_arr, rect)
-            counts[name] = len(b)
-        return counts
+        # Objects per band: a crowd region is never one.
+        return {name: int(object_rows(_select_gt_for_band(gt, rect)["iscrowd"]).sum())
+                for name, rect in bands.items()}
 
     cal_gt_counts, test_gt_counts = _band_gt_counts(cal_bands), _band_gt_counts(test_bands)
     _check_feasibility(cal_gt_counts, side="cal")
@@ -415,14 +417,12 @@ def resolve_block_calibration_records(
         cal_records, cal_rects = _band_records(
             reader, cal_bands, mosaic_w, mosaic_h, tile_size, overlap, predictor,
             tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, postprocess=postprocess,
-            gt_boxes=gt_boxes_arr, gt_labels=gt_labels_arr,
-            stem=stem,
+            gt=gt, stem=stem,
         )
         test_records, test_rects = _band_records(
             reader, test_bands, mosaic_w, mosaic_h, tile_size, overlap, predictor,
             tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, postprocess=postprocess,
-            gt_boxes=gt_boxes_arr, gt_labels=gt_labels_arr,
-            stem=stem,
+            gt=gt, stem=stem,
         )
 
     from tcip_mcp.pipelines.operating_point import (
@@ -471,7 +471,7 @@ def resolve_block_calibration_records(
 def _band_records(
     reader: Any, bands: dict[str, tuple[int, int, int, int]], mosaic_w: int, mosaic_h: int,
     tile_size: int, overlap: float, predictor: Any, *, tile_batch_size: int, global_nms_iou: float,
-    postprocess: str, gt_boxes: np.ndarray, gt_labels: np.ndarray, stem: str,
+    postprocess: str, gt: dict[str, np.ndarray], stem: str,
 ) -> tuple[list[dict], dict[str, tuple[int, int, int, int]]]:
     """Per-band COCO-shaped records (:func:`~tcip_mcp.pipelines.training.evaluation.
     build_coco_image_record`, the exact model ``calibrate_operating_point._records`` builds) plus
@@ -486,7 +486,9 @@ def _band_records(
     """
     from tcip_mcp.pipelines.data.tiling import region_halo
     from tcip_mcp.pipelines.raster_source import Rect, _RegionView
-    from tcip_mcp.pipelines.training.evaluation import build_coco_image_record
+    from tcip_mcp.pipelines.training.evaluation import (
+        build_coco_image_record, detection_record, gt_records,
+    )
 
     records: list[dict] = []
     rects_by_id: dict[str, tuple[int, int, int, int]] = {}
@@ -508,16 +510,11 @@ def _band_records(
         ):
             cx, cy = (bx1 + bx2) / 2.0 + hx0, (by1 + by2) / 2.0 + hy0
             if ix0 <= cx < ix1 and iy0 <= cy < iy1:
-                dt.append({
-                    "category_id": int(label), "score": float(score),
-                    "bbox": [bx1 + hx0 - ix0, by1 + hy0 - iy0, bx2 - bx1, by2 - by1],
-                })
-        selected_boxes, selected_labels = _select_gt_for_band(gt_boxes, gt_labels, inner)
-        gt = [
-            {"category_id": int(lab), "bbox": [x1, y1, x2 - x1, y2 - y1], "iscrowd": 0}
-            for (x1, y1, x2, y2), lab in zip(selected_boxes.tolist(), selected_labels.tolist())
-        ]
-        rec = build_coco_image_record(ix1 - ix0, iy1 - iy0, gt, dt, image_id=image_id)
+                dx, dy = hx0 - ix0, hy0 - iy0
+                dt.append(detection_record((bx1 + dx, by1 + dy, bx2 + dx, by2 + dy), label, score))
+        rec = build_coco_image_record(ix1 - ix0, iy1 - iy0,
+                                      gt_records(_select_gt_for_band(gt, inner)), dt,
+                                      image_id=image_id)
         rec["cap_hit"] = cap_hit
         records.append(rec)
         rects_by_id[image_id] = inner

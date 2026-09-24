@@ -1,4 +1,4 @@
-"""Headless annotation library: canonical name-based per-image JSON labels + a single-file COCO."""
+"""Headless annotation library: canonical name-based per-image JSON labels, and a COCO reader."""
 
 from tcip_annotation.state import (
     Annotation,
@@ -8,19 +8,12 @@ from tcip_annotation.state import (
     Polygon,
     bbox_of,
 )
-# Label I/O is the canonical per-image JSON (json_io); a single-file COCO is a genuine interop format.
+# Label I/O is the canonical per-image JSON (json_io); a dataset-level COCO is only ever read.
 from tcip_annotation.json_io import (
     read_annotations,
     write_annotations,
-    to_coco_dataset,
 )
-from tcip_annotation.format_io import (
-    detect_format,
-    load_annotations as load_annotations_any,
-    save_annotations as save_annotations_any,
-    parse_coco_annotations,
-    write_coco,
-)
+from tcip_annotation.format_io import parse_coco_annotations
 from tcip_annotation.matching import (
     compute_classified_trait_matches,
     compute_matches,
@@ -47,14 +40,8 @@ __all__ = [
     # Canonical per-image JSON: the platform's native on-disk label format (primary read/write path)
     "read_annotations",
     "write_annotations",
-    "to_coco_dataset",
-    # Multi-format import/export (auto-detect + dispatch; behind the load/save_annotations tools)
-    "detect_format",
-    "load_annotations_any",
-    "save_annotations_any",
-    # COCO-specific (interop)
+    # An external COCO document's records (import only)
     "parse_coco_annotations",
-    "write_coco",
     # Matching
     "compute_matches",
     "compute_classified_trait_matches",

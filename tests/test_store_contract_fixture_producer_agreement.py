@@ -45,8 +45,11 @@ def test_the_selection_golden_carries_each_sample_s_own_source_label_group_and_s
 
 
 def test_the_cal_holdout_lock_golden_carries_every_key_the_resolver_writes(tmp_path):
-    fresh = splits.resolve_locked_cal_holdout_split(
+    import tcip_store as ts
+
+    splits.resolve_locked_cal_holdout_split(
         ["a_1", "b_2", "c_3", "d_4"], identity_hash=LOCK_IDENTITY, scope_root=tmp_path)
+    fresh = ts.read(splits.cal_holdout_lock_key(LOCK_IDENTITY, scope_root=tmp_path))
     golden = REGISTERED["cal_holdout_split_lock"].golden
     assert isinstance(golden, dict)
 

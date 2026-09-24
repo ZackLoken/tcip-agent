@@ -110,15 +110,6 @@ export function effectiveComplete(record: CompletenessRecord | undefined): Set<s
   return new Set(record.cells_complete.filter((c) => !stale.has(c)));
 }
 
-/** The label reader's own reason, stripped of the record it dumps after a colon and a brace
- *  (`tcip_annotation`'s `UnreadableLabelDocument` messages end "...: {'id': 1, ...}"): a breeder
- *  reads the reader's own sentence, never a Python dict. Text with no brace passes through. */
-export function breederReadErrorReason(raw: string): string {
-  const idx = raw.indexOf("{");
-  if (idx === -1) return raw;
-  return raw.slice(0, idx).replace(/[:\s]+$/, "");
-}
-
 /** Whether a cell's recorded scale meets a subject's working scale: the one comparison the
  *  tracker, the overlay's derivation and the chrome's attested-view line all call, so "does this
  *  cell meet the working scale" is never answered twice. `null` on either side (no recorded

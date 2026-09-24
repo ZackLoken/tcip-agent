@@ -546,7 +546,9 @@ def stage_prediction_shapes(
     """
     from tcip_annotation import json_io
 
-    if json_io.is_sidecar_name(f"{stem}.json"):
+    from tcip_mcp.dataset_layout import label_filename
+
+    if json_io.is_sidecar_name(label_filename(stem)):
         raise ValueError(
             f"{stem} names one of a prediction bucket's own provenance stamps; an image whose "
             "stem is reserved this way can never be written as a bucket's per-image prediction "
@@ -565,7 +567,7 @@ def stage_prediction_shapes(
     path = None
     if annotations:
         pred_dir.mkdir(parents=True, exist_ok=True)
-        out = pred_dir / f"{stem}.json"
+        out = pred_dir / label_filename(stem)
         json_io.write_annotations(out, annotations, img_w, img_h)
         path = str(out)
 

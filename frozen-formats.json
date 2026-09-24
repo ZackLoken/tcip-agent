@@ -61,12 +61,6 @@
       "schema_version": 1,
       "cannot_carry_field": null
     },
-    "coco_documents": {
-      "kind": "blob",
-      "frozen": false,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
     "confidence_sweep": {
       "kind": "record",
       "frozen": true,

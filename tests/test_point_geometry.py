@@ -87,60 +87,9 @@ def test_a_point_alongside_a_box_and_a_polygon_all_survive_one_file(tmp_path: Pa
 # ── target membership (the one shared decision) ──────────────────────────────
 
 
-def test_target_class_id_returns_none_for_a_point_without_raising() -> None:
-    a = Annotation(subject="bud", geometry=Point(1.0, 2.0))
-    assert json_io.target_class_id(a, "bud", None, {"bud": 0}) is None
-    # An attribute scope must not turn the point into a decode failure either: it is simply not a
-    # target for this scope, which is a different thing from "a target the registry can't decode".
-    assert json_io.target_class_id(a, "bud", "opening", {"open": 0}) is None
-
-
 def test_target_class_id_still_assigns_a_box_its_class() -> None:
     a = Annotation(subject="bud", geometry=BOX)
     assert json_io.target_class_id(a, "bud", None, {"bud": 0}) == 0
-
-
-# ── COCO assembly for training ───────────────────────────────────────────────
-
-
-def _entries(tmp_path: Path, anns: list[Annotation], name: str = "IMG_0001.JPG"):
-    label = tmp_path / f"{Path(name).stem}.json"
-    json_io.write_annotations(label, anns, 100, 80)
-    return [(str(label), name)]
-
-
-def test_to_coco_dataset_counts_a_point_only_image_but_emits_no_annotation(tmp_path: Path) -> None:
-    """A point is real content (the image is annotated, not an empty negative) yet has no COCO
-    record: a zero-area box in ``annotations`` would train as an object."""
-    coco = json_io.to_coco_dataset(
-        _entries(tmp_path, [Annotation(subject="bud", geometry=Point(20.0, 20.0))]),
-        subject="bud", id_map={"bud": 0})
-    assert [i["file_name"] for i in coco["images"]] == ["IMG_0001.JPG"]
-    assert coco["annotations"] == []
-
-
-def test_to_coco_dataset_keeps_the_box_next_to_the_point(tmp_path: Path) -> None:
-    coco = json_io.to_coco_dataset(
-        _entries(tmp_path, [
-            Annotation(subject="bud", geometry=Point(20.0, 20.0)),
-            Annotation(subject="bud", geometry=BOX),
-        ]),
-        subject="bud", id_map={"bud": 0})
-    (rec,) = coco["annotations"]
-    assert rec["bbox"] == [10.0, 10.0, 20.0, 20.0]
-    assert rec["area"] == 400.0
-
-
-def test_write_coco_interop_export_skips_a_point(tmp_path: Path) -> None:
-    from tcip_annotation.format_io import write_coco
-
-    out = tmp_path / "dataset.json"
-    write_coco(str(out), {"IMG_0001.JPG": (
-        [Annotation(subject="bud", geometry=Point(20.0, 20.0)),
-         Annotation(subject="bud", geometry=BOX)], 100, 80)})
-    coco = json.loads(out.read_text(encoding="utf-8"))
-    (rec,) = coco["annotations"]  # the box only; COCO has no honest record for a point
-    assert rec["bbox"] == [10.0, 10.0, 20.0, 20.0]
 
 
 # ── the loader's own per-image target read ───────────────────────────────────
@@ -154,10 +103,14 @@ def test_json_det_targets_yields_no_box_for_a_point(tmp_path: Path) -> None:
         Annotation(subject="bud", geometry=Point(20.0, 20.0)),
         Annotation(subject="bud", geometry=BOX),
     ], 100, 80)
-    boxes, labels, n_unlabeled = json_det_targets(str(label), "bud", None, {"bud": 0})
-    assert boxes == [[10.0, 10.0, 30.0, 30.0]]
-    assert labels == [1]
+    target, n_unlabeled = json_det_targets(str(label), "bud", None, {"bud": 0})
+    assert target["boxes"] == [[10.0, 10.0, 30.0, 30.0]]
+    assert target["labels"] == [1]
     assert n_unlabeled == 0  # a point is not an unlabeled instance either: it is not an instance
+    # An attribute scope must not turn the point into a decode failure either: it is simply not a
+    # target for this scope, which is a different thing from "a target the registry can't decode".
+    target, n_unlabeled = json_det_targets(str(label), "bud", "opening", {"open": 0})
+    assert target["boxes"] == [] and n_unlabeled == 1  # only the box, never assessed, is a gap
 
 
 def test_a_point_only_document_carries_the_subject_and_the_detection_loader_refuses_it(
@@ -280,8 +233,8 @@ def test_review_engine_reads_no_bbox_for_a_point(tmp_path: Path) -> None:
     eng = ReviewEngine(state_dir=tmp_path / "state")
     anns = [Annotation(subject="bud", geometry=Point(20.0, 20.0)),
             Annotation(subject="bud", geometry=BOX)]
-    assert eng._bbox_of_annotation(anns, 0) is None  # like a geometry-less label, not a 0-area box
-    assert eng._bbox_of_annotation(anns, 1) == (10.0, 10.0, 30.0, 30.0)
+    assert eng._box_of(anns[0]) is None  # like a geometry-less label, not a 0-area box
+    assert eng._box_of(anns[1]) == (10.0, 10.0, 30.0, 30.0)
 
 
 # ── spatial index (hit-testing, a different concern from bbox_of) ────────────
@@ -333,15 +286,11 @@ def test_visualize_annotations_renders_the_box_and_reports_the_point(tmp_path: P
 # ── dict serializers (the read side of every agent/GUI surface) ──────────────
 
 
-def test_mcp_ann_dict_emits_the_point_key() -> None:
-    from tcip_mcp.tools.annotation_tools import _add_geom, _ann_dict
+def test_the_client_projection_emits_the_point_key() -> None:
+    from tcip_annotation.json_io import client_annotation
 
-    d = _ann_dict(Annotation(subject="bud", geometry=Point(12.0, 34.0)))
+    d = client_annotation(Annotation(subject="bud", geometry=Point(12.0, 34.0)))
     assert d["point"] == [12.0, 34.0]
-
-    det: dict = {}
-    _add_geom(det, Annotation(subject="bud", geometry=Point(12.0, 34.0)))
-    assert det["point"] == [12.0, 34.0]
 
 
 def test_mcp_read_annotations_tool_returns_a_point(tmp_path: Path) -> None:

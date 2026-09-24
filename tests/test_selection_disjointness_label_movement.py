@@ -333,7 +333,7 @@ _REVIEW_IDENTITY = {"checkpoint_sha256": "sha-review", "experiment_id": None}
 
 def _review_entry(gt, pred, conf):
     return {"match_type": "TP", "action": "accepted", "class_id": 0,
-            "gt_bbox_norm": gt, "pred_bbox_norm": pred, "conf": conf,
+            "iscrowd": False, "reviewed_by": "", "class_name": "", "gt_bbox_norm": gt, "pred_bbox_norm": pred, "conf": conf,
             "producer_identity": _REVIEW_IDENTITY, "conf_threshold": None,
             "missed_object_attested": False}
 

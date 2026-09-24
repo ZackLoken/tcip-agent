@@ -429,6 +429,80 @@ def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
     assert ts.exists(evaluation_results_key(tmp_path / "out"))
 
 
+def test_full_frame_scores_a_detection_in_a_crowd_region_as_neither(tmp_path, monkeypatch):
+    """The delivery-grade gate reads each record's crowd flag off the loader's target: a
+    detection inside a crowd region is neither a true nor a false positive."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
+
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    Image.new("RGB", (128, 128)).save(images_dir / "a.png")
+    json_io.write_annotations(str(labels_dir / "a.json"), [
+        Annotation(subject="bud", geometry=BBox(10, 10, 30, 30)),
+        Annotation(subject="bud", geometry=BBox(60, 60, 120, 120), iscrowd=True)], 128, 128)
+
+    class _Stub:
+        in_chans = 3
+
+        def predict_tiled(self, path, **kw):
+            return {"image": path, "width": 128, "height": 128,
+                    "boxes": [[10, 10, 30, 30], [60, 60, 120, 120]], "scores": [0.9, 0.9],
+                    "labels": [1, 1], "count": 2}
+
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
+    r = run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir),
+                                  str(tmp_path / "out"), subject="bud", tile_size=64, overlap=0.2)
+    assert (r["tp"], r["fp"], r["fn"]) == (1, 0, 0)
+
+
+def test_full_frame_reads_each_ground_truth_box_on_the_stored_grid(tmp_path, monkeypatch):
+    """The delivery-grade gate scores the box its document holds, on the stored two-decimal grid,
+    never the float arithmetic of the loader's corners."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
+
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    Image.new("RGB", (128, 128)).save(images_dir / "a.png")
+    json_io.write_annotations(str(labels_dir / "a.json"), [
+        Annotation(subject="bur", geometry=BBox(10.1, 10.1, 40.3, 30.3))], 128, 128)
+
+    class _Stub:
+        in_chans = 3
+
+        def predict_tiled(self, path, **kw):
+            return {"image": path, "width": 128, "height": 128,
+                    "boxes": [[10.1, 10.1, 40.3, 30.3]], "scores": [0.9], "labels": [1],
+                    "count": 1}
+
+    scored: list = []
+    real_record = evaluation.build_coco_image_record
+
+    def recording(w, h, gt, dt, **kw):
+        scored.append((gt, dt))
+        return real_record(w, h, gt, dt, **kw)
+
+    monkeypatch.setattr(evaluation, "build_coco_image_record", recording)
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
+    run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir),
+                              str(tmp_path / "out"), subject="bur", tile_size=64, overlap=0.2)
+    assert [g["bbox"] for gt, _ in scored for g in gt] == [[10.1, 10.1, 30.2, 20.2]]
+    assert [d["bbox"] for _, dt in scored for d in dt] == [[10.1, 10.1, 30.2, 20.2]]
+
+
 def test_evaluate_scores_a_contradicted_negative_on_its_actual_content_and_names_it(
     tmp_path, monkeypatch
 ):
@@ -843,7 +917,7 @@ def _op_box(cx, cy, s=20.0):
 
 
 def _op_ann(cx, cy, cid=0, score=None):
-    a = {"category_id": cid, "bbox": _op_box(cx, cy)}
+    a = {"category_id": cid, "bbox": _op_box(cx, cy), "iscrowd": 0}
     if score is not None:
         a["score"] = score
     return a
@@ -1269,6 +1343,7 @@ def test_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
             self.train_tile_size = 64
             self.train_overlap = 0.2
             self.in_chans = 3
+            self.config: dict = {"data": {"subject": "bud"}}  # the run's recorded subject
 
         def predict_batch(self, paths, tile=False, tile_size=None, overlap=None,
                           tile_batch_size=96, global_nms_iou=None, postprocess="nms",

@@ -14,9 +14,9 @@ from typing import TYPE_CHECKING, Callable, NamedTuple
 
 import tcip_store as ts
 
-from tcip_annotation import Annotation, Point, bbox_of, load_annotations_any
-from tcip_annotation.state import box_derivable, polygonal
-from tcip_annotation.json_io import UnreadableLabelDocument
+from tcip_annotation import Annotation, Point, bbox_of
+from tcip_annotation.state import box_derivable, polygonal, prediction_score
+from tcip_annotation.json_io import UnreadableLabelDocument, read_predictions
 from tcip_annotation.json_io import read_annotations as read_labels
 from tcip_annotation.sam_wrapper import column_label
 from tcip_annotation.viz import (
@@ -294,7 +294,6 @@ def _viz_annotations(
     class_names: str = "",
 ) -> dict:
     """Render ground-truth annotations on a single image. See ``visualize``."""
-    from tcip_annotation.format_io import detect_format
     from tcip_mcp.dataset_layout import find_gt_label
 
     img = Path(image_path)
@@ -307,9 +306,8 @@ def _viz_annotations(
         return {"error": f"No labels found for {stem}"}
 
     try:
-        fmt = detect_format(str(label_path))
-        anns = load_annotations_any(str(label_path), fmt=fmt, file_name=img.name)
-    except (ValueError, UnreadableLabelDocument) as exc:
+        anns = read_labels(str(label_path))
+    except UnreadableLabelDocument as exc:
         return {"error": str(exc)}
     idx, index = _subject_indexer()
 
@@ -334,7 +332,6 @@ def _viz_annotations(
     return {
         "image_path": out,
         "summary": summary,
-        "format": fmt,
         # `count` is the stable key across all visualize sources; the source-specific alias stays.
         "count": len(shapes),
         "annotation_count": len(shapes),
@@ -368,12 +365,11 @@ def _viz_predictions(
         return {"error": f"No predictions found for {stem}"}
 
     try:
-        preds = read_labels(str(pred_file))
+        preds = read_predictions(str(pred_file))
         scope = bucket_scope(Path(pred_file).parent)
     except (UnreadableLabelDocument, StampScopeUnstated, ts.StoreError) as exc:
         return {"error": str(exc)}
-    if conf_threshold > 0:
-        preds = [a for a in preds if (a.score is None or a.score >= conf_threshold)]
+    preds = [a for a in preds if prediction_score(a) >= conf_threshold]
     idx, index = _subject_indexer()
 
     n_points = _n_points(preds)
@@ -417,7 +413,6 @@ def _viz_comparison(
     value (:func:`_legend_name`), so a correctly localized, wrongly classified pair shows as
     a real match with two different legend colors rather than as an unrelated FP/FN.
     """
-    from tcip_annotation.format_io import detect_format
     from tcip_annotation.matching import compute_matches
     from tcip_mcp.dataset_layout import find_gt_label, find_prediction
     from tcip_mcp.pipelines.resolution import StampScopeUnstated, bucket_scope
@@ -433,9 +428,8 @@ def _viz_comparison(
     if label_path is None:
         return {"error": f"No labels found for {stem}"}
     try:
-        fmt = detect_format(str(label_path))
-        gt = _boxable(load_annotations_any(str(label_path), fmt=fmt, file_name=img.name))
-    except (ValueError, UnreadableLabelDocument) as exc:
+        gt = _boxable(read_labels(str(label_path)))
+    except UnreadableLabelDocument as exc:
         return {"error": str(exc)}
     gt_dicts = [_box_dict(a, index) for a in gt]
 
@@ -444,7 +438,7 @@ def _viz_comparison(
     tp_matches: list[dict] = []
     if pred_file is not None:
         try:
-            preds = _boxable(read_labels(str(pred_file)))
+            preds = _boxable(read_predictions(str(pred_file)))
             scope = bucket_scope(Path(pred_file).parent)
         except (UnreadableLabelDocument, StampScopeUnstated, ts.StoreError) as exc:
             return {"error": str(exc)}
@@ -499,20 +493,13 @@ def get_worst_predictions(
     if not gt_path.is_dir():
         return {"error": f"Labels directory not found: {labels_dir}"}
 
-    from tcip_annotation.json_io import prediction_documents, read_annotations
-    from tcip_annotation.state import box_derivable
+    from tcip_annotation.json_io import detection_annotations, prediction_documents
 
-    def _boxes(path) -> list:
-        """The annotations this count heuristic counts, a geometry-less label and a ``Point`` are
-        not detections, so neither belongs in a box count on either side of the comparison."""
-        return [a for a in read_annotations(str(path))
-                if box_derivable(a.geometry)]
-
+    # Both sides counted as a count counts: objects with a box, a crowd region and a Point none.
     scores: list[tuple[str, float]] = []
     for pred_file in prediction_documents(pred_path):
-        gt_file = gt_path / pred_file.name
-        preds = _boxes(pred_file)
-        gt_anns = _boxes(gt_file) if gt_file.is_file() else []
+        preds = detection_annotations(pred_file)
+        gt_anns = detection_annotations(gt_path / pred_file.name)
 
         n_pred = len(preds)
         n_gt = len(gt_anns)
@@ -520,10 +507,7 @@ def get_worst_predictions(
         # Simple error heuristic: |pred - gt| + missed + extra + low confidence
         missed = max(0, n_gt - n_pred)
         extra = max(0, n_pred - n_gt)
-        avg_conf = 0.0
-        if n_pred > 0:
-            confs = [p.score for p in preds if p.score is not None]
-            avg_conf = sum(confs) / len(confs) if confs else 0.5
+        avg_conf = sum(map(prediction_score, preds)) / n_pred if n_pred else 0.0
 
         # Higher score = worse prediction
         error_score = missed * 2.0 + extra * 1.0 + (1.0 - avg_conf)
@@ -533,7 +517,7 @@ def get_worst_predictions(
     for gt_file in prediction_documents(gt_path):
         pred_file = pred_path / gt_file.name
         if not pred_file.is_file():
-            gt_anns = _boxes(gt_file)
+            gt_anns = detection_annotations(gt_file)
             if gt_anns:
                 scores.append((gt_file.stem, len(gt_anns) * 3.0))
 
@@ -597,6 +581,7 @@ def render_failure_cases(
     if not worst_items:
         return {"summary": "No prediction errors found", "image_path": None}
 
+    from tcip_mcp.dataset_layout import label_filename
     from tcip_mcp.project_paths import resolve_state
 
     out_dir = resolve_state(Path(".tcip") / "artifacts" / "viz" / "failures").resolve()
@@ -615,12 +600,12 @@ def render_failure_cases(
 
         idx, index = _subject_indexer()
 
-        gt_file = Path(labels_dir) / f"{stem}.json"
-        pred_file = Path(predictions_dir) / f"{stem}.json"
+        gt_file = Path(labels_dir) / label_filename(stem)
+        pred_file = Path(predictions_dir) / label_filename(stem)
         try:
             gt_dicts = ([_box_dict(a, index) for a in _boxable(read_labels(str(gt_file)))]
                         if gt_file.is_file() else [])
-            pred_dicts = ([_box_dict(a, index) for a in _boxable(read_labels(str(pred_file)))]
+            pred_dicts = ([_box_dict(a, index) for a in _boxable(read_predictions(str(pred_file)))]
                           if pred_file.is_file() else [])
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
@@ -651,7 +636,6 @@ def _viz_dataset_sample(
     class_names: str = "",
 ) -> dict:
     """Render a grid of random annotated dataset samples. See ``visualize``."""
-    from tcip_annotation.format_io import detect_format
     from tcip_mcp.dataset_layout import find_gt_label, image_root
     from tcip_mcp.pipelines.image_utils import (
         BandGroupIncomplete, BandGroupRef, list_logical_images, resolve_image_source,
@@ -682,18 +666,11 @@ def _viz_dataset_sample(
             continue
         rep_path = source.manifest_path if isinstance(source, BandGroupRef) else source
         label_path = find_gt_label(str(rep_path))
-        if label_path is not None:
-            try:
-                fmt = detect_format(str(label_path))
-            except UnreadableLabelDocument as exc:
-                return {"error": str(exc)}
-            except ValueError:
-                label_path = None  # unrecognized store: render the image without labels
         read = _read_for_display(source)
         if label_path is not None:
             idx, index = _subject_indexer()
             try:
-                anns = load_annotations_any(str(label_path), fmt=fmt, file_name=rep_path.name)
+                anns = read_labels(str(label_path))
             except UnreadableLabelDocument as exc:
                 return {"error": str(exc)}
             if task == "detect":

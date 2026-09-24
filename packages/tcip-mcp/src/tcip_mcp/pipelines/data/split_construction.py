@@ -143,14 +143,10 @@ def persist_run_partition(experiment_id: str, data_cfg: dict, *,
                 record["redrawn_within_selection"] = True
         if experiment_exists(experiment_id):
             key, st_key = split_key(experiment_id), status_key(experiment_id)
-            try:
-                with store.transaction(key, st_key) as txn:
-                    state = (txn.read(st_key, default={}) or {}).get("state")
-                    refuse_if_terminal(experiment_id, "persist_run_partition", state)
-                    txn.write(key, record)
-            except ExperimentTerminal as exc:
-                from tcip_mcp.experiments import audit_refusal_reraising
-                audit_refusal_reraising(experiment_id, "persist_run_partition", {}, exc)
+            with store.transaction(key, st_key) as txn:
+                state = (txn.read(st_key, default={}) or {}).get("state")
+                refuse_if_terminal(experiment_id, "persist_run_partition", state)
+                txn.write(key, record)
     except ExperimentTerminal:
         raise
     except Exception as exc:  # noqa: BLE001

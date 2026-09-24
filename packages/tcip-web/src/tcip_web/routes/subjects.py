@@ -27,7 +27,7 @@ from pydantic import BaseModel
 
 from tcip_store import StoreError
 
-from tcip_mcp.dataset_layout import IMAGE_STATUSES
+from tcip_mcp.dataset_layout import IMAGE_STATUSES, label_filename
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.label_annotations_cache import cached_label_annotations
 
@@ -62,16 +62,15 @@ def _resolve_dataset_root(dataset_root: str | None, annotations_dir: str | None)
 
 def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
     """Record a dataset-native GUI mutation in that dataset's own audit log: this module's own
-    ``image_status.json`` and ``subjects.json`` writes, and ``inference.py``'s prediction writes.
+    ``image_status.json`` and ``subjects.json`` writes.
 
-    All three are dataset-native, not project-private (a dataset can be opened by more than one
+    Both are dataset-native, not project-private (a dataset can be opened by more than one
     project, see ``dataset_layout.image_status_path`` and ``dataset_layout.dataset_root_of``), so
     there is no single project's audit log a write here unambiguously belongs to. Colocating the
     trail with the state it describes, rather than guessing a project, is deliberate. A failed
     append raises ``AuditEntryNotWritten``: the mutation has already committed by the time this
     runs, so the caller answers the gap rather than have it pass as silently recorded. Every
-    caller (``save_subjects``, ``set_image_status``, ``set_image_status_bulk``, and
-    ``inference.py``'s worker) refuses a falsy root before calling this, so there is no
+    caller (``save_subjects``, ``set_image_status``, ``set_image_status_bulk``) refuses a falsy root before calling this, so there is no
     empty-scope case here to guard against.
     """
     from tcip_web.routes.audit_gap import record_committed
@@ -437,7 +436,7 @@ def derive_image_status(payload: DerivePayload) -> dict:
         stem = name.rsplit(".", 1)[0]
         has_any = False
         if adir:
-            label_path = adir / f"{stem}.json"
+            label_path = adir / label_filename(stem)
             try:
                 annotations = cached_label_annotations(label_path)
             except UnreadableLabelDocument:

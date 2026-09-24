@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -434,7 +433,6 @@ class TestExperiments:
 class TestModelRegistryReplaceAudit:
     def setup_method(self):
         self.tmpdir = Path(tempfile.mkdtemp())
-        self.audit_path = self.tmpdir / ".tcip" / "audit.jsonl"
 
     def teardown_method(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -444,7 +442,12 @@ class TestModelRegistryReplaceAudit:
         p.write_bytes(content)
         return str(p)
 
-    def test_replace_by_name_with_different_content_is_audited(self):
+    def _rows(self) -> list[dict]:
+        import tcip_mcp.audit as audit_mod
+
+        return list(ts.read_log(audit_mod.audit_log_key()).records)
+
+    def test_a_first_registration_and_a_replacement_each_leave_one_row(self):
         import tcip_mcp.audit as audit_mod
         from tcip_mcp.model_registry import ModelRegistry
 
@@ -454,20 +457,66 @@ class TestModelRegistryReplaceAudit:
         reg = ModelRegistry(str(self.tmpdir))
         reg.register_model("exp1", self._ckpt("a.pt", b"first"), {}, metrics_source=None)
         first_sha = reg.get_model("exp1")["sha256"]
+        (first,) = self._rows()
+        assert first["tool"] == "model_registered"
+        assert first["arguments"] == {"name": "exp1", "new_sha256": first_sha, "experiment_id": None}
+
         reg.register_model("exp1", self._ckpt("b.pt", b"second, different"), {}, metrics_source=None)
         second_sha = reg.get_model("exp1")["sha256"]
         assert first_sha != second_sha
-
-        events = ts.read_log(audit_mod.audit_log_key()).records
-        replace_events = [e for e in events if e.get("tool") == "model_registry_replace"]
-        assert len(replace_events) == 1
-        assert replace_events[0]["arguments"]["name"] == "exp1"
-        assert replace_events[0]["arguments"]["superseded_sha256"] == first_sha
-        assert replace_events[0]["arguments"]["new_sha256"] == second_sha
+        _, replaced = self._rows()
+        assert replaced["tool"] == "model_registered"
+        assert replaced["arguments"]["name"] == "exp1"
+        assert replaced["arguments"]["superseded_sha256"] == first_sha
+        assert replaced["arguments"]["new_sha256"] == second_sha
 
         audit_mod.AUDIT_ROOT = original
 
-    def test_reregistering_identical_content_is_not_audited_as_a_replace(self):
+    def test_the_register_model_door_leaves_only_the_registrys_own_rows(self):
+        """Through the door: one row per registry write that changed content, the registry's,
+        and none for the door on top of it or for an idempotent re-registration."""
+        import tcip_mcp.audit as audit_mod
+        from tcip_mcp.tools.model_tools import register_model
+
+        original = audit_mod.AUDIT_ROOT
+        audit_mod.AUDIT_ROOT = self.tmpdir
+
+        first = self._ckpt("a.pt", b"first")
+        for path in (first, self._ckpt("b.pt", b"second, different"), self._ckpt("c.pt", b"first")):
+            assert "error" not in register_model(name="door", checkpoint_path=path, config={},
+                                                 project_path=str(self.tmpdir))
+
+        rows = self._rows()
+        assert [r["tool"] for r in rows] == ["model_registered", "model_registered", "model_registered"]
+        assert ["superseded_sha256" in r["arguments"] for r in rows] == [False, True, True]
+        assert "error" not in register_model(name="door", checkpoint_path=str(self.tmpdir / "c.pt"),
+                                             config={}, project_path=str(self.tmpdir))
+        assert len(self._rows()) == 3  # the same entry re-registered: nothing changed, no row
+
+        audit_mod.AUDIT_ROOT = original
+
+    def test_reregistering_an_identical_entry_changes_nothing_and_leaves_no_row(self):
+        import tcip_mcp.audit as audit_mod
+        from tcip_mcp.model_registry import ModelRegistry, registry_index_key
+
+        original = audit_mod.AUDIT_ROOT
+        audit_mod.AUDIT_ROOT = self.tmpdir
+
+        reg = ModelRegistry(str(self.tmpdir))
+        ckpt = self._ckpt("a.pt", b"same bytes")
+        reg.register_model("exp1", ckpt, {}, metrics_source=None)
+        before = ts.read_versioned(registry_index_key(self.tmpdir))
+        reg.register_model("exp1", ckpt, {}, metrics_source=None)
+
+        after = ts.read_versioned(registry_index_key(self.tmpdir))
+        assert (after.value, after.version) == (before.value, before.version)
+        assert [e["tool"] for e in self._rows()] == ["model_registered"]
+
+        audit_mod.AUDIT_ROOT = original
+
+    def test_the_same_weights_under_new_tags_change_the_entry_and_leave_one_row(self):
+        """A write is decided by the entry it would store, never by the weights' digest alone:
+        the same checkpoint re-registered under new tags changes the entry and leaves its line."""
         import tcip_mcp.audit as audit_mod
         from tcip_mcp.model_registry import ModelRegistry
 
@@ -477,11 +526,10 @@ class TestModelRegistryReplaceAudit:
         reg = ModelRegistry(str(self.tmpdir))
         ckpt = self._ckpt("a.pt", b"same bytes")
         reg.register_model("exp1", ckpt, {}, metrics_source=None)
-        reg.register_model("exp1", ckpt, {}, metrics_source=None)  # idempotent re-registration, same content
+        reg.register_model("exp1", ckpt, {}, tags=["chestnut"], metrics_source=None)
 
-        lines = self.audit_path.read_text().strip().splitlines() if self.audit_path.exists() else []
-        events = [json.loads(line) for line in lines]
-        assert not [e for e in events if e.get("tool") == "model_registry_replace"]
+        assert ModelRegistry(str(self.tmpdir)).get_model("exp1")["tags"] == ["chestnut"]
+        assert [e["tool"] for e in self._rows()] == ["model_registered", "model_registered"]
 
         audit_mod.AUDIT_ROOT = original
 
@@ -507,24 +555,8 @@ class TestModelRegistryReplaceAudit:
         with pytest.raises(audit_mod.AuditEntryNotWritten) as caught:
             reg.register_model("exp1", second_ckpt, {}, metrics_source=None)
 
-        assert caught.value.tool == "model_registry_replace"
+        assert caught.value.tool == "model_registered"
         reloaded = ModelRegistry(str(self.tmpdir)).get_model("exp1")
         assert reloaded["file_size_bytes"] == len(b"second, different")
-
-        audit_mod.AUDIT_ROOT = original
-
-    def test_first_registration_under_a_name_is_not_audited_as_a_replace(self):
-        import tcip_mcp.audit as audit_mod
-        from tcip_mcp.model_registry import ModelRegistry
-
-        original = audit_mod.AUDIT_ROOT
-        audit_mod.AUDIT_ROOT = self.tmpdir
-
-        reg = ModelRegistry(str(self.tmpdir))
-        reg.register_model("brand_new", self._ckpt("a.pt", b"content"), {}, metrics_source=None)
-
-        lines = self.audit_path.read_text().strip().splitlines() if self.audit_path.exists() else []
-        events = [json.loads(line) for line in lines]
-        assert not [e for e in events if e.get("tool") == "model_registry_replace"]
 
         audit_mod.AUDIT_ROOT = original

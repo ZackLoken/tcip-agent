@@ -18,8 +18,8 @@ from tcip_mcp.pipelines.data.selection import ClassScope
 
 
 def _refusals(root):
-    events = ts.read_log(audit_log_key(root)).records
-    return [e for e in events if e.get("tool") == "experiment_mutation_refused"]
+    """Every line the root's audit log holds: a refused write changes nothing and writes none."""
+    return list(ts.read_log(audit_log_key(root)).records)
 
 
 class _StemDataset:
@@ -53,16 +53,12 @@ def test_split_write_refused_against_a_watchdog_failed_record_leaves_it_failed(t
     assert status["error"] == "exceeded max_wall_clock_seconds (5)"  # the watchdog's own reason
     assert not ts.exists(exp.split_key(eid, root=tmp_path))  # the write never landed
 
-    refusals = _refusals(tmp_path)
-    assert len(refusals) == 1
-    assert refusals[0]["arguments"]["op"] == "persist_run_partition"
-    assert refusals[0]["arguments"]["experiment_id"] == eid
-    assert refusals[0]["status"] == "refused"
+    assert _refusals(tmp_path) == []
 
 
-def test_update_status_refusal_audits_the_launch_root_not_the_current_one(tmp_path, monkeypatch):
-    """A launch's wall-clock watchdog passes the root it captured at launch; its refused write's
-    audit line must land on that root's own log, not whatever this process has since adopted."""
+def test_update_status_refusal_reads_the_launch_root_and_writes_no_line(tmp_path, monkeypatch):
+    """A launch's wall-clock watchdog passes the root it captured at launch; the refusal is
+    decided against that root's record and writes no line under either root."""
     from tcip_mcp.experiments import create_experiment, update_status
 
     launch_root = tmp_path / "launch"
@@ -81,7 +77,8 @@ def test_update_status_refusal_audits_the_launch_root_not_the_current_one(tmp_pa
     )
     assert "error" in result
 
-    assert _refusals(launch_root)
+    assert result["state"] == "completed"
+    assert not _refusals(launch_root)
     assert not _refusals(other_root)
 
 
@@ -123,7 +120,7 @@ def test_split_write_still_lands_against_a_running_record(tmp_path):
     assert _refusals(tmp_path) == []
 
 
-def test_tiling_patch_refused_against_a_terminal_record_raises_and_audits(tmp_path):
+def test_tiling_patch_refused_against_a_terminal_record_raises(tmp_path):
     from tcip_mcp.experiments import ExperimentTerminal, create_experiment, update_status
 
     import pytest
@@ -140,8 +137,7 @@ def test_tiling_patch_refused_against_a_terminal_record_raises_and_audits(tmp_pa
         _patch_experiment_config_tiling(eid, {"tile_size": 224})
 
     assert ts.read(exp.config_key(eid, root=tmp_path)) == config_before  # untouched
-    refusals = _refusals(tmp_path)
-    assert refusals and refusals[0]["arguments"]["op"] == "patch_experiment_config_tiling"
+    assert _refusals(tmp_path) == []
 
 
 def test_tiling_patch_still_lands_against_a_running_record(tmp_path):
@@ -174,8 +170,7 @@ def test_scope_patch_refused_against_a_terminal_record(tmp_path):
     with pytest.raises(ExperimentTerminal):
         _patch_experiment_config_scope(eid, ClassScope("bud", None, {"bud": 0}))
 
-    refusals = _refusals(tmp_path)
-    assert refusals and refusals[0]["arguments"]["op"] == "patch_experiment_config_scope"
+    assert _refusals(tmp_path) == []
 
 
 @pytest.mark.parametrize(
@@ -210,84 +205,7 @@ def test_shared_patch_procedure_refuses_a_terminal_record_for_every_caller(
         patch_fn(eid, **kwargs)
 
     assert ts.read(exp.config_key(eid, root=tmp_path)) == config_before  # untouched
-    refusals = _refusals(tmp_path)
-    assert refusals and refusals[0]["arguments"]["op"] == op
-
-
-def test_split_write_raises_when_the_refusal_audit_append_fails(tmp_path, monkeypatch):
-    """A refusal's own audit line failing to write must not swallow the refusal: the write still
-    never lands and ExperimentTerminal still reaches the caller, chaining the append failure
-    rather than losing it to a logged warning."""
-    from tcip_mcp.experiments import ExperimentTerminal, create_experiment, update_status
-    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
-
-    import pytest
-
-    eid = "exp-027-currant-bud-det-3"
-    create_experiment(eid, {"model_source": {"builder": "my_models:bud_det"}})
-    update_status(eid, "running")
-    update_status(eid, "failed", error="exceeded max_wall_clock_seconds (5)")
-
-    def _boom(*a, **k):
-        raise OSError("simulated audit append failure")
-
-    monkeypatch.setattr("tcip_mcp.audit.record_event_or_raise", _boom)
-
-    with pytest.raises(ExperimentTerminal) as excinfo:
-        persist_run_partition(
-            eid,
-            {"labels_dir": ""},
-        )
-    assert isinstance(excinfo.value.__cause__, OSError)
-
-    assert not ts.exists(exp.split_key(eid, root=tmp_path))  # the write still never landed
-
-
-def test_tiling_patch_raises_when_the_refusal_audit_append_fails(tmp_path, monkeypatch):
-    from tcip_mcp.experiments import ExperimentTerminal, create_experiment, update_status
-
-    import pytest
-
-    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_tiling
-
-    eid = "exp-028-currant-cluster-det-2"
-    create_experiment(eid, {"model_source": {"builder": "my_models:cluster_det"}})
-    update_status(eid, "running")
-    update_status(eid, "completed")
-    config_before = ts.read(exp.config_key(eid, root=tmp_path))
-
-    def _boom(*a, **k):
-        raise OSError("simulated audit append failure")
-
-    monkeypatch.setattr("tcip_mcp.audit.record_event_or_raise", _boom)
-
-    with pytest.raises(ExperimentTerminal) as excinfo:
-        _patch_experiment_config_tiling(eid, {"tile_size": 224})
-    assert isinstance(excinfo.value.__cause__, OSError)
-
-    assert ts.read(exp.config_key(eid, root=tmp_path)) == config_before  # untouched
-
-
-def test_scope_patch_raises_when_the_refusal_audit_append_fails(tmp_path, monkeypatch):
-    from tcip_mcp.experiments import ExperimentTerminal, create_experiment, update_status
-
-    import pytest
-
-    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_scope
-
-    eid = "exp-029-persimmon-fruit-det-2"
-    create_experiment(eid, {"model_source": {"builder": "my_models:fruit_det"}})
-    update_status(eid, "running")
-    update_status(eid, "failed", error="dataloader raised")
-
-    def _boom(*a, **k):
-        raise OSError("simulated audit append failure")
-
-    monkeypatch.setattr("tcip_mcp.audit.record_event_or_raise", _boom)
-
-    with pytest.raises(ExperimentTerminal) as excinfo:
-        _patch_experiment_config_scope(eid, ClassScope("bud", None, {"bud": 0}))
-    assert isinstance(excinfo.value.__cause__, OSError)
+    assert _refusals(tmp_path) == []
 
 
 def test_overwrite_config_if_pristine_still_succeeds_over_a_pristine_experiment(tmp_path):

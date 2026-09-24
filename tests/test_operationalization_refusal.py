@@ -1211,7 +1211,7 @@ def test_deliver_per_image_counts_refuses_with_no_trait_argument(
     out_csv = tmp_path / "o.csv"
 
     with pytest.raises(TypeError, match="'trait'"):
-        itools.deliver_per_image_counts("m.pt", str(tmp_path), str(out_csv))
+        itools.deliver_per_image_counts("m.pt", str(tmp_path), str(out_csv))  # type: ignore[call-arg]
 
     assert not out_csv.exists()
 

@@ -219,20 +219,9 @@ def test_register_model_from_experiment_refuses_bytes_the_run_did_not_record(tmp
     assert "error" in refused2
     assert ModelRegistry(str(tmp_path)).list_models() == []
 
-    events = ts.read_log(audit_log_key(tmp_path)).records
-    refusals = [e["arguments"] for e in events if e.get("tool") == "experiment_mutation_refused"
-                and e["arguments"].get("op") == "register_model_from_experiment"]
-    assert len(refusals) == 2
-
-    mismatch = next(a for a in refusals if a["experiment_id"] == exp_id)
-    assert mismatch["caller_sha256"] == _sha256_of_bytes(overwritten)
-    assert mismatch["recorded_sha256"] == completed["model_weights_sha256"]
-    assert mismatch["recorded_path"] == str(ckpt)
-
-    not_completed = next(a for a in refusals if a["experiment_id"] == exp_id2)
-    assert not_completed["caller_sha256"] == _sha256_of_bytes(b"any file at all")
-    assert not_completed["recorded_sha256"] is None
-    assert not_completed["recorded_path"] is None
+    assert _sha256_of_bytes(overwritten) in refused["error"]
+    assert completed["model_weights_sha256"] in refused["error"]
+    assert ts.read_log(audit_log_key(tmp_path)).records == []  # a refusal leaves no line
 
 
 # Rail 4: a project_path other than the experiment's root refuses by name.
@@ -400,9 +389,9 @@ def test_register_model_from_experiment_twice_and_from_a_copy_both_admit(tmp_pat
     assert entry["sha256"] == first["sha256"]
 
 
-# Rail 14: the model_registry_replace event names the superseded entry's experiment_id.
+# Rail 14: a replacement's registry event names the superseded entry's experiment_id.
 
-def test_model_registry_replace_event_carries_superseded_experiment_id(tmp_path, monkeypatch):
+def test_a_replacements_registry_event_carries_superseded_experiment_id(tmp_path, monkeypatch):
     import tcip_store as ts
     from tcip_mcp.audit import audit_log_key
     from tcip_mcp.model_registry import ModelRegistry
@@ -417,8 +406,8 @@ def test_model_registry_replace_event_carries_superseded_experiment_id(tmp_path,
     reg.register_model("m", str(ckpt_b), {}, metrics_source=None)
 
     events = ts.read_log(audit_log_key()).records
-    replace = [e for e in events if e.get("tool") == "model_registry_replace"]
-    assert len(replace) == 1
+    replace = [e for e in events if "superseded_sha256" in e.get("arguments", {})]
+    assert len(replace) == 1 and replace[0]["tool"] == "model_registered"
     assert replace[0]["arguments"]["superseded_experiment_id"] is None
 
 

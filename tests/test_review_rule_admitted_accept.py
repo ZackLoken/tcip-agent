@@ -242,8 +242,8 @@ def test_refusal_below_conf_prediction(
 def test_refusal_scoreless_prediction(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A scoreless prediction, published before the seal: compute_matches reads it as confidence
-    one for matching only, and a rule about a reported score cannot admit a record with none."""
+    """A prediction document holding a record with no score is refused where it is read, naming
+    the key: no reader stands in a confidence the model never reported."""
     from tests._clear_prediction_bucket_fixtures import write_image
 
     dataset_root = tmp_path / "data"
@@ -273,7 +273,7 @@ def test_refusal_scoreless_prediction(
     }
     resp = client.post("/api/review/action", json=payload)
     assert resp.status_code == 400, resp.text
-    assert "scoreless" in resp.text
+    assert "'score'" in resp.text
 
 
 def test_refusal_classified_scope(

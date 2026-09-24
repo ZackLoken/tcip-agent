@@ -211,11 +211,10 @@ def test_a_wall_clock_failed_record_reached_by_finalize_run_registers_nothing(tm
     assert _audit_statuses(tmp_path) == ["running", "failed"]
 
 
-def test_a_wall_clock_failed_record_with_unaudited_refusal_still_reconciles(tmp_path, monkeypatch):
-    """When the wall-clock refusal's own audit line fails to write, complete_run raises instead of
-    returning the refusal dict: _finalize_run must still reconcile run.status from the record
-    itself, run_training_envelope's closing event still fires (its ``finally``), and the audit
-    failure reaches the caller rather than being logged away."""
+def test_a_wall_clock_refusal_needs_no_audit_line_to_reconcile(tmp_path, monkeypatch):
+    """A refusal writes no line, so a refused audit log changes nothing about it: complete_run
+    returns its refusal dict, _finalize_run reconciles run.status from it, and
+    run_training_envelope's closing event still fires."""
     from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_mcp.experiments import create_experiment, update_status
 
@@ -231,15 +230,12 @@ def test_a_wall_clock_failed_record_with_unaudited_refusal_still_reconciles(tmp_
     ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
                        experiment_id=experiment_id)
 
-    def _boom(*a, **k):
-        # Only this one refusal's own audit line fails; record_event (the running/failed status
-        # events) is a separate function and is untouched, so the closing event still lands.
-        raise AuditEntryNotWritten("experiment_mutation_refused", OSError("simulated audit append failure"))
+    def _boom(tool, *a, **k):
+        raise AuditEntryNotWritten(tool, OSError("simulated audit append failure"))
 
     monkeypatch.setattr("tcip_mcp.audit.record_event_or_raise", _boom)
 
-    with pytest.raises(AuditEntryNotWritten):
-        run_training_envelope(ctx)
+    run_training_envelope(ctx)
 
     assert ctx.run.status == "failed"  # reconciled to what the record holds despite the raise
     assert _experiment_state(tmp_path, experiment_id) == "failed"

@@ -520,9 +520,12 @@ def test_a_completed_runs_registered_weights_run_through_run_inference_with_no_f
     assert r["checkpoint_sha256"] == hashlib.sha256(ckpt.read_bytes()).hexdigest()
 
 
-# Rail 11: a registration that fails after completion appends model_registration_failed.
+# Rail 11: a registration that fails or refuses after completion registered nothing and leaves no
+# line, and the completed run stays completed.
 
-def test_registration_failure_after_completion_is_recorded_in_the_audit_log(tmp_path, monkeypatch):
+@pytest.mark.parametrize("outcome", ["raises", "refuses"])
+def test_a_registration_that_committed_nothing_at_completion_leaves_no_line(
+        tmp_path, monkeypatch, outcome):
     import tcip_mcp.experiments as experiments_mod
     from tcip_mcp.experiments import create_experiment, update_status
     from tcip_mcp.pipelines.training.envelope import TrainContext, _finalize_run
@@ -539,21 +542,21 @@ def test_registration_failure_after_completion_is_recorded_in_the_audit_log(tmp_
     _bespoke_checkpoint(ckpt)
 
     def _boom(*a, **kw):
-        raise ValueError("registration exploded")
+        if outcome == "raises":
+            raise ValueError("registration exploded")
+        return {"error": "the name is held by another run"}
 
     monkeypatch.setattr(experiments_mod, "register_model_from_experiment", _boom)
-
-    ctx = TrainContext(run=run, train_loader=None, experiment_id=exp_id, final_weights=str(ckpt))
-    _finalize_run(ctx)
 
     import tcip_store
     from tcip_mcp.audit import audit_log_key
 
-    page = tcip_store.read_log(audit_log_key(tmp_path))
-    events = [r for r in page.records if r["tool"] == "model_registration_failed"]
-    assert len(events) == 1, events
-    assert events[0]["arguments"]["weights_path"] == str(ckpt)
-    assert "registration exploded" in events[0]["arguments"]["reason"]
+    before = list(tcip_store.read_log(audit_log_key(tmp_path)).records)
+    ctx = TrainContext(run=run, train_loader=None, experiment_id=exp_id, final_weights=str(ckpt))
+    _finalize_run(ctx)
+
+    assert list(tcip_store.read_log(audit_log_key(tmp_path)).records) == before
+    assert run.status == "completed"
 
 
 # Rail 10: register_model and load_registered_checkpoint agree on one file's digest.
@@ -794,7 +797,7 @@ def test_run_inference_refuses_a_sweep_whose_evidence_the_codec_cannot_carry(
     from tcip_annotation.state import Annotation, BBox
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
+    ckpt = _bespoke_checkpoint(tmp_path / "m.pt", stamp={"config": {"data": {"subject": "bud"}}})
     _register(tmp_path, ckpt)
 
     images_dir = tmp_path / "images"

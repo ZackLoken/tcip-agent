@@ -251,7 +251,7 @@ def test_materialize_dataset_carries_a_quarantine_capable_stamp(tmp_path):
 
     review_state = {"image": {
         "imgB.jpg": {"img_status": "completed", "detections": [
-            {"action": "rejected", "class_name": "bud", "gt_bbox_norm": None,
+            {"action": "rejected", "class_name": "bud", "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": None,
              "pred_bbox_norm": [0.5, 0.5, 0.1, 0.1]}]},
     }}
     out = tmp_path / "out"

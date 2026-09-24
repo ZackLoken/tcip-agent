@@ -55,11 +55,12 @@ def _plant_mapping(root: Path) -> ts.Key:
     return ts.Key(plant_mapping.PLANT_MAPPING_STORE, str(root), ("plant_mapping",))
 
 
-def _coco_target(directory: Path, stem: str) -> ts.Key:
-    """The caller-named blob target a coco export writes, which can be aimed anywhere."""
-    from tcip_annotation.format_io import coco_document_key
+def _blob_target(directory: Path, stem: str) -> ts.Key:
+    """A caller-named blob target, a per-image document in a tree no layout resolver describes,
+    which can be aimed anywhere."""
+    from tcip_annotation.json_io import annotation_record_key
 
-    return coco_document_key(directory, stem)
+    return annotation_record_key(directory, stem)
 
 
 # ── what the rail must admit ─────────────────────────────────────────────────
@@ -253,9 +254,9 @@ def test_a_blob_written_onto_a_records_claimed_path_beside_a_database_is_refused
 
     with bound(FileBackend()):
         with pytest.raises(ts.StoreError) as held_store:
-            ts.put_blob(_coco_target(tmp_path / ".tcip" / "state", "image_status"), b"{}")
+            ts.put_blob(_blob_target(tmp_path / ".tcip" / "state", "image_status"), b"{}")
         with pytest.raises(ts.StoreError) as never_held_store:
-            ts.put_blob(_coco_target(tmp_path / ".tcip" / "state", "view_coverage"), b"{}")
+            ts.put_blob(_blob_target(tmp_path / ".tcip" / "state", "view_coverage"), b"{}")
 
     assert "image_status" in str(held_store.value)
     assert "view_coverage" in str(never_held_store.value)
@@ -275,7 +276,7 @@ def test_a_caller_named_output_that_collides_with_a_claim_is_refused_by_name(tmp
 
     with bound(FileBackend()):
         with pytest.raises(ts.StoreError) as raised:
-            ts.put_blob(_coco_target(tmp_path, "curated_manifest"), b"{}")
+            ts.put_blob(_blob_target(tmp_path, "curated_manifest"), b"{}")
 
     message = str(raised.value)
     assert "curated_manifest" in message
@@ -347,7 +348,7 @@ def test_an_ordinary_blob_write_beside_a_database_takes_no_lock_and_creates_no_s
     monkeypatch.setattr(file_backend_module, "transition_lock", counted)
 
     with bound(FileBackend()):
-        ts.put_blob(_coco_target(output, "annotations"), b"{}")
+        ts.put_blob(_blob_target(output, "annotations"), b"{}")
         ts.put_blob(
             json_io.annotation_record_key(
                 dataset_layout.annotation_dir(tmp_path, "2026-03-04"), "a_1"
@@ -375,7 +376,7 @@ def test_a_blob_target_matching_two_claims_locks_both_roots_and_refuses_at_the_d
 
     with bound(FileBackend()):
         with pytest.raises(ts.StoreError) as raised:
-            ts.put_blob(_coco_target(inner / "review", "a_1.jpg"), b"{}")
+            ts.put_blob(_blob_target(inner / "review", "a_1.jpg"), b"{}")
 
     assert "review_verdicts" in str(raised.value)
     assert (tmp_path / ".tcip").is_dir()
@@ -408,7 +409,7 @@ def test_a_colliding_blob_write_and_a_database_creation_never_both_land(tmp_path
             backend = FileBackend()
             try:
                 ready.wait(timeout=30)
-                backend.put_blob(_coco_target(root / ".tcip" / "state", "image_status"), b"{}")
+                backend.put_blob(_blob_target(root / ".tcip" / "state", "image_status"), b"{}")
                 outcomes["blob"] = "written"
             except ts.StoreError as exc:
                 outcomes["blob"] = f"refused: {exc}"

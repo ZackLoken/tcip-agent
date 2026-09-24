@@ -98,6 +98,7 @@ def test_close_polygon_rejects_less_than_3_vertices(state: AnnotationState) -> N
 def test_close_polygon_clamps_to_image_bounds(state: AnnotationState) -> None:
     state.img_width = 100
     state.img_height = 100
+    state.active_subject = "bur"
     state.current_polygon = [(-10.0, -10.0), (200.0, 50.0), (50.0, 200.0)]
     eng = AnnotationEngine(state)
     assert eng.close_current_polygon() is True

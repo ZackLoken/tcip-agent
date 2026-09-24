@@ -59,11 +59,11 @@ export interface GuiState {
 /** One annotation as it lives on disk / crosses the wire: a subject, an optional geometry
  *  (a box OR a polygon OR a point, or none for an image/plant-level rating), and its attribute
  *  values by name. A prediction is the same shape with ``score`` set. */
-export interface Annotation {
+export interface Annotation extends CarriedFields {
   subject: string;
   bbox?: [number, number, number, number] | null; // [x1, y1, x2, y2], pixel
   // Every ring of a polygon, pixel: an occlusion-split instance_seg shape is genuinely more than
-  // one region, and both load routes (_ann_dict in annotate.py / review.py) always send them all.
+  // one region, and both load routes (annotation_dict in annotate.py) always send them all.
   rings?: [number, number][][] | null;
   // A single labelled location, pixel: a placed prompt or a keypoint/landmark. Geometry is a union
   // server-side (tcip_annotation.state.Annotation), so this never arrives alongside bbox/rings, and
@@ -71,84 +71,71 @@ export interface Annotation {
   point?: [number, number] | null;
   attributes: Record<string, string>;
   score?: number | null;
+  // Always stated by the load routes.
+  iscrowd: boolean;
+  // One of "person" | "tool" | "tool_accepted" | "unattributed", from the load route's
+  // authorship_of. A load-response fact, never sent back on save (AnnotationPayload carries none).
+  authorship?: string | null;
+}
+
+/** The facts an annotation carries through the canvas unchanged and back on save, so a re-save
+ *  never re-stamps the original creator: its crowd flag (COCO's iscrowd, a region of unseparated
+ *  objects, never one instance; a shape drawn here states none, which the save route reads as no
+ *  crowd) and its provenance. ``accepted_by_rule`` names the validation record a rule-based
+ *  admission was verified against ("<experiment_id>:<record_digest>"), set only by the Review
+ *  accept that verified the claim. */
+export interface CarriedFields {
+  iscrowd?: boolean;
   created_by?: string | null;
   created_at?: string | null;
   accepted_by?: string | null;
   accepted_at?: string | null;
-  // The validation record a rule-based admission was verified against ("<experiment_id>:
-  // <record_digest>"), set only by the Review accept that verified the claim.
   accepted_by_rule?: string | null;
-  // One of "person" | "tool" | "tool_accepted" | "unattributed", from the load route's
-  // authorship_of. A load-response fact, never sent back on save (AnnotationPayload carries none).
-  authorship?: string | null;
 }
 
 /** The wire shape the Annotate save route accepts (mirrors AnnotationPayload in annotate.py):
  *  ``points`` for one hand-drawn/edited contour, ``rings`` for a multi-ring shape round-tripping
  *  through save. Send one or the other, never both (the backend prefers ``rings``). ``point`` is a
  *  third, separate geometry: one coordinate pair, no ring/multi-part concept. */
-export interface AnnotationPayload {
+export interface AnnotationPayload extends CarriedFields {
   subject: string;
   bbox?: number[] | null;
   points?: number[][] | null;
   rings?: number[][][] | null;
   point?: number[] | null;
   attributes: Record<string, string>;
-  created_by?: string | null;
-  created_at?: string | null;
-  accepted_by?: string | null;
-  accepted_at?: string | null;
-  accepted_by_rule?: string | null;
 }
 
 /* ── Canvas-local shapes (the drawing model; not synced to server) ────────── */
 
-export interface Box {
+/** What every canvas shape is and carries: its subject, its attribute values, and the load
+ *  route's authorship classification, which drives the canvas symbology and is never sent on
+ *  save. */
+interface CanvasShape extends CarriedFields {
+  subject: string;
+  attributes: Record<string, string>;
+  authorship?: string | null;
+}
+
+export interface Box extends CanvasShape {
   x1: number;
   y1: number;
   x2: number;
   y2: number;
-  subject: string;
-  attributes: Record<string, string>;
-  // Provenance round-trips through the canvas: loaded shapes carry it back on save so a
-  // re-save never re-stamps the original creator (new shapes omit it and get stamped).
-  created_by?: string | null;
-  created_at?: string | null;
-  accepted_by?: string | null;
-  accepted_at?: string | null;
-  accepted_by_rule?: string | null;
-  // The load route's authorship classification; drives the canvas symbology, never sent on save.
-  authorship?: string | null;
 }
 
 /** A polygon on the canvas: every ring of one annotation. The drawing tool authors exactly one ring
  *  (a person draws one contour); a loaded occlusion-split shape can carry several, and all of them
  *  are drawn, hit-tested and saved together as the single annotation they are. */
-export interface PolygonShape {
+export interface PolygonShape extends CanvasShape {
   rings: [number, number][][];
-  subject: string;
-  attributes: Record<string, string>;
-  created_by?: string | null;
-  created_at?: string | null;
-  accepted_by?: string | null;
-  accepted_at?: string | null;
-  accepted_by_rule?: string | null;
-  authorship?: string | null;
 }
 
 /** A point on the canvas: one labelled location, the whole annotation. No extent, so no derived
  *  box and no vertices; it is placed, moved and deleted as a single coordinate. */
-export interface PointShape {
+export interface PointShape extends CanvasShape {
   x: number;
   y: number;
-  subject: string;
-  attributes: Record<string, string>;
-  created_by?: string | null;
-  created_at?: string | null;
-  accepted_by?: string | null;
-  accepted_at?: string | null;
-  accepted_by_rule?: string | null;
-  authorship?: string | null;
 }
 
 /** A review detection: an outcome (TP/FP/FN) referencing a GT and/or a prediction annotation by

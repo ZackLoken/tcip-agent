@@ -23,12 +23,12 @@ def _image(images_dir, name: str, size) -> None:
 
 
 def _accepted(class_name: str, gt, pred=None) -> dict:
-    return {"action": "accepted", "class_name": class_name, "gt_bbox_norm": gt,
+    return {"action": "accepted", "class_name": class_name, "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": gt,
             "pred_bbox_norm": pred}
 
 
 def _rejected(class_name: str, pred) -> dict:
-    return {"action": "rejected", "class_name": class_name, "gt_bbox_norm": None,
+    return {"action": "rejected", "class_name": class_name, "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": None,
             "pred_bbox_norm": pred}
 
 
@@ -63,12 +63,28 @@ def test_positive_boxes_denormalize_against_each_axis_extent(tmp_path):
     assert (stamped["width"], stamped["height"]) == (96, 48)
 
 
+def test_an_accepted_crowd_region_materializes_as_a_crowd_region(tmp_path):
+    """The verdict's crowd flag, the flag of the ground-truth record it was recorded on, is
+    written onto the materialized label, so the harvested set never trains the region as one
+    object."""
+    src = tmp_path / "src"
+    _image(src, "c.png", (100, 100))
+    out = tmp_path / "out"
+    crowd = {**_accepted("bur", [0.75, 0.75, 0.4, 0.4]), "iscrowd": True}
+    state = {"image": {"c.png": _completed([_accepted("bur", [0.15, 0.15, 0.2, 0.2]), crowd])}}
+
+    materialize_dataset(state, str(src), str(out))
+
+    got = json_io.read_annotations(str(out / "annotations" / "c.json"))
+    assert [a.iscrowd for a in got] == [False, True]
+
+
 def test_human_edited_box_takes_precedence_over_prediction(tmp_path):
     """An edited verdict carries both boxes; the human's corrected box is the label."""
     entry = {"action": "edited", "class_name": "bud",
-             "gt_bbox_norm": [0.25, 0.5, 0.4, 0.2], "pred_bbox_norm": [0.75, 0.25, 0.1, 0.1]}
+             "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.25, 0.5, 0.4, 0.2], "pred_bbox_norm": [0.75, 0.25, 0.1, 0.1]}
     positives = partition_review_verdicts({"image": {"e.png": _completed([entry])}})["e.png"]["positives"]
-    assert positives == [("bud", 0.25, 0.5, 0.4, 0.2)]
+    assert positives == [("bud", (0.25, 0.5, 0.4, 0.2), False)]
 
     src = tmp_path / "src"
     _image(src, "e.png", (100, 50))

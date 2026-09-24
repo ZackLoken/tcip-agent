@@ -294,6 +294,51 @@ def indexed_sample_keys(dataset: Any) -> set[str]:
     return set(getattr(dataset, "stems", None) or getattr(dataset, "_stems", None) or [])
 
 
+def target_tensors(target: Any) -> dict[str, torch.Tensor]:
+    """A ``{"boxes", "labels", "iscrowd"}`` target of parallel per-box values as the tensors every
+    detection loader emits, ``iscrowd`` under torchvision's reference key."""
+    return {
+        "boxes": torch.tensor(target["boxes"], dtype=torch.float32).reshape(-1, 4),
+        "labels": torch.tensor(target["labels"], dtype=torch.int64),
+        "iscrowd": torch.tensor(target["iscrowd"], dtype=torch.int64),
+    }
+
+
+def crowd_of(target: Mapping[str, Any]) -> torch.Tensor:
+    """A detection target's per-box crowd flags. A target a bespoke dataset built without
+    ``iscrowd`` states no crowd region, so every one of its rows is an instance: the one decision
+    for a target the platform's loaders did not build, which always state the flag."""
+    crowd = target.get("iscrowd")
+    if crowd is not None:
+        return crowd
+    boxes = torch.as_tensor(target["boxes"])  # a list, an array or a tensor, on its own device
+    return torch.zeros(len(boxes), dtype=torch.int64, device=boxes.device)
+
+
+def object_rows(iscrowd: Any) -> Any:
+    """Which rows of a target's parallel per-box values are each one object: a boolean mask,
+    ``True`` where the row is not a crowd region, over a tensor, an array or a list of flags. The
+    one place a tensor or array target asks which rows count, size or train as objects."""
+    flags = iscrowd if isinstance(iscrowd, (torch.Tensor, np.ndarray)) else np.asarray(iscrowd)
+    return flags == 0
+
+
+def instance_targets(targets: list[dict]) -> list[dict]:
+    """Loader targets as the built-in torchvision heads are handed them: every crowd row removed.
+
+    Those heads read only ``boxes``, ``labels`` and ``masks``, so a crowd region handed to them
+    trains as one positive instance; withheld, its region trains as background, which penalizes a
+    detection inside it but never teaches one box for many objects. The loaders' own targets keep
+    every row and its ``iscrowd`` flag, for evaluation and for a bespoke loop that acts on it.
+    """
+    out = []
+    for t in targets:
+        keep = object_rows(crowd_of(t))
+        out.append({k: v[keep] if k in ("boxes", "labels", "masks", "iscrowd") else v
+                    for k, v in t.items()})
+    return out
+
+
 class DetectionDataset(BaseImageDataset):
     """Object detection over a recorded sample list.
 
@@ -323,8 +368,9 @@ class DetectionDataset(BaseImageDataset):
         self.stems = self._init_from_samples(samples)
         self._init_class_ids_from_draw(id_map)
 
-    def det_targets(self, stem: str) -> tuple[list, list]:
-        """Pixel-xyxy boxes + 1-indexed labels for one sample's own label document.
+    def det_targets(self, stem: str) -> dict[str, list]:
+        """One sample's own label document as ``{"boxes", "labels", "iscrowd"}`` parallel lists
+        (pixel xyxy, 1-indexed label, crowd flag), the target shape ``json_det_targets`` reads.
 
         Public, because a delivery-grade measurement scores against the ground truth this run
         trains on and reads it here rather than opening the document itself: one statement of
@@ -333,12 +379,12 @@ class DetectionDataset(BaseImageDataset):
         The samples were already admitted with any image carrying an instance unlabeled for
         ``attribute`` held out (the producer's ``skipped_incomplete_attribute`` rail, a
         fixed-length dataset can't act on this per-``__getitem__`` call, only once, up front), so
-        ``n_unlabeled`` is always 0 here by construction; the 3-tuple is unpacked for the shared
-        ``json_det_targets`` signature, not because a nonzero count is expected at this point.
+        the unlabeled count ``json_det_targets`` also returns is always 0 here by construction.
         """
-        boxes, labels, _n_unlabeled = json_det_targets(
-            str(self._label_path(stem)), self.subject, self.attribute, self.id_map)
-        return boxes, labels
+        target, _n_unlabeled = json_det_targets(
+            str(self._label_path(stem)), self.subject, self.attribute, self.id_map,
+            reads=self.reads_geometry)
+        return target
 
     @property
     def num_classes(self) -> int:
@@ -352,22 +398,15 @@ class DetectionDataset(BaseImageDataset):
     def class_distribution(self) -> dict[int, int]:
         counts: Counter[int] = Counter()
         for stem in self.stems:
-            _, labels = self.det_targets(stem)
-            for lab in labels:
+            target = self.det_targets(stem)
+            for lab in np.asarray(target["labels"])[object_rows(target["iscrowd"])].tolist():
                 counts[lab - 1] += 1  # back to 0-indexed cid
         return dict(counts)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self.stems[idx]
         img = self._open_image(stem)
-        w, h = self._image_size(img)
-        boxes, labels = self.det_targets(stem)
-        target = {
-            "boxes": torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4),
-            "labels": torch.tensor(labels, dtype=torch.int64),
-            "image_id": idx,
-        }
-        return self._finalize(img, target)
+        return self._finalize(img, {**target_tensors(self.det_targets(stem)), "image_id": idx})
 
 
 # ====================================================================
@@ -473,7 +512,7 @@ class TiledDetectionDataset(BaseImageDataset):
         # so the seam-sliver cutoff is derived from this dataset's class-average object size, not a
         # fixed fraction (derive-don't-pin). skip_empty defaults False: empty tiles are valid
         # negatives.
-        stems_data: list[tuple[str, np.ndarray, np.ndarray, int, int]] = []
+        stems_data: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, int, int]] = []
         # xywh per image (char_sizes_from_boxes's own expected shape), converted from the xyxy boxes
         # this loop otherwise deals in, so the class-average size uses the same computation
         # derive_localization_kind/derive_iou_match_threshold already share, never a second formula.
@@ -516,13 +555,16 @@ class TiledDetectionDataset(BaseImageDataset):
                     f"{authored[1]}."
                 )
             # Through the base dataset's own targeting, over this sample's own document.
-            full_boxes, full_labels = base.det_targets(stem)
-            fb = np.asarray(full_boxes, dtype=np.float32).reshape(-1, 4)
-            fl = np.asarray(full_labels, dtype=np.int64)
-            if len(fb):
+            full = base.det_targets(stem)
+            fb = np.asarray(full["boxes"], dtype=np.float32).reshape(-1, 4)
+            fl = np.asarray(full["labels"], dtype=np.int64)
+            fc = np.asarray(full["iscrowd"], dtype=np.int64)
+            # A crowd region is not one object, so its extent says nothing about object size.
+            objects = fb[object_rows(fc)]
+            if len(objects):
                 gt_boxes_per_image.append(
-                    [(x1, y1, x2 - x1, y2 - y1) for x1, y1, x2, y2 in fb.tolist()])
-            stems_data.append((stem, fb, fl, w, h))
+                    [(x1, y1, x2 - x1, y2 - y1) for x1, y1, x2, y2 in objects.tolist()])
+            stems_data.append((stem, fb, fl, fc, w, h))
 
         char_sizes = char_sizes_from_boxes(gt_boxes_per_image)
         self.class_avg_size = float(np.mean(char_sizes)) if char_sizes else 0.0
@@ -544,7 +586,7 @@ class TiledDetectionDataset(BaseImageDataset):
         self.min_box_size = sliver_frac * self.class_avg_size
 
         # Pass 2: tile using the derived sliver cutoff, boxes clipped in bulk per stem.
-        for stem, fb, fl, w, h in stems_data:
+        for stem, fb, fl, fc, w, h in stems_data:
             positions = tile_positions(h, w, tile_size, self.stride)
             if regions is not None:
                 kept: list[tuple[int, int]] = []
@@ -556,13 +598,17 @@ class TiledDetectionDataset(BaseImageDataset):
                     else:
                         self.tiles_dropped_outside_regions += 1
                 positions = kept
-            per_tile = clipped_boxes_per_tile(fb, fl, positions, tile_size, self.min_box_size)
-            for (tile_x, tile_y), (tb, tl) in zip(positions, per_tile):
+            # Clipped by row index, so each kept box's label and crowd flag are read by that row.
+            per_tile = clipped_boxes_per_tile(
+                fb, np.arange(len(fb)), positions, tile_size, self.min_box_size)
+            for (tile_x, tile_y), (tb, rows) in zip(positions, per_tile):
                 if len(tb) > 1:
-                    tb, tl = dedup_boxes(tb, tl, dedup_iou)
+                    keep = dedup_boxes(tb, fl[rows], dedup_iou)
+                    tb, rows = tb[keep], rows[keep]
                 if skip_empty and len(tb) == 0:
                     continue
-                self._index.append({"stem": stem, "tile_x": tile_x, "tile_y": tile_y, "boxes": tb, "labels": tl})
+                self._index.append({"stem": stem, "tile_x": tile_x, "tile_y": tile_y,
+                                    "boxes": tb, "labels": fl[rows], "iscrowd": fc[rows]})
 
     @property
     def num_classes(self) -> int:
@@ -593,7 +639,7 @@ class TiledDetectionDataset(BaseImageDataset):
     def class_distribution(self) -> dict[int, int]:
         counts: Counter[int] = Counter()
         for e in self._index:
-            for lab in e["labels"].tolist():
+            for lab in e["labels"][object_rows(e["iscrowd"])].tolist():
                 counts[int(lab) - 1] += 1  # 0-indexed cid, matching DetectionDataset
         return dict(counts)
 
@@ -651,12 +697,7 @@ class TiledDetectionDataset(BaseImageDataset):
                     f"{self.expected_channels} channels. Cropping here would displace every box."
                 )
             tile = crop_pad_tile(img, e["tile_x"], e["tile_y"], self.tile_size, w, h)
-        target = {
-            "boxes": torch.tensor(e["boxes"], dtype=torch.float32).reshape(-1, 4),
-            "labels": torch.tensor(e["labels"], dtype=torch.int64),
-            "image_id": idx,
-        }
-        return self._finalize(tile, target)
+        return self._finalize(tile, {**target_tensors(e), "image_id": idx})
 
 
 # ====================================================================
@@ -687,27 +728,6 @@ class InstanceSegDataset(BaseImageDataset):
         self.stems = self._init_from_samples(samples)
         self._init_class_ids_from_draw(id_map)
 
-    def _read_polys(self, stem: str, w: int, h: int) -> list[tuple[list[list[tuple[float, float]]], int]]:
-        """(pixel polygon rings, 1-indexed label) per instance, from this sample's own
-        ``<stem>.json``, filtered to ``subject`` and the geometry this loader declares it reads
-        (:attr:`reads_geometry`). Already pixel-space; the +1
-        background offset is the loader's, nothing on disk carries it.
-        An instance's rings is a list, an occlusion-split instance (a leaf crossed by a stem) is
-        genuinely more than one ring; ``__getitem__`` rasterizes every ring of an instance into
-        that instance's one mask."""
-        out: list[tuple[list[list[tuple[float, float]]], int]] = []
-        from tcip_annotation import json_io
-        for ann in json_io.read_annotations(str(self._label_path(stem))):
-            if ann.subject != self.subject or not polygonal(ann.geometry):
-                continue
-            key = ann.attributes.get(self.attribute) if self.attribute else self.subject
-            if key is None or self.id_map is None or key not in self.id_map:
-                raise ValueError(
-                    f"annotation of subject {self.subject!r} has class key {key!r} not in the run's "
-                    f"id map, the registry cannot decode its own labels")
-            out.append(([list(ring) for ring in ann.geometry.rings], self.id_map[key] + 1))
-        return out
-
     @property
     def num_classes(self) -> int:
         return self._num_classes
@@ -721,16 +741,11 @@ class InstanceSegDataset(BaseImageDataset):
         img = self._open_image(stem)
         w, h = self._image_size(img)
 
-        boxes, labels, masks = [], [], []
-        for rings, lab in self._read_polys(stem, w, h):
-            all_pts = [p for ring in rings for p in ring]
-            if not all_pts:
-                continue
-            xs = [p[0] for p in all_pts]
-            ys = [p[1] for p in all_pts]
-            boxes.append([min(xs), min(ys), max(xs), max(ys)])
-            labels.append(lab)
-
+        target, _n_unlabeled = json_det_targets(
+            str(self._label_path(stem)), self.subject, self.attribute, self.id_map,
+            reads=self.reads_geometry)
+        masks = []
+        for polygon in target["geometry"]:
             # Rasterize every ring into the same instance mask, a multi-ring instance is one
             # occlusion-split object, not several separate ones; ImageDraw fills union naturally
             # since a pixel already painted 1 stays 1.
@@ -739,21 +754,18 @@ class InstanceSegDataset(BaseImageDataset):
                 from PIL import ImageDraw
                 poly_img = Image.new("L", (w, h), 0)
                 draw = ImageDraw.Draw(poly_img)
-                for ring in rings:
-                    if len(ring) >= 3:
-                        draw.polygon([(p[0], p[1]) for p in ring], fill=1)
+                for ring in polygon.rings:
+                    draw.polygon([(p[0], p[1]) for p in ring], fill=1)
                 mask = np.array(poly_img)
             except Exception:
                 pass
             masks.append(mask)
 
-        target = {
-            "boxes": torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4),
-            "labels": torch.tensor(labels, dtype=torch.int64),
+        return self._finalize(img, {
+            **target_tensors(target),
             "masks": torch.tensor(np.stack(masks) if masks else np.zeros((0, h, w)), dtype=torch.uint8),
             "image_id": idx,
-        }
-        return self._finalize(img, target)
+        })
 
 
 # ====================================================================

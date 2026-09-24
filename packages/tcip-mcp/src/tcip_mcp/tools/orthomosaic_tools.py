@@ -23,7 +23,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tcip_mcp.audit import audited
 from tcip_mcp.server import mcp
 
 if TYPE_CHECKING:
@@ -587,7 +586,6 @@ def orthomosaic_plant_counts(
 
 
 @mcp.tool()
-@audited
 def deliver_orthomosaic_plant_counts(
     predictions_dir: str,
     raster_path: str,

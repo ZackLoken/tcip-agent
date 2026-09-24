@@ -26,15 +26,13 @@ import uuid
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from tcip_annotation import (
     BBox,
-    Point,
-    Polygon,
     ReviewContext,
     ReviewDetection,
     ReviewEngine,
@@ -42,13 +40,13 @@ from tcip_annotation import (
     compute_matches,
 )
 from tcip_annotation.json_io import (
-    UnreadableLabelDocument, bbox_from_corners, check_box_extent,
-    prediction_documents, read_annotations,
+    UnreadableLabelDocument, annotation_from_payload, check_box_extent,
+    prediction_documents, read_annotations, read_predictions,
 )
 from tcip_annotation.review_engine import capture_label_baseline
-from tcip_annotation.state import Annotation, polygonal
-from tcip_annotation.verdicts import VerdictAction
-from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status
+from tcip_annotation.state import Annotation, prediction_score
+from tcip_annotation.verdicts import VerdictAction, decode_verdict
+from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status, label_filename
 from tcip_mcp.pipelines.image_utils import (
     AmbiguousImageStem, image_dimensions, resolve_image_source,
 )
@@ -57,6 +55,7 @@ from tcip_web import jobstore
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.label_annotations_cache import cached_label_annotations
 from tcip_web.paths import assert_path_allowed
+from tcip_web.routes.annotate import annotation_dict
 
 router = APIRouter(prefix="/api/review", tags=["review"])
 logger = logging.getLogger(__name__)
@@ -124,7 +123,7 @@ def _prediction_digest(pred_dir: Optional[str], image_name: str) -> Optional[str
     from tcip_mcp.pipelines.resolution import dataset_hash
 
     stem = Path(image_name).stem
-    if not (Path(pred_dir) / f"{stem}.json").is_file():
+    if not (Path(pred_dir) / label_filename(stem)).is_file():
         return None
     return dataset_hash(pred_dir, [stem])
 
@@ -249,34 +248,6 @@ def _ensure_original_backup(label_path: Optional[str]) -> None:
     capture_label_baseline(label_path)
 
 
-def _ann_dict(a: Annotation) -> dict:
-    """Serialize an :class:`Annotation` for the canvas (pixel coords + attributes + provenance).
-
-    ``rings`` (not ``points``) for a polygon: a prediction awaiting review can be a genuine
-    multi-ring occlusion-split instance_seg output, and accepting it as-is must not silently keep
-    only the first ring. The canvas itself still only ever *draws*/*edits* a single ring by hand
-    (see ``edited_points`` below). ``point`` is the singular ``[x, y]`` of a placed prompt / keypoint,
-    the same key the on-disk schema uses: a Point GT annotation on the frame is shown as itself
-    rather than arriving geometry-less and being written back without its location.
-    """
-    out: dict = {"subject": a.subject, "attributes": dict(a.attributes)}
-    geom = a.geometry
-    if polygonal(geom):
-        out["rings"] = [[list(pt) for pt in ring] for ring in geom.rings]
-    elif isinstance(geom, BBox):
-        out["bbox"] = [geom.x1, geom.y1, geom.x2, geom.y2]
-    elif isinstance(geom, Point):
-        out["point"] = [geom.x, geom.y]
-    if a.score is not None:
-        out["score"] = a.score
-    out["created_by"] = a.created_by
-    out["created_at"] = a.created_at
-    out["accepted_by"] = a.accepted_by
-    out["accepted_at"] = a.accepted_at
-    out["accepted_by_rule"] = a.accepted_by_rule
-    return out
-
-
 def _check_classification_scope(subject: Optional[str], attribute: Optional[str]) -> None:
     """Reviewing a classified trait needs both facts: ``attribute`` alone can't say which GT
     instances it scopes. Raised before anything is read/mutated, not just at the matcher call, so a
@@ -344,23 +315,27 @@ def _compute_matches(
 ) -> dict:
     """Dispatch to plain detection matching, or classified-trait matching when the caller names the
     (subject, attribute) axis under review. The one call site both ``/matches`` and ``/action`` use,
-    so a verdict's freshly recomputed matches are always scoped identically to what produced it."""
-    if attribute is None:
-        return compute_matches(gt, preds, iou_threshold, conf_threshold)
-    _check_classification_scope(subject, attribute)
-    # _check_classification_scope already refused an attribute with no subject
-    assert subject is not None
-    return compute_classified_trait_matches(
-        gt, preds, subject=subject, attribute=attribute, vocabulary=vocabulary or set(),
-        iou_threshold=iou_threshold, conf_threshold=conf_threshold,
-    )
-
-
-def _read_annotations_or_400(path: str) -> list:
-    """``read_annotations``, refused (400) naming the file when the document will not read: a
-    review derived from a document nobody can read is a claim about nothing."""
+    so a verdict's freshly recomputed matches are always scoped identically to what produced it.
+    A record the matching refuses (a scoreless prediction, an unclassified record) answers 400."""
     try:
-        return read_annotations(path)
+        if attribute is None:
+            return compute_matches(gt, preds, iou_threshold, conf_threshold)
+        _check_classification_scope(subject, attribute)
+        # _check_classification_scope already refused an attribute with no subject
+        assert subject is not None
+        return compute_classified_trait_matches(
+            gt, preds, subject=subject, attribute=attribute, vocabulary=vocabulary or set(),
+            iou_threshold=iou_threshold, conf_threshold=conf_threshold,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+def _read_annotations_or_400(read, path: str) -> list:
+    """``read(path)``, refused (400) naming the file when the document will not read: a review
+    derived from a document nobody can read is a claim about nothing."""
+    try:
+        return read(path)
     except UnreadableLabelDocument as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -372,9 +347,9 @@ def _load_ctx(image_name: str, image_path: str, *, gt_path: Optional[str],
     gt_path = _guard_path(gt_path)
     pred_path = _guard_path(pred_path)
     if gt_path:
-        ctx.gt = _read_annotations_or_400(gt_path)
+        ctx.gt = _read_annotations_or_400(read_annotations, gt_path)
     if pred_path:
-        ctx.preds = _read_annotations_or_400(pred_path)
+        ctx.preds = _read_annotations_or_400(read_predictions, pred_path)
     return ctx
 
 
@@ -466,7 +441,7 @@ def _matches_response(
             pred_idx=d.pred_idx,
             bbox=d.bbox,
             reviewed=entry is not None,
-            reviewed_action=entry.get("action") if entry else None,
+            reviewed_action=decode_verdict(entry).action if entry else None,
         ))
 
     n_reviewed, n_total = engine.review_progress(bucket, ctx, all_dets)
@@ -477,8 +452,8 @@ def _matches_response(
         n_fp=len(matches["fp"]),
         n_fn=len(matches["fn"]),
         detections=out_dets,
-        gt=[_ann_dict(a) for a in ctx.gt],
-        preds=[_ann_dict(a) for a in ctx.preds],
+        gt=[annotation_dict(a) for a in ctx.gt],
+        preds=[annotation_dict(a) for a in ctx.preds],
         image_status=engine.get_image_review_status(bucket, image_name),
         n_reviewed=n_reviewed,
         n_total=n_total,
@@ -503,16 +478,11 @@ def compute_image_matches(req: MatchesRequest) -> MatchesResponse:
     ctx = _load_ctx(req.image_name, req.image_path, gt_path=req.gt_path, pred_path=req.pred_path)
     engine = _get_engine(req.dataset_root)
     scope = _review_scope(req.pred_path, req.subject, req.attribute)
-    from tcip_annotation.json_io import ClassifiedRecordRefused
-
-    try:
-        matches = _compute_matches(
-            ctx.gt, ctx.preds, iou_threshold=req.iou_threshold, conf_threshold=req.conf_threshold,
-            subject=scope.subject, attribute=scope.attribute,
-            vocabulary=_bucket_vocabulary(req.pred_path),
-        )
-    except ClassifiedRecordRefused as exc:
-        raise HTTPException(400, str(exc)) from exc
+    matches = _compute_matches(
+        ctx.gt, ctx.preds, iou_threshold=req.iou_threshold, conf_threshold=req.conf_threshold,
+        subject=scope.subject, attribute=scope.attribute,
+        vocabulary=_bucket_vocabulary(req.pred_path),
+    )
     return _matches_response(
         ctx, matches, engine, req.image_name, bucket=_bucket_of_file(req.pred_path),
         filter_type=req.filter_type, filter_class=req.filter_class, scope=scope,
@@ -541,8 +511,9 @@ class ActionPayload(BaseModel):
     user: Optional[str] = None
     # Edited shape committed from the Review canvas (only for action="edited"): a box, or a
     # polygon's points. Accept/Reject don't carry these: they act on the loaded pred/gt by index.
-    edited_box: Optional[tuple[float, float, float, float]] = None
-    edited_points: Optional[list[list[float]]] = None
+    # Carried uninterpreted: the save conversion (annotation_from_payload) is their one reading.
+    edited_box: Any = None
+    edited_points: Any = None
     # Review thresholds so the route can decide (at the same op point as the GUI) whether
     # this verdict was the last one and the image should flip to 'completed'.
     iou_threshold: float = 0.5
@@ -646,12 +617,11 @@ def _apply_gt_mutation(
         )
 
     if act == "edited":
-        geom: BBox | Polygon | None = None
-        if payload.edited_box is not None:
-            geom = bbox_from_corners(*payload.edited_box, where=f"editing {payload.class_name!r}")
-        elif payload.edited_points is not None:
-            # The reviewer edits one contour by hand on the canvas: single-ring input.
-            geom = Polygon(rings=[[(float(p[0]), float(p[1])) for p in payload.edited_points]])
+        # The edited box or the one contour the reviewer drew, through the save routes' own
+        # conversion, so an edit is checked exactly as a saved shape is.
+        geom = annotation_from_payload(
+            {"subject": payload.class_name, "points": payload.edited_points,
+             "bbox": payload.edited_box}, author=None, now=now_iso).geometry
         if geom is None:
             return False, None
         # An existing record is edited only for a tp/fn or a paired fp; any other gt_idx-carrying
@@ -736,12 +706,11 @@ def _verify_rule_admitted_claim(
     names (``<experiment_id>:<record_digest>``), or refuse by name.
 
     Refuses 400 for a condition the claim itself fails (wrong action or det_type, no named
-    prediction, a classified scope, a scoreless or below-conf prediction, no admission rule), and
+    prediction, a classified scope, a below-conf prediction, no admission rule), and
     409 when a fresh recompute over the pristine, unmutated ``ctx`` no longer holds the submitted
     detection. The claim is the client's; the identity is the binding's own, never one the client
     supplied.
     """
-    from tcip_annotation.json_io import ClassifiedRecordRefused
     from tcip_mcp.pipelines.resolution import admission_rule_of, read_operating_point_sidecar
 
     if payload.action != "accepted":
@@ -759,10 +728,6 @@ def _verify_rule_admitted_claim(
                  "detections of the object class, and a classified review judges values")
     assert payload.pred_idx is not None  # _names_prediction's own guard
     pred = ctx.preds[payload.pred_idx]
-    if pred.score is None:
-        raise HTTPException(
-            400, "rule_admitted refuses a scoreless prediction: the rule is about a score the "
-                 "model reported")
     if not pred_path:
         raise HTTPException(400, "rule_admitted needs a prediction bucket to read the rule from")
     bucket_dir = str(Path(pred_path).parent)
@@ -770,17 +735,14 @@ def _verify_rule_admitted_claim(
     resolution = admission_rule_of(stamp, bucket_dir)
     if resolution.rule is None:
         raise HTTPException(400, resolution.reason)
-    if pred.score < resolution.rule.conf:
+    if prediction_score(pred) < resolution.rule.conf:
         raise HTTPException(
             400, f"rule_admitted refuses a prediction scored {pred.score}, below the rule's own "
                  f"conf {resolution.rule.conf}")
-    try:
-        pristine_matches = _compute_matches(
-            ctx.gt, ctx.preds, iou_threshold=payload.iou_threshold, conf_threshold=payload.conf_threshold,
-            subject=scope.subject, attribute=scope.attribute, vocabulary=vocabulary,
-        )
-    except ClassifiedRecordRefused as exc:
-        raise HTTPException(400, str(exc)) from exc
+    pristine_matches = _compute_matches(
+        ctx.gt, ctx.preds, iou_threshold=payload.iou_threshold, conf_threshold=payload.conf_threshold,
+        subject=scope.subject, attribute=scope.attribute, vocabulary=vocabulary,
+    )
     if not any(d.get("pred_idx") == payload.pred_idx for d in pristine_matches[payload.det_type]):
         raise HTTPException(
             409, "this image's matches changed since they were loaded; reload before confirming")
@@ -800,8 +762,6 @@ def record_action(payload: ActionPayload) -> dict:
             "record_action requires the dataset root this verdict is scoped to; name one "
             "rather than leaving it unstated.",
         )
-    from tcip_annotation.json_io import ClassifiedRecordRefused
-
     gt_path = _guard_path(payload.gt_path)
     pred_path = _guard_path(payload.pred_path)
     scope = _review_scope(pred_path, payload.subject, payload.attribute)
@@ -845,14 +805,11 @@ def record_action(payload: ActionPayload) -> dict:
     # Recompute over the mutated in-memory documents before any write, so a refusal here leaves
     # neither the verdict log nor the GT file touched, never a write on disk behind a 400.
     bucket = _bucket_of_file(pred_path)
-    try:
-        matches = _compute_matches(
-            work.gt, ctx.preds,
-            iou_threshold=payload.iou_threshold, conf_threshold=payload.conf_threshold,
-            subject=scope.subject, attribute=scope.attribute, vocabulary=vocabulary,
-        )
-    except ClassifiedRecordRefused as exc:
-        raise HTTPException(400, str(exc)) from exc
+    matches = _compute_matches(
+        work.gt, ctx.preds,
+        iou_threshold=payload.iou_threshold, conf_threshold=payload.conf_threshold,
+        subject=scope.subject, attribute=scope.attribute, vocabulary=vocabulary,
+    )
 
     # An edited verdict rewrites the GT geometry, so key the entry to the post-edit geometry;
     # otherwise the next reload's spatial lookup misses it and the detection reads unreviewed.
@@ -953,7 +910,7 @@ def _is_negative_for_subject(
     """
     if not pred_dir:
         return True
-    pred_file = Path(pred_dir) / f"{Path(image_name).stem}.json"
+    pred_file = Path(pred_dir) / label_filename(Path(image_name).stem)
     if subject is None:
         return not _has_objects(pred_file)
     from tcip_mcp.pipelines.resolution import StampScopeUnstated, bucket_scope
@@ -1008,7 +965,7 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     # read runs before either engine write, so an unreadable document persists nothing.
     annotations: list = []
     if payload.subject and gt_path:
-        annotations = _read_annotations_or_400(gt_path)
+        annotations = _read_annotations_or_400(read_annotations, gt_path)
     if payload.completed:
         producer_identity = _resolve_producer_identity_for_dir(pred_dir, payload.image_name)
         # An unresolvable subject omits the entry rather than refusing the Complete; the reader

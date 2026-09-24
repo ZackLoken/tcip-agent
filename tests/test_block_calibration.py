@@ -275,6 +275,73 @@ def test_block_calibration_admits_valid_work_once_attested(tmp_path: Path):
     assert "seed" not in conf.gate_evidence["split_policy"]
 
 
+def test_block_calibration_refuses_a_run_that_recorded_no_subject(tmp_path: Path):
+    """The run's scope is read through its one reader, where an empty subject is none, and a run
+    recording none is refused by name before any ground truth is read."""
+    from tcip_store import store
+
+    from tcip_mcp.experiments import config_key, create_experiment
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+
+    exp = _build_experiment(tmp_path)
+    data_cfg = {**store.read(config_key(exp["experiment_id"]))["data"], "subject": ""}
+    create_experiment("exp_no_subject", {"data": data_cfg})
+    persist_run_partition("exp_no_subject", data_cfg)
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
+                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+
+    with pytest.raises(ValueError, match="experiment 'exp_no_subject' records no subject"):
+        resolve_block_calibration_records(
+            predictor, trait_name="bud_opening", experiment_id="exp_no_subject",
+            global_nms_iou=0.3, export_tile_size=TILE)
+
+
+def test_block_band_counts_and_spacing_count_objects_not_crowd_regions(tmp_path: Path):
+    """The same mosaic resolved twice, its boxes plain and then every other one marked a crowd
+    region: the bands count fewer objects and the objects' spacing widens, since a crowd region
+    is no object to count or to space."""
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+
+    from tcip_mcp.pipelines.training.evaluation import gt_objects
+
+    provenance, records = [], []
+    for crowd_every_other in (False, True):
+        run_dir = tmp_path / ("crowd" if crowd_every_other else "plain")
+        run_dir.mkdir()
+        exp = _build_experiment(run_dir, experiment_id=f"exp_{run_dir.name}")
+        label = exp["labels_dir"] / f"{exp['stem']}.json"
+        boxes = json_io.read_annotations(str(label))
+        json_io.write_annotations(str(label), [
+            Annotation(subject=a.subject, geometry=a.geometry,
+                       iscrowd=crowd_every_other and i % 2 == 1) for i, a in enumerate(boxes)],
+            WIDTH, HEIGHT, keep_empty=True)
+        manifest = exp["spatial_manifest"]
+        _attest_regions_complete(
+            exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+        checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(run_dir))
+        predictor = build_predictor(checkpoint, device="cpu",
+                                    score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+        _bundle, prov, evidence = resolve_block_calibration_records(
+            predictor, trait_name="bud_opening", experiment_id=exp["experiment_id"],
+            global_nms_iou=0.3, export_tile_size=TILE)
+        provenance.append(prov)
+        records.append(evidence["inputs"]["calibration_records"]
+                       + evidence["inputs"]["holdout_records"])
+
+    plain, crowd = provenance
+    assert crowd["block_scale_px"] > plain["block_scale_px"]
+    # Each band's count is its objects, the crowd regions its own record also holds excluded.
+    counted = sum(crowd["cal_gt_counts"].values()) + sum(crowd["test_gt_counts"].values())
+    assert counted == sum(len(gt_objects(r)) for r in records[1])
+    assert 0 < counted < sum(len(r["gt"]) for r in records[1])
+
+
 def test_block_calibration_prefers_plant_pitch_over_gt_spacing_when_configured(tmp_path: Path):
     """A training experiment whose config.json carries data.plant_csv_paths resolves the block
     scale from the real planting-grid pitch, not the GT-object-spacing fallback: the plant-pitch
@@ -839,12 +906,47 @@ def test_select_gt_for_band_matches_the_dt_sides_center_inclusion_rule():
         [190.0, 120.0, 260.0, 140.0],   # center (225,130): outside (past x1=200) -> dropped
         [50.0, 90.0, 110.0, 150.0],     # center (80,120): outside (past x0=100) -> dropped
     ])
-    labels = np.array([1, 2, 3])
+    gt = {"boxes": boxes, "labels": np.array([1, 2, 3]),
+          "iscrowd": np.array([True, False, False])}
 
-    kept_boxes, kept_labels = _select_gt_for_band(boxes, labels, band)
+    kept = _select_gt_for_band(gt, band)
 
-    assert kept_labels.tolist() == [1]
-    np.testing.assert_array_equal(kept_boxes, np.array([[20.0, 20.0, 40.0, 40.0]]))
+    assert kept["labels"].tolist() == [1]
+    assert kept["iscrowd"].tolist() == [True]  # the flag travels with its row
+    np.testing.assert_array_equal(kept["boxes"], np.array([[20.0, 20.0, 40.0, 40.0]]))
+
+
+def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
+    """A band's reference forms a crowd region's ground truth as a crowd region, read off the
+    row it came from, never as one more object in the band, each box on the stored grid its
+    document holds."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from tcip_mcp.pipelines.block_calibration import _band_records
+    from tcip_mcp.pipelines.data.label_queries import json_det_targets
+
+    class _OneDetection:
+        def predict_tiled(self, view, **kwargs):
+            return {"boxes": [[10.1, 10.1, 40.3, 30.3]], "scores": [0.9], "labels": [1]}
+
+    label = tmp_path / "mosaic.json"
+    json_io.write_annotations(str(label), [
+        Annotation(subject="bur", geometry=BBox(20.3, 20.7, 40.1, 60.9)),
+        Annotation(subject="bur", geometry=BBox(100.0, 100.0, 180.0, 180.0), iscrowd=True)],
+        200, 200)
+    target, _ = json_det_targets(str(label), "bur", None, {"bur": 0})
+    gt = {"boxes": np.asarray(target["boxes"], dtype=np.float32).reshape(-1, 4),
+          "labels": np.asarray(target["labels"], dtype=np.int64),
+          "iscrowd": np.asarray(target["iscrowd"], dtype=bool)}
+    records, _rects = _band_records(
+        SimpleNamespace(height=200, width=200, num_channels=3), {"a": (0, 0, 200, 200)},
+        200, 200, 64, 0.2, _OneDetection(), tile_batch_size=1, global_nms_iou=0.3,
+        postprocess="nms", gt=gt, stem="mosaic")
+    assert [g["iscrowd"] for g in records[0]["gt"]] == [0, 1]
+    assert records[0]["gt"][0]["bbox"] == [20.3, 20.7, 19.8, 40.2]
+    assert [d["bbox"] for d in records[0]["dt"]] == [[10.1, 10.1, 30.2, 20.2]]
 
 
 def test_select_gt_for_band_empty_input_is_a_no_op():
@@ -852,10 +954,10 @@ def test_select_gt_for_band_empty_input_is_a_no_op():
 
     from tcip_mcp.pipelines.block_calibration import _select_gt_for_band
 
-    boxes = np.zeros((0, 4), dtype=np.float32)
-    labels = np.zeros((0,), dtype=np.int64)
-    kept_boxes, kept_labels = _select_gt_for_band(boxes, labels, (0, 0, 10, 10))
-    assert len(kept_boxes) == 0 and len(kept_labels) == 0
+    gt = {"boxes": np.zeros((0, 4), dtype=np.float32), "labels": np.zeros((0,), dtype=np.int64),
+          "iscrowd": np.zeros((0,), dtype=bool)}
+    kept = _select_gt_for_band(gt, (0, 0, 10, 10))
+    assert all(len(kept[k]) == 0 for k in ("boxes", "labels", "iscrowd"))
 
 
 def test_band_rects_are_reported_in_full_mosaic_coordinates():

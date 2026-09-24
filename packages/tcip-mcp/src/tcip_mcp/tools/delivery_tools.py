@@ -25,7 +25,6 @@ identity is stamped everywhere else (``identity.py``), never a person's ``user:`
 
 
 @mcp.tool()
-@audited
 def deliver_per_plant_csv(
     results: list[dict],
     output_path: str,

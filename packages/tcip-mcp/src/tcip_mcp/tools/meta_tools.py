@@ -423,10 +423,9 @@ def read_audit_log(
     it around the call), so it is never present in this call's own result; a later read of the
     same scope sees it, the same as any earlier call's entry appears in this one.
 
-    This is a read, not a replacement for the two readers that already scan this log for their
-    own narrow question: the plant-mapping receipt scan (``pipelines.postprocessing.plant_mapping._scan_receipts``)
-    and the refused-experiment-mutation index (``experiments._index_refused_mutations``) each
-    keep their own targeted read, since a general-purpose page here would make them re-filter a
+    This is a read, not a replacement for the reader that already scans this log for its own
+    narrow question: the plant-mapping receipt scan (``pipelines.postprocessing.plant_mapping._scan_receipts``)
+    keeps its own targeted read, since a general-purpose page here would make it re-filter a
     result shaped for something else. A read of the record leaves no line on it: the log holds
     mutations only, the same as ``load_project_memory`` and every other read-only door.
 

@@ -85,8 +85,8 @@ human approval prompt, and a `cd`-then-relative write is an accepted residual of
   in-process test transport (starlette's `TestClient` or httpx's `ASGITransport`), the app
   refuses to start unless `TCIP_WORKSPACE` is set (`app.WorkspaceUnsetUnderTest`); set it and
   `TCIP_STATE_ROOT` to scratch directories before starting one.
-- Review save formats mirror the annotation-engine's `{json, coco}` scope (see
-  `packages/tcip-annotation/CLAUDE.md`); don't add a frontend format option the backend can't read.
+- Reviews save the one label shape, the per-image JSON document (see
+  `packages/tcip-annotation/CLAUDE.md`); don't add a frontend format option.
 - The GUI follows minimalist design without dropping functionality: prefer nesting related
   actions into one structure (a menu, a split button, a grouped control)
   over adding sibling buttons, and combine existing buttons into nested structures where the

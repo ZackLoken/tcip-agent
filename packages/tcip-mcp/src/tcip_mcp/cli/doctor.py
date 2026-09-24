@@ -109,9 +109,9 @@ def check_negatives(root: Path, findings: list, *, seen: "set[str] | None" = Non
     from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_annotation.review_engine import BASELINE_DIRNAME
     from tcip_mcp.dataset_layout import (
-        annotation_date, annotation_root, annotations_hold_subject, bucket_subject_date,
-        confirmed_negative_names_any_subject, is_confirmed_negative, normalize_status_store,
-        read_image_status_store, resolve_image_name,
+        LABEL_SUFFIX, annotation_date, annotation_root, annotations_hold_subject,
+        bucket_subject_date, confirmed_negative_names_any_subject, is_confirmed_negative,
+        label_filename, normalize_status_store, read_image_status_store, resolve_image_name,
     )
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
     from tcip_store import SchemaVersionRefused, StoreError
@@ -137,7 +137,7 @@ def check_negatives(root: Path, findings: list, *, seen: "set[str] | None" = Non
     neg_names = confirmed_negative_names_any_subject(by_bucket)
     ambiguous_reported: set[str] = set()
 
-    for label in ann_root.rglob("*.json") if ann_root.is_dir() else []:
+    for label in ann_root.rglob(f"*{LABEL_SUFFIX}") if ann_root.is_dir() else []:
         if BASELINE_DIRNAME in label.parts:
             continue
         try:
@@ -174,7 +174,7 @@ def check_negatives(root: Path, findings: list, *, seen: "set[str] | None" = Non
 
     # Images with no label record at all: excluded from training, so a breeder who labelled 30 of
     # 400 trains on 30. Reported as one line, not one per image (the dominant case at small scale).
-    labelled = {p.stem for p in ann_root.rglob("*.json")
+    labelled = {p.stem for p in ann_root.rglob(f"*{LABEL_SUFFIX}")
                 if BASELINE_DIRNAME not in p.parts} if ann_root.is_dir() else set()
     unannotated = sorted(set(stems) - labelled)
     if unannotated:
@@ -182,8 +182,6 @@ def check_negatives(root: Path, findings: list, *, seen: "set[str] | None" = Non
         findings.append(("info", f"{len(unannotated)} of {len(stems)} image(s) have no label "
                         f"record and are excluded from training ({shown}). Annotate them, or mark "
                         "the genuinely-empty ones Complete to train them as negatives."))
-
-    from tcip_mcp.dataset_layout import label_filename
 
     for name in neg_names:
         stem = Path(name).stem
@@ -194,18 +192,15 @@ def check_negatives(root: Path, findings: list, *, seen: "set[str] | None" = Non
 
 
 def check_data_quality(root: Path, findings: list, *, seen: "set[str] | None" = None) -> None:
-    """Per-file annotation quality, any supported format: stem matching between images and
-    labels, an empty per-image label with no human confirmation the image is a negative, a file
-    whose format cannot be determined, and a file present but unreadable. Format is decided per
-    label file, never once for the whole dataset, so a store mixing shapes cannot report clean
-    because one file's shape happened to be detected first.
+    """Per-file annotation quality: stem matching between images and labels, an empty per-image
+    label with no human confirmation the image is a negative, and a file the one per-image reader
+    refuses (undecodable, a dataset-level COCO, an unrecognized shape), each file read on its own
+    so one bad document never hides the findings about the rest.
 
-    Reuses ``data_tools._scan_dataset``'s own image/label census and root-candidate walk rather
-    than re-deriving them, so this check and ``scan_dataset`` can never silently disagree on what
-    counts as a label. Some overlap with ``check_negatives`` is expected (an orphan or
-    unconfirmed-empty per-image label can be named by both); this check's own value is the
-    per-file format decision and COCO-aware validation neither ``check_negatives`` nor
-    ``check_reserved_names`` carries.
+    Reuses ``data_tools._scan_dataset``'s own image/label census rather than re-deriving it, so
+    this check and ``scan_dataset`` can never silently disagree on what counts as a label. Some
+    overlap with ``check_negatives`` is expected (an orphan or unconfirmed-empty per-image label
+    can be named by both).
 
     Reads the status store through the same seam ``check_negatives`` reads it through, so the
     two agree on one root under whichever backend the process is bound to. Not gated in
@@ -216,10 +211,7 @@ def check_data_quality(root: Path, findings: list, *, seen: "set[str] | None" = 
     ``seen`` is the same cross-check stem-collision set ``check_negatives`` takes, so the three
     checks that enumerate ``images/`` report one collision once, not once each.
     """
-    from tcip_annotation.format_io import detect_format
-    from tcip_annotation.json_io import (
-        UnreadableLabelDocument, load_json_document, read_annotations as read_labels,
-    )
+    from tcip_annotation.json_io import UnreadableLabelDocument, read_annotations as read_labels
     from tcip_mcp.dataset_layout import (
         annotation_date, confirmed_negative_names_any_subject, normalize_status_store,
         read_image_status_store, resolve_image_name,
@@ -230,9 +222,6 @@ def check_data_quality(root: Path, findings: list, *, seen: "set[str] | None" = 
 
     try:
         scan = _scan_dataset(str(root))
-    except UnreadableLabelDocument as exc:
-        findings.append(("error", f"data quality scan: {exc}"))
-        return
     except AmbiguousImageStem as exc:
         _report_stem_collision(findings, exc, seen)
         return
@@ -257,46 +246,26 @@ def check_data_quality(root: Path, findings: list, *, seen: "set[str] | None" = 
     for label_path in scan["labels"]:
         label = Path(label_path)
         rel = label.relative_to(root) if root in label.parents else label
+        stem = label.stem
+        if stem not in image_stems:
+            findings.append(("error", f"{rel}: no matching image"))
         try:
-            file_fmt = detect_format(label_path)
-        except ValueError as exc:
-            findings.append(("error", f"{rel}: cannot determine annotation format: {exc}"))
-            continue
+            anns = read_labels(label_path)
         except UnreadableLabelDocument as exc:
             findings.append(("error", f"{rel}: label file will not read: {exc}"))
             continue
-
-        if file_fmt == "json":
-            stem = label.stem
-            if stem not in image_stems:
-                findings.append(("error", f"{rel}: no matching image"))
+        if not anns:
             try:
-                anns = read_labels(label_path)
-            except UnreadableLabelDocument as exc:
-                findings.append(("error", f"{rel}: label file will not read: {exc}"))
+                name = resolve_image_name(str(root), annotation_date(label_path), stem)
+            except AmbiguousImageStem as exc:
+                message = str(exc)
+                if message not in ambiguous_reported:
+                    findings.append(("error", message))
+                    ambiguous_reported.add(message)
                 continue
-            if not anns:
-                try:
-                    name = resolve_image_name(str(root), annotation_date(label_path), stem)
-                except AmbiguousImageStem as exc:
-                    message = str(exc)
-                    if message not in ambiguous_reported:
-                        findings.append(("error", message))
-                        ambiguous_reported.add(message)
-                    continue
-                if name is None or name not in negatives:
-                    findings.append(("error", f"{rel}: empty label file, not a confirmed "
-                                    "negative for any subject; excluded from training"))
-        elif file_fmt == "coco":
-            try:
-                coco = load_json_document(label_path)
-                coco_fnames = {img.get("file_name", "") for img in coco.get("images", [])}
-                for fn in coco_fnames:
-                    if Path(fn).stem not in image_stems:
-                        findings.append(("warn", f"{rel}: COCO image {fn!r} not found in "
-                                        "images dir"))
-            except Exception as exc:  # noqa: BLE001 - a malformed COCO document, named and moved past
-                findings.append(("error", f"{rel}: COCO parse error: {exc}"))
+            if name is None or name not in negatives:
+                findings.append(("error", f"{rel}: empty label file, not a confirmed "
+                                "negative for any subject; excluded from training"))
 
 
 def check_reserved_names(root: Path, findings: list) -> None:
@@ -309,20 +278,21 @@ def check_reserved_names(root: Path, findings: list) -> None:
     This check walks with ``rglob``, so it sees exactly what those walks hide.
     """
     from tcip_annotation.json_io import is_sidecar_name
-    from tcip_mcp.dataset_layout import annotation_root, image_root
+    from tcip_mcp.dataset_layout import LABEL_SUFFIX, annotation_root, image_root, label_filename
     from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
 
     images = image_root(root)
     if images.is_dir():
         for p in sorted(images.rglob("*")):
-            if p.is_file() and p.suffix.lower() in IMAGE_EXTS and is_sidecar_name(f"{p.stem}.json"):
+            if (p.is_file() and p.suffix.lower() in IMAGE_EXTS
+                    and is_sidecar_name(label_filename(p.stem))):
                 findings.append(("error", f"{p.relative_to(root)}: image stem is reserved for a "
                                 "prediction bucket's own provenance stamp; its label can never be "
                                 "read through any bucket walk"))
 
     ann_root = annotation_root(root)
     if ann_root.is_dir():
-        for p in sorted(ann_root.rglob("*.json")):
+        for p in sorted(ann_root.rglob(f"*{LABEL_SUFFIX}")):
             if p.is_file() and is_sidecar_name(p.name):
                 findings.append(("error", f"{p.relative_to(root)}: label filename is reserved for "
                                 "a prediction bucket's own provenance stamp; it is excluded from "
@@ -449,12 +419,12 @@ def check_registry(root: Path, findings: list) -> None:
 def check_provenance(root: Path, findings: list) -> None:
     from tcip_annotation.json_io import ANNOTATIONS_KEY, UnreadableLabelDocument, load_label_document
     from tcip_annotation.review_engine import BASELINE_DIRNAME
-    from tcip_mcp.dataset_layout import annotation_root
+    from tcip_mcp.dataset_layout import LABEL_SUFFIX, annotation_root
     from tcip_mcp.pipelines.model_build import SNAPSHOT_MANIFEST_STORE
 
     ann_root = annotation_root(root)
     unstamped = 0
-    for label in ann_root.rglob("*.json") if ann_root.is_dir() else []:
+    for label in ann_root.rglob(f"*{LABEL_SUFFIX}") if ann_root.is_dir() else []:
         if BASELINE_DIRNAME in label.parts:
             continue
         try:

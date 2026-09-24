@@ -579,6 +579,8 @@ def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
     """
     from tcip_annotation.json_io import prediction_documents
 
+    from tcip_mcp.dataset_layout import label_filename
+
     labels_dir = Path(labels_dir)
     if stems is None:
         # Canonical labels are per-image JSON; a bucket's own sidecar stamps are not labels.
@@ -589,12 +591,12 @@ def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
     for stem in stems:
         h.update(stem.encode("utf-8"))
         h.update(b"\0")
-        h.update(_label_bytes(labels_dir / f"{stem}.json"))
+        h.update(_label_bytes(labels_dir / label_filename(stem)))
         h.update(b"\0")
     return h.hexdigest()[:16]
 
 
-def _digest_bytes(b: bytes) -> str:
+def digest_bytes(b: bytes) -> str:
     """One ground-truth record's digest from its bytes, ``sha256(bytes)[:16]``.
 
     The convention stated once, for the three callers that must agree on it: the draw that records
@@ -605,14 +607,14 @@ def _digest_bytes(b: bytes) -> str:
 
 
 def ground_truth_digest(path: Path) -> str:
-    """One ground-truth file's own digest, by the same convention :func:`_digest_bytes` states.
+    """One ground-truth file's own digest, by the same convention :func:`digest_bytes` states.
 
     Takes the file rather than a directory and a stem, so it answers for ground truth that is not
     a per-image label document too: the run's own recorded partition digests each member's stated
     path through this, and the delivery-time check recomputes a reference sample's through it, so
     the two cannot drift into hashing one file two ways.
     """
-    return _digest_bytes(_label_bytes(path))
+    return digest_bytes(_label_bytes(path))
 
 
 def ground_truth_digests(paths: Iterable[str]) -> dict[str, str]:
@@ -973,14 +975,39 @@ def write_sidecar(pred_dir: str | Path, stamp: dict, document: str = "operating_
 
     A stamp is assembled by its producer, and ``operating_point_stamp`` carries a producer's
     own extra fields through ``**fields``, so what it holds is checked here, where every
-    write through this seam passes, rather than at each producer.
+    write through this seam passes, rather than at each producer. Leaves the write's one
+    ``stamp_written`` line.
     """
     check_json_value(stamp, path="stamp")
     _check_stamp_claim(stamp, document, pred_dir)
+    scope = bucket_dataset_root(pred_dir)
     Path(pred_dir).mkdir(parents=True, exist_ok=True)
     key = sidecar_key(pred_dir, document)
     with tcip_store.transaction(key) as txn:
         txn.write(key, stamp)
+    _record_stamp_written(pred_dir, document, stamp, scope)
+
+
+def bucket_dataset_root(bucket: str | Path) -> Path | None:
+    """The dataset root a bucket sits under, or ``None`` when it is under none: the root its
+    stamp, claim, publication and covered-bucket key are all recorded against, so a door cannot
+    record a key the verifier will not look for. Read from the path where the bucket is now,
+    never from the record or from what a write planted in the bucket, so a dataset moved or
+    copied whole keys its buckets the same way."""
+    from tcip_mcp.dataset_layout import dataset_root_of
+
+    root = dataset_root_of(bucket)
+    return root.resolve() if root is not None else None
+
+
+def _record_stamp_written(pred_dir: str | Path, document: str, stamp: dict,
+                          scope: Path | None) -> None:
+    """A stamp write's one audit line, ``stamp_written``: the bucket, the document and the stamp
+    as stored, written by the library that stored it for every door alike."""
+    from tcip_mcp.audit import record_event_or_raise
+
+    record_event_or_raise("stamp_written", {"pred_dir": str(pred_dir), "document": document},
+                          scope=scope, stamp=stamp)
 
 
 def update_sidecar(
@@ -993,8 +1020,10 @@ def update_sidecar(
     store, or ``None`` to leave it exactly as it was. Returns whether anything was written. The
     read and the write are one transaction, so a promotion can never overwrite fields another
     process stamped between them, and a no-downgrade decision the updater makes is made against
-    what is actually stored rather than against a value read before the lock.
+    what is actually stored rather than against a value read before the lock. A merge that
+    writes leaves its ``stamp_written`` line; one that leaves the stamp as it was leaves none.
     """
+    scope = bucket_dataset_root(pred_dir)
     key = sidecar_key(pred_dir, document)
     with tcip_store.transaction(key) as txn:
         current = txn.read(key, default={})
@@ -1006,6 +1035,7 @@ def update_sidecar(
         _check_stamp_claim(
             updated, document, pred_dir, introduced_keys=set(updated) - set(current))
         txn.write(key, updated)
+    _record_stamp_written(pred_dir, document, updated, scope)
     return True
 
 
@@ -2095,7 +2125,7 @@ def verify_stamp_binding(
 
     if document in ("operating_point", "resolve_scale"):
         resolved = Path(bucket).resolve()
-        dataset_root = _dataset_root_of(resolved)
+        dataset_root = bucket_dataset_root(resolved)
         noun = "count" if document == "operating_point" else "scale"
         if dataset_root is None:
             return floored(
@@ -2202,15 +2232,6 @@ def admission_rule_of(stamp: dict | None, pred_dir: str | Path) -> AdmissionReso
         ),
         reason="",
     )
-
-
-def _dataset_root_of(path: Path) -> Path | None:
-    """The dataset root a bucket sits under, resolved from where it is now rather than from the
-    record, so a dataset moved or copied whole still keys its covered buckets the same way."""
-    from tcip_mcp.dataset_layout import dataset_root_of
-
-    root = dataset_root_of(path)
-    return root.resolve() if root is not None else None
 
 
 def experiment_recorded_checkpoint(experiment_id: str) -> str | None:
@@ -2604,10 +2625,9 @@ def record_delivery_binding_event(
 ) -> bool:
     """Record what verification found for each bucket a delivery read, in that dataset's own log.
 
-    The ``@audited`` decorator records a door's arguments and its status, which is not what a later
-    reader of a delivered number needs: they need which buckets stood behind it, which of their
-    claims were answered for, and by which records. That cannot be obtained by changing the
-    decorator's inputs, so a door emits it alongside. The event files against the dataset root the
+    This event is the delivery's one audit line, carrying what a later reader of a delivered number
+    needs and a door's arguments cannot: which buckets stood behind it, which of their claims were
+    answered for, and by which records. The event files against the dataset root the
     buckets share, since it describes records that travel with the data; a delivery whose buckets
     share no dataset root files against the platform log instead. This mutation already committed
     (the artifact shipped before this call runs) with no tool body of its own for ``@audited`` to
@@ -2692,7 +2712,7 @@ def record_delivery_binding_event(
     """
     from tcip_mcp.audit import record_event_or_raise
 
-    roots = {_dataset_root_of(Path(d)) for d in (pred_dirs or [])}
+    roots = {bucket_dataset_root(d) for d in (pred_dirs or [])}
     scope = roots.pop() if len(roots) == 1 else None
 
     primary_document = measurement_documents[0] if measurement_documents else None

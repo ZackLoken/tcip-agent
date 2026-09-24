@@ -16,29 +16,28 @@ Schema::
           "point": [x, y],                      # pixel point, a prompt or keypoint (optional)
           "attributes": {"<attribute>": "<value>"},   # attr name -> value name
           "score": 0.91,                        # predictions only
+          "iscrowd": true,                      # a region of unseparated objects (optional)
           "created_by": "sam", "created_at": "...",
           "accepted_by": "user:breeder", "accepted_at": "...",
           "accepted_by_rule": "<experiment_id>:<record_digest>" } ] }
 
 Integer class ids never appear on disk; a name→id assignment is a per-training-run artifact
-(:mod:`tcip_mcp.subject_registry`). :func:`to_coco_dataset` takes that run's ``id_map`` (a plain dict,
-so this package never imports tcip-mcp) and assigns COCO ``category_id`` from it.
+(:mod:`tcip_mcp.subject_registry`).
 
 Negative invariant: a missing file is unannotated, and a present file with ``"annotations": []`` is
 *still* unannotated until a human marks that image Complete, recorded as ``"negative"`` in
 ``.tcip/state/image_status.json``, scoped to the subject. Only that confirmation makes it a training
-negative; :func:`to_coco_dataset` skips an unconfirmed empty. An annotation with a subject but no
+negative. An annotation with a subject but no
 geometry (an image-level label) is a real annotation: it keeps the image out of the empty-negative
 bucket and never collapses to nothing.
 
 A missing file reads as unannotated (``[]``), and so does the platform's own empty document
 (``{"annotations": []}``). A *present* document this format cannot make sense of (undecodable text,
-a non-dict document, an ``annotations`` that is not a list, a record that is not a dict or carries
-no string ``subject``, or a stored box with no positive extent) raises
+a non-dict document, an ``annotations`` that is not a list, or a record
+:func:`annotation_of_record` refuses, a supplied value that does not parse among them) raises
 :class:`UnreadableLabelDocument` instead of reading as empty: an unreadable file is not the same
 fact as no file, and reading one as empty would train a corrupt document as a confirmed negative.
-Writers and readers are symmetric, and a degenerate polygon (<3 points) is skipped on write so it
-can never masquerade as an empty record.
+Writers and readers are symmetric: a record the writer stores is one the reader accepts.
 """
 
 from __future__ import annotations
@@ -64,17 +63,20 @@ from tcip_store import (
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation.state import (
-    Annotation, BBox, Point, Polygon, bbox_of, box_derivable, polygonal,
+    Annotation, BBox, Point, Polygon, bbox_of, is_detection, polygonal,
+    prediction_score,
 )
 
-ANNOTATIONS_KEY = "annotations"  # the one top-level list key; format_io.detect_format shares it
+ANNOTATIONS_KEY = "annotations"  # the one top-level list key
+LABEL_SUFFIX = ".json"
+"""The suffix of every per-image label and prediction document, stated once for every package."""
 _PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at", "accepted_by_rule")
 
 
 # ── the store (tcip-annotation must not depend on tcip-mcp) ───────────────────
 
 ANNOTATION_RECORDS_STORE = "annotation_records"
-_ANNOTATION_RECORD_LOCATOR = RootedFileLocator(suffix=".json")
+_ANNOTATION_RECORD_LOCATOR = RootedFileLocator(suffix=LABEL_SUFFIX)
 register_store(
     StoreDescriptor(
         name=ANNOTATION_RECORDS_STORE,
@@ -119,10 +121,9 @@ def _document_bytes(payload: dict) -> bytes:
 class UnreadableLabelDocument(Exception):
     """A present label document this platform's readers cannot make sense of.
 
-    Deliberately not a :class:`ValueError`: a handler written to catch format detection's own
-    ``ValueError`` (an unrecognized-but-decodable shape, a legitimate "not this kind of file"
-    answer) must not also absorb a document that is flatly broken and silently render or train it
-    as unlabeled.
+    Deliberately not a :class:`ValueError`: a handler written to catch a caller's own
+    ``ValueError`` must not also absorb a document nobody can read and silently render or train
+    it as unlabeled.
     """
 
 
@@ -130,10 +131,9 @@ def parse_json_document(text: str, *, source: str) -> dict:
     """A JSON document's parsed dict, from its raw text: decode and dict-shape only.
 
     Raises :class:`UnreadableLabelDocument`, naming ``source``, for text that does not decode as
-    JSON or that decodes to something other than a dict. Carries no opinion on
-    ``schema_version``: a caller that has not yet decided whether ``source`` is this platform's
-    own per-image document or an interop shape (COCO, or an unrecognized one) reads through here
-    first, and applies :func:`check_annotation_record_version` itself only once it knows which.
+    JSON or that decodes to something other than a dict. Carries no opinion on the document's
+    shape or ``schema_version``: the COCO import reads an external document through here, and
+    :func:`parse_label_document` adds the per-image document's own checks.
     """
     try:
         data = json.loads(text)
@@ -161,34 +161,49 @@ def check_annotation_record_version(data: dict, *, source: str) -> None:
         raise UnreadableLabelDocument(f"{source}: {exc}") from exc
 
 
+def is_dataset_level_document(data: dict) -> bool:
+    """Whether a parsed document carries a dataset-level COCO's keys (``images`` or
+    ``categories``) rather than being one image's label document."""
+    return "images" in data or "categories" in data
+
+
 def parse_label_document(text: str, *, source: str) -> dict:
     """A per-image label document's parsed dict, from its raw text.
 
     Raises :class:`UnreadableLabelDocument`, naming ``source``, for text that does not decode as
-    JSON, that decodes to something other than a dict (:func:`parse_json_document`), or that
-    carries a ``schema_version`` this reader does not accept (:func:`check_annotation_record_version`):
-    none of the three is a document this schema can read, and reading any of them as empty would
-    train an unreadable file as an unannotated image. The one choke point every reader of *this
-    platform's own* per-image document shares, so ``load_label_document`` and
-    ``annotations_from_bytes`` cannot disagree about what a document means. A caller reading a
-    document whose format is not yet decided (format detection, an interop parse) reads through
-    :func:`parse_json_document` instead, applying this platform's version ceiling only once it
-    has confirmed the document is this store's own shape.
+    JSON, that decodes to something other than a dict (:func:`parse_json_document`), that carries
+    a dataset-level COCO's keys or the old ``objects`` schema, or that carries a
+    ``schema_version`` this reader does not accept (:func:`check_annotation_record_version`):
+    none is a document this schema can read, and reading any of them as a label would train an
+    unreadable file, or another image's records, as this image's. The one choke point every
+    reader of a per-image document shares (``read_annotations``, ``load_label_document``,
+    ``annotations_from_bytes``), so every reader, training and calibration included, gets the
+    same answer about what a document is.
     """
     data = parse_json_document(text, source=source)
+    if is_dataset_level_document(data):
+        raise UnreadableLabelDocument(
+            f"{source} is a dataset-level COCO document (an 'images' or 'categories' key), not a "
+            "per-image label document: convert it with import_coco"
+        )
+    if "objects" in data:
+        raise UnreadableLabelDocument(
+            f"{source} is the old 'objects' label schema, which is not read in place: convert it "
+            "to the name-based per-image schema"
+        )
     check_annotation_record_version(data, source=source)
     return data
 
 
-def _decode_label_bytes(data: bytes, *, source: str) -> str:
-    """A label document's bytes, decoded strictly as UTF-8, a leading byte-order mark accepted.
+def decode_document_bytes(data: bytes, *, source: str) -> str:
+    """A JSON document's bytes, decoded strictly as UTF-8, a leading byte-order mark accepted.
 
     ``utf-8-sig``: a UTF-8 byte-order mark encodes the same text as the same document without
     one, so a document this platform (or an operator's conforming script) wrote under a tool
     that stamps one must read identically to one that does not. Bytes that decode with a BOM
     stripped but are not valid UTF-8 otherwise, or that carry no valid UTF-8 at all (a UTF-16
     document, for instance), still raise :class:`UnreadableLabelDocument`, naming ``source``: the
-    one decode policy every reader of a label document's raw bytes shares, so a file reader and a
+    one decode policy every reader of a document's raw bytes shares, so a file reader and a
     store-backed reader over the same bytes cannot disagree about whether they read.
     """
     try:
@@ -197,38 +212,29 @@ def _decode_label_bytes(data: bytes, *, source: str) -> str:
         raise UnreadableLabelDocument(f"{source} is not valid UTF-8: {exc}") from exc
 
 
+def read_document_bytes(path: str | Path) -> bytes:
+    """A present document's bytes, the one file read every document loader shares.
+
+    Raises :class:`UnreadableLabelDocument`, naming ``path``, when the file cannot be opened (a
+    permission error, a directory where a file was expected). Callers check for a missing path
+    themselves: this is only ever called once a document is known to be present.
+    """
+    p = Path(path)
+    try:
+        return p.read_bytes()
+    except OSError as exc:
+        raise UnreadableLabelDocument(f"{p} could not be opened: {exc}") from exc
+
+
 def load_label_document(path: str | Path) -> dict:
     """A per-image label document's parsed dict, read from ``path``.
 
-    Raises :class:`UnreadableLabelDocument`, naming ``path``, when the file cannot be opened (a
-    permission error, a directory where a file was expected), when its bytes are not valid UTF-8,
-    or when :func:`parse_label_document` refuses its contents. Callers check for a missing path
-    themselves: this function is only ever called once a document is known to be present, so it
-    does not special-case absence.
+    Raises :class:`UnreadableLabelDocument`, naming ``path``, for a file that will not open, bytes
+    that are not valid UTF-8, or contents :func:`parse_label_document` refuses.
     """
-    p = Path(path)
-    try:
-        data = p.read_bytes()
-    except OSError as exc:
-        raise UnreadableLabelDocument(f"{p} could not be opened: {exc}") from exc
-    return parse_label_document(_decode_label_bytes(data, source=str(p)), source=str(p))
-
-
-def load_json_document(path: str | Path) -> dict:
-    """A JSON document's parsed dict, read from ``path``: decode and dict-shape only, no
-    ``schema_version`` check.
-
-    For a reader that has not yet decided whether ``path`` is this platform's own per-image
-    document or an interop shape (format detection, a COCO parse): see :func:`load_label_document`
-    for the version-checked per-image reader. Raises :class:`UnreadableLabelDocument`, naming
-    ``path``, for the same unopenable-file and undecodable-bytes cases that one raises for.
-    """
-    p = Path(path)
-    try:
-        data = p.read_bytes()
-    except OSError as exc:
-        raise UnreadableLabelDocument(f"{p} could not be opened: {exc}") from exc
-    return parse_json_document(_decode_label_bytes(data, source=str(p)), source=str(p))
+    source = str(path)
+    return parse_label_document(
+        decode_document_bytes(read_document_bytes(path), source=source), source=source)
 
 
 def annotations_from_bytes(data: bytes, *, source: str) -> list[Annotation]:
@@ -240,7 +246,7 @@ def annotations_from_bytes(data: bytes, *, source: str) -> list[Annotation]:
     file reader would. Raises :class:`UnreadableLabelDocument`, naming ``source``, for anything
     the file reader would refuse.
     """
-    return _annotations_of(parse_label_document(_decode_label_bytes(data, source=source),
+    return _annotations_of(parse_label_document(decode_document_bytes(data, source=source),
                                                 source=source))
 
 
@@ -283,7 +289,8 @@ def prediction_documents(bucket: str | Path) -> list[Path]:
     d = Path(bucket)
     if not d.is_dir():
         return []
-    return sorted(f for f in d.glob("*.json") if f.is_file() and not is_sidecar_name(f.name))
+    return sorted(f for f in d.glob(f"*{LABEL_SUFFIX}")
+                  if f.is_file() and not is_sidecar_name(f.name))
 
 
 def _load(path: str) -> dict | None:
@@ -310,50 +317,46 @@ def safe_score(x) -> float:
     return round(v, 4) if math.isfinite(v) else 0.0
 
 
-def _score_of(obj: dict) -> float | None:
-    """A prediction score, or ``None`` when absent/non-numeric (ground truth has none)."""
-    s = obj.get("score")
-    return float(s) if isinstance(s, (int, float)) and not isinstance(s, bool) else None
+def _numbers(value, key: str, count: int | None = None) -> list[float]:
+    """``value`` as floats: a list of JSON numbers, exactly ``count`` of them when given.
 
-
-def _coerce_bbox(bb) -> list[float] | None:
-    """A 4-list of floats, or None (wrong shape / non-numeric)."""
-    if not isinstance(bb, list) or len(bb) != 4:
-        return None
-    try:
-        return [float(v) for v in bb]
-    except (TypeError, ValueError):
-        return None
-
-
-def _rings_from_segmentation(seg) -> list[list[tuple[float, float]]] | None:
-    """Every valid polygon ring of a ``segmentation`` → pixel points per ring, or None if none usable.
-
-    Each entry needs an even coord count and >=3 points (6 coords); a ring that fails this is dropped
-    individually, not the whole annotation, the same treatment an RLE dict or other non-ring entry gets.
-    Returns None only when no ring survives (an all-degenerate or empty ``segmentation``).
+    Raises ``ValueError`` naming ``key`` for anything else, a numeric string included: a supplied
+    value that is not what the schema states is refused, never read as absent.
     """
-    if not isinstance(seg, list) or not seg:
-        return None
+    if (not isinstance(value, list) or (count is not None and len(value) != count)
+            or not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value)):
+        raise ValueError(f"{key} {value!r} is not a list of {count or 'some'} numbers")
+    return [float(v) for v in value]
+
+
+def _polygon_of(segmentation) -> Polygon:
+    """A ``segmentation``'s flat ``x, y`` rings as a :class:`Polygon`, which refuses a ring too
+    short to be a shape, or ``ValueError`` naming what the value is instead."""
+    if not isinstance(segmentation, list):
+        raise ValueError(f"segmentation {segmentation!r} is not a list of rings")
     rings: list[list[tuple[float, float]]] = []
-    for ring in seg:
-        if not isinstance(ring, list) or len(ring) < 6 or len(ring) % 2 != 0:
-            continue
-        try:
-            rings.append([(float(ring[i]), float(ring[i + 1])) for i in range(0, len(ring), 2)])
-        except (TypeError, ValueError):
-            continue
-    return rings or None
+    for ring in segmentation:
+        flat = _numbers(ring, "segmentation ring")
+        if len(flat) % 2:
+            raise ValueError(f"segmentation ring {ring!r} is not x, y pairs")
+        rings.append(list(zip(flat[0::2], flat[1::2])))
+    return Polygon(rings)
 
 
-def _coerce_point(pt) -> tuple[float, float] | None:
-    """A 2-list of floats as an (x, y) pair, or None (wrong shape / non-numeric)."""
-    if not isinstance(pt, list) or len(pt) != 2:
-        return None
-    try:
-        return (float(pt[0]), float(pt[1]))
-    except (TypeError, ValueError):
-        return None
+def attributes_of(raw) -> dict[str, str]:
+    """Supplied attribute values, name to value name, read by the decoder and the writer alike:
+    anything but a mapping of names to non-empty value names raises ``ValueError``, since a value
+    that is not a name is not the same fact as no value."""
+    if not isinstance(raw, dict) or not all(isinstance(v, str) and v for v in raw.values()):
+        raise ValueError(f"attributes {raw!r} are not attribute names mapped to value names")
+    return dict(raw)
+
+
+def iscrowd_of(raw) -> bool:
+    """A supplied crowd flag: COCO's ``0``/``1`` or ``true``/``false``, else ``ValueError``."""
+    if not isinstance(raw, int) or raw not in (0, 1):
+        raise ValueError(f"iscrowd {raw!r} is not 0, 1, true or false")
+    return bool(raw)
 
 
 def box_extent_ok(bbox: BBox) -> bool:
@@ -393,97 +396,116 @@ def check_box_extent(bbox: BBox, *, where: str) -> None:
         )
 
 
-def bbox_from_corners(x1: float, y1: float, x2: float, y2: float, *, where: str) -> BBox:
-    """A :class:`BBox` from its corners, refusing an inverted or zero-extent one up front.
-
-    The one place a raw request builds a box, so its refusal names ``where`` (the subject or
-    action the request was about) rather than surfacing later at the writer's own record index.
-    """
-    box = BBox(x1, y1, x2, y2)
-    check_box_extent(box, where=where)
-    return box
-
-
-def ring_vertex(vertex) -> tuple[float, float]:
-    """A polygon ring vertex as ``(x, y)``, from an ``[x, y]`` pair or an ``{"x":, "y":}`` mapping.
+def ring_vertex(vertex) -> tuple:
+    """A polygon ring vertex's ``(x, y)`` as given, from an ``[x, y]`` pair or an
+    ``{"x":, "y":}`` mapping, or ``ValueError`` for any other shape.
 
     The producers of ring data disagree on the vertex shape (a canvas round-trip sends pairs, a
-    segmentation prompt sends mappings), so the one conversion door takes either. Public: every
-    door that stages a multi-ring polygon proposal (not just the ground-truth save path here)
-    parses its vertices through this one function, never a second unpacking of its own.
+    segmentation prompt sends mappings), so the one unpacking takes either, and every door taking
+    ring vertices (the save conversion here, proposal staging) goes through it. The values are
+    not interpreted here: the reader of the ring checks they are numbers.
     """
-    if isinstance(vertex, Mapping):
-        return float(vertex["x"]), float(vertex["y"])
-    return float(vertex[0]), float(vertex[1])
+    if isinstance(vertex, Mapping) and "x" in vertex and "y" in vertex:
+        return vertex["x"], vertex["y"]
+    if isinstance(vertex, (list, tuple)) and len(vertex) == 2:
+        return vertex[0], vertex[1]
+    raise ValueError(f"ring vertex {vertex!r} is not an [x, y] pair or an {{x, y}} mapping")
 
 
 def annotation_from_payload(payload: Mapping, *, author: str | None, now: str) -> Annotation:
     """One client payload dict as an :class:`Annotation`: the single conversion every save door uses.
 
-    Geometry precedence is ``rings``, then ``points``, then ``bbox``, then ``point``. A payload
-    carrying more than one of them never loses the richer shape: a polygon is the source of truth
-    and its box is derived on write, so letting a box win would collapse it to a box-only record.
-    An empty ``points`` list falls through to ``bbox`` rather than becoming a degenerate polygon.
-    ``point`` is a single placed prompt or keypoint, deliberately a different key from ``points``:
-    a one-vertex contour and a point are not the same geometry.
+    The payload is translated into the document's own record shape and decoded by
+    :func:`annotation_of_record`, so every check a stored record passes is the one a saved payload
+    passes, and a supplied value that route refuses raises ``ValueError`` here too. The
+    translation: ``bbox`` corners ``[x1, y1, x2, y2]`` become the record's ``[x, y, w, h]``;
+    ``rings`` (a list of rings) and ``points`` (one ring) become ``segmentation``, ``rings``
+    winning when both are given, each vertex an ``[x, y]`` pair or an ``{"x", "y"}`` mapping;
+    ``point`` (a single placed prompt or keypoint, a different geometry from a one-vertex contour)
+    is kept as it is. A polygon then wins over a box and a box over a point, as in a stored record.
 
-    Provenance: a payload carrying ``created_by`` is a shape round-tripping back through the
-    client, so it keeps its own ``created_at`` and its review sign-off
-    (``accepted_by``/``accepted_at``/``accepted_by_rule``) verbatim, and the creator stays the
+    Provenance: a payload carrying ``created_by`` (present as the decoder reads presence: any
+    value but ``null``) is a shape round-tripping back through the client, so it keeps every
+    provenance key it carries verbatim, its review sign-off included, and the creator stays the
     creator through edits. One that does not is new: it is stamped to ``author`` at ``now`` and
     claims no sign-off, since a new shape minting acceptance would record a review that never
     happened. With no ``author`` resolved either, a new shape carries no provenance rather than a
-    time with nobody attached.
+    time with nobody attached. A payload's ``score`` is not read: a saved shape is ground truth.
+    A payload box quantizes to the stored two-decimal grid (:func:`xywh`) in translation, so what
+    is saved is what a later read of the document returns.
     """
-    geometry: BBox | Polygon | Point | None = None
-    if payload.get("rings"):
-        geometry = Polygon(rings=[[ring_vertex(v) for v in ring] for ring in payload["rings"]])
-    elif payload.get("points"):
-        geometry = Polygon(rings=[[ring_vertex(v) for v in payload["points"]]])
-    elif payload.get("bbox") is not None:
-        x1, y1, x2, y2 = (float(v) for v in payload["bbox"])
-        geometry = bbox_from_corners(x1, y1, x2, y2, where=f"subject {payload.get('subject')!r}")
-    elif payload.get("point") is not None:
-        geometry = Point(float(payload["point"][0]), float(payload["point"][1]))
-    round_tripped = bool(payload.get("created_by"))
-    created_by = payload.get("created_by") or author
+    payload = annotation_object(payload)
+    rings, corners = payload.get("rings"), payload.get("bbox")
+    if rings is None and payload.get("points") is not None:
+        rings = [payload["points"]]
+    segmentation = rings if not isinstance(rings, list) else [
+        [c for v in ring for c in ring_vertex(v)] if isinstance(ring, list) else ring
+        for ring in rings]
+    provenance = ({k: payload.get(k) for k in _PROV_KEYS} if payload.get("created_by") is not None
+                  else {"created_by": author, "created_at": now if author else None})
+    return annotation_of_record({
+        "subject": payload.get("subject"),
+        "segmentation": segmentation,
+        "bbox": xywh(*_numbers(corners, "bbox", 4)) if corners is not None else None,
+        "point": payload.get("point"),
+        "attributes": payload.get("attributes"),
+        "iscrowd": payload.get("iscrowd"),
+        **provenance,
+    })
+
+
+def annotation_object(o) -> dict:
+    """``o`` when it is an annotation object (a JSON object), else ``ValueError`` naming it: the
+    one check every reader of a raw record, native or COCO, makes before reading its fields."""
+    if not isinstance(o, dict):
+        raise ValueError(f"is {o!r}, not an annotation object")
+    return o
+
+
+def annotation_of_record(o) -> Annotation:
+    """One record of a per-image document as an :class:`Annotation`: the one per-record decoder.
+
+    A key that is absent or ``null`` reads as absent, for every optional field: a ground-truth
+    record has no ``score``, an image-level label has no geometry, a record with no ``iscrowd``
+    is no crowd region. A key that is present with a value that is not what the schema states
+    raises ``ValueError`` naming the key, never reads as absent, whichever geometry wins
+    precedence: a ``bbox`` that is not four numbers or has no positive extent
+    (:func:`check_box_extent`), a ``segmentation`` that is not rings of three or more points
+    (:func:`_polygon_of`), a ``point`` that is not two numbers, a ``score`` that is not a number,
+    attributes that are not value names (:func:`attributes_of`), a crowd flag that is not one
+    (:func:`iscrowd_of`). So does a record that is not an object (:func:`annotation_object`) or
+    that :class:`Annotation` refuses to construct (no non-empty string ``subject``). Geometry
+    precedence is rings, then box, then point, over the keys present: a polygon is the source of
+    truth and its box is derived from it.
+    """
+    o = annotation_object(o)
+    subject = o.get("subject")
+    present = {k: o[k] for k in ("segmentation", "bbox", "point", "score", "attributes", "iscrowd",
+                                 *_PROV_KEYS) if o.get(k) is not None}
+    polygon = _polygon_of(present["segmentation"]) if "segmentation" in present else None
+    box = None
+    if "bbox" in present:
+        x, y, w, h = _numbers(present["bbox"], "bbox", 4)
+        box = BBox(x, y, x + w, y + h)
+        check_box_extent(box, where=f"subject {subject!r}")
+    point = _numbers(present["point"], "point", 2) if "point" in present else None
+    score = _numbers([present["score"]], "score", 1)[0] if "score" in present else None
     return Annotation(
-        subject=str(payload["subject"]),
-        geometry=geometry,
-        attributes={str(k): str(v) for k, v in (payload.get("attributes") or {}).items()},
-        created_by=created_by,
-        created_at=payload.get("created_at") if round_tripped else (now if created_by else None),
-        accepted_by=payload.get("accepted_by") if round_tripped else None,
-        accepted_at=payload.get("accepted_at") if round_tripped else None,
-        accepted_by_rule=payload.get("accepted_by_rule") if round_tripped else None,
+        subject=subject, geometry=polygon or box or (Point(*point) if point else None),
+        attributes=attributes_of(present["attributes"]) if "attributes" in present else {},
+        score=score, iscrowd="iscrowd" in present and iscrowd_of(present["iscrowd"]),
+        **{k: present[k] for k in _PROV_KEYS if k in present},
     )
-
-
-def _attributes_of(obj: dict) -> dict[str, str]:
-    """The annotation's attribute values (name → value name); non-string entries dropped."""
-    raw = obj.get("attributes")
-    if not isinstance(raw, dict):
-        return {}
-    return {str(k): v for k, v in raw.items() if isinstance(v, str) and v}
-
-
-def _prov_kwargs(obj: dict) -> dict:
-    return {k: obj[k] for k in _PROV_KEYS if obj.get(k) is not None}
 
 
 def _annotations_of(data: dict | None) -> list[Annotation]:
     """Parse a loaded per-image dict into :class:`Annotation` records (the one shared parse).
 
-    Prefers a polygon geometry over a box when both are present (the polygon is the source of truth and
-    its box is derivable). An annotation with a ``subject`` but no geometry is kept (an image-level
-    label).
-
     Raises :class:`UnreadableLabelDocument` for a document whose ``annotations`` is present but not
-    a list (covers it being absent or ``null`` too), for a record that is not a dict or carries no
-    string ``subject`` (naming the record's index: skipping it silently would let a one-record file
-    whose only record is malformed read as an empty document, and an empty read is what every
-    zero-object training path is built on), and for a record whose stored box has no positive
-    extent (:func:`check_box_extent`).
+    a list (covers it being absent or ``null`` too), and for any record
+    :func:`annotation_of_record` refuses, naming the record's index: skipping it silently would let
+    a one-record file whose only record is malformed read as an empty document, and an empty read
+    is what every zero-object training path is built on.
     """
     if data is None:
         return []
@@ -494,32 +516,10 @@ def _annotations_of(data: dict | None) -> list[Annotation]:
         )
     out: list[Annotation] = []
     for i, o in enumerate(raw):
-        if not isinstance(o, dict):
-            raise UnreadableLabelDocument(f"record {i} is {o!r}, not an annotation object")
-        subject = o.get("subject")
-        if not isinstance(subject, str) or not subject:
-            raise UnreadableLabelDocument(f"record {i} carries no string subject: {o!r}")
-        geometry: BBox | Polygon | Point | None = None
-        rings = _rings_from_segmentation(o.get("segmentation"))
-        if rings is not None:
-            geometry = Polygon(rings)
-        else:
-            bb = _coerce_bbox(o.get("bbox"))
-            if bb is not None:
-                x, y, w, h = bb
-                geometry = BBox(x, y, x + w, y + h)
-                try:
-                    check_box_extent(geometry, where=f"record {i} ({subject!r})")
-                except ValueError as exc:
-                    raise UnreadableLabelDocument(str(exc)) from exc
-            else:
-                pt = _coerce_point(o.get("point"))
-                if pt is not None:
-                    geometry = Point(pt[0], pt[1])
-        out.append(Annotation(
-            subject=subject, geometry=geometry, attributes=_attributes_of(o),
-            score=_score_of(o), **_prov_kwargs(o),
-        ))
+        try:
+            out.append(annotation_of_record(o))
+        except ValueError as exc:
+            raise UnreadableLabelDocument(f"record {i} {exc}") from exc
     return out
 
 
@@ -545,17 +545,31 @@ def read_annotations(path) -> list[Annotation]:
     return _annotations_of(_load(str(path)))
 
 
-def detection_annotations(path: str | Path) -> list[Annotation]:
-    """A prediction document's annotations narrowed to real detections, a ``Point`` excluded.
+def read_predictions(path) -> list[Annotation]:
+    """A prediction document's records, each stating its ``score``, the one decoder a model's own
+    output is read through: a record stating none raises :class:`UnreadableLabelDocument` naming
+    it (:func:`~tcip_annotation.state.prediction_score`), never a stand-in confidence."""
+    annotations = read_annotations(path)
+    for i, a in enumerate(annotations):
+        try:
+            prediction_score(a)
+        except ValueError as exc:
+            raise UnreadableLabelDocument(f"record {i} {exc}") from exc
+    return annotations
 
-    A ``Point`` records no detection (nothing a detector localized as a box or region), so
-    counting one would inflate whatever this feeds: a phenology curve's denominator, or a
-    per-image detection count. The one predicate ``count_by_class`` and a per-image count CSV's
-    bucket-regime reader share, extracted here so neither path can drift from the other about
+
+def detection_annotations(path: str | Path) -> list[Annotation]:
+    """A prediction document's annotations narrowed to the detections a count counts
+    (:func:`~tcip_annotation.state.is_detection`: a crowd region and a ``Point`` excluded).
+
+    A ``Point`` records no detection and a crowd region is never one object, so counting either
+    would inflate whatever this feeds: a phenology curve's denominator, a per-image detection
+    count, a per-plant count. The one selection every counting reader of a per-image document
+    shares (``count_by_class``, the per-image count CSV's bucket reader, the orthomosaic per-plant
+    count, the worst-predictions triage on both sides), so no path can drift from another about
     what counts as a detection.
     """
-    return [a for a in read_annotations(str(path))
-           if box_derivable(a.geometry)]
+    return [a for a in read_annotations(str(path)) if is_detection(a)]
 
 
 def read_annotations_versioned(target: Key | str | Path) -> tuple[list[Annotation], Version]:
@@ -760,18 +774,21 @@ def require_reference_ground_truth(directory: str | Path) -> None:
 # ── writer ─────────────────────────────────────────────────────────────────
 
 
-def xywh(x1: float, y1: float, x2: float, y2: float) -> list[float]:
-    """A pixel box in corner form as this schema's ``bbox``: COCO ``[x, y, w, h]``, 2 decimals.
+def xywh(x1: float, y1: float, x2: float, y2: float, *, on_grid: bool = True) -> list[float]:
+    """A box in corner form as this schema's ``bbox``: COCO ``[x, y, w, h]``, the one conversion.
 
-    The 2-decimal quantum is the grid the stored document lives on, so it is also the grid anything
-    comparing a stored box against another box has to be on. Public because that comparison happens
-    outside this package too (evaluation puts both sides of a match on this grid before scoring);
-    one implementation, so a reader and a scorer cannot land on different grids.
+    A pixel box is put on the 2-decimal quantum, the grid the stored document lives on, so it is
+    also the grid anything comparing a stored box against another box has to be on. Public
+    because that comparison happens outside this package too (evaluation puts both sides of a
+    match on this grid before scoring); one implementation, so a reader and a scorer cannot land
+    on different grids. ``on_grid=False`` is for a box on no pixel grid at all (a record kept on
+    the normalized unit square), which the quantum would erase.
 
     The inverse, reading such a record back, is ``BBox(x, y, x + w, y + h)`` in
     :func:`_annotations_of`, which is what keeps write and read symmetric.
     """
-    return [round(x1, 2), round(y1, 2), round(x2 - x1, 2), round(y2 - y1, 2)]
+    box = [x1, y1, x2 - x1, y2 - y1]
+    return [round(v, 2) for v in box] if on_grid else box
 
 
 def _stored_bbox_or_raise(bbox: BBox, *, where: str) -> list[float]:
@@ -802,25 +819,21 @@ def geometry_extent_ok(geometry: BBox | Polygon) -> bool:
     A :class:`Polygon`'s vertices round to two decimals before its box is derived, the same
     order :func:`write_annotations` stores them in, so a caller pre-filtering a candidate
     detection before it ever reaches the writer reaches the identical verdict the writer would.
-    An empty ring list (every ring shorter than three points) has no shape and is not ok.
     """
     if polygonal(geometry):
-        rings = [r for r in geometry.rings if len(r) >= 3]
-        if not rings:
-            return False
-        return stored_box_extent_ok(bbox_of(Polygon(_rounded_rings(rings))))
+        return stored_box_extent_ok(bbox_of(Polygon(_rounded_rings(geometry.rings))))
     return stored_box_extent_ok(cast(BBox, geometry))
 
 
-def _annotation_record(a: Annotation) -> dict | None:
-    """One annotation → its JSON object, or None if a degenerate polygon should be skipped."""
+def stored_content(a: Annotation) -> dict:
+    """One annotation as its stored JSON object, provenance aside: its content on the stored
+    grid, which the writer stores and a content digest of stored annotations hashes. Its
+    attributes are read through :func:`attributes_of`, so a record the writer stores is one the
+    reader accepts, raising ``ValueError`` otherwise."""
     rec: dict = {"subject": a.subject}
     geom = a.geometry
     if polygonal(geom):
-        valid_rings = [r for r in geom.rings if len(r) >= 3]
-        if not valid_rings:
-            return None  # no ring is a real shape; skip so write<->read stays symmetric
-        rounded_rings = _rounded_rings(valid_rings)
+        rounded_rings = _rounded_rings(geom.rings)
         rec["segmentation"] = [[c for xy in ring for c in xy] for ring in rounded_rings]
         # Boxed from the rounded rings the document stores, not the raw ones, so a ring that
         # only collapses at the stored grid can't write a box claiming extent it lost.
@@ -831,14 +844,59 @@ def _annotation_record(a: Annotation) -> dict | None:
     elif isinstance(geom, Point):
         rec["point"] = [round(geom.x, 2), round(geom.y, 2)]
     if a.attributes:
-        rec["attributes"] = dict(a.attributes)
+        rec["attributes"] = attributes_of(a.attributes)
     if a.score is not None:
         rec["score"] = safe_score(a.score)
-    for k in _PROV_KEYS:
-        v = getattr(a, k, None)
-        if v is not None:
-            rec[k] = v
+    if a.iscrowd:
+        rec["iscrowd"] = True
     return rec
+
+
+def _held_provenance(a: Annotation) -> dict:
+    """The provenance fields ``a`` holds, under the schema's own key names; a field it does not
+    hold is absent, never ``None``."""
+    return {k: getattr(a, k) for k in _PROV_KEYS if getattr(a, k) is not None}
+
+
+def client_annotation(a: Annotation) -> dict:
+    """``a`` as the dict a client reads, the one projection every read door shares (a tool
+    response, the Annotate and Review canvases).
+
+    ``bbox`` in corner form ``[x1, y1, x2, y2]``; ``rings`` for a polygon, every ring, since a
+    stored polygon can be an occlusion-split instance of more than one; ``point`` for a placed
+    prompt or keypoint, the on-disk key; ``attributes``; ``score`` for a prediction; ``iscrowd``
+    always stated, so a crowd region round-trips back on save; and the provenance fields the
+    record holds (:func:`_held_provenance`), which is what reference admissibility turns on.
+    """
+    out: dict = {"subject": a.subject, "attributes": dict(a.attributes), "iscrowd": a.iscrowd}
+    geom = a.geometry
+    if polygonal(geom):
+        out["rings"] = [[[x, y] for x, y in ring] for ring in geom.rings]
+    elif isinstance(geom, BBox):
+        out["bbox"] = [geom.x1, geom.y1, geom.x2, geom.y2]
+    elif isinstance(geom, Point):
+        out["point"] = [geom.x, geom.y]
+    if a.score is not None:
+        out["score"] = a.score
+    return {**out, **_held_provenance(a)}
+
+
+def encode_annotations(target, annotations, img_w: int, img_h: int, *,
+                       keep_empty: bool = False) -> tuple[Key, bytes | None]:
+    """The key ``target`` names and the exact bytes its per-image document holds.
+
+    The writer's one encoder, apart from the write so a caller placing several documents can
+    encode every one of them, and refuse on the first geometry the stored grid collapses
+    (``ValueError``), before any lands. ``None`` for the bytes when no record survives encoding
+    and ``keep_empty`` is not set: such a document is removed rather than written.
+    """
+    records = [{**stored_content(a), **_held_provenance(a)} for a in annotations]
+    key = _record_key(target)
+    if not records and not keep_empty:
+        return key, None
+    payload = {"image": key.parts[-1], "width": int(img_w), "height": int(img_h),
+               ANNOTATIONS_KEY: records}
+    return key, _document_bytes(payload)
 
 
 def write_annotations(target, annotations, img_w: int, img_h: int, *,
@@ -856,14 +914,11 @@ def write_annotations(target, annotations, img_w: int, img_h: int, *,
     write into a compare-and-set: anything that changed underneath raises ``VersionConflict`` and
     nothing is written. Returns the new version, or ``None`` when the document was removed.
     """
-    records = [r for r in (_annotation_record(a) for a in annotations) if r is not None]
-    key = _record_key(target)
-    if not records and not keep_empty:
+    key, data = encode_annotations(target, annotations, img_w, img_h, keep_empty=keep_empty)
+    if data is None:
         tcip_store.delete(key, expect=expect)
         return None
-    payload = {"image": key.parts[-1], "width": int(img_w), "height": int(img_h),
-               ANNOTATIONS_KEY: records}
-    return tcip_store.put_blob(key, _document_bytes(payload), expect=expect)
+    return tcip_store.put_blob(key, data, expect=expect)
 
 
 # ── the one target-membership decision (shared by assembly and the loader) ───
@@ -877,9 +932,9 @@ def target_class_id(a: Annotation, subject: str, attribute: str | None,
                     ) -> int | None | str:
     """The 0-indexed class id ``a`` trains as for ``(subject, attribute)``.
 
-    Returns ``None`` if ``a`` is not a detection/segmentation target for this scope at all (a
-    different subject, a geometry-less label, or a :class:`~tcip_annotation.state.Point`, since a point
-    has no box/area and is never a detection/segmentation training target). For a genuine
+    Returns ``None`` if ``a`` is of a different subject, no target of this scope at all. Which
+    geometry a target is read from is the caller's statement (the loader's ``reads_geometry``,
+    through ``label_queries.json_det_targets``), never asked again here. For a genuine
     target, two different failure shapes exist and must not be conflated: the instance was
     never assessed for ``attribute`` at all (``a.attributes.get(attribute) is None``, the annotator
     hasn't gotten to it yet, a soft/expected gap), versus the instance was assessed but with a value
@@ -889,11 +944,11 @@ def target_class_id(a: Annotation, subject: str, attribute: str | None,
     regardless of ``allow_unlabeled``, since a real annotation read as nothing is a measurement bug,
     never something to drop silently.
 
-    The single membership+id decision: :func:`to_coco_dataset` (training assembly) and the loader's
-    per-image target reader both call this, so the assembled COCO and the calibration/eval GT can
-    never disagree about which annotation is a target or which class it is.
+    The single membership+id decision every per-image target reader calls, so training and
+    calibration/eval ground truth can never disagree about which annotation is a target or which
+    class it is.
     """
-    if a.subject != subject or not box_derivable(a.geometry):
+    if a.subject != subject:
         return None
     key = a.attributes.get(attribute) if attribute else subject
     if key is None:
@@ -963,92 +1018,3 @@ def require_classified_record(
             "bucket."
         )
     return value
-
-
-# ── dataset-COCO assembly (for training / export) ────────────────────────────
-
-
-def to_coco_dataset(
-    entries: list[tuple[str, str]],
-    *,
-    subject: str,
-    id_map: dict[str, int],
-    attribute: str | None = None,
-    confirmed_negative_names: set[str] | None = None,
-) -> dict:
-    """Concatenate per-image JSON files into one COCO dataset dict, scoped to one subject.
-
-    ``entries``: ``[(label_json_path, image_file_name), ...]``. ``id_map`` is the run's name→id
-    assignment (``tcip_mcp.subject_registry.assign_class_ids``): keyed by the ``attribute``'s value names
-    when ``attribute`` is set, else by the ``subject`` itself. Each kept annotation's ``category_id`` is
-    ``id_map[key]`` where ``key`` is its attribute value (``attribute`` set) or the subject.
-
-    Only annotations of ``subject`` that carry a geometry become COCO annotations (a geometry-less
-    annotation has no training destination this slice, but its presence still marks the image
-    *annotated*, keeping it out of the negative bucket). A missing label file is skipped; an image
-    with no annotations of ``subject`` is included only as a negative when its ``file_name`` is in
-    ``confirmed_negative_names`` (a human marked it Complete-with-nothing). ``categories`` are emitted
-    from ``id_map``. An annotation whose class key is not in ``id_map`` raises, since a real annotation
-    the registry cannot decode is a measurement bug, not something to drop silently.
-
-    When ``attribute`` is set, an image with any instance never assessed for it is excluded
-    wholesale, not trained on its labeled subset alone: silently narrowing to the labeled instances
-    would leave the image's other real, unlabeled objects to train as background noise. The excluded
-    ``file_name``s are reported in the returned dict's own ``excluded_incomplete_attribute`` list,
-    alongside ``images``/``annotations``/``categories``, so a downstream partition can attribute
-    the drop to its real reason rather than re-deriving one from the image's mere absence, which
-    reads identically to an empty label file nobody confirmed.
-
-    A missing label file is skipped, unannotated; a present, unreadable one raises
-    :class:`UnreadableLabelDocument` rather than assembling as a zero-object image, so a corrupt
-    document behind a confirmed-negative name never enters the assembled dataset as a fabricated
-    negative.
-    """
-    categories = [{"id": cid, "name": name} for name, cid in sorted(id_map.items(), key=lambda kv: kv[1])]
-    coco: dict = {"images": [], "annotations": [], "categories": categories,
-                 "excluded_incomplete_attribute": []}
-    negatives = confirmed_negative_names or set()
-    ann_id = 1
-    img_id = 0
-    for label_path, file_name in entries:
-        if not os.path.exists(str(label_path)):
-            continue  # unannotated, not part of the training set
-        data = load_label_document(str(label_path))
-        scoped = [a for a in _annotations_of(data) if a.subject == subject]
-        if not scoped and file_name not in negatives:
-            continue  # no annotations of this subject and not a confirmed negative, skip
-        # allow_unlabeled=True: an instance never assessed for `attribute` is a soft, expected gap,
-        # not a decode bug, and must not abort the whole assembly; computed once per instance and reused below.
-        cids = [target_class_id(a, subject, attribute, id_map, allow_unlabeled=True) for a in scoped]
-        if attribute is not None and UNLABELED in cids:
-            coco["excluded_incomplete_attribute"].append(file_name)
-            continue  # incomplete GT for this scope: the whole image, not just the gap, is excluded
-        img_id += 1
-        coco["images"].append({
-            "id": img_id, "file_name": file_name,
-            "width": int(data.get("width", 0) or 0), "height": int(data.get("height", 0) or 0),
-        })
-        for a, cid in zip(scoped, cids):
-            if cid is None:
-                continue  # image-level label: counts the image as annotated, no detection/seg target
-            assert box_derivable(a.geometry), (
-                "target_class_id already returned None for a geometry no box can be read from"
-            )
-            box = bbox_of(a.geometry)
-            rec: dict = {
-                "id": ann_id, "image_id": img_id, "category_id": cid, "iscrowd": 0,
-                "bbox": xywh(box.x1, box.y1, box.x2, box.y2),
-                "area": round((box.x2 - box.x1) * (box.y2 - box.y1), 2),
-            }
-            if polygonal(a.geometry):
-                rec["segmentation"] = [[round(float(c), 2) for xy in ring for c in xy]
-                                       for ring in a.geometry.rings if len(ring) >= 3]
-            if a.score is not None:
-                rec["score"] = safe_score(a.score)
-            for k in _PROV_KEYS:
-                v = getattr(a, k, None)
-                if v is not None:
-                    rec[k] = v
-            coco["annotations"].append(rec)
-            ann_id += 1
-    return coco

@@ -30,6 +30,32 @@ def client() -> TestClient:
 # ── the shared constructor ──────────────────────────────────────────────────
 
 
+def test_a_count_before_the_write_counts_what_the_write_stores(tmp_path: Path):
+    """The delivered count and the prediction write read one extent decision on the stored
+    grid: a box that rounds to no width, and a mask whose rings have none, count as nothing
+    beside the one detection the write keeps."""
+    import numpy as np
+
+    from tcip_annotation.json_io import read_annotations
+    from tcip_mcp.pipelines.postprocessing.export import positive_detections, write_predictions_json
+
+    blob = np.zeros((40, 40), dtype=np.float32)
+    blob[5:30, 5:30] = 1.0
+    past_the_edge = {"mask_patch": blob, "offset_x": 100, "offset_y": 0}  # clipped to one column
+
+    def result() -> dict:
+        return {"width": 40, "height": 40, "labels": [1, 1, 1], "scores": [0.9, 0.8, 0.7],
+                "boxes": [[5.0, 5.0, 30.0, 30.0], [5.0, 5.0, 30.0, 30.0], [10.0, 5.0, 10.004, 30.0]],
+                "masks": [past_the_edge, blob], "count": 3}
+
+    counted, scores = positive_detections(result())
+    written = result()
+    write_predictions_json(tmp_path / "a.json", written, subject="bur", attribute=None,
+                           id_map={"bur": 0})
+    assert counted == len(read_annotations(tmp_path / "a.json")) == written["count"] == 1
+    assert scores == written["scores"] == [0.8]
+
+
 def test_check_box_extent_refuses_an_inverted_box():
     from tcip_annotation.json_io import check_box_extent
 
@@ -50,12 +76,13 @@ def test_check_box_extent_admits_an_ordered_box():
     check_box_extent(BBox(5, 5, 10, 20), where="subject 'leaf'")  # must not raise
 
 
-def test_bbox_from_corners_refuses_and_admits():
-    from tcip_annotation.json_io import bbox_from_corners
+def test_a_corner_box_is_refused_and_admitted_through_the_save_conversion():
+    from tcip_annotation.json_io import annotation_from_payload
 
-    with pytest.raises(ValueError):
-        bbox_from_corners(10, 10, 5, 5, where="subject 'leaf'")
-    box = bbox_from_corners(5, 5, 10, 20, where="subject 'leaf'")
+    with pytest.raises(ValueError, match="positive extent"):
+        annotation_from_payload({"subject": "leaf", "bbox": [10, 10, 5, 5]}, author=None, now="t")
+    box = annotation_from_payload({"subject": "leaf", "bbox": [5, 5, 10, 20]},
+                                  author=None, now="t").geometry
     assert (box.x1, box.y1, box.x2, box.y2) == (5, 5, 10, 20)
 
 
@@ -274,6 +301,24 @@ def test_review_action_refuses_an_inverted_edited_box(client: TestClient, tmp_pa
     assert json.loads(gt_path.read_text())["annotations"][0]["bbox"] == [1, 1, 2, 2]
 
 
+@pytest.mark.parametrize("edit", [
+    {"edited_points": [[10.0, 10.0]]},                                  # one vertex: no polygon
+    {"edited_box": [5, 5, 10, 20], "edited_points": [[10.0, 10.0]]},    # beside a valid box
+    {"edited_box": ["10", "10", "50", "50"]},                           # coordinates as strings
+    {"edited_points": [["10", "10"], ["50", "10"], ["50", "50"]]},
+], ids=["one_vertex_contour", "one_vertex_contour_beside_a_box", "string_box", "string_ring"])
+def test_a_review_edit_is_checked_as_a_saved_shape_is(client: TestClient, tmp_path: Path, edit) -> None:
+    """The edit route reads the reviewer's shape through the save routes' own conversion, so
+    every value it carries is checked, whichever geometry the edit resolves to."""
+    gt_path, pred_path = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
+
+    resp = client.post("/api/review/action", json=_action_payload(
+        tmp_path, gt_path, pred_path, det_type="fn", gt_idx=0, action="edited", **edit))
+
+    assert resp.status_code == 400, resp.text
+    assert json.loads(gt_path.read_text())["annotations"][0]["bbox"] == [1, 1, 2, 2]
+
+
 def test_review_action_admits_an_ordered_edited_box(client: TestClient, tmp_path: Path) -> None:
     gt_path, pred_path = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
 
@@ -398,3 +443,20 @@ def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(tmp_path):
     assert "error" not in result
     assert result["dropped_nonpositive_boxes"] == 1
     assert result["n_detect"] == 1
+
+
+@pytest.mark.parametrize("shape", ["box", "polygon"])
+def test_stage_proposals_refuses_a_shape_stating_no_confidence(tmp_path, shape):
+    """A staged shape is a prediction, so it states the confidence its producer reported; one
+    stating none is refused by name, never staged at a confidence nobody reported."""
+    from tcip_mcp.tools.proposal_tools import stage_proposals
+
+    image = tmp_path / "images" / "2026-01-01" / "img_001.jpg"
+    _write_image(image)
+    unscored = ({"boxes": [{"subject": "leaf", "cx": 0.5, "cy": 0.5, "w": 0.2, "h": 0.2}]}
+                if shape == "box" else
+                {"polygons": [{"subject": "leaf", "points": [[0.1, 0.1], [0.4, 0.1], [0.4, 0.4]]}]})
+
+    result = stage_proposals(str(image), model_name="sam", **unscored)
+
+    assert "conf" in result.get("error", ""), result

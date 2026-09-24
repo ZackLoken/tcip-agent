@@ -4,7 +4,7 @@ import { annotationsToCanvas, canvasToAnnotations } from "@/lib/labelSerde";
 import type { Annotation, AnnotationPayload } from "@/store/types";
 
 /** What the load routes hand back for a payload just saved: the save/load asymmetry made explicit,
- *  `_to_annotation` builds one Polygon from `rings` or `points`, and `_ann_dict` always emits
+ *  `annotation_from_payload` builds one Polygon from `rings` or `points`, and `annotation_dict` always emits
  *  `rings`. A save payload is therefore never a load payload; going through this is what makes a
  *  round-trip test a round-trip. `point` is symmetric (same field both ways), so it rides through
  *  the rest spread untouched. */
@@ -19,9 +19,15 @@ describe("labelSerde round-trip", () => {
   it("splits a unified list by each annotation's own geometry, then reassembles it symmetrically", () => {
     // One of each kind in one file, including a geometry-less rating that must not be dropped.
     const annotations: Annotation[] = [
-      { subject: "subject_a", bbox: [10, 20, 30, 40], attributes: { growth_stage: "extended" } },
       {
         subject: "subject_a",
+        iscrowd: false,
+        bbox: [10, 20, 30, 40],
+        attributes: { growth_stage: "extended" },
+      },
+      {
+        subject: "subject_a",
+        iscrowd: false,
         rings: [
           [
             [0, 0],
@@ -31,8 +37,13 @@ describe("labelSerde round-trip", () => {
         ],
         attributes: {},
       },
-      { subject: "tip", point: [7, 9], attributes: {} },
-      { subject: "efb", attributes: { severity: "moderate" }, created_by: "user:breeder" },
+      { subject: "tip", iscrowd: false, point: [7, 9], attributes: {} },
+      {
+        subject: "efb",
+        iscrowd: false,
+        attributes: { severity: "moderate" },
+        created_by: "user:breeder",
+      },
     ];
 
     const canvas = annotationsToCanvas(annotations);
@@ -70,7 +81,9 @@ describe("labelSerde round-trip", () => {
   });
 
   it("preserves a geometry-less rating across a load->save->load cycle (never silently dropped)", () => {
-    const original: Annotation[] = [{ subject: "efb", attributes: { severity: "severe" } }];
+    const original: Annotation[] = [
+      { subject: "efb", iscrowd: false, attributes: { severity: "severe" } },
+    ];
     const saved = canvasToAnnotations(annotationsToCanvas(original));
     // The saved payload, read back, still yields exactly the geometry-less rating.
     const reloaded = annotationsToCanvas(asLoaded(saved));
@@ -90,6 +103,7 @@ describe("labelSerde round-trip", () => {
     const annotations: Annotation[] = [
       {
         subject: "subject_a",
+        iscrowd: false,
         rings: [
           [
             [0, 0],
@@ -110,6 +124,7 @@ describe("labelSerde round-trip", () => {
     const original: Annotation[] = [
       {
         subject: "subject_a",
+        iscrowd: false,
         rings: [
           [
             [0, 0],
@@ -150,13 +165,17 @@ describe("labelSerde multi-ring polygons", () => {
   ];
 
   it("loads every ring into one canvas polygon (no ring dropped, no shape split in two)", () => {
-    const canvas = annotationsToCanvas([{ subject: "subject_a", rings: twoRings, attributes: {} }]);
+    const canvas = annotationsToCanvas([
+      { subject: "subject_a", iscrowd: false, rings: twoRings, attributes: {} },
+    ]);
     expect(canvas.polygons).toHaveLength(1);
     expect(canvas.polygons[0].rings).toEqual(twoRings);
   });
 
   it("deep-copies the rings so canvas edits never mutate the loaded response", () => {
-    const loaded: Annotation[] = [{ subject: "subject_a", rings: twoRings, attributes: {} }];
+    const loaded: Annotation[] = [
+      { subject: "subject_a", iscrowd: false, rings: twoRings, attributes: {} },
+    ];
     const canvas = annotationsToCanvas(loaded);
     canvas.polygons[0].rings[1][0] = [999, 999];
     expect(twoRings[1][0]).toEqual([40, 40]);
@@ -187,7 +206,13 @@ describe("labelSerde multi-ring polygons", () => {
 
   it("round-trips a multi-ring shape unchanged through save -> load (points bucket empty)", () => {
     const original: Annotation[] = [
-      { subject: "subject_a", rings: twoRings, attributes: {}, created_by: "user:breeder" },
+      {
+        subject: "subject_a",
+        iscrowd: false,
+        rings: twoRings,
+        attributes: {},
+        created_by: "user:breeder",
+      },
     ];
     const saved = canvasToAnnotations(annotationsToCanvas(original));
     const reloaded = annotationsToCanvas(asLoaded(saved));
@@ -198,12 +223,44 @@ describe("labelSerde multi-ring polygons", () => {
   });
 });
 
+describe("labelSerde crowd flag", () => {
+  it("keeps a crowd region a crowd region through load -> save -> load, on every shape kind", () => {
+    const ring: [number, number][] = [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+    ];
+    // As the load routes send them: every annotation states its flag.
+    const original: Annotation[] = [
+      { subject: "bur", bbox: [0, 0, 10, 10], attributes: {}, iscrowd: true },
+      { subject: "bur", rings: [ring], attributes: {}, iscrowd: true },
+      { subject: "bur", bbox: [20, 20, 30, 30], attributes: {}, iscrowd: false },
+    ];
+    const canvas = annotationsToCanvas(original);
+    expect(canvas.boxes.map((b) => b.iscrowd)).toEqual([true, false]);
+    expect(canvas.polygons[0].iscrowd).toBe(true);
+
+    const saved = canvasToAnnotations(canvas);
+    expect(saved.map((a) => a.iscrowd)).toEqual([true, false, true]);
+    const reloaded = annotationsToCanvas(asLoaded(saved));
+    expect(reloaded.boxes.map((b) => b.iscrowd)).toEqual([true, false]);
+    expect(reloaded.polygons[0].iscrowd).toBe(true);
+  });
+});
+
 describe("labelSerde authorship", () => {
   it("carries authorship onto every canvas shape kind, from the load response", () => {
     const canvas = annotationsToCanvas([
-      { subject: "subject_a", bbox: [0, 0, 10, 10], attributes: {}, authorship: "tool" },
       {
         subject: "subject_a",
+        iscrowd: false,
+        bbox: [0, 0, 10, 10],
+        attributes: {},
+        authorship: "tool",
+      },
+      {
+        subject: "subject_a",
+        iscrowd: false,
         rings: [
           [
             [0, 0],
@@ -214,7 +271,7 @@ describe("labelSerde authorship", () => {
         attributes: {},
         authorship: "person",
       },
-      { subject: "tip", point: [1, 2], attributes: {}, authorship: "unattributed" },
+      { subject: "tip", iscrowd: false, point: [1, 2], attributes: {}, authorship: "unattributed" },
     ]);
     expect(canvas.boxes[0].authorship).toBe("tool");
     expect(canvas.polygons[0].authorship).toBe("person");
@@ -223,9 +280,16 @@ describe("labelSerde authorship", () => {
 
   it("never carries authorship back into a save payload, on any shape kind", () => {
     const canvas = annotationsToCanvas([
-      { subject: "subject_a", bbox: [0, 0, 10, 10], attributes: {}, authorship: "tool" },
       {
         subject: "subject_a",
+        iscrowd: false,
+        bbox: [0, 0, 10, 10],
+        attributes: {},
+        authorship: "tool",
+      },
+      {
+        subject: "subject_a",
+        iscrowd: false,
         rings: [
           [
             [0, 0],
@@ -236,7 +300,7 @@ describe("labelSerde authorship", () => {
         attributes: {},
         authorship: "tool",
       },
-      { subject: "tip", point: [1, 2], attributes: {}, authorship: "tool" },
+      { subject: "tip", iscrowd: false, point: [1, 2], attributes: {}, authorship: "tool" },
     ]);
     const saved = canvasToAnnotations(canvas);
     expect(saved.every((a) => !("authorship" in a))).toBe(true);
@@ -307,6 +371,7 @@ describe("labelSerde points", () => {
         subject: "tip",
         point: [12.5, 40],
         attributes: { stage: "open" },
+        iscrowd: false,
         created_by: "user:breeder",
       },
     ]);
@@ -316,6 +381,7 @@ describe("labelSerde points", () => {
         y: 40,
         subject: "tip",
         attributes: { stage: "open" },
+        iscrowd: false,
         created_by: "user:breeder",
         created_at: null,
         accepted_by: null,
@@ -347,6 +413,7 @@ describe("labelSerde points", () => {
     const original: Annotation[] = [
       {
         subject: "tip",
+        iscrowd: false,
         point: [101.5, 202.25],
         attributes: { stage: "open" },
         created_by: "user:breeder",
@@ -371,8 +438,8 @@ describe("labelSerde points", () => {
 
   it("keeps a point and a geometry-less rating distinct (a point is not an image-level label)", () => {
     const canvas = annotationsToCanvas([
-      { subject: "tip", point: [1, 2], attributes: {} },
-      { subject: "efb", attributes: { severity: "severe" } },
+      { subject: "tip", iscrowd: false, point: [1, 2], attributes: {} },
+      { subject: "efb", iscrowd: false, attributes: { severity: "severe" } },
     ]);
     expect(canvas.points).toHaveLength(1);
     expect(canvas.imageAnnotations).toHaveLength(1);

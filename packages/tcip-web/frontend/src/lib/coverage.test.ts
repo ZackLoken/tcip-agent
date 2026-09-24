@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  breederReadErrorReason,
   cellAt,
   cellsIntersecting,
   completeWarningMessage,
@@ -358,16 +357,5 @@ describe("replaceRequiredToastSentence", () => {
   it("pluralizes by count", () => {
     expect(replaceRequiredToastSentence(1)).toContain("1 cell seen on a previous lattice");
     expect(replaceRequiredToastSentence(3)).toContain("3 cells seen on a previous lattice");
-  });
-});
-
-describe("breederReadErrorReason", () => {
-  it("strips the reader's dict dump after the colon and brace", () => {
-    const raw = "record 0 carries no string subject: {'id': 1, 'image_id': 1, 'category_id': 0}";
-    expect(breederReadErrorReason(raw)).toBe("record 0 carries no string subject");
-  });
-
-  it("passes a reason with no brace through unchanged", () => {
-    expect(breederReadErrorReason("plot.json: not valid JSON")).toBe("plot.json: not valid JSON");
   });
 });

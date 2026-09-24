@@ -438,15 +438,12 @@ describe("CoverageChrome", () => {
     expect(screen.getByText(/1 cell seen on a previous lattice \(6x6\)/)).toBeInTheDocument();
   });
 
-  it("the read-error text strips the record's dictionary, keeping the reader's own sentence", () => {
-    render(
-      <CoverageChrome
-        {...baseProps()}
-        readError="record 0 carries no string subject: {'id': 1, 'category_id': 0}"
-      />,
-    );
-    expect(screen.getByText(/record 0 carries no string subject$/)).toBeInTheDocument();
-    expect(screen.queryByText(/'id': 1/)).not.toBeInTheDocument();
+  it("the read-error text is the reader's whole reason", () => {
+    const reason = "record 0 attributes {'color': 3} are not attribute names mapped to value names";
+    render(<CoverageChrome {...baseProps()} readError={reason} />);
+    expect(
+      screen.getByText((text) => text.includes(`fixed: ${reason}`) || text.endsWith(reason)),
+    ).toBeInTheDocument();
   });
 
   it("another subject's attestation reaches the hidden state list", () => {
