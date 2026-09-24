@@ -96,7 +96,7 @@ def _records(counts: list[int]) -> list[dict]:
     return [
         build_coco_image_record(
             100, 100,
-            [{"bbox": [10.0, 10.0, 12.0, 12.0], "category_id": 0} for _ in range(n)],
+            [{"bbox": [10.0, 10.0, 12.0, 12.0], "category_id": 0, "iscrowd": 0} for _ in range(n)],
             [{"bbox": [10.0, 10.0, 12.0, 12.0], "category_id": 0, "score": 0.9}
              for _ in range(n)],
             image_id=f"img{i}",

@@ -54,7 +54,7 @@ def _skewed_calibration_records() -> list[dict]:
         gt, dt = [], []
         for k in range(n):
             box = [50.0 * k, 100.0 + 10.0 * i, 20.0, 20.0]
-            gt.append({"bbox": box, "category_id": 1})
+            gt.append({"bbox": box, "category_id": 1, "iscrowd": 0})
             dt.append({"bbox": box, "category_id": 1, "score": 0.9})
         recs.append({"image_id": f"c{i}", "width": 20000, "height": 2000, "gt": gt, "dt": dt})
     return recs

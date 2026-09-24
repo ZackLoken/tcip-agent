@@ -35,7 +35,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from tcip_mcp.pipelines.feedback.verdicts import decode_verdict
+from tcip_annotation.json_io import xywh
+from tcip_annotation.state import BBox
+from tcip_annotation.verdicts import Verdict, decode_verdict
+
 from tcip_mcp.pipelines.resolution import VALIDATED_REVIEW_CONFIRMED, ResolvedBundle
 
 # Every name resolve_operating_point can put in gate_evidence["failures"] (cross-cutting named-failure
@@ -180,14 +183,16 @@ def _selection_movement_sentence(gate_evidence: dict) -> str:
             "calibrated on a universe that moved: redraw the split or re-confirm those labels.")
 
 
-def _to_xywh(box_norm: Sequence[float], img_w: float, img_h: float) -> list[float]:
-    """Normalized center-form ``[cx, cy, w, h]`` -> top-left ``[x, y, w, h]`` scaled by image dims.
+def _to_xywh(box_norm: Sequence[float], dims: tuple[int, int] | None) -> list[float]:
+    """A verdict's normalized box scaled to its image (:meth:`BBox.from_normalized_centre`) as
+    the stored ``[x, y, w, h]`` on the stored pixel grid (``json_io.xywh``).
 
-    With no image dimensions the unit square (1.0, 1.0) keeps every record on one consistent
-    normalized scale, valid for the count curve, whose tolerance is derived from the same records.
+    With no image dimensions the record stays on the unit square, off any pixel grid, keeping
+    every record on one consistent normalized scale, valid for the count curve, whose tolerance
+    is derived from the same records.
     """
-    cx, cy, bw, bh = (float(v) for v in box_norm)
-    return [(cx - bw / 2) * img_w, (cy - bh / 2) * img_h, bw * img_w, bh * img_h]
+    b = BBox.from_normalized_centre(box_norm, *(dims or (1.0, 1.0)))
+    return xywh(b.x1, b.y1, b.x2, b.y2, on_grid=dims is not None)
 
 
 def _same_producer(entry_identity: dict, target: dict) -> bool:
@@ -213,6 +218,12 @@ def _matches_any_bucket(identity: dict | None, bucket_identities: list[dict]) ->
     if not identity:
         return False
     return any(_same_producer(identity, target) for target in bucket_identities)
+
+
+def _scoped_verdicts(entries: list[dict], bucket_identities: list[dict]) -> list[Verdict]:
+    """An image's verdict entries, decoded, recorded against one of ``bucket_identities``."""
+    verdicts = [decode_verdict(e) for e in entries]
+    return [v for v in verdicts if _matches_any_bucket(v.producer_identity, bucket_identities)]
 
 
 def covers(slot: Any, subject: str | None) -> bool:
@@ -309,12 +320,15 @@ def review_to_records(
     only a stemmed ``image_id`` can match a training stem in ``_train_disjointness``. Stemming
     also keeps tile groups coherent: ``_TILE_GROUP_RE`` matches only a bare stem.
     """
+    from tcip_mcp.pipelines.training.evaluation import build_coco_image_record, dt_record, gt_record
+
     dims = image_dims or {}
     records: list[dict] = []
     for img_name, img_data in review_state.get("image", {}).items():
         if only_completed and img_data.get("img_status") != "completed":
             continue
-        img_w, img_h = dims.get(img_name, (1.0, 1.0))
+        img_dims = dims.get(img_name)
+        img_w, img_h = img_dims or (1.0, 1.0)
         detections = img_data.get("detections") or []
         gt_preexisting = bool(img_data.get("gt_preexisting"))
 
@@ -328,21 +342,18 @@ def review_to_records(
             # drop every confirmed negative from the reference.
             if not _matches_any_bucket(img_data.get("producer_identity"), bucket_identities):
                 continue
-            records.append({"width": int(img_w), "height": int(img_h),
-                            "image_id": Path(img_name).stem, "gt": [], "dt": [],
-                            "adjudication_covered": covers(
-                                img_data.get("adjudication_covered"), subject)})
+            records.append({
+                **build_coco_image_record(img_w, img_h, [], [], image_id=Path(img_name).stem),
+                "adjudication_covered": covers(img_data.get("adjudication_covered"), subject)})
             continue
 
-        scoped = [e for e in detections
-                 if _matches_any_bucket(e.get("producer_identity"), bucket_identities)]
+        scoped = _scoped_verdicts(detections, bucket_identities)
         if not scoped:
             continue  # nothing on this image pertains to the bucket(s) being validated
 
         gt: list[dict] = []
         dt: list[dict] = []
-        for entry in scoped:
-            verdict = decode_verdict(entry)
+        for verdict in scoped:
             if not verdict.geometry_recorded:
                 # A coverage-only attestation ("swept this image, found nothing more", the Review
                 # tab's "sweep" verdict: neither gt_idx nor pred_idx set and no edited geometry
@@ -360,39 +371,39 @@ def review_to_records(
                 # is missing real evidence, the opposite of what class-aware admission is for.
                 raise ValueError(
                     f"{_breeder_message('class_id_unresolvable')} "
-                    f"(image {img_name!r}, class {entry.get('class_name')!r})"
+                    f"(image {img_name!r}, class {verdict.class_name!r})"
                 )
             cid = verdict.class_id
             # dt: the model's own prediction with its recorded score (any verdict that has one).
             if verdict.pred_box is not None and verdict.conf is not None:
-                dt.append({"category_id": cid + 1,
-                           "bbox": _to_xywh(verdict.pred_box, img_w, img_h),
-                           "score": verdict.conf})
+                dt.append(dt_record(_to_xywh(verdict.pred_box, img_dims), cid + 1,
+                                    verdict.conf))
             # gt: boxes the breeder affirmed exist (accepted FP carries only a predicted box).
             if verdict.is_positive and verdict.affirmed_box is not None:
-                gt.append({"category_id": cid + 1,
-                           "bbox": _to_xywh(verdict.affirmed_box, img_w, img_h),
-                           "iscrowd": 0})
-        has_missed_object_attestation = any(
-            decode_verdict(e).missed_object_attested for e in scoped
-        )
-        records.append({"width": int(img_w), "height": int(img_h),
-                        "image_id": Path(img_name).stem, "gt": gt, "dt": dt,
-                        "adjudication_covered": gt_preexisting or has_missed_object_attestation})
+                gt.append(gt_record(_to_xywh(verdict.affirmed_box, img_dims), cid + 1,
+                                    verdict.iscrowd))
+        has_missed_object_attestation = any(v.missed_object_attested for v in scoped)
+        records.append({
+            **build_coco_image_record(img_w, img_h, gt, dt, image_id=Path(img_name).stem),
+            "adjudication_covered": gt_preexisting or has_missed_object_attestation})
     return records
 
 
 def review_reference_hash(records: list[dict]) -> str:
-    """Content hash of the review-confirmed reference (image names + affirmed gt boxes).
+    """Content hash of the review-confirmed reference: each image's name and its ground truth as
+    content (:func:`~tcip_mcp.pipelines.training.evaluation.gt_facts`), and nothing derived from
+    them, so a field a record builder adds never re-keys a reference.
 
     Scopes the derived conf to *this* reference so the firewall can flag it being inherited across a
     different one, the review analogue of ``resolution.dataset_hash`` over label bytes.
     """
+    from tcip_mcp.pipelines.training.evaluation import gt_facts
+
     h = hashlib.sha256()
-    for rec in sorted(records, key=lambda r: str(r.get("image_id", ""))):
-        h.update(str(rec.get("image_id", "")).encode("utf-8"))
+    for rec in sorted(records, key=lambda r: str(r["image_id"])):
+        h.update(str(rec["image_id"]).encode("utf-8"))
         h.update(b"\0")
-        h.update(json.dumps(rec.get("gt", []), sort_keys=True).encode("utf-8"))
+        h.update(json.dumps(gt_facts(rec)).encode("utf-8"))
         h.update(b"\0")
     return h.hexdigest()[:16]
 
@@ -421,14 +432,10 @@ def review_conf_threshold(
     for img_data in review_state.get("image", {}).values():
         if only_completed and img_data.get("img_status") != "completed":
             continue
-        scoped = [e for e in (img_data.get("detections") or [])
-                 if _matches_any_bucket(e.get("producer_identity"), bucket_identities)]
-        if not scoped:
-            continue
-        image_thresholds = [e.get("conf_threshold") for e in scoped]
-        if any(t is None for t in image_thresholds):
-            return None
-        thresholds.extend(float(t) for t in image_thresholds)
+        for verdict in _scoped_verdicts(img_data.get("detections") or [], bucket_identities):
+            if verdict.conf_threshold is None:
+                return None
+            thresholds.append(verdict.conf_threshold)
     return max(thresholds) if thresholds else None
 
 
@@ -520,13 +527,14 @@ def resolve_operating_point_from_review(
     from tcip_mcp.pipelines.operating_point import (
         attach_split_policy_provenance, resolve_operating_point,
     )
+    from tcip_mcp.pipelines.training.evaluation import gt_objects
 
     records = review_to_records(review_state, image_dims=image_dims, only_completed=only_completed,
                                 bucket_identities=bucket_identities, subject=subject)
     ref_hash = review_reference_hash(records)
     by_id = {str(r.get("image_id", "")): r for r in records}
     stems = sorted(by_id)
-    annotation_counts = {s: len(by_id[s].get("gt", [])) for s in stems}
+    annotation_counts = {s: len(gt_objects(by_id[s])) for s in stems}
     locked = resolve_locked_cal_holdout_split(
         stems, identity_hash=ref_hash, scope_root=scope_root, annotation_counts=annotation_counts,
         group_by=group_by, group_key_map=group_key_map, seed=seed, holdout_ratio=holdout_ratio,

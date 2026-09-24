@@ -41,6 +41,21 @@ def test_mcp_save_annotations_empty_refuses_and_preserves_gt(tmp_path):
     assert len(json_io.read_annotations(det)) == 1              # GT preserved intact
 
 
+@pytest.mark.parametrize("bad", ["a bur", {"bbox": [1, 1, 5, 5]}, {"subject": ""}],
+                         ids=["not_an_object", "no_subject", "empty_subject"])
+def test_mcp_save_annotations_refuses_by_index_through_the_decoders_checks(tmp_path, bad):
+    """Each annotation is admitted by the decoder's own object and subject checks, the refusal
+    naming its index, and nothing is written; the valid one beside it is not written alone."""
+    from tcip_mcp.tools.annotation_tools import save_annotations
+
+    img = _img(tmp_path)
+    det = tmp_path / "det.json"
+    res = save_annotations(str(img), annotations=[{"subject": "bur", "bbox": [1, 1, 5, 5]}, bad],
+                           path=str(det))
+    assert res["error"].startswith("annotation 1 ")
+    assert not det.exists()
+
+
 def test_review_engine_save_gt_empty_keeps_record(tmp_path):
     """An emptied GT keeps an ``{"annotations": []}`` record (not a negative until confirmed),
     never deleting the label file."""
@@ -105,17 +120,3 @@ def test_draw_splits_counts_json_objects_not_lines(tmp_path):
     # foreground_annotations sums per split: true total is 3+1+0+0. Counting raw JSON text
     # lines instead reports dozens, since negatives alone read as several each.
     assert sum(res["foreground_annotations"].values()) == 4
-
-
-def test_coco_roundtrip_preserves_provenance(tmp_path):
-    """GT exported to dataset-COCO and re-imported must keep created_by/accepted_by."""
-    from tcip_annotation.format_io import parse_coco_annotations, write_coco
-    import json as _json
-
-    b = Annotation(subject="bud", geometry=BBox(10, 10, 40, 40), created_by="derived:user:breeder",
-                   created_at="2026-02-11T00:00:00+00:00", accepted_by="user:breeder")
-    p = tmp_path / "dataset.json"
-    write_coco(str(p), {"IMG_0001.JPG": ([b], 100, 80)})
-    anns = parse_coco_annotations(_json.loads(p.read_text()), file_name="IMG_0001.JPG")
-    assert anns[0].created_by == "derived:user:breeder"
-    assert anns[0].accepted_by == "user:breeder"

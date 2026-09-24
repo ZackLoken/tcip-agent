@@ -244,11 +244,13 @@ def _ios(a, b, area_a, area_b) -> float:
 
 def dedup_boxes(
     boxes: np.ndarray, labels: np.ndarray, iou_thresh: float, class_aware: bool = True,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Greedy largest-first dedup: drop a box overlapping a kept box by >= iou_thresh."""
+) -> list[int]:
+    """Greedy largest-first dedup: the sorted indices of the boxes kept, dropping a box that
+    overlaps a kept box by >= iou_thresh. Indices, so a caller keeps every per-box array (a crowd
+    flag beside the labels) in step by indexing each one the same way."""
     n = len(boxes)
     if not iou_thresh or iou_thresh >= 1.0 or n < 2:
-        return boxes, labels
+        return list(range(n))
     areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
     order = sorted(range(n), key=lambda i: -areas[i])  # largest first
     kept: list[int] = []
@@ -262,8 +264,7 @@ def dedup_boxes(
                 break
         if not dup:
             kept.append(i)
-    keep_idx = sorted(kept)
-    return boxes[keep_idx], labels[keep_idx]
+    return sorted(kept)
 
 
 @overload

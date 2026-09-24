@@ -19,7 +19,7 @@ from typing import Optional
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import (
-    Annotation, AnnotationState, BBox, Point, Polygon, polygonal,
+    Annotation, AnnotationState, BBox, Point, Polygon, bbox_of, box_derivable,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,17 +73,14 @@ class AnnotationEngine:
         s._poly_bboxes = []
         for ann in s.annotations:
             geom = ann.geometry
-            if isinstance(geom, BBox):
-                s._poly_bboxes.append((geom.x1, geom.y1, geom.x2, geom.y2))
+            if box_derivable(geom):
+                b = bbox_of(geom)
+                s._poly_bboxes.append((b.x1, b.y1, b.x2, b.y2))
             elif isinstance(geom, Point):
                 # A hit-test extent, not a measurement: the point's own zero-area cell is a real
                 # spatial-index entry (bbox_of refuses one because a *training/delivery* box must
                 # never be fabricated, a different concern from finding the shape under a cursor).
                 s._poly_bboxes.append((geom.x, geom.y, geom.x, geom.y))
-            elif polygonal(geom) and geom.rings:
-                xs = [p[0] for ring in geom.rings for p in ring]
-                ys = [p[1] for ring in geom.rings for p in ring]
-                s._poly_bboxes.append((min(xs), min(ys), max(xs), max(ys)))
             else:
                 s._poly_bboxes.append((0.0, 0.0, 0.0, 0.0))
         s._poly_bboxes_dirty = False
@@ -183,12 +180,10 @@ class AnnotationEngine:
         """Finalize the in-progress polygon into an annotation under the active subject.
 
         Clamps vertices to image bounds, pushes undo, appends the annotation. Returns ``True`` if a
-        polygon was added, ``False`` if the in-progress polygon had fewer than 3 vertices.
+        polygon was added, ``False`` if the in-progress vertices are no polygon (:class:`Polygon`
+        refuses them). Either way the in-progress polygon is cleared.
         """
         s = self.state
-        if len(s.current_polygon) < 3:
-            s.current_polygon = []
-            return False
         w = max(s.img_width, 0)
         h = max(s.img_height, 0)
         clamped: list[tuple[float, float]] = []
@@ -196,8 +191,12 @@ class AnnotationEngine:
             cx = x if w == 0 else max(0.0, min(float(w), x))
             cy = y if h == 0 else max(0.0, min(float(h), y))
             clamped.append((cx, cy))
-        self.add_polygon(Polygon(rings=[clamped]))
         s.current_polygon = []
+        try:
+            polygon = Polygon(rings=[clamped])
+        except ValueError:
+            return False
+        self.add_polygon(polygon)
         return True
 
     # ── I/O ───────────────────────────────────────────────────────────────

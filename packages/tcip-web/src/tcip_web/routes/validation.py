@@ -6,13 +6,13 @@ identical disjoint-split + count-bias gate and conf-censoring guard the held-out
 so a review can only stamp a bucket's operating_point.json VALIDATED_REVIEW_CONFIRMED with a
 record outside the bucket answering for it.
 
-Shares review.py's engine cache, audit writer and bucket-key helpers, the same verdict store
+Shares review.py's engine cache and bucket-key helpers, the same verdict store
 the review routes read and write, rather than a second implementation of any of them.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -20,27 +20,14 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from tcip_mcp.audit import AuditEntryNotWritten
+from tcip_web.routes.audit_gap import audit_gap_409
+
 from tcip_web.routes.review import (
-    _audit, _bucket_of_dir, _get_engine, _guard_path, _prediction_digest,
+    _bucket_of_dir, _get_engine, _guard_path, _prediction_digest,
 )
 
 router = APIRouter(prefix="/api/review", tags=["review"])
-
-
-def _dataset_root_of_all(paths: Iterable[Optional[str]]) -> Optional[str]:
-    """The one dataset root every path in paths belongs to, or None when that is not a single
-    answer.
-
-    A cross-check that a request naming one dataset is not pointing at another's files, never a
-    source of the root itself: the request states that. None means the paths answer nothing to
-    cross-check against (a bucket under no dataset root is legitimate work), or that they answer
-    several things, which is the refusal a request accepting more than one prediction directory
-    would need.
-    """
-    from tcip_mcp.dataset_layout import dataset_root_of
-
-    roots = {str(root) for p in paths if p and (root := dataset_root_of(p)) is not None}
-    return roots.pop() if len(roots) == 1 else None
 
 
 def _recorded_prediction_digests(image_state: dict) -> set[Optional[str]]:
@@ -50,8 +37,10 @@ def _recorded_prediction_digests(image_state: dict) -> set[Optional[str]]:
     entry. A recorded identity carrying no digest reads as None, the same value an image with no
     prediction document records, so an unrecorded identity is compared rather than waved through.
     """
+    from tcip_annotation.verdicts import decode_verdict
+
     identities = [image_state.get("producer_identity")]
-    identities += [d.get("producer_identity") for d in image_state.get("detections") or []]
+    identities += [decode_verdict(d).producer_identity for d in image_state.get("detections") or []]
     return {i.get("prediction_digest") for i in identities if isinstance(i, dict)}
 
 
@@ -102,9 +91,9 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     bucket to validate. A raw store write straight to the stamp's key can still manufacture one
     past this refusal, the accepted limit of the scope rail itself (``resolution._check_stamp_claim``).
 
-    The sealed record's own audit line (inside ``seal_validation``, one bucket at a time) can
-    also fail this way: the validation row it appends lands before that line, so a dropped
-    append there answers 409 with the buckets stamped so far, not a 500.
+    Each act is recorded by the library that makes it: the sealed record by ``seal_validation``
+    and each bucket's stamp by ``update_sidecar``, one bucket at a time. Each writes before its
+    line, so a dropped append answers 409 with the buckets stamped so far, not a 500.
     """
     if not req.dataset_root:
         raise HTTPException(
@@ -130,6 +119,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
 
     from tcip_mcp.pipelines.resolution import (
         StampScopeUnstated,
+        bucket_dataset_root,
         read_operating_point_sidecar,
         scope_of_stamp,
         verify_stamp_binding,
@@ -137,9 +127,10 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     from tcip_mcp.prediction_buckets import bucket_stems
     from tcip_store.errors import DecodeError, SchemaVersionRefused, StoreBusy
 
-    # A bucket answering a different root than the stated one is another dataset's evidence.
-    named_root = _dataset_root_of_all(bucket_dirs)
-    if named_root is not None and Path(named_root).resolve() != Path(req.dataset_root).resolve():
+    # A bucket answering a different root than the stated one is another dataset's evidence; a
+    # bucket under no dataset root answers nothing to cross-check and is legitimate work.
+    named_root = bucket_dataset_root(pred_dir)
+    if named_root is not None and named_root != Path(req.dataset_root).resolve():
         raise HTTPException(
             400,
             f"the predictions at {pred_dir} belong to dataset {named_root}, not to "
@@ -368,6 +359,9 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         # since the split locked, or the lock file itself is corrupt. Either way
         # this is an honest refusal, not a 500: surface it as such.
         raise HTTPException(400, str(exc)) from None
+    except AuditEntryNotWritten as exc:
+        # The split lock was drawn and its receipt lost; nothing was validated or sealed.
+        raise audit_gap_409(exc, {exc.tool: exc.arguments, "validated": False}) from None
 
     result = describe_review_validation(bundle, reviewed_image_count=n)
 
@@ -385,8 +379,8 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     ref_hash = review_reference_hash(
         review_to_records(review_state, bucket_identities=bucket_identities, subject=req.subject))
     now_iso = datetime.now(timezone.utc).isoformat()
-    record_digests: dict[str, str] = {}
     stamped: list[str] = []
+    gap: AuditEntryNotWritten | None = None
 
     try:
         draft = None
@@ -466,9 +460,6 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
 
         return _promote
 
-    from tcip_mcp.audit import AuditEntryNotWritten
-    from tcip_web.routes.audit_gap import audit_gap_409
-
     try:
         for d in bucket_dirs:
             if bindings[d].claimed and bindings[d].ok:
@@ -477,29 +468,25 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             # Sealed outside the stamp's lock: no store write may open inside another's transaction.
             earned = _stamp_body(sidecars[d])
             if draft is not None:
-                record_digests[d], earned = seal_validation(
+                _digest, earned = seal_validation(
                     draft, dataset_root=req.dataset_root, bucket_dirs=list(bucket_dirs),
                     stamp_body=earned)
-            if update_sidecar(d, _promotion_of(d, earned)):
-                stamped.append(d)
+            try:
+                if update_sidecar(d, _promotion_of(d, earned)):
+                    stamped.append(d)
+            except AuditEntryNotWritten:
+                stamped.append(d)  # the stamp landed; only its line was lost
+                raise
     except StoreBusy as exc:
         # Contention is a retryable infrastructure fault, never a malformed request; the
         # dataset select route's own StoreBusy handling is the platform's precedent.
         raise HTTPException(503, str(exc)) from exc
     except (ValueError, SchemaVersionRefused, DecodeError) as exc:
         raise HTTPException(400, str(exc)) from None
-    except AuditEntryNotWritten as gap:
-        # seal_validation's own validation row already landed; only its audit line failed. The
-        # buckets this call had not yet stamped when it raised stay unstamped.
-        raise audit_gap_409(gap, ValidateReferenceResponse(
-            validated=bool(result["validated"]),
-            reference=result["reference"],
-            reviewed_image_count=n,
-            conf=result["conf"],
-            reason=result["reason"],
-            buckets_stamped=stamped,
-        )) from gap
-
+    except AuditEntryNotWritten as exc:
+        # A record or stamp already landed; only its library's audit line failed. The buckets
+        # this call had not yet stamped when it raised stay unstamped.
+        gap = exc
     committed = ValidateReferenceResponse(
         validated=bool(result["validated"]),
         reference=result["reference"],
@@ -508,17 +495,6 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         reason=result["reason"],
         buckets_stamped=stamped,
     )
-
-    # The sidecar this stamps sits in the prediction bucket, which travels with the dataset.
-    try:
-        _audit(req.dataset_root, "gui_review_validate_reference", {
-            "trait": req.trait,
-            "validated": result["validated"],
-            "reference": result["reference"],
-            "reviewed_image_count": n,
-            "buckets_stamped": stamped,
-            "record_digests": record_digests,
-        })
-    except AuditEntryNotWritten as exc:
-        raise audit_gap_409(exc, committed) from exc
+    if gap is not None:
+        raise audit_gap_409(gap, committed) from gap
     return committed

@@ -504,15 +504,15 @@ def test_inference_and_tuning_bind_no_dict_aliases_of_their_own():
 
 
 def test_validate_reference_and_its_exclusive_helpers_moved_to_validation_module():
-    """validate_reference and the two helpers only it used (``_dataset_root_of_all``,
-    ``_recorded_prediction_digests``) moved out of review.py into routes/validation.py, public and
+    """validate_reference and the helper only it uses (``_recorded_prediction_digests``) moved out
+    of review.py into routes/validation.py, public and
     unaliased; the route path is unchanged (checked live in test_review_path_confinement.py and
     test_review_validation_affordance.py, which still call POST /api/review/validate_reference).
     ``_prediction_digest``, ``_get_engine``, ``_bucket_of_dir``, ``_guard_path`` and ``_audit``
     stay in review.py: each is also used by a route that stayed (mark_complete, /action,
     /matches), so validation.py imports them rather than restating them."""
     _assert_one_home(
-        {"validate_reference", "_dataset_root_of_all", "_recorded_prediction_digests"},
+        {"validate_reference", "_recorded_prediction_digests"},
         _web_module_path("routes/review.py"),
         _web_module_path("routes/validation.py"),
         roots=(_web_src_root(),),

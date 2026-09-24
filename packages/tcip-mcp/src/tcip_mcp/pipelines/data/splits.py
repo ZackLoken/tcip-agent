@@ -111,12 +111,14 @@ def count_label_lines(
     corrupt document is not the same fact as an empty one.
     """
     from tcip_annotation import json_io
+    from tcip_annotation.state import instances
 
     subject, attribute = subject or None, attribute or None
     jp = Path(label_path)
     if not jp.is_file():
         return 0
-    records = json_io.read_annotations(str(jp))
+    # A crowd region is never one object, so it is never counted as one.
+    records = instances(json_io.read_annotations(str(jp)))
     if subject is None:
         return len(records)
     return sum(
@@ -1077,7 +1079,7 @@ def _split_content_hash(parts: dict[str, list[str]] | None) -> str | None:
         return None
     h = hashlib.sha256()
     for key in ("calibration", "holdout"):
-        for s in sorted(parts.get(key) or []):
+        for s in sorted(parts[key]):
             h.update(s.encode("utf-8"))
             h.update(b"\0")
         h.update(b"\0\0")
@@ -1085,7 +1087,7 @@ def _split_content_hash(parts: dict[str, list[str]] | None) -> str | None:
 
 
 def resolve_locked_cal_holdout_split(
-    stems: Sequence[str],
+    stems: Sequence[str] | None,
     *,
     identity_hash: str,
     scope_root: str | Path,
@@ -1097,6 +1099,7 @@ def resolve_locked_cal_holdout_split(
     force_redraw: bool = False,
     timestamp: str | None = None,
     selection_dir: str | None = None,
+    reason: str | None = None,
 ) -> dict:
     """Resolve (and lock) the calibration/holdout split for one dataset identity.
 
@@ -1128,16 +1131,20 @@ def resolve_locked_cal_holdout_split(
     (:func:`selection_calibration_universe`, which each door calls before it ever draws a universe
     to lock).
 
+    ``stems`` ``None`` names the existing lock's own members as the universe, for a caller holding
+    an identity and no labels to re-scan (``redraw_calibration_holdout``); with no lock to read
+    them from it raises ``ValueError``.
+
     A locked stem with no corresponding entry in the caller's current ``stems`` (its image/label
     was deleted or renamed since the split was locked) raises ``ValueError`` rather than silently
     returning stale membership for a caller to crash on later; this mirrors
     ``resolve_group_key_fn``'s already-loud policy-error convention, which this function already
     lets propagate unmodified. A lock file that exists but fails to parse (corrupt, not merely
-    absent) raises for the same reason when ``force_redraw=False``, "unreadable" must never
-    silently become "no lock exists yet, draw a fresh one", which would violate this function's
-    own never-a-silent-re-cut guarantee. ``force_redraw=True`` (the audited admin path)
-    proceeds past a corrupt lock file rather than also being blocked by it; redraw history just
-    can't be recovered from what couldn't be read.
+    absent) raises for the same reason when ``force_redraw=False`` or when ``stems`` is ``None``,
+    "unreadable" must never silently become "no lock exists yet, draw a fresh one", which would
+    violate this function's own never-a-silent-re-cut guarantee. ``force_redraw=True`` over stems
+    the caller holds (the audited admin path) proceeds past a corrupt lock file rather than also
+    being blocked by it; redraw history just can't be recovered from what couldn't be read.
 
     ``scope_root`` is required and has no default: it is the root the lock is stored under, the
     dataset root of the labels or records the split was drawn over. See
@@ -1149,21 +1156,27 @@ def resolve_locked_cal_holdout_split(
     ``datetime.now()`` itself, matching the rest of the codebase's tool-boundary convention) and
     is only meaningful when a new draw actually happens (first draw, or ``force_redraw=True``).
 
+    Every draw that writes a lock, a first draw or a forced redraw, leaves its one audit line,
+    ``calibration_holdout_drawn``, naming the policy, the membership before and after and the
+    caller's ``reason`` (a redraw states one); returning an existing lock writes nothing and leaves
+    none. The draw's line is this act's alone: whatever else the triggering door writes (a
+    calibrate door's stamp, for one) is recorded by the library that writes it, never here.
+
     Returns the full locked-split dict: ``{identity_hash, calibration, holdout, group_by,
     group_key_map, seed, holdout_ratio, selection_dir, redraw_history}``, plus the optional
-    ``policy_divergence`` / ``unlocked_stems`` report fields above when a lock already existed.
+    ``policy_divergence`` / ``unlocked_stems`` report fields above when a lock already existed,
+    or, on a draw, the ``old_membership`` it replaced (``None`` for a first draw).
     """
-    group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
     lock_key = cal_holdout_lock_key(identity_hash, scope_root=scope_root)
     try:
         existing = store.read(lock_key, default=None)
     except DecodeError as exc:
-        if not force_redraw:
+        if not force_redraw or stems is None:
             raise ValueError(
                 f"the cal/holdout lock for identity_hash={identity_hash!r} exists but could not "
                 f"be read/parsed ({exc}). Refusing to silently treat a corrupt lock as 'no lock "
-                "exists' and redraw. Investigate the file, or use redraw_calibration_holdout "
-                "once you've deliberately decided to replace it."
+                "exists' and redraw. Investigate the file, or redraw it with "
+                "redraw_calibration_holdout over the labels its stems come from."
             ) from exc
         logger.warning(
             "the cal/holdout lock for identity_hash=%s is corrupt (%s); force_redraw=True "
@@ -1172,6 +1185,12 @@ def resolve_locked_cal_holdout_split(
             identity_hash, exc,
         )
         existing = None
+    if stems is None:
+        if existing is None:
+            raise ValueError(f"no lock exists for identity_hash={identity_hash!r} to take the "
+                             "redraw's stems from; name the labels its stems come from.")
+        stems = sorted(set(existing["calibration"]) | set(existing["holdout"]))
+    group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
     declared_policy = {
         "group_by": group_by, "group_key_map": group_key_map,
         "seed": seed, "holdout_ratio": holdout_ratio,
@@ -1179,7 +1198,7 @@ def resolve_locked_cal_holdout_split(
     }
 
     if existing is not None and not force_redraw:
-        locked_stems = set(existing.get("calibration", [])) | set(existing.get("holdout", []))
+        locked_stems = set(existing["calibration"]) | set(existing["holdout"])
         stems_set = set(stems)
         stale = sorted(locked_stems - stems_set)
         if stale:
@@ -1196,7 +1215,7 @@ def resolve_locked_cal_holdout_split(
         unlocked_stems = sorted(stems_set - locked_stems)
         if unlocked_stems:
             result["unlocked_stems"] = unlocked_stems
-        recorded_policy = {k: existing.get(k) for k in declared_policy}
+        recorded_policy = {k: existing[k] for k in declared_policy}
         if recorded_policy != declared_policy:
             logger.warning(
                 "cal/holdout split for identity_hash=%s is locked with a different policy than "
@@ -1209,7 +1228,7 @@ def resolve_locked_cal_holdout_split(
 
     parts = cal_holdout_split(stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
                               holdout_ratio=holdout_ratio, seed=seed)
-    redraw_history = list(existing.get("redraw_history", [])) if existing else []
+    redraw_history = list(existing["redraw_history"]) if existing else []
     redraw_history.append({
         "policy": declared_policy,
         "seed": seed,
@@ -1225,4 +1244,15 @@ def resolve_locked_cal_holdout_split(
         "redraw_history": redraw_history,
     }
     store.replace(lock_key, locked)
-    return locked
+    from tcip_mcp.audit import dataset_scope_of, record_event_or_raise
+
+    old_membership = ({"calibration": existing["calibration"], "holdout": existing["holdout"]}
+                      if existing else None)
+    # The draw's one receipt, a first draw and a redraw alike; the lock has already landed.
+    record_event_or_raise(
+        "calibration_holdout_drawn",
+        {"identity_hash": identity_hash, **declared_policy, "reason": reason},
+        scope=dataset_scope_of(str(scope_root)), old_membership=old_membership,
+        new_membership={"calibration": parts["calibration"], "holdout": parts["holdout"]},
+    )
+    return {**locked, "old_membership": old_membership}

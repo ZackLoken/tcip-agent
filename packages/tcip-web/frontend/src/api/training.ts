@@ -111,12 +111,6 @@ export interface CompareSplit {
   error?: string;
 }
 
-/** One refused post-terminal mutation the platform audit log recorded against an experiment. */
-export interface CompareRefusedMutation {
-  timestamp: string | null;
-  arguments: Record<string, unknown>;
-}
-
 /** One marked experiment's own column in the comparison, every value labelled by which record
  * it came from. `error` alone (no other field) marks an id compare_experiments could not even
  * read; every other field is absent only on that entry. */
@@ -130,7 +124,6 @@ export interface CompareExperiment {
   n_rows?: number;
   last_logged_metrics?: MetricRow;
   rows_after_end?: number | null;
-  refused_mutations?: CompareRefusedMutation[];
   /** The status record's own failure reason; null for a run that never failed. */
   status_error?: string | null;
   /** The config's builder; null when the config names none (never a fabricated "unknown"). */

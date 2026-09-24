@@ -244,6 +244,28 @@ def test_stage_proposals_rejects_box_missing_subject(tmp_path: Path) -> None:
     assert "error" in res  # returns cleanly, doesn't crash the audited tool
 
 
+@pytest.mark.parametrize("subject", [None, "", 7], ids=["absent", "empty", "not_a_string"])
+@pytest.mark.parametrize("shape", ["boxes", "polygons"])
+def test_stage_proposals_refuses_a_shape_naming_no_subject_by_index(
+        tmp_path: Path, shape: str, subject) -> None:
+    """A staged shape is an annotation, made where every annotation is: one naming no subject is
+    refused by construction, the refusal naming the shape, and nothing is staged."""
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0001")
+    good = ({"subject": "bur", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}
+            if shape == "boxes" else
+            {"subject": "bur", "conf": 0.9, "points": [[0.1, 0.1], [0.3, 0.1], [0.3, 0.4]]})
+    bad = {k: v for k, v in good.items() if k != "subject"}
+    if subject is not None:
+        bad["subject"] = subject
+    res = stage_proposals(_img_path(root, date, "IMG_0001"), model_name="agent_proposals",
+                          **{shape: [good, bad]})
+    assert res["error"].startswith(f"{'box' if shape == 'boxes' else 'polygon'} 1: ")
+    assert "subject" in res["error"]
+    assert not (Path(prediction_dir(root, "agent_proposals", date)) / "IMG_0001.json").exists()
+
+
 def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
@@ -315,7 +337,7 @@ def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
         image_path, model_name="sam",
         polygons=[{"subject": "leaf", "conf": 0.9, "points": [[0.1, 0.1], [0.2, 0.2]]}],
     )
-    assert "error" in res and "3 points" in res["error"]
+    assert "error" in res and "three or more points" in res["error"]
     # Un-normalized (pixel) points must be caught.
     res = stage_proposals(
         image_path, model_name="sam",
@@ -550,7 +572,7 @@ def test_stage_proposals_refuses_a_short_ring_under_rings(tmp_path: Path) -> Non
         "rings": [[[10.0, 10.0], [50.0, 10.0]]],
     }])
 
-    assert "error" in res and "at least 3 points" in res["error"]
+    assert "error" in res and "three or more points" in res["error"]
     assert not (root / "predictions").exists()
 
 

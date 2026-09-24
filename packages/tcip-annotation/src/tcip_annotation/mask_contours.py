@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from tcip_annotation.state import is_ring
+
 #: Simplification tolerance as a fraction of each ring's own perimeter, so the deviation a ring is
 #: allowed is proportional to that ring's size: a small fragment is not flattened by the same
 #: absolute tolerance that suits a large one.
@@ -33,8 +35,9 @@ def mask_to_polygon_rings(
 
     Rings are ordered largest-contour-area first, so a consumer that can only render or edit one ring
     gets the dominant region rather than a raster-order accident. Each ring is simplified with
-    ``cv2.approxPolyDP`` at ``epsilon_frac`` of its own perimeter, and a ring left with fewer than 3
-    points is dropped (it is no longer an area). Returns ``[]`` when nothing is foreground.
+    ``cv2.approxPolyDP`` at ``epsilon_frac`` of its own perimeter, and a ring left that is no
+    ring (:func:`~tcip_annotation.state.is_ring`, the rule a :class:`Polygon` is built under) is
+    dropped: it is no longer an area. Returns ``[]`` when nothing is foreground.
     """
     import cv2
     import numpy as np
@@ -49,6 +52,6 @@ def mask_to_polygon_rings(
     for c in sorted(contours, key=cv2.contourArea, reverse=True):
         approx = cv2.approxPolyDP(c, epsilon_frac * cv2.arcLength(c, True), True)
         pts = [(float(p[0][0]), float(p[0][1])) for p in approx]
-        if len(pts) >= 3:
+        if is_ring(pts):
             rings.append(pts)
     return rings

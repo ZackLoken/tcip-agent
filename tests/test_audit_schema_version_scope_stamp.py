@@ -84,7 +84,7 @@ def test_project_scoped_writer_carries_the_version_stamp_and_resolved_scope(
 def test_platform_default_write_carries_the_version_stamp_and_no_scope(
     platform_root: Path, tmp_path: Path,
 ) -> None:
-    """A model-registry replace (real production ``record_event`` caller, no ``scope`` of its
+    """A model-registry write (real production ``record_event`` caller, no ``scope`` of its
     own) stays a platform event: no ``schema_version`` field, and no ``scope`` either."""
     from tcip_mcp.model_registry import ModelRegistry
 
@@ -97,7 +97,6 @@ def test_platform_default_write_carries_the_version_stamp_and_no_scope(
     reg.register_model("exp1", str(second), {}, metrics_source=None)
 
     rows = list(ts.read_log(audit_module.audit_log_key(platform_root)).records)
-    matches = [r for r in rows if r["tool"] == "model_registry_replace"]
-    assert len(matches) == 1, rows
-    assert "schema_version" not in matches[0]
-    assert "scope" not in matches[0]
+    matches = [r for r in rows if r["tool"] == "model_registered"]
+    assert len(matches) == 2, rows
+    assert all("schema_version" not in m and "scope" not in m for m in matches)

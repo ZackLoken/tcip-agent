@@ -1,9 +1,10 @@
 """The browser and the backend meet on one declaration of the dataset's own vocabulary.
 
-Two facts the backend owns reach the browser as literals: the statuses the image-status store
-holds, and the extension a per-image label or prediction record is written under. Both are stated
-once on each side, and these tests hold the two sides equal, so a token added or renamed in
-``dataset_layout`` cannot leave the browser filtering on a value the store never records.
+The statuses the image-status store holds reach the browser as a literal union, stated once on
+each side, and these tests hold the two sides equal, so a token added or renamed in
+``dataset_layout`` cannot leave the browser filtering on a value the store never records. The
+suffix a per-image record is named with reaches the browser through the generated types instead
+(``tests/test_generated_frontend_types.py``), so the browser states it nowhere.
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ STATUS_DECLARATION = FRONTEND_SRC / "api" / "subjects.ts"
 PATH_DECLARATION = FRONTEND_SRC / "lib" / "paths.ts"
 
 _STATUS_UNION_RE = re.compile(r"export type ImageStatus = ([^;]+);")
-_RECORD_EXT_RE = re.compile(r'export const RECORD_EXT = "([^"]+)";')
 _FINISHED_STATUSES_RE = re.compile(
     r"export const FINISHED_STATUSES: readonly ImageStatus\[\] = \[([^\]]+)\];"
 )
@@ -53,15 +53,6 @@ def test_the_browsers_image_statuses_are_the_ones_the_store_records() -> None:
     assert match is not None, "the ImageStatus union is no longer where this test reads it"
     declared = tuple(re.findall(r'"([^"]+)"', match.group(1)))
     assert declared == _statuses()
-
-
-def test_the_browser_names_a_record_the_way_the_resolver_does() -> None:
-    """The extension the browser appends to a stem is the one the label resolver would have used."""
-    from tcip_mcp.dataset_layout import label_ext
-
-    match = _RECORD_EXT_RE.search(PATH_DECLARATION.read_text(encoding="utf-8"))
-    assert match is not None, "RECORD_EXT is no longer where this test reads it"
-    assert match.group(1) == label_ext("json")
 
 
 def test_no_other_frontend_module_restates_the_status_vocabulary() -> None:

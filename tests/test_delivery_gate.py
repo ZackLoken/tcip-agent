@@ -766,8 +766,9 @@ def test_deliver_per_image_counts_takes_no_acknowledgement_for_the_delivery(tmp_
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference)
     out_csv = tmp_path / "o.csv"
     with pytest.raises(TypeError):
-        itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(out_csv),
-                                   trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+        itools.deliver_per_image_counts(  # type: ignore[call-arg]
+            _dummy_checkpoint(tmp_path), str(tmp_path), str(out_csv),
+            trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
     r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(out_csv),
                                trait=fx.COUNT_TRAIT)
     assert "error" in r
@@ -925,8 +926,9 @@ def test_deliver_per_image_counts_bucket_regime_takes_no_acknowledgement(tmp_pat
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path / "ds", experiment_id="exp-tile-floor")
 
     with pytest.raises(TypeError):
-        itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
-                                   trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+        itools.deliver_per_image_counts(  # type: ignore[call-arg]
+            predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
+            trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
     r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT)
     assert "error" in r

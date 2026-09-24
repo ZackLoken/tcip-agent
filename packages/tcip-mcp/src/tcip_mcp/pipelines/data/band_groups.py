@@ -453,6 +453,7 @@ def detect_and_write_band_groups(
     """
     from tcip_annotation.json_io import is_sidecar_name
 
+    from tcip_mcp.dataset_layout import label_filename
     from tcip_mcp.pipelines.image_utils import bucket_logical_identities, stem_collision_key
 
     d = Path(images_dir)
@@ -483,7 +484,7 @@ def detect_and_write_band_groups(
     reserved_name_skips: list[dict] = []
     for group in (*explicit_found, *embedded_found):
         stem = group["stem"]
-        if is_sidecar_name(f"{stem}.json"):
+        if is_sidecar_name(label_filename(stem)):
             reserved_name_skips.append(
                 {"stem": stem, "bands": sorted(group["bands"]), "source": group["source"]}
             )

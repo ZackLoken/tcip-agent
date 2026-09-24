@@ -213,9 +213,8 @@ def render_segmentations(
         all_pts: list[tuple[float, float]] = []
         for ring in poly.get("rings", []):
             pts = [(x * sx, y * sy) for x, y in ring]
-            if len(pts) >= 3:
-                draw.polygon(pts, fill=color + (int(255 * alpha),), outline=color)
-                all_pts.extend(pts)
+            draw.polygon(pts, fill=color + (int(255 * alpha),), outline=color)
+            all_pts.extend(pts)
         if all_pts:
             # Label once per instance, at the centroid of every drawn ring combined.
             cx = sum(p[0] for p in all_pts) / len(all_pts)
@@ -405,9 +404,6 @@ def render_candidates(
         cid = cand["candidate_id"]
         color = COLOR_PALETTE[cid % len(COLOR_PALETTE)]
         rings = [[(x * sx, y * sy) for x, y in ring] for ring in cand["rings"]]
-        rings = [r for r in rings if len(r) >= 3]
-        if not rings:
-            continue
 
         # Fill every ring; one number for the candidate as a whole
         fill = color + (int(255 * alpha),)

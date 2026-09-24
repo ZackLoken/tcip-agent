@@ -21,24 +21,41 @@ def _clip(value: float, upper: float | None) -> float:
     return max(0.0, min(float(value), float(upper)))
 
 
+def stored_geometries(image_result: dict) -> dict[int, BBox | Polygon]:
+    """Each detection of one raw predictor result that a write stores, by index, as the geometry
+    stored: its mask's rings when it carries one (:func:`_mask_geometry_for_export`), else its box,
+    kept only when that geometry has extent on the stored grid
+    (:func:`~tcip_annotation.json_io.geometry_extent_ok`). The one decision of what a detection is,
+    read by :func:`write_predictions_json` and by every count taken before or beside that write."""
+    from tcip_annotation.json_io import geometry_extent_ok
+    from tcip_annotation.state import BBox
+
+    masks = image_result.get("masks")
+    size = (image_result.get("width") or 0, image_result.get("height") or 0)
+    kept: dict[int, BBox | Polygon] = {}
+    for i, box in enumerate(image_result.get("boxes", [])):
+        geometry: BBox | Polygon = BBox(*box)
+        if masks is not None and i < len(masks):
+            geometry = _mask_geometry_for_export(masks[i], tuple(box), f"detection {i}",
+                                                 image_size=size)
+        if geometry_extent_ok(geometry):
+            kept[i] = geometry
+    return kept
+
+
 def positive_detections(image_result: dict) -> tuple[int, list[float]]:
-    """One image's raw predictor result narrowed to real detections: a box with no positive
-    extent was never a detection, so it counts toward neither the kept count nor the confidence
-    scores. The one predicate :func:`write_predictions_json` itself drops by, so a delivered count
-    or a CSV row computed here always agrees with what that write actually persists.
+    """One image's raw predictor result narrowed to real detections (:func:`stored_geometries`),
+    so a delivered count or a CSV row computed here always agrees with what
+    :func:`write_predictions_json` persists: the kept count and the kept confidence scores.
 
     Falls back to ``image_result["count"]`` when no ``boxes`` are present at all (a caller that
     states only a bare count, never a per-box result to narrow).
     """
-    from tcip_annotation.json_io import box_extent_ok
-    from tcip_annotation.state import BBox
-
-    boxes = image_result.get("boxes", [])
     scores = image_result.get("scores", [])
-    if not boxes:
+    if not image_result.get("boxes"):
         return image_result.get("count", 0), scores
-    keep = [box_extent_ok(BBox(*b)) for b in boxes]
-    return keep.count(True), [s for s, k in zip(scores, keep) if k]
+    kept = stored_geometries(image_result)
+    return len(kept), [s for i, s in enumerate(scores) if i in kept]
 
 
 def unmapped_label_ids(results: list[dict], id_map: dict[str, int] | None) -> list[int]:
@@ -127,7 +144,7 @@ def write_predictions_json(
     from datetime import datetime, timezone
 
     from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
+    from tcip_annotation.state import Annotation
     from tcip_mcp.subject_registry import decode_class_ids
 
     p = Path(json_path)
@@ -150,11 +167,11 @@ def write_predictions_json(
     boxes = result.get("boxes", [])
     scores = result.get("scores", [])
     labels = result.get("labels", [])
+    stored = stored_geometries(result)
     preds: list[Annotation] = []
     kept_indices: list[int] = []
     dropped = 0
-    for i, (box, score, label) in enumerate(zip(boxes, scores, labels)):
-        x1, y1, x2, y2 = box
+    for i, (score, label) in enumerate(zip(scores, labels)):
         cid = max(int(label) - 1, 0)  # undo the 1-indexed torchvision label -> 0-indexed run id
         if attribute is not None:
             if cid not in id_to_name:
@@ -166,10 +183,8 @@ def write_predictions_json(
             name = id_to_name[cid]
         else:
             name = id_to_name.get(cid, str(cid))  # decode via the recorded map, never a fresh derivation
-        geometry: BBox | Polygon = BBox(x1, y1, x2, y2)
-        if masks is not None and i < len(masks):
-            geometry = _mask_geometry_for_export(masks[i], (x1, y1, x2, y2), name, image_size=(w, h))
-        if not json_io.geometry_extent_ok(geometry):
+        geometry = stored.get(i)
+        if geometry is None:
             dropped += 1
             continue
         if attribute is not None:

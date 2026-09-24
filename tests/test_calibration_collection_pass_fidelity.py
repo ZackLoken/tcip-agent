@@ -273,3 +273,50 @@ def test_calibration_records_name_detections_in_the_ground_truths_class_vocabula
     dt_ids = {d["category_id"] for r in cal_records for d in r["dt"]}
     assert dt_ids == {OPEN_ID, SHED_ID}
     assert UNUSED_ID not in dt_ids  # the map's middle value has no instance to name
+
+
+def test_calibration_records_carry_each_ground_truth_records_crowd_flag(tmp_path, monkeypatch):
+    """The reference a sweep reads forms a crowd region's ground truth as a crowd region, read
+    off the target each record came from, never as one more object, and each box on the stored
+    two-decimal grid its document holds."""
+    from PIL import Image
+
+    import tcip_mcp.pipelines.calibration as calibration
+    import tcip_mcp.pipelines.operating_point as operating_point
+
+    images_dir, labels_dir = tmp_path / "ds" / "images", tmp_path / "ds" / "labels"
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir(parents=True)
+    for i in range(TWO_CLASS_STEMS):
+        stem = f"{STEM_PREFIX}{i:02d}"
+        Image.new("RGB", (TWO_CLASS_W, TWO_CLASS_H)).save(images_dir / f"{stem}.png")
+        json_io.write_annotations(str(labels_dir / f"{stem}.json"), [
+            Annotation(subject="bud", geometry=BBox(*_box(60.0 + i, 60.0))),
+            Annotation(subject="bud", geometry=BBox(310.1, 100.1, 530.3, 250.3), iscrowd=True),
+        ], TWO_CLASS_W, TWO_CLASS_H)
+    captured: dict = {}
+    real_resolve = operating_point.resolve_operating_point
+
+    def _capturing_resolve(*args, **kwargs):
+        captured["records"] = kwargs["calibration_records"] + (kwargs["holdout_records"] or [])
+        return real_resolve(*args, **kwargs)
+
+    monkeypatch.setattr(operating_point, "resolve_operating_point", _capturing_resolve)
+    stub = _HesitantDetectorStub()
+    stub.predict_batch = lambda paths, **kw: [  # type: ignore[method-assign]
+        {"image": p, "width": TWO_CLASS_W, "height": TWO_CLASS_H,
+         "boxes": [_box(60.0 + _stem_index(p), 60.0), [10.1, 10.1, 40.3, 30.3]],
+         "scores": [0.9, 0.9], "labels": [1, 1], "count": 2}
+        for p in paths]
+
+    calibration.calibrate_operating_point(
+        stub, "bud_opening", str(labels_dir), str(images_dir),
+        tile=False, tile_size=None, overlap=0.2, tile_batch_size=8,
+        global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
+        group_by="stem", seed=5, holdout_ratio=0.5,
+    )
+
+    assert captured["records"], "no records reached the sweep"
+    assert all([g["iscrowd"] for g in r["gt"]] == [0, 1] for r in captured["records"])
+    assert all(r["gt"][1]["bbox"] == [310.1, 100.1, 220.2, 150.2] for r in captured["records"])
+    assert all(r["dt"][1]["bbox"] == [10.1, 10.1, 30.2, 20.2] for r in captured["records"])

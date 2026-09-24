@@ -702,18 +702,13 @@ export function RunComparison({
         )}
       </div>
 
-      {result.experiments.some(
-        (e) => (e.refused_mutations && e.refused_mutations.length > 0) || e.rows_after_end,
-      ) && (
+      {result.experiments.some((e) => e.rows_after_end) && (
         <div className="tcip-panel p-2 text-[11px] text-tcip-muted">
           {result.experiments.map((e) =>
-            (e.refused_mutations && e.refused_mutations.length > 0) || e.rows_after_end ? (
+            e.rows_after_end ? (
               <div key={e.experiment_id}>
                 <span className="font-mono">{e.experiment_id}</span>:{" "}
-                {e.refused_mutations && e.refused_mutations.length > 0
-                  ? `${e.refused_mutations.length} refused mutation(s)`
-                  : ""}
-                {e.rows_after_end ? ` / ${e.rows_after_end} row(s) logged after the run ended` : ""}
+                {`${e.rows_after_end} row(s) logged after the run ended`}
               </div>
             ) : null,
           )}

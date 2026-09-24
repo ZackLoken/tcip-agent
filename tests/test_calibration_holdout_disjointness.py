@@ -64,6 +64,7 @@ class _CalStub:
         self.score_threshold = 0.5
         self.train_tile_size = None
         self.train_overlap = None
+        self.config: dict = {"data": {"subject": "bud"}}  # the run's recorded subject
 
     def predict_batch(self, paths, **kw):
         return [{"image": p, "width": IMG, "height": IMG,
@@ -658,7 +659,7 @@ def test_review_to_records_stems_the_image_id():
 
     review_state = {"image": {"srcA_0_0.jpg": {"img_status": "completed", "detections": [
         {"action": "accepted", "class_id": 0,
-         "gt_bbox_norm": [0.5, 0.5, 0.1, 0.1], "pred_bbox_norm": [0.5, 0.5, 0.1, 0.1], "conf": 0.9,
+         "iscrowd": False, "reviewed_by": "", "class_name": "", "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.5, 0.5, 0.1, 0.1], "pred_bbox_norm": [0.5, 0.5, 0.1, 0.1], "conf": 0.9,
          "producer_identity": _IDENTITY},
     ]}}}
     recs = review_to_records(review_state, bucket_identities=[_IDENTITY])
@@ -681,7 +682,7 @@ def test_train_disjointness_matches_extensioned_review_ids_to_train_group(tmp_pa
         "group_by": "tile_prefix"})
 
     def _entry(gt, pred, conf):
-        return {"action": "accepted", "class_id": 0, "gt_bbox_norm": gt, "pred_bbox_norm": pred,
+        return {"action": "accepted", "class_id": 0, "iscrowd": False, "reviewed_by": "", "class_name": "", "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": gt, "pred_bbox_norm": pred,
                 "conf": conf, "producer_identity": _IDENTITY}
 
     # Two reviewed images, both further tiles of the same source the model trained on, keyed
@@ -1143,7 +1144,7 @@ def _op_box(cx: float, cy: float, s: float = 20.0) -> list[float]:
 
 
 def _op_ann(cx, cy, cid=0, score=None):
-    a = {"category_id": cid, "bbox": _op_box(cx, cy)}
+    a = {"category_id": cid, "bbox": _op_box(cx, cy), "iscrowd": 0}
     if score is not None:
         a["score"] = score
     return a

@@ -17,7 +17,6 @@ import hashlib
 import logging
 from pathlib import Path
 
-from tcip_mcp.audit import audited
 from tcip_mcp.server import mcp
 
 logger = logging.getLogger(__name__)
@@ -80,7 +79,6 @@ def _read_reference_csv(csv_path: str) -> dict[str, dict[str, float | str]]:
 
 
 @mcp.tool()
-@audited
 def calibrate_physical_scale(
     trait: str,
     pred_dir: str,
@@ -196,11 +194,12 @@ def calibrate_physical_scale(
             "reference photographed in some other capture says nothing about this one."
         )}
 
+    from tcip_mcp.dataset_layout import label_filename
     from tcip_mcp.pipelines.measurement.mask_geometry import principal_axis_extent_of_points
 
     references: dict[str, dict] = {}
     for stem, row in sorted(references_raw.items()):
-        label_path = Path(labels_dir) / f"{stem}.json"
+        label_path = Path(labels_dir) / label_filename(stem)
         if not label_path.is_file():
             return {"error": f"no annotation file for reference image {stem!r} at {label_path}"}
         try:

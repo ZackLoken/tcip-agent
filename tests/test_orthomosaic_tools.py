@@ -492,7 +492,7 @@ def test_deliver_orthomosaic_plant_counts_refuses_unvalidated_then_delivers_once
     assert not out_csv.exists()
 
     with pytest.raises(TypeError):
-        deliver_orthomosaic_plant_counts(
+        deliver_orthomosaic_plant_counts(  # type: ignore[call-arg]
             str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
             delivered_phenotype="stem_count", acknowledge_unvalidated=True)
     assert not out_csv.exists()
@@ -912,6 +912,10 @@ def test_deliver_orthomosaic_keeps_a_bespoke_producer_checkpoint(tmp_path, monke
     assert len(door) == 1, emitted
     assert door[0]["verified_buckets"][str(bucket_dir)]["record"] != ""
     assert door[0]["record_digests"] != []
+    # That event is the delivery's one line: no call line beside it in either log.
+    platform = ts.read_log(audit_log_key()).records
+    assert [e for e in [*emitted, *platform] if e["tool"] == "deliver_orthomosaic_plant_counts"
+            and "verified_buckets" not in e] == []
 
 
 def test_deliver_orthomosaic_drops_a_producer_no_experiment_answers_for(tmp_path, monkeypatch):

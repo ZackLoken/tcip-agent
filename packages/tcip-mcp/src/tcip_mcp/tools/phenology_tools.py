@@ -110,7 +110,6 @@ def register_plant_registry(name: str, csv_paths: list[str], *, crop: str, site:
 
 
 @mcp.tool()
-@audited
 def build_plant_mapping(
     name: str,
     images_root: str,
@@ -341,8 +340,9 @@ def _match_gt_to_predictions(gt: list, preds: list, *, kind: str,
     ``subject``: a GT box carries the trait's object type in ``subject`` and its confirmed value
     under ``attributes[attribute]``, and a prediction box under a classified scope carries the
     same shape, so matching by ``subject`` name would already agree by construction rather than
-    testing anything (both sides read as the same object class). Box geometries only (polygon GT
-    is out of scope for a box-detector's classification calibration).
+    testing anything (both sides read as the same object class). ``gt`` arrives box ground truth
+    only and ``preds`` objects only, a crowd region excluded, both selected once by the caller;
+    the predictions are narrowed to boxes here.
 
     ``kind``/``center_match_tolerance``/``iou_threshold`` come from
     ``evaluation.resolve_match_criterion``, the same resolver every other localization consumer
@@ -362,7 +362,7 @@ def _match_gt_to_predictions(gt: list, preds: list, *, kind: str,
     from tcip_annotation.matching import box_iou
     from tcip_annotation.state import BBox
 
-    gt_boxes = [(i, a) for i, a in enumerate(gt) if isinstance(a.geometry, BBox)]
+    gt_boxes = list(enumerate(gt))
     pred_boxes = [(i, a) for i, a in enumerate(preds) if isinstance(a.geometry, BBox)]
 
     if kind == "center_match":
@@ -404,7 +404,8 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     identical hash, defeating that check entirely; see its own docstring). An unmatched GT or
     prediction (the detector itself missed or hallucinated an object) is not a classification-call
     disagreement and is excluded, this calibrates the classifier's call, not the detector's, the
-    same separation the platform's own detect-then-classify decomposition makes elsewhere.
+    same separation the platform's own detect-then-classify decomposition makes elsewhere. A crowd
+    region is never one object, so it is never paired (:func:`~tcip_annotation.state.instances`).
 
     ``pred_dir``'s own recorded scope governs when it has one: no stamp at all (the hand-split
     calibration/holdout workflow) leaves the caller's stated ``(subject, attribute)`` in force; a
@@ -430,10 +431,12 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     """
     from tcip_annotation import json_io
     from tcip_annotation.json_io import prediction_documents
-    from tcip_annotation.state import BBox
+    from tcip_annotation.state import BBox, instances
     from tcip_mcp.pipelines.postprocessing.phenology import bucket_id_map
     from tcip_mcp.pipelines.resolution import bucket_scope
-    from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
+    from tcip_mcp.pipelines.training.evaluation import (
+        records_from_annotation, resolve_match_criterion,
+    )
 
     gt_p, pred_p = Path(gt_dir), Path(pred_dir)
     json_io.require_reference_ground_truth(gt_p)  # the prediction side is never held to this
@@ -488,18 +491,11 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     # so both are walked through prediction_documents, their own sidecar stamps excluded.
     paired = [f for f in prediction_documents(gt_p) if (pred_p / f.name).is_file()]
 
-    def _scoped_gt(path: str) -> list:
-        return [a for a in json_io.read_annotations(path) if a.subject == subject]
-
-    def _xywh(a) -> list[float]:
-        b = a.geometry
-        return [b.x1, b.y1, max(b.x2 - b.x1, 0.0), max(b.y2 - b.y1, 0.0)]
-
-    per_image = [
-        {"gt": [{"bbox": _xywh(a), "category_id": 0}
-                for a in _scoped_gt(str(gt_file)) if isinstance(a.geometry, BBox)]}
-        for gt_file in paired
-    ]
+    # The subject's objects, a crowd region excluded (it is never one object to pair), and its
+    # boxes, the one geometry this pairing reads.
+    gt_boxes = {f: [a for a in instances(json_io.read_annotations(str(f)))
+                    if a.subject == subject and isinstance(a.geometry, BBox)] for f in paired}
+    per_image = [records_from_annotation(gt_boxes[f], [], width=0, height=0)[1] for f in paired]
     criterion = resolve_match_criterion(trait_name, per_image)
     kind = criterion["kind"]
     center_match_tolerance = criterion.get("tolerance")
@@ -508,8 +504,8 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     items: list[dict] = []
     for gt_file in paired:
         pred_file = pred_p / gt_file.name
-        gt_annots = _scoped_gt(str(gt_file))
-        pred_annots = json_io.read_annotations(str(pred_file))
+        gt_annots = gt_boxes[gt_file]
+        pred_annots = instances(json_io.read_annotations(str(pred_file)))  # a crowd call pairs nothing
         for gt_a, pred_a in _match_gt_to_predictions(
             gt_annots, pred_annots, kind=kind, center_match_tolerance=center_match_tolerance,
             iou_threshold=iou_threshold,
@@ -581,7 +577,6 @@ def _agreed_checkpoint_identity(pred_dirs: list[str]) -> str | None:
 
 
 @mcp.tool()
-@audited
 def calibrate_classifier_operating_point(
     trait_name: str,
     subject: str,
@@ -724,7 +719,6 @@ def calibrate_classifier_operating_point(
 
 
 @mcp.tool()
-@audited
 def deliver_phenology_milestones(
     trait: str,
     mapping_name: str,
@@ -757,7 +751,7 @@ def deliver_phenology_milestones(
         mapping_name: Name of a plant mapping persisted under this project (``{date:
             [assignment, ...]}`` with ``stem`` / ``plot_name`` / ``accession_name`` per
             assignment), produced by the web plant-mapping step or ``build_plant_mapping``.
-        predictions_by_date: ``{date: predictions_dir}``, each dir holds per-image COCO/JSON
+        predictions_by_date: ``{date: predictions_dir}``, each dir holds per-image JSON
             prediction files (``<stem>.json``) from the state classifier.
         output_csv_path: Where to write the delivered per-plant CSV (e.g.
             ``<phenology_prefix>_phenology.csv``). A relative path resolves against the

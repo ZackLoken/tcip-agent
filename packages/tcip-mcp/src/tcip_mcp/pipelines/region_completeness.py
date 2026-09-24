@@ -3,7 +3,8 @@
 deleted inside an attested cell after attestation.
 
 One digest per ``(subject, stem, cell)``: a hash of the subject's annotations whose geometry
-centers inside that cell's own rect, canonically serialized the same way
+centers inside that cell's own rect, each as the label writer stores it on its grid with
+provenance aside (``json_io.stored_content``), canonically serialized the same way
 ``subject_registry.attribute_schema_digest`` hashes an attribute vocabulary. Recomputing it from the
 label file currently on disk and comparing against the stamp taken at attestation time
 (:func:`tcip_mcp.dataset_layout.region_completeness_digest_path`) is the store's staleness check.
@@ -16,7 +17,8 @@ import json
 from pathlib import Path
 
 import tcip_store
-from tcip_annotation.state import Annotation, BBox, Point, polygonal
+from tcip_annotation.json_io import stored_content
+from tcip_annotation.state import Annotation, Point, bbox_of
 
 from tcip_mcp.pipelines.reference_grid import Cell
 
@@ -27,35 +29,15 @@ def _annotation_center(a: Annotation) -> tuple[float, float] | None:
     g = a.geometry
     if g is None:
         return None
-    if isinstance(g, BBox):
-        return (g.x1 + g.x2) / 2.0, (g.y1 + g.y2) / 2.0
     if isinstance(g, Point):
         return g.x, g.y
-    xs = [pt[0] for ring in g.rings for pt in ring]
-    ys = [pt[1] for ring in g.rings for pt in ring]
-    return (min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0
+    b = bbox_of(g)
+    return (b.x1 + b.x2) / 2.0, (b.y1 + b.y2) / 2.0
 
 
 def _in_cell(point: tuple[float, float], cell: Cell) -> bool:
     x, y = point
     return cell.x0 <= x < cell.x1 and cell.y0 <= y < cell.y1
-
-
-def _annotation_record(a: Annotation) -> dict:
-    """Canonical content of one annotation for digest purposes: subject, geometry, and attribute
-    values. Provenance (``created_by``/``created_at``/...) is deliberately excluded, the same
-    reasoning ``attribute_schema_digest`` applies to a subject's description text: who authored a
-    shape, or when, says nothing about whether the shape itself changed."""
-    g = a.geometry
-    if isinstance(g, BBox):
-        geom = ["bbox", round(g.x1, 2), round(g.y1, 2), round(g.x2, 2), round(g.y2, 2)]
-    elif isinstance(g, Point):
-        geom = ["point", round(g.x, 2), round(g.y, 2)]
-    elif polygonal(g):
-        geom = ["polygon", [[[round(x, 2), round(y, 2)] for x, y in ring] for ring in g.rings]]
-    else:
-        geom = None
-    return {"subject": a.subject, "geometry": geom, "attributes": dict(sorted(a.attributes.items()))}
 
 
 def _digest_of_records(records: list[dict]) -> str:
@@ -83,7 +65,7 @@ def cell_annotation_digest(annotations: list[Annotation], subject: str, cell: Ce
         center = _annotation_center(a)
         if center is None or not _in_cell(center, cell):
             continue
-        records.append(_annotation_record(a))
+        records.append(stored_content(a))
     return _digest_of_records(records)
 
 
@@ -163,7 +145,7 @@ def cell_annotation_digests(
     cell.
     """
     by_cell = annotations_by_cell(annotations, subject, cells, tile_size, overlap)
-    return {name: _digest_of_records([_annotation_record(a) for a in anns])
+    return {name: _digest_of_records([stored_content(a) for a in anns])
             for name, anns in by_cell.items()}
 
 

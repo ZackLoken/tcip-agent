@@ -126,7 +126,6 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/__init__.py | Review -> retrain feedback: materialize curated datasets and reconstruct a review-confirmed calibration reference from review verdicts. | 1 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/materialize.py | Materialize a curated detection dataset from human review verdicts. | 10 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/review_calibration.py | Reconstruct a calibration reference from human review verdicts. | 4 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/verdicts.py | Reading one stored review verdict entry: the action vocabulary and the boxes it carries. | 1 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/image_utils.py | Shared image utilities for the composable ML pipeline (channel-aware). | 5 | 38 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/inference/__init__.py | Inference pipeline: model loading and batch prediction. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/inference/generic_predictor.py | Generic predictor for any bespoke ``model_source`` checkpoint. | 10 | 1 |
@@ -208,9 +207,9 @@ under a covered root that no row names.
 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
-| packages/tcip-annotation/src/tcip_annotation/__init__.py | Headless annotation library: canonical name-based per-image JSON labels + a single-file COCO. | 8 | 6 |
+| packages/tcip-annotation/src/tcip_annotation/__init__.py | Headless annotation library: canonical name-based per-image JSON labels, and a COCO reader. | 8 | 6 |
 | packages/tcip-annotation/src/tcip_annotation/annotation_engine.py | AnnotationEngine: Annotation CRUD, spatial index, undo/redo. | 2 | 1 |
-| packages/tcip-annotation/src/tcip_annotation/format_io.py | Annotation I/O for the two on-disk formats: the canonical per-image JSON and a single-file COCO. | 4 | 7 |
+| packages/tcip-annotation/src/tcip_annotation/format_io.py | The reader of an external dataset-level COCO document, on its way into per-image documents. | 4 | 7 |
 | packages/tcip-annotation/src/tcip_annotation/json_io.py | Per-image JSON: the canonical on-disk label format (ground truth + predictions). | 3 | 45 |
 | packages/tcip-annotation/src/tcip_annotation/mask_contours.py | Mask -> polygon rings: the one contour extractor behind every mask-derived shape. | 0 | 3 |
 | packages/tcip-annotation/src/tcip_annotation/matching.py | Geometry helpers and GT-vs-prediction matching engine. | 2 | 4 |
@@ -218,7 +217,7 @@ under a covered root that no row names.
 | packages/tcip-annotation/src/tcip_annotation/sam_wrapper.py | SAM2 wrapper for interactive segmentation. | 2 | 6 |
 | packages/tcip-annotation/src/tcip_annotation/state.py | Annotation and review data model. | 0 | 24 |
 | packages/tcip-annotation/src/tcip_annotation/utils.py | Shared utilities: image orientation, geometry helpers. | 0 | 4 |
-| packages/tcip-annotation/src/tcip_annotation/verdicts.py | The review verdict's action vocabulary, declared once. | 0 | 3 |
+| packages/tcip-annotation/src/tcip_annotation/verdicts.py | The review verdict: its action vocabulary, declared once, and the one reading of a stored entry. | 0 | 3 |
 | packages/tcip-annotation/src/tcip_annotation/viz.py | Visualization rendering: draws annotations and predictions on images. | 2 | 2 |
 
 ## tcip-store
@@ -737,9 +736,10 @@ tree by `tools/check_architecture_doc.py` and `tools/check_architecture_citation
 `packages/tcip-mcp/src/tcip_mcp/server.py:9` defines `mcp = MCPServer("tcip-pipeline")`.
 `python tools/list_tools.py` is the authority for the registered tool list and count; a
 count written here drifts, so none is. Every registered tool's name matches an `@mcp.tool()`
-decorator site in `packages/tcip-mcp/src/tcip_mcp/tools/*.py` and each such site is
-immediately followed by an `@audited` decorator (some spelled `@audited(scope_arg=...)`, so a
-check must match the decorator name rather than the whole line).
+decorator site in `packages/tcip-mcp/src/tcip_mcp/tools/*.py`. A mutating tool's site is
+followed by an `@audited` decorator (some spelled `@audited(scope_arg=...)`) unless its library
+records each of its acts itself, and a tool that only reads need carry none. The "audited" column
+says which.
 
 Tables below group by defining module. Column "line" is the `def`/`async def` line.
 Docstring is the function's docstring first line, verbatim.
@@ -771,7 +771,7 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `materialize_review_dataset` | `feedback_tools.py:153` | yes | Build a curated detection dataset from human review verdicts. |
-| `prioritize_review_queue` | `feedback_tools.py:380` | yes | Rank un-reviewed images by active-learning informativeness for the next review batch. |
+| `prioritize_review_queue` | `feedback_tools.py:380` | no | Rank un-reviewed images by active-learning informativeness for the next review batch. |
 
 ### gui_tools.py (2 tools)
 
@@ -784,23 +784,24 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `run_inference` | `inference_tools.py:269` | yes | Run a trained model over images or a raster, and persist the predictions as a bucket. |
+| `run_inference` | `inference_tools.py:291` | no | Run a trained model over images or a raster, and persist the predictions as a bucket. |
 | `clear_prediction_bucket` | `inference_tools.py:1614` | yes | Move a terminal experiment's own recorded prediction bucket into a dated archive under `predictions/.cleared/`, so the path re-publishes: the audited remedy `run_inference`'s own docstring and `delivery.md` name for a bucket the pointer lock has otherwise made unreachable a second time (a completed or failed experiment's bucket publishes once through the ordinary doors). |
-| `deliver_per_image_counts` | `inference_tools.py:2528` | yes | Export a CSV summary of detection counts per image, from a live run or a persisted bucket. |
+| `deliver_per_image_counts` | `inference_tools.py:2528` | no | Export a CSV summary of detection counts per image, from a live run or a persisted bucket. |
 
 ### calibration_tools.py (3 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `redraw_calibration_holdout` | `calibration_tools.py:23` | yes | Deliberately redraw a locked calibration/holdout split. |
-| `calibrate_scalar_operating_point` | `calibration_tools.py:268` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
-| `calibrate_count_operating_point` | `calibration_tools.py:480` | yes | Calibrate and validate the count operating point against held-out GT, earning a claim |
+| `redraw_calibration_holdout` | `calibration_tools.py:22` | no, its library event | Deliberately redraw a locked calibration/holdout split. |
+| `calibrate_scalar_operating_point` | `calibration_tools.py:268` | no | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
+| `calibrate_count_operating_point` | `calibration_tools.py:480` | no | Calibrate and validate the count operating point against held-out GT, earning a claim |
 
-### ingest_tools.py (1 tool)
+### ingest_tools.py (2 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `ingest_images` | `ingest_tools.py:219` | yes | Copy raw images into a structured project, bucketed by the capture date each file states. |
+| `import_coco` | `ingest_tools.py:437` | no, its library event | Convert an external dataset-level COCO document into the dataset's per-image label documents. |
 
 ### meta_tools.py (5 tools)
 
@@ -822,7 +823,7 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `register_model` | `model_tools.py:24` | yes | Register a trained model in the project model registry. |
+| `register_model` | `model_tools.py:24` | no | Register a trained model in the project model registry. |
 | `rank_registered_models` | `model_tools.py:118` | yes | List the project's registered models, or rank them by an explicit metric. |
 
 ### operationalization_tools.py (1 tool)
@@ -842,13 +843,13 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `deliver_orthomosaic_plant_counts` | `orthomosaic_tools.py:591` | yes | Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s). |
+| `deliver_orthomosaic_plant_counts` | `orthomosaic_tools.py:589` | no, its library event | Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s). |
 
 ### delivery_tools.py (2 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `deliver_per_plant_csv` | `delivery_tools.py:29` | yes | The general per-plant CSV door: `aggregate_per_plant`'s own output plus the existing |
+| `deliver_per_plant_csv` | `delivery_tools.py:28` | no, its library event | The general per-plant CSV door: `aggregate_per_plant`'s own output plus the existing |
 | `supersede_delivery` | `delivery_tools.py:193` | yes | Record that a delivered file's number is withdrawn or replaced, without touching the file |
 
 ### phenology_tools.py (4 tools)
@@ -856,9 +857,9 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `register_plant_registry` | `phenology_tools.py:31` | yes | Register a plant-locations CSV set under a name, so `build_plant_mapping` and |
-| `build_plant_mapping` | `phenology_tools.py:114` | yes | Assign each geolocated image to a plant, then persist the mapping under this project. |
-| `calibrate_classifier_operating_point` | `phenology_tools.py:585` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
-| `deliver_phenology_milestones` | `phenology_tools.py:728` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `build_plant_mapping` | `phenology_tools.py:113` | no, its library event | Assign each geolocated image to a plant, then persist the mapping under this project. |
+| `calibrate_classifier_operating_point` | `phenology_tools.py:585` | no | Calibrate and validate the trait's positive-class classifier against held-out GT. |
+| `deliver_phenology_milestones` | `phenology_tools.py:726` | no, its library event | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (5 tools)
 
@@ -894,7 +895,7 @@ anything.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `calibrate_physical_scale` | `scale_tools.py:84` | yes | Derive and validate a physical per-pixel scale, and stamp it into ``pred_dir``'s |
+| `calibrate_physical_scale` | `scale_tools.py:84` | no | Derive and validate a physical per-pixel scale, and stamp it into ``pred_dir``'s |
 
 ### training_tools.py (6 tools)
 
@@ -1145,14 +1146,13 @@ wires it directly rather than through `trainingApi`.
 
 ## 3. tcip-annotation importable public symbols
 
-`packages/tcip-annotation/src/tcip_annotation/__init__.py:40-76` defines `__all__`.
-Counted this session by parsing the module's AST: 27 entries.
+`packages/tcip-annotation/src/tcip_annotation/__init__.py:33-63` defines `__all__`: 22 entries.
 
 differs from phase0 record: `docs/audit/phase0/surface-formats/annotation-api.md` states
 in prose ("re-exports the following 26 names") that `__all__` has 26 names; its own table
-under "Package-level exports" (lines 40-66 of that file) in fact lists 27 rows, matching
-the HEAD count of 27. The HEAD fact is 27; the phase0 document's summary sentence
-undercounts its own table by one.
+under "Package-level exports" (lines 40-66 of that file) lists 27 rows. The HEAD fact is 22:
+the COCO writers `write_coco` and `to_coco_dataset`, the format-dispatch aliases
+`load_annotations_any` and `save_annotations_any`, and `detect_format` are gone.
 
 | name | re-exported from | `__init__.py` line |
 |---|---|---|
@@ -1164,12 +1164,7 @@ undercounts its own table by one.
 | `bbox_of` | `state` | 3 |
 | `read_annotations` | `json_io` | 12 |
 | `write_annotations` | `json_io` | 12 |
-| `to_coco_dataset` | `json_io` | 12 |
-| `detect_format` | `format_io` | 17 |
-| `load_annotations_any` (alias of `format_io.load_annotations`) | `format_io` | 17-19 |
-| `save_annotations_any` (alias of `format_io.save_annotations`) | `format_io` | 17-20 |
-| `parse_coco_annotations` | `format_io` | 21 |
-| `write_coco` | `format_io` | 22 |
+| `parse_coco_annotations` | `format_io` | 16 |
 | `compute_matches` | `matching` | 24 |
 | `compute_classified_trait_matches` | `matching` | 24 |
 | `box_iou` | `matching` | 27 |
@@ -1192,7 +1187,7 @@ states the same rule and is loaded automatically when reading files in the packa
 Names not re-exported in `__all__` but importable directly from their defining submodule
 (restated from phase0, not re-derived this session): `json_io.ANNOTATIONS_KEY`,
 `json_io.UNLABELED`, `json_io.target_class_id`,
-`format_io.AnnotFormat`, `format_io.load_annotations`, `format_io.save_annotations`,
+`json_io.LABEL_SUFFIX`, `format_io.coco_categories`,
 `mask_contours.DEFAULT_EPSILON_FRAC`, `annotation_engine.Snapshot`,
 `annotation_engine.UNDO_DEPTH`, `review_engine.REVIEW_SHARD_DIRNAME`,
 `sam_wrapper.checkpoint_path`, `sam_wrapper.predict_from_point`,
@@ -1278,8 +1273,8 @@ Path: `<dataset_root>/annotations/[<date>/]<stem>.json` (ground truth);
 
 Writers: `tcip_annotation.json_io.write_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:844`;
-`tcip_annotation.format_io.save_annotations` (`fmt="json"`),
-`packages/tcip-annotation/src/tcip_annotation/format_io.py:283`;
+`tcip_mcp.pipelines.data.coco_import.import_coco_document`,
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/coco_import.py:12`;
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
 `packages/tcip-annotation/src/tcip_annotation/review_engine.py:844`;
 `tcip_mcp.prediction_buckets.stage_prediction_shapes`,
@@ -1287,8 +1282,6 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 
 Readers: `tcip_annotation.json_io.read_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:544`;
-`tcip_annotation.format_io.load_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/format_io.py:379`;
 `tcip_mcp.dataset_layout.subjects_on_date`,
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:1267`.
 
@@ -1305,25 +1298,14 @@ reader are exercised in round-trip tests
 recorded by S17: no test cross-writes through one production writer and cross-reads through a
 different consumer path in the same test.
 
-## 2. Assembled COCO dataset JSON, interop format
+## 2. External COCO dataset JSON, import only
 
-Path: caller-supplied, single dataset-level `.json` file, not per-image.
+Path: caller-supplied, single dataset-level `.json` file, not per-image. The platform writes none.
 
-Writers: `tcip_annotation.format_io.write_coco`,
-`packages/tcip-annotation/src/tcip_annotation/format_io.py:305`;
-`tcip_annotation.format_io.save_annotations` (`fmt="coco"`), `format_io.py:283`;
-`tcip_annotation.json_io.to_coco_dataset` (returns dict, performs no file I/O),
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:413`.
-
-Readers: `tcip_annotation.format_io.parse_coco_annotations`, `format_io.py:239`;
-`tcip_annotation.format_io.load_annotations` (`fmt="coco"` or auto-detected via `detect_format`,
-`format_io.py:72`), `format_io.py:263`.
-
-No seam id in `seam-coverage.json`'s 67-entry inventory names the COCO write/read agreement
-directly. S19 ("Annotation format detection scope (json, coco)") is the nearest seam but covers
-only `detect_format`'s refusal behavior on an unrecognized store, not COCO writer/reader schema
-agreement; `phase0_implementation: once, shared` for S19 (`tests/test_mcp_tools_integration.py:185`,
-`tests/test_format_io.py:198,209`).
+Reader: `tcip_annotation.format_io.parse_coco_annotations`, `format_io.py:52`, which names each
+record's subject and decodes it through format 1's own decoder, called only by
+`tcip_mcp.pipelines.data.coco_import.import_coco_document`, `coco_import.py:12`, which writes the
+per-image documents of format 1 from it. Format 1's reader refuses this shape wherever it sits.
 
 ## 3. `subjects.json`, subject registry
 
@@ -1517,42 +1499,60 @@ one; a call that took the platform default leaves `scope` unset. No line carries
 `schema_version` field: absence is the frozen version 1, `frozen-formats.json`'s ceiling for this
 store.
 
-`audited` covers the platform's doors (every MCP tool in `tools/`, plus the script-invoked doors
-demoted from them): bare, a platform event; `@audited(scope_arg=...)` names the argument carrying
+Every mutating door leaves exactly one line per act, the decorator's or the library's. The
+decorator writes none for a call that returns its error dict and an `exception` line for a call
+that raises; whatever a refusing call committed first is recorded by the library that committed
+it. The library that mutates records the act, and the decorator stays only on a door whose own
+act has no library owner: `audited` covers the platform's mutating doors (the MCP tools in
+`tools/`, plus the script-invoked doors demoted from them) except a door whose libraries record
+each of its acts (`import_coco`, `build_plant_mapping`, `redraw_calibration_holdout`,
+`deliver_per_plant_csv`, `deliver_orthomosaic_plant_counts`, `deliver_phenology_milestones`,
+`register_model`, `run_inference`, `deliver_per_image_counts`, and the four calibrate doors
+`calibrate_count_operating_point`, `calibrate_scalar_operating_point`,
+`calibrate_classifier_operating_point` and `calibrate_physical_scale`, whose lock, record, curve
+and stamp each leave their library's line; a stamp's is `stamp_written`, written by
+`resolution.write_sidecar` and `resolution.update_sidecar`): bare, a platform event;
+`@audited(scope_arg=...)` names the argument carrying
 a dataset or project location, resolved via `dataset_scope_of` (`audit.py:270`) (through the tool's own
-canonicalizer when the declaration passes one as `scope_via`). Ten doors declare one: eight
-dataset-scoped (`save_annotations`, `tools/annotation_tools.py:147`; `write_subject_registry`,
-`tools/annotation_tools.py:513`; `redraw_calibration_holdout`, `tools/calibration_tools.py:23`;
-`materialize_review_dataset`, `tools/feedback_tools.py:153`; `run_inference`,
-`tools/inference_tools.py:269`; `register_dataset`, `tools/project_tools.py:189`;
-`propose_annotations`, `tools/proposal_tools.py:183`; `stage_proposals`, `tools/proposal_tools.py:754`)
-and two project-scoped
+canonicalizer when the declaration passes one as `scope_via`). Ten doors declare one: seven
+dataset-scoped (`save_annotations`, `tools/annotation_tools.py:92`; `write_subject_registry`,
+`tools/annotation_tools.py:439`; `materialize_review_dataset`, `tools/feedback_tools.py:153`;
+`clear_prediction_bucket`, `tools/inference_tools.py:1636`; `register_dataset`,
+`tools/project_tools.py:189`; `propose_annotations`, `tools/proposal_tools.py:183`;
+`stage_proposals`, `tools/proposal_tools.py:747`) and three project-scoped
 (`state_trait_operationalization`, `tools/operationalization_tools.py:19`; `author_trait_spec`,
-`tools/trait_spec_authoring_tools.py:27`; `dataset_scope_of` admits a `project_root` argument the
+`tools/trait_spec_authoring_tools.py:27`; `delete_stray_state_file`,
+`tools/project_tools.py:1190`; `dataset_scope_of` admits a `project_root` argument the
 same way it admits a dataset root, since both are directories carrying their own `.tcip/`). A
 resolution that answers "no dataset" leaves the call a platform event; a resolver that raises
 refuses the call rather than filing it there.
 
 `record_event`/`record_event_or_raise` cover code that is neither an MCP tool nor a demoted door.
 Platform-scoped, no `scope` of their own: the training envelope's open/close events
-(`pipelines/training/envelope.py`), the model registry's replace and write-refusal events
-(`model_registry.py:408,424`), `evaluation.py`'s derived-localization-kind record
-(`pipelines/training/evaluation.py:539` (`record_event_or_raise`)),
-`experiments.py`'s post-terminal refusal (`_audit_refused`, `experiments.py:386`) when its caller names no
-project root (the training watchdog passes the launch's own pinned platform root, so its lines
-carry a `scope` equal to the platform root, the presence-never-means-non-platform case), and
-`routes/terminal.py`'s one line per agent-terminal launch (`agent_terminal_started`, `routes/terminal.py:83`). The `@audited(scope_arg=...)`
+(`pipelines/training/envelope.py`), the model registry's write event (`model_registered`,
+`model_registry.py`), `evaluation.py`'s derived-localization-kind record
+(`pipelines/training/evaluation.py:539` (`record_event_or_raise`)), a calibration curve's
+first write (`calibration_curve_written`, `tools/inference_tools.py`'s `keep_calibration_curve`),
+and `routes/terminal.py`'s one line per agent-terminal launch (`agent_terminal_started`, `routes/terminal.py:83`). The `@audited(scope_arg=...)`
 doors span every category by whatever root their declared argument resolves; this paragraph
 names the explicit-emitter files, not a closed census of the decorator's doors.
 Dataset-scoped: two GUI route writers passing the dataset root their own guard resolved
-(`routes/subjects.py`'s `_audit_dataset_write`, `routes/subjects.py:63`, which `routes/inference.py`'s own prediction
-writer calls too (`_audit_dataset_write`, `routes/inference.py:406`); `routes/review.py`'s `_audit`,
+(`routes/subjects.py`'s `_audit_dataset_write`, `routes/subjects.py:63`; `routes/review.py`'s `_audit`,
 `routes/review.py:96`), plus `routes/annotate.py`'s `_audit_gui_write` (`routes/annotate.py:158`), dataset-scoped
 when its guard resolves one and platform-scoped otherwise (a label path confined to an allowed
 root but outside any dataset tree), `resolution.py`'s `record_delivery_binding_event`
 (`resolution.py:2590`, dataset-scoped when a
-delivery's buckets share one dataset root, platform-scoped otherwise), and
-`calibration_tools.py`'s redraw event (`redraw_calibration_holdout_result`, `tools/calibration_tools.py:224`).
+delivery's buckets share one dataset root, platform-scoped otherwise),
+the calibration/holdout lock's draw event (`calibration_holdout_drawn`,
+`pipelines/data/splits.py:1240`), written by every first draw and redraw whichever door triggers
+it, the COCO import's `coco_document_imported` (`pipelines/data/coco_import.py`), written
+once a document has committed, on success and on a later failed write alike, and a prediction
+bucket's `prediction_bucket_published` (`tools/inference_tools.py`'s `seal_stamp_and_record`),
+written by the publishing library for an image bucket and a raster bucket alike, whichever door
+published it (the GUI's inference worker included), naming the documents written, and every bucket stamp's `stamp_written`
+(`pipelines/resolution.py`'s `write_sidecar` and `update_sidecar`), naming the stamp as stored,
+filed under the bucket's dataset root (`resolution.bucket_dataset_root`) or the platform log when
+the bucket sits under none.
 Project-scoped: `routes/results.py`'s `_audit` (`routes/results.py:164`, its delivery and confirmation routes) and
 `pipelines/postprocessing/plant_mapping.py`'s `persist_mapping` (`pipelines/postprocessing/plant_mapping.py:1406`), whose two callers file
 its receipt under two different categories: the MCP tool `build_plant_mapping` passes the
@@ -1577,15 +1577,9 @@ relocated import's lines still name the exporting machine's own root and nothing
 against where the archive now sits; and a project archive is provenance-preserving, not
 path-sanitized, by the same standing choice.
 
-Readers: two production parsers, both reading through the storage seam's `read_log` rather than
-decoding lines by hand, and both refusing (never scanning past) a page reporting corruption or an
-unknown `schema_version`. `experiments._index_refused_mutations`,
-`packages/tcip-mcp/src/tcip_mcp/experiments.py:1629`, one scan of the platform audit log
-(`audit_log_key()`, no scope) indexing every `experiment_mutation_refused` entry by
-`arguments.experiment_id`, shared by `compare_experiments` (`experiments.py:1735`), across every experiment it
-compares in one call; `page.corrupt`/`page.version_refused` both fail the whole call (`None`, not
-a partial index), so a caller who cannot see behind an unreadable entry never reports "no
-refusals" in its place. `plant_mapping._scan_receipts`
+Readers: one production parser, reading through the storage seam's `read_log` rather than
+decoding lines by hand, and refusing (never scanning past) a page reporting corruption or an
+unknown `schema_version`. `plant_mapping._scan_receipts`
 (`pipelines/postprocessing/plant_mapping.py:1597`) and `_require_receipt`
 (`pipelines/postprocessing/plant_mapping.py:1624`), the hard receipt gate `load_mapping` runs
 before trusting a persisted mapping record:
@@ -2322,9 +2316,11 @@ which calls `record_committed` (`review.py:110`, `routes/audit_gap.py`)
 with the dataset root its own guard resolved, so a failed append raises `AuditEntryNotWritten`
 rather than only warning; `routes/annotate.py:167` (`record_committed(`) does the same for its own
 dataset, under a root that may be `None` (a label path outside any dataset tree, recorded to the
-platform log instead); `routes/subjects.py:79` (`record_committed(`) likewise, the one
-`routes/inference.py:398` (`from tcip_web.routes.subjects import _audit_dataset_write`) imports
-and calls rather than defining its own; `routes/results.py:176`
+platform log instead); `routes/subjects.py:79` (`record_committed(`) likewise; the GUI
+inference worker writes no line of its own and publishes through the one publisher,
+`routes/inference.py:393` (`seal_stamp_and_record(output_dir, provenance, None, written=job.done)`),
+whose receipts are the library's, catching `AuditEntryNotWritten` into the job's
+`audit_warning`; `routes/results.py:176`
 (`record_committed(`) does the same for a project root instead. Reader:
 `pipelines/postprocessing/plant_mapping.py:1624` (`_require_receipt`)
 trusts only a `plant_mapping_built` entry it finds in the log under the root its caller holds
@@ -2439,9 +2435,9 @@ Phase 3 verdict: single.
 
 ## S19. Annotation format detection scope (json, coco)
 
-Must agree: every reader refuses rather than guesses when a file's format is undetermined.
-Side A: `packages/tcip-annotation/src/tcip_annotation/format_io.py:72` (`def detect_format(path: str) -> AnnotFormat:`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:120` (`file_fmt = fmt or detect_format(str(gt_path))`).
+Must agree: a label document's shape is decided by its one reader, never guessed beside it.
+Side A: `packages/tcip-annotation/src/tcip_annotation/json_io.py:169` (`def parse_label_document(text: str, *, source: str) -> dict:`), which refuses a dataset-level COCO and the old `objects` schema for every reader of a per-image document.
+Side B: none; admission, the doctor and the read tool take that reader's answer.
 Phase 3 verdict: single.
 
 ## S20. subjects.json subject registry
@@ -2631,7 +2627,7 @@ Differs from phase0 record: phase0 cited a line inside the function's body rathe
 
 Must agree: a breeder-confirmed sample reaches the operating-point gate evidence in the same record shape GT annotations do, and passes the same gate.
 Side A: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:659` (`def record_detection_action(`, the one writer of a stored verdict entry).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/verdicts.py:74` (`decode_verdict`, the one read of that entry, over the affirming actions declared at `pipelines/feedback/verdicts.py:18` (`POSITIVE_ACTIONS`)), called by `pipelines/feedback/review_calibration.py:282` for the calibration reference and `pipelines/feedback/materialize.py:85` for the curated dataset. What each consumer then emits from the affirmed box (COCO xywh scaled by the image, pixel corners for a label file) stays its own.
+Side B: `packages/tcip-annotation/src/tcip_annotation/verdicts.py:103` (`decode_verdict`, the one read of that entry, over the affirming actions declared at `verdicts.py:33` (`POSITIVE_ACTIONS`)), called by `pipelines/feedback/review_calibration.py:225` for the calibration reference, `pipelines/feedback/materialize.py:101` for the curated dataset, and the engine's own lookup and the review routes. What each consumer then emits from the affirmed box (COCO xywh scaled by the image, pixel corners for a label file) stays its own.
 Phase 3 verdict: single.
 
 ## S46. Frontend api/ layer against backend route paths

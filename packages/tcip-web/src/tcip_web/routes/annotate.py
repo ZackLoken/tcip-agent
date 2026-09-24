@@ -8,17 +8,16 @@ so the backend doesn't have to guess a dataset layout.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from tcip_annotation import BBox, Point
-from tcip_annotation.state import polygonal
 from tcip_annotation.json_io import (
     UnreadableLabelDocument,
     annotation_from_payload,
     authorship_of,
+    client_annotation,
     read_annotations_versioned,
     write_annotations,
 )
@@ -34,22 +33,23 @@ router = APIRouter(prefix="/api/annotate", tags=["annotate"])
 
 
 class AnnotationPayload(BaseModel):
-    """One annotation: its ``subject`` (the object it is about), a geometry (a box, a polygon, a
-    point, or none of them for an image-level label), and its attribute values by name."""
+    """One annotation: its ``subject`` (the object it is about), a geometry (``bbox`` corners,
+    ``points`` for the one ring the canvas draws by hand, ``rings`` for a loaded multi-ring shape
+    round-tripping, ``point`` for a placed prompt or keypoint, or none of them for an image-level
+    label), its attribute values by name and its crowd flag.
+
+    Every field but the subject and the provenance is carried uninterpreted: its one reading is
+    :func:`~tcip_annotation.json_io.annotation_from_payload`, the conversion the save tool shares,
+    so a value that route refuses is never coerced into one here first.
+    """
 
     subject: str
-    bbox: Optional[list[float]] = None          # [x1, y1, x2, y2], pixel
-    points: Optional[list[list[float]]] = None  # single-ring polygon vertices, pixel: a shape the
-                                                 # canvas itself drew/edited by hand
-    rings: Optional[list[list[list[float]]]] = None  # multi-ring polygon (a loaded, unedited
-                                                       # occlusion-split instance_seg shape round-
-                                                       # tripping through save): takes precedence
-                                                       # over `points` when both are present
-    point: Optional[list[float]] = None         # [x, y], pixel: one placed prompt / keypoint.
-                                                 # Singular, deliberately distinct from `points`:
-                                                 # a point and a one-vertex contour are not the
-                                                 # same geometry.
-    attributes: dict[str, str] = {}
+    bbox: Any = None
+    points: Any = None
+    rings: Any = None
+    point: Any = None
+    attributes: Any = None
+    iscrowd: Any = None
     # Keep-original-creator: a loaded shape's created_by, sign-off and rule marker round-trip
     # back on save, so a re-save never re-stamps existing labels; new shapes carry none of them.
     created_by: Optional[str] = None
@@ -125,34 +125,12 @@ def _guarded_audit_root(label_path: Optional[str]) -> Optional[str]:
         raise HTTPException(403, str(exc)) from exc
 
 
-def _ann_dict(a: Annotation) -> dict:
-    """Serialize an :class:`Annotation` for the canvas (pixel coords + provenance).
-
-    ``rings`` (not ``points``) for a polygon: a loaded GT annotation can be a multi-ring
-    occlusion-split instance_seg prediction accepted through Review, so the canvas always receives
-    every ring rather than silently only the first. The canvas itself still only ever *draws* a
-    single ring by hand (see ``AnnotationPayload.points`` below, the save side). ``point`` is the
-    singular ``[x, y]`` of a placed prompt / keypoint, the same key the on-disk schema uses.
-    ``authorship`` is this load response's own field, derived from the four provenance fields
-    through :func:`authorship_of`; the label document itself carries no such field.
-    """
-    out: dict = {"subject": a.subject, "attributes": dict(a.attributes)}
-    geom = a.geometry
-    if polygonal(geom):
-        out["rings"] = [[list(pt) for pt in ring] for ring in geom.rings]
-    elif isinstance(geom, BBox):
-        out["bbox"] = [geom.x1, geom.y1, geom.x2, geom.y2]
-    elif isinstance(geom, Point):
-        out["point"] = [geom.x, geom.y]
-    if a.score is not None:
-        out["score"] = a.score
-    out["created_by"] = a.created_by
-    out["created_at"] = a.created_at
-    out["accepted_by"] = a.accepted_by
-    out["accepted_at"] = a.accepted_at
-    out["accepted_by_rule"] = a.accepted_by_rule
-    out["authorship"] = authorship_of(a)
-    return out
+def annotation_dict(a: Annotation) -> dict:
+    """An :class:`Annotation` for the canvas, the one the Annotate and Review load routes share:
+    the library's client projection (:func:`~tcip_annotation.json_io.client_annotation`) plus this
+    response's own ``authorship``, derived through :func:`authorship_of`; the label document
+    itself carries no such field."""
+    return {**client_annotation(a), "authorship": authorship_of(a)}
 
 
 def _audit_gui_write(payload: "SavePayload", label_path: str, root: Optional[str]) -> None:
@@ -187,7 +165,7 @@ def load_labels(image_path: str, label_path: Optional[str] = None) -> dict:
             stored, version = read_annotations_versioned(label_path)
         except UnreadableLabelDocument as exc:
             raise HTTPException(400, str(exc)) from exc
-        annotations = [_ann_dict(a) for a in stored]
+        annotations = [annotation_dict(a) for a in stored]
         token = version.token
     return {
         "image_path": image_path,

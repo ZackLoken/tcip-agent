@@ -323,9 +323,9 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(tmp_pa
 
 
 def test_preflight_reports_the_admission_refusal_the_launch_would_raise(tmp_path):
-    """A dataset-level export among the per-image documents refuses the run's own admission, so
-    preflight names it in those words: a preflight that swallowed the refusal would read valid
-    over data the launch then refuses."""
+    """A dataset-level export at an image's label path refuses the run's own admission, through
+    the one per-image reader, so preflight names it in those words: a preflight that swallowed
+    the refusal would read valid over data the launch then refuses."""
     pytest.importorskip("torch")
     from PIL import Image
     from tcip_annotation import json_io
@@ -336,8 +336,9 @@ def test_preflight_reports_the_admission_refusal_the_launch_would_raise(tmp_path
     imgs, lbls = tmp_path / "images", tmp_path / "annotations"
     imgs.mkdir()
     lbls.mkdir()
-    for stem in ("a", "b"):
+    for stem in ("a", "b", "zzz-export"):
         Image.new("RGB", (20, 20)).save(imgs / f"{stem}.jpg")
+    for stem in ("a", "b"):
         json_io.write_annotations(lbls / f"{stem}.json",
                                   [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 20, 20)
     (lbls / "zzz-export.json").write_text(json.dumps(
@@ -351,7 +352,7 @@ def test_preflight_reports_the_admission_refusal_the_launch_would_raise(tmp_path
     }
     r = preflight_config(cfg)
 
-    with pytest.raises(ValueError, match="dataset-level COCO") as raised:
+    with pytest.raises(json_io.UnreadableLabelDocument, match="dataset-level COCO") as raised:
         auto_train_val("detection", dict(data_cfg), None)
     assert r["valid"] is False
     assert any("dataset-level COCO" in i for i in r["issues"]), r["issues"]
@@ -1257,7 +1258,6 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch)
 
 def test_ensure_experiment_mints_fresh_id_instead_of_mutating(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # .tcip/experiments lives under cwd
-    from tcip_mcp.audit import audit_log_key
     from tcip_mcp.experiments import (
         config_key, create_experiment, lineage_key, log_metrics, read_metrics, status_key,
         update_status,
@@ -1287,10 +1287,6 @@ def test_ensure_experiment_mints_fresh_id_instead_of_mutating(tmp_path, monkeypa
     assert lineage["parent_experiment"] == "exp1"
     assert lineage["data_source"] == "imgs_v2"
 
-    # An ordinary relaunch refuses nothing: overwrite_config_if_pristine is never even attempted
-    # against a non-pristine id, so no experiment_mutation_refused line is appended for it.
-    events = ts.read_log(audit_log_key(tmp_path)).records
-    assert not [e for e in events if e.get("tool") == "experiment_mutation_refused"]
 
 
 def test_ensure_experiment_attaches_to_precreated(tmp_path, monkeypatch):

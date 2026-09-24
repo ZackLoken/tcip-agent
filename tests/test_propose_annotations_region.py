@@ -439,6 +439,32 @@ class TestWholeFrameDefaultIsUnaffected:
         assert "candidates[0].bbox" in result["error"]
         assert ts.read(proposal_tools._staging_key_for(str(img_path)).key, default=None) is None
 
+    def test_a_candidate_whose_rings_are_no_polygon_is_refused_where_it_arrives(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An engine's rings are held to the polygon rule where they arrive, so a ring too short
+        to be a shape is named then, never drawn on the overlay and refused later at staging."""
+        import tcip_store as ts
+        from tcip_mcp.pipelines import proposal
+        from tcip_mcp.tools import proposal_tools
+
+        class TwoPointProposer:
+            def propose(self, image_path, **params):
+                return [{"candidate_id": 0, "bbox": [1.0, 1.0, 2.0, 2.0], "area": 1,
+                         "score": 0.5, "engine": "sam", "engine_meta": {},
+                         "rings": [[(1, 1), (2, 2)]]}]
+
+        monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: TwoPointProposer())
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        img_path = images_dir / "short_ring.jpg"
+        Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
+
+        result = proposal_tools.propose_annotations(image_path=str(img_path))
+
+        assert "three or more points" in result.get("error", ""), result
+        assert ts.read(proposal_tools._staging_key_for(str(img_path)).key, default=None) is None
+
     def test_an_ordinary_candidate_is_still_staged(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -467,3 +493,29 @@ class TestWholeFrameDefaultIsUnaffected:
         assert "error" not in result, result
         envelope = ts.read(proposal_tools._staging_key_for(str(img_path)).key)
         assert envelope["candidates"][0]["bbox"] == [1.0, 1.0, 2.0, 2.0]
+
+    def test_a_candidate_stating_no_confidence_is_refused_where_it_arrives(
+        self, tmp_path: Path,
+    ) -> None:
+        """A candidate's confidence is its engine's to state: one stating none is refused by name
+        where it arrives, never staged under a confidence nobody reported."""
+        import tcip_store as ts
+        from tcip_mcp.pipelines.proposal import register_proposal_engine
+        from tcip_mcp.tools import proposal_tools
+
+        class UnscoredProposer:
+            def propose(self, image_path, **params):
+                return [{"candidate_id": 0, "bbox": [1.0, 1.0, 2.0, 2.0], "area": 1,
+                         "engine": "unscored", "engine_meta": {},
+                         "rings": [[(1, 1), (2, 1), (2, 2)]]}]
+
+        register_proposal_engine("unscored", UnscoredProposer())  # type: ignore[arg-type]
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        img_path = images_dir / "unscored.jpg"
+        Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
+
+        result = proposal_tools.propose_annotations(image_path=str(img_path), engine="unscored")
+
+        assert "'score'" in result.get("error", ""), result
+        assert ts.read(proposal_tools._staging_key_for(str(img_path)).key, default=None) is None

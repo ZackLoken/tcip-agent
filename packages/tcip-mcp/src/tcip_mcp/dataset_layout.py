@@ -42,9 +42,8 @@ from tcip_store import (
 )
 from tcip_store.file_backend import RootedFileLocator
 
-# Per-image JSON is the canonical on-disk label format; ``coco`` is the assembled dataset view of it.
-LABEL_EXT = {"json": ".json", "coco": ".json"}
-_ANY_EXTS = (".json",)
+from tcip_annotation.json_io import LABEL_SUFFIX
+
 DEFAULT_MODEL = "live"
 #: Geometry kinds a task authors, kept as a selector, not a label-path segment.
 TASKS = ("detect", "segment")
@@ -73,11 +72,6 @@ def is_bucket_name(name: str) -> bool:
     return is_valid_name(name) and not name.startswith(".")
 
 
-def label_ext(fmt: Optional[str]) -> str:
-    """File extension for a label format: always ``.json``; both formats are JSON on disk."""
-    return LABEL_EXT.get((fmt or "json").lower(), ".json")
-
-
 # ── the dataset-root stores ──────────────────────────────────────────────────
 
 _STATE_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
@@ -91,10 +85,10 @@ _IMAGE_TREE = RootedFileLocator(prefix=("images",))
 the extension is part of the file's own name, because a dataset holds whatever formats its
 captures came in."""
 
-_LABEL_TREE = RootedFileLocator(prefix=("annotations",), suffix=LABEL_EXT["json"])
+_LABEL_TREE = RootedFileLocator(prefix=("annotations",), suffix=LABEL_SUFFIX)
 """Ground truth, one file per image under its capture date."""
 
-_PREDICTION_TREE = RootedFileLocator(prefix=("predictions",), suffix=LABEL_EXT["json"])
+_PREDICTION_TREE = RootedFileLocator(prefix=("predictions",), suffix=LABEL_SUFFIX)
 """Model outputs, one file per image under a model bucket and capture date."""
 
 
@@ -275,7 +269,7 @@ def prediction_bucket_date(path: str | Path) -> Optional[str]:
     model, rest = rest[0], rest[1:]  # drop <model>
     if not is_bucket_name(model):
         return None
-    if rest and rest[-1].endswith(".json"):
+    if rest and rest[-1].endswith(LABEL_SUFFIX):
         rest = rest[:-1]
     return rest[0] if len(rest) == 1 else None
 
@@ -294,7 +288,7 @@ def annotation_date(path: str | Path) -> Optional[str]:
     i = len(parts) - 1 - parts[::-1].index("annotations")
     rest = parts[i + 1:]
     # A file (<date>/<stem>.json or <stem>.json) trims its trailing stem first.
-    if rest and rest[-1].endswith(".json"):
+    if rest and rest[-1].endswith(LABEL_SUFFIX):
         rest = rest[:-1]
     return rest[0] if len(rest) == 1 else None
 
@@ -1204,44 +1198,30 @@ def is_cleared_bucket(path: str | Path) -> bool:
     return cleared_bucket_of(path) is not None
 
 
-def label_filename(stem: str, fmt: str = "json") -> str:
+def label_filename(stem: str) -> str:
     """The file name one image's label or prediction record is written under.
 
     The rule an image stem becomes a record name by, stated once: a consumer holding a directory
     this module did not hand it (a curated dataset's ``labels/``) still asks here for the name
     rather than re-asserting the extension.
     """
-    return f"{stem}{label_ext(fmt)}"
+    return f"{stem}{LABEL_SUFFIX}"
 
 
-def annotation_path(
-    dataset_root: str | Path,
-    date: Optional[str],
-    stem: str,
-    fmt: str = "json",
-) -> Path:
-    return annotation_dir(dataset_root, date) / label_filename(stem, fmt)
+def annotation_path(dataset_root: str | Path, date: Optional[str], stem: str) -> Path:
+    return annotation_dir(dataset_root, date) / label_filename(stem)
 
 
-def annotation_path_for_image(
-    image_path: str | Path,
-    fmt: str = "json",
-    *,
-    date: Optional[str] = None,
-) -> Path:
+def annotation_path_for_image(image_path: str | Path, *, date: Optional[str] = None) -> Path:
     """Canonical write path for an image's single label file (date derived from the image path)."""
     root, img_date, stem = parse_image_path(image_path)
-    return annotation_path(root, date if date is not None else img_date, stem, fmt)
+    return annotation_path(root, date if date is not None else img_date, stem)
 
 
 def prediction_path(
-    dataset_root: str | Path,
-    model: Optional[str],
-    date: Optional[str],
-    stem: str,
-    fmt: str = "json",
+    dataset_root: str | Path, model: Optional[str], date: Optional[str], stem: str,
 ) -> Path:
-    return prediction_dir(dataset_root, model, date) / label_filename(stem, fmt)
+    return prediction_dir(dataset_root, model, date) / label_filename(stem)
 
 
 def list_subjects(dataset_root: str | Path) -> list[str]:
@@ -1364,7 +1344,7 @@ def prediction_bucket_dirs(dataset_root: str | Path, *, include_cleared: bool) -
 
 
 def _dir_has_label_file(d: Path) -> bool:
-    """True if ``d`` holds at least one label file (any supported extension).
+    """True if ``d`` holds at least one label file.
 
     An *empty* label file counts here: this answers "was anything written on this date", which is
     what the GUI's selectors need. It does not mean the image is a confirmed negative: that
@@ -1373,7 +1353,7 @@ def _dir_has_label_file(d: Path) -> bool:
     """
     if not d.is_dir():
         return False
-    return any(p.is_file() and p.suffix in _ANY_EXTS for p in d.iterdir())
+    return any(p.is_file() and p.suffix == LABEL_SUFFIX for p in d.iterdir())
 
 
 def models_with_predictions(dataset_root: str | Path, date: Optional[str]) -> list[str]:
@@ -1387,26 +1367,15 @@ def models_with_predictions(dataset_root: str | Path, date: Optional[str]) -> li
     ]
 
 
-def find_gt_label(
-    image_path: str | Path,
-    *,
-    date: Optional[str] = None,
-    fmt: Optional[str] = None,
-) -> Optional[Path]:
+def find_gt_label(image_path: str | Path, *, date: Optional[str] = None) -> Optional[Path]:
     """Find the existing ground-truth label file for an image (read-time resolver).
 
     One file per image, so this resolves ``annotations/<date>/<stem>.json`` directly. Returns
-    the file, or ``None``. If ``fmt`` is given only that extension is considered, else any supported.
+    the file, or ``None``.
     """
     root, img_date, stem = parse_image_path(image_path)
-    d = date if date is not None else img_date
-    exts = [label_ext(fmt)] if fmt else list(_ANY_EXTS)
-    adir = annotation_dir(root, d)
-    for e in exts:
-        cand = adir / f"{stem}{e}"
-        if cand.is_file():
-            return cand
-    return None
+    cand = annotation_path(root, date if date is not None else img_date, stem)
+    return cand if cand.is_file() else None
 
 
 def find_prediction(
@@ -1414,7 +1383,6 @@ def find_prediction(
     *,
     model: Optional[str] = None,
     date: Optional[str] = None,
-    fmt: Optional[str] = None,
 ) -> Optional[Path]:
     """Find an existing prediction file for an image: a specific ``model`` if given, else every
     live model. Returns the first existing file, or ``None``.
@@ -1425,7 +1393,6 @@ def find_prediction(
     archive every other caller of this module is refused."""
     root, img_date, stem = parse_image_path(image_path)
     d = date if date is not None else img_date
-    exts = [label_ext(fmt)] if fmt else list(_ANY_EXTS)
 
     if model is not None and not is_bucket_name(model):
         raise ValueError(
@@ -1434,9 +1401,7 @@ def find_prediction(
         )
     models = [model] if model else list_models(root)
     for m in models:
-        pdir = prediction_dir(root, m, d)
-        for e in exts:
-            cand = pdir / f"{stem}{e}"
-            if cand.is_file():
-                return cand
+        cand = prediction_path(root, m, d, stem)
+        if cand.is_file():
+            return cand
     return None

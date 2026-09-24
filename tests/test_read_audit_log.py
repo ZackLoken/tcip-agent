@@ -53,10 +53,9 @@ def test_read_audit_log_filters_by_tool_and_status_newest_first(
 
     result = read_audit_log(scope=str(dataset_root), tool="write_subject_registry", status="ok")
     assert "error" not in result, result
-    # Every call returned, the refused one included: a refusal is the body's own answer, and
-    # its line reads ok like any other return; only a raised body reads exception.
-    assert result["count"] == 3
-    assert [e["status"] for e in result["entries"]] == ["ok", "ok", "ok"]
+    # The two writes each leave their line; the refused call, no act, leaves none.
+    assert result["count"] == 2
+    assert [e["status"] for e in result["entries"]] == ["ok", "ok"]
     # Newest first: the last call's own timestamp sorts ahead of the first's.
     assert result["entries"][0]["timestamp"] >= result["entries"][-1]["timestamp"]
     assert result["scope_resolved"] == str(dataset_root.resolve())

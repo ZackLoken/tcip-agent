@@ -14,7 +14,9 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
+
+from tcip_annotation.state import BBox, Polygon, box_derivable
 
 from tcip_mcp.pipelines.image_utils import list_logical_images, logical_image_name
 
@@ -63,15 +65,15 @@ def resolve_registry_id_map(labels_dir, subject: str | None, attribute: str | No
     single-class detector (``attribute`` is ``None``) needs no registry file, the subject *is* the
     class, so it is derived from a synthesized single-subject registry through the same
     ``assign_class_ids``, not a local ``{subject: 0}`` literal. Attribute classification needs the
-    registry to order its values, and refuses when there is none.
+    registry to order its values, and refuses when there is none. A scope naming no subject is
+    refused through :meth:`~tcip_mcp.pipelines.data.selection.ClassScope.named_subject`.
     """
     from tcip_mcp import subject_registry
     from tcip_mcp.dataset_layout import dataset_root_of
+    from tcip_mcp.pipelines.data.selection import ClassScope
 
-    if not subject:
-        raise ValueError(
-            "a detection/instance_seg run needs an explicit subject to read name-based labels; "
-            "none was threaded through build_dataset.")
+    scope = ClassScope.recorded_in({"subject": subject, "attribute": attribute})
+    subject, attribute = scope.named_subject(f"the run over {labels_dir}"), scope.attribute
     cp = resolved_subjects_path(labels_dir)
     if cp is not None:
         registry = subject_registry.read_registry(cp)
@@ -92,14 +94,21 @@ def resolve_registry_id_map(labels_dir, subject: str | None, attribute: str | No
     return registry, subject_registry.assign_class_ids(registry, subject, attribute)
 
 
-def json_det_targets(path, subject, attribute, id_map):
-    """``(boxes, labels, n_unlabeled)`` for one image from the name-based per-image JSON.
+def json_det_targets(path, subject, attribute, id_map,
+                     reads: Callable[[Any], bool] = box_derivable):
+    """``(target, n_unlabeled)`` for one image from the name-based per-image JSON: the one
+    builder of a target from annotations, for the detection loader, the instance loader and every
+    evaluation and calibration reader alike.
 
-    Filters to ``subject`` + a box-derivable geometry
-    (:func:`~tcip_annotation.state.box_derivable`, the one statement of that rule), then maps each
-    kept annotation to its
-    0-indexed id via ``id_map`` (the single ``assign_class_ids`` map), +1 for background. An
-    annotation the registry cannot decode raises, a real label read as nothing is a measurement bug.
+    ``target`` is the detection target shape, ``{"boxes", "labels", "iscrowd"}`` as parallel lists
+    (pixel xyxy, 1-indexed label, crowd flag), every reader of a box's target reading its flag
+    beside it, and ``"geometry"``, each row's own geometry, which a mask is rasterized from.
+    Filters to ``subject`` and the geometry the caller reads (``reads``, a loader's own
+    ``reads_geometry``; :func:`~tcip_annotation.state.box_derivable` unless stated, the one
+    statement of which geometry a target is read from), then maps each
+    kept annotation to its 0-indexed id via ``id_map`` (the single ``assign_class_ids`` map), +1
+    for background, the one place that offset is added. An annotation the registry cannot decode
+    raises, a real label read as nothing is a measurement bug.
 
     ``n_unlabeled`` counts instances of ``subject`` never assessed for ``attribute`` yet (a soft,
     expected gap, not a decode bug, excluded from ``boxes``/``labels`` rather than raising).
@@ -114,11 +123,15 @@ def json_det_targets(path, subject, attribute, id_map):
     verdict once, up front, in ``admitted_documents``' ``skipped_incomplete_attribute`` partition.
     """
     from tcip_annotation import json_io
-    from tcip_annotation.state import bbox_of, box_derivable
+    from tcip_annotation.state import bbox_of
 
-    boxes, labels = [], []
+    target: dict[str, list] = {"boxes": [], "labels": [], "iscrowd": [], "geometry": []}
     n_unlabeled = 0
     for a in json_io.read_annotations(path):
+        if not reads(a.geometry):
+            continue
+        # Every reads predicate admits a box or a region only (box_derivable or narrower).
+        geometry = cast(BBox | Polygon, a.geometry)
         # allow_unlabeled=True: an instance never assessed for `attribute` yet is a soft, expected
         # gap, not a decode bug, must not raise and abort the whole read.
         cid = json_io.target_class_id(a, subject, attribute, id_map, allow_unlabeled=True)
@@ -127,16 +140,12 @@ def json_det_targets(path, subject, attribute, id_map):
             continue
         if cid is None:
             continue
-        # target_class_id is the one decision: it answers None for another subject and for a
-        # geometry no box can be read from, so these assert what it decided rather than re-ask.
-        assert isinstance(cid, int)
-        assert box_derivable(a.geometry), (
-            "target_class_id already returned None for a geometry no box can be read from"
-        )
-        box = bbox_of(a.geometry)
-        boxes.append([box.x1, box.y1, box.x2, box.y2])
-        labels.append(cid + 1)
-    return boxes, labels, n_unlabeled
+        box = bbox_of(geometry)
+        target["boxes"].append([box.x1, box.y1, box.x2, box.y2])
+        target["labels"].append(int(cid) + 1)
+        target["iscrowd"].append(a.iscrowd)
+        target["geometry"].append(geometry)
+    return target, n_unlabeled
 
 
 def ground_truth_shape(ground_truth) -> str:
@@ -148,17 +157,11 @@ def ground_truth_shape(ground_truth) -> str:
     and of what the place holds; this function's own job is which names to ask about.
 
     A ``.csv`` is a table, one row per sample. A directory holding per-image label documents is
-    the document shape and one holding ``<stem>.png`` rasters the mask shape. A dataset-level COCO
-    document anywhere among those documents refuses by name, naming the import door as the
-    remedy: training reads one ground-truth record per sample, and an assembled export shadowing
-    the per-image documents beside it would train on a source nobody chose. Every document the
-    directory admits is classified, not only the first, so which name an export happens to sort
-    under decides nothing. A directory holding neither documents nor masks reads as the document
-    shape, whose own admission then names what is missing image by image.
-
-    A present, unreadable document raises
-    :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than reading as no ground
-    truth: an unreadable document is not the same fact as an absent one.
+    the document shape and one holding ``<stem>.png`` rasters the mask shape. A directory holding
+    neither documents nor masks reads as the document shape, whose own admission then names what
+    is missing image by image. What each document holds is its reader's to decide: a
+    dataset-level COCO sitting among them is refused by the per-image reader when admission reads
+    it, naming the import door.
     """
     from tcip_annotation.json_io import prediction_documents
     from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK, TABLE, shape_of
@@ -175,34 +178,10 @@ def ground_truth_shape(ground_truth) -> str:
             f"{ground_truth!r} is neither a .csv table nor a directory of ground truth: a run "
             "reads one label document per image, one <stem>.png mask per image, or one row of a "
             "table, and this names none of them.")
-    documents = prediction_documents(path)
-    if documents:
-        assembled = sorted(str(d) for d in documents if _is_assembled_coco(d))
-        if assembled:
-            raise ValueError(
-                f"{path} holds {len(assembled)} dataset-level COCO document(s) ({assembled[:5]}): "
-                f"training reads one ground-truth record per image, so if the per-image documents "
-                f"here are the real label source, move the export out of {path}; if the export is "
-                "the label source, import it into per-image documents first.")
+    if prediction_documents(path):
         return DOCUMENT
     held = {shape_of(str(p), None) for p in path.iterdir() if p.is_file()}
     return MASK if MASK in held else DOCUMENT
-
-
-def _is_assembled_coco(document: Path) -> bool:
-    """Whether one candidate document is a dataset-level COCO export rather than a per-image
-    label document.
-
-    Through ``format_io``'s own classification, the one place a document's shape is read from its
-    keys. An unrecognized shape is not an export (the admission below reports what it finds in
-    it), and the old ``objects`` schema, which that classification raises on, is not one either.
-    """
-    from tcip_annotation.format_io import detect_json_format
-
-    try:
-        return detect_json_format(document) == "coco"
-    except ValueError:
-        return False
 
 
 def admitted_records(
@@ -249,8 +228,7 @@ def admitted_records(
         for label_path, image_name in records.values():
             if image_name is None or label_path is None or not Path(label_path).is_file():
                 continue
-            _boxes, _labels, n_unlabeled = json_det_targets(
-                label_path, subject, attribute, id_map)
+            _target, n_unlabeled = json_det_targets(label_path, subject, attribute, id_map)
             if n_unlabeled:
                 incomplete_names.add(image_name)
 

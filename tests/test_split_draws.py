@@ -1594,10 +1594,10 @@ def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
 def test_a_misrouted_coco_is_named_by_the_producer_not_by_the_single_source_leg(
     tmp_path, monkeypatch,
 ):
-    """A dataset-level COCO document misrouted as data.labels_dir is the producer's own refusal,
-    raised where the run admits and reported at preflight in those same words. This leg adds
-    nothing of its own: neither its single-source message nor a spatial-strip claim about a
-    membership nothing could admit."""
+    """A dataset-level COCO document misrouted into data.labels_dir, at an image's label path, is
+    the one reader's refusal, raised where the run admits and reported at preflight in those same
+    words. This leg adds nothing of its own: neither its single-source message nor a spatial-strip
+    claim about a membership nothing could admit."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import json
@@ -1608,7 +1608,7 @@ def test_a_misrouted_coco_is_named_by_the_producer_not_by_the_single_source_leg(
     images_dir, labels_dir = tmp_path / "ds" / "images", tmp_path / "ds" / "detect"
     labels_dir.mkdir(parents=True)
     _save_png(images_dir / "img0.png")
-    (labels_dir / "dataset.json").write_text(json.dumps(
+    (labels_dir / "img0.json").write_text(json.dumps(
         {"images": [{"id": 1, "file_name": "img0.png"}], "annotations": [], "categories": []}))
     cfg = _one_source_tiled_cfg(images_dir, labels_dir)
 

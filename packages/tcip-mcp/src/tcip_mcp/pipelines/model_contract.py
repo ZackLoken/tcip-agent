@@ -88,6 +88,7 @@ def _synth_batch(task: str, *, in_chans: int, img_size: int, device: Any,
     """
     import torch
 
+    from tcip_mcp.pipelines.data.datasets import target_tensors
     from tcip_mcp.pipelines.training.collation import task_collate
 
     collate = task_collate(task)
@@ -95,11 +96,10 @@ def _synth_batch(task: str, *, in_chans: int, img_size: int, device: Any,
     if task in _DETECTION_TASKS:
         img = torch.rand(in_chans, img_size, img_size, device=device)
         box = [img_size * 0.2, img_size * 0.2, img_size * 0.7, img_size * 0.7]
-        target = {
-            "boxes": torch.tensor([box], device=device),
-            "labels": torch.ones((1,), dtype=torch.long, device=device),  # 1-indexed foreground
-            "image_id": 0,
-        }
+        # One foreground instance (labels are 1-indexed), through the loaders' own tensor builder.
+        tensors = target_tensors({"boxes": [box], "labels": [1], "iscrowd": [False]})
+        target: dict[str, Any] = {k: v.to(device) for k, v in tensors.items()}
+        target["image_id"] = 0
         if task == "instance_seg":
             mask = torch.zeros((1, img_size, img_size), dtype=torch.uint8, device=device)
             lo, hi = int(img_size * 0.2), int(img_size * 0.7)
@@ -124,6 +124,18 @@ def _synth_batch(task: str, *, in_chans: int, img_size: int, device: Any,
             target = {"labels": torch.randint(0, num_classes, (), device=device)}
         items.append((img, target))
     return collate(items)
+
+
+def _driving_batch(task: str, dims: "Mapping[str, int] | None", sample_batch: Any,
+                   device: Any) -> tuple[Any, Any]:
+    """The ``(images, targets)`` a model is driven with, as the trainer hands it: ``sample_batch``
+    when given, else synthesized; a detection task's targets through ``instance_targets``, the one
+    call the trainer makes, so a crowd row the run withholds from the heads is withheld here too."""
+    from tcip_mcp.pipelines.data.datasets import instance_targets
+
+    images, targets = (sample_batch if sample_batch is not None else
+                       _synth_batch(task, device=device, **(dims or {})))
+    return images, instance_targets(targets) if task in _DETECTION_TASKS else targets
 
 
 def _contains_tensor(value: Any, _depth: int = 0, _max_depth: int = 4) -> bool:
@@ -211,8 +223,7 @@ def check_model_contract(
     # Train pass: finite loss with a gradient.
     try:
         model.train()
-        images, targets = (sample_batch if sample_batch is not None else
-                           _synth_batch(task, device=dev, **(dims or {})))
+        images, targets = _driving_batch(task, dims, sample_batch, dev)
         loss = _forward_loss(model, images, targets)
         if not (hasattr(loss, "requires_grad") and loss.requires_grad):
             issues.append("train-mode loss does not require grad (no learnable path)")
@@ -242,8 +253,7 @@ def check_model_contract(
     # Eval pass: documented output shape.
     try:
         model.eval()
-        images, _ = (sample_batch if sample_batch is not None else
-                     _synth_batch(task, device=dev, **(dims or {})))
+        images, _ = _driving_batch(task, dims, sample_batch, dev)
         with torch.no_grad():
             out = model(images)
         if task in _DETECTION_TASKS:
@@ -307,8 +317,7 @@ def overfit_check(
         pass
 
     try:
-        images, targets = (sample_batch if sample_batch is not None else
-                           _synth_batch(task, device=dev, **(dims or {})))
+        images, targets = _driving_batch(task, dims, sample_batch, dev)
     except ValueError as exc:  # report, never raise: this returns a dict
         return {"passed": False, "losses": [], "initial": None, "final": None, "issue": str(exc)}
     losses: list[float] = []

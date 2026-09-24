@@ -30,12 +30,12 @@ def _image(images_dir, name: str, size) -> None:
 
 
 def _accepted(class_name: str, gt) -> dict:
-    return {"action": "accepted", "class_name": class_name, "gt_bbox_norm": gt,
+    return {"action": "accepted", "class_name": class_name, "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": gt,
             "pred_bbox_norm": None}
 
 
 def _rejected(class_name: str, pred, reviewed_by: str = "breeder") -> dict:
-    return {"action": "rejected", "class_name": class_name, "gt_bbox_norm": None,
+    return {"action": "rejected", "class_name": class_name, "iscrowd": False, "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": None,
             "pred_bbox_norm": pred, "reviewed_by": reviewed_by}
 
 

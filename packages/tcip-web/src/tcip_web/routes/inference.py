@@ -1,6 +1,6 @@
 """Inference routes: async tiled runs + live progress WebSocket.
 
-Jobs run on a background thread. Each job writes per-image COCO/JSON predictions
+Jobs run on a background thread. Each job writes per-image JSON predictions
 (one ``<stem>.json`` per image, pixel-xyxy boxes + per-object score) to ``output_dir``
 so they plug straight into the Review tab and the per-plant curve pipeline.
 
@@ -39,6 +39,7 @@ from tcip_mcp.pipelines.resolution import (
     DEFAULT_NMS_IOU,
     DEFAULT_OVERLAP,
 )
+from tcip_mcp.dataset_layout import label_filename
 from tcip_mcp.web_client import INFERENCE_JOBS, current_root
 from tcip_web import jobstore
 from tcip_web.paths import assert_path_allowed
@@ -92,8 +93,8 @@ class InferenceJob:
     status: JobStatus = "pending"
     error: Optional[str] = None
     warning: Optional[str] = None
-    # Set when the worker's own audit line for this run could not be written: a distinct fact
-    # from warning, never reused for it. The predictions are on disk regardless.
+    # Set when a line the publishing library writes for this run could not be written: a distinct
+    # fact from warning, never reused for it. The predictions and their stamp are on disk regardless.
     audit_warning: Optional[str] = None
     # Detections dropped for a zero-extent box: no detection, so dropped rather than failing the
     # run. A rehydrated job's count is whatever the last persist wrote, never a live measurement.
@@ -201,7 +202,7 @@ def _list_images(images_dir: Path) -> list[Path | BandGroupRef]:
 
 
 def _worker(job: InferenceJob) -> None:
-    # Held through try/except, assigned to job.status only in finally, after the audit line is
+    # Held through try/except, assigned to job.status only in finally, after the publication is
     # attempted. "running" (never a terminal read) until a branch below names the real outcome.
     terminal_status: JobStatus = "running"
     try:
@@ -318,10 +319,10 @@ def _worker(job: InferenceJob) -> None:
             job.error = classified_refusal
             return
 
+        from tcip_mcp.audit import AuditEntryNotWritten
         from tcip_mcp.pipelines import image_utils
-        from tcip_mcp.pipelines.resolution import (
-            operating_point_stamp, prediction_producer, write_sidecar,
-        )
+        from tcip_mcp.pipelines.resolution import operating_point_stamp, prediction_producer
+        from tcip_mcp.tools.inference_tools import seal_stamp_and_record
 
         # overlap has no home in ResolvedBundle's tracked params (only conf/cross_tile_nms/tiled/
         # tile_size/max_dets are), so the value and source this run actually used travel directly.
@@ -378,7 +379,7 @@ def _worker(job: InferenceJob) -> None:
                     )
                     break
             job.dropped_boxes += write_predictions_json(
-                output_dir / f"{img.stem}.json", results[0],
+                output_dir / label_filename(img.stem), results[0],
                 created_by=prediction_producer(job.checkpoint_path, identity["sha256"]),
                 id_map=id_map, subject=subject, attribute=attribute)
             job.done += 1
@@ -386,45 +387,20 @@ def _worker(job: InferenceJob) -> None:
         if terminal_status != "failed":
             # Last, never beside where it is built, so a partway-dead pass leaves a bucket no reader mistakes for certified;
             # image_filenames names every enumerated image whether written or not, including one cancelled before its first write.
-            write_sidecar(output_dir, provenance)
+            # Published through the one publisher every bucket ends in, so the stamp, the lineage
+            # link and the publication's line are the library's, as on the MCP door.
+            try:
+                seal_stamp_and_record(output_dir, provenance, None, written=job.done)
+            except AuditEntryNotWritten as exc:
+                job.audit_warning = str(exc)
             terminal_status = "cancelled" if job.cancel_event.is_set() else "completed"
     except Exception as exc:
         logger.exception("inference job %s failed", job.job_id)
         terminal_status = "failed"
         job.error = str(exc)
     finally:
-        from tcip_mcp.audit import AuditEntryNotWritten
-        from tcip_mcp.dataset_layout import dataset_root_of
-        from tcip_web.routes.subjects import _audit_dataset_write
-
-        try:
-            # output_dir is resolved under the launch's dataset root by the layout resolver, so
-            # unlike save_labels's caller-named path this is unreachable for a launched job.
-            dataset_root = dataset_root_of(job.output_dir)
-            if dataset_root is not None:
-                try:
-                    _audit_dataset_write(
-                        str(dataset_root),
-                        "gui_inference_run",
-                        {
-                            "job_id": job.job_id,
-                            "checkpoint_path": job.checkpoint_path,
-                            "images_dir": job.images_dir,
-                            "output_dir": job.output_dir,
-                            "status": terminal_status,
-                            "images_written": job.done,
-                            "total": job.total,
-                            "error": job.error,
-                            "dropped_nonpositive_boxes": job.dropped_boxes,
-                        },
-                    )
-                except AuditEntryNotWritten as exc:
-                    job.audit_warning = str(exc)
-        finally:
-            # In its own inner finally so the status always lands; a _persist() raise replaces whatever the
-            # audit attempt let through (kept as __context__) and leaves the summary unwritten.
-            job.status = terminal_status
-            _persist()
+        job.status = terminal_status
+        _persist()
 
 
 # ── Request/response ───────────────────────────────────────────────────
@@ -436,7 +412,7 @@ class LaunchInferencePayload(BaseModel):
     # server-side through dataset_layout / prediction_buckets, so no caller reimplements the layout.
     dataset_root: str
     # A bucket name, not a model identity: it may name a variant (e.g. an @r2 suggestion) no registered model bears, which
-    # nothing downstream reads as a model (the stamp takes the checkpoint's own stem, the audit line records only output_dir).
+    # nothing downstream reads as a model (the stamp takes the checkpoint's own stem, the publication's line records only the bucket).
     model_name: str
     date: str | None = None
     # None (default) derives tiling from the checkpoint's own training geometry in the worker,

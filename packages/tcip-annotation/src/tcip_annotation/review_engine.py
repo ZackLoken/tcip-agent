@@ -36,9 +36,9 @@ import tcip_store
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, Version, register_store
 from tcip_store.file_backend import RootedFileLocator
 
-from tcip_annotation.json_io import write_annotations
+from tcip_annotation.json_io import LABEL_SUFFIX, write_annotations
 from tcip_annotation.state import Annotation, bbox_of, box_derivable
-from tcip_annotation.verdicts import VERDICT_ACTIONS, VerdictAction
+from tcip_annotation.verdicts import VERDICT_ACTIONS, VerdictAction, decode_verdict
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +206,7 @@ register_store(
         kind="blob",
         key_fields=("stem",),
         frozen=True,
-        locator=RootedFileLocator(prefix=(BASELINE_DIRNAME,), suffix=".json"),
+        locator=RootedFileLocator(prefix=(BASELINE_DIRNAME,), suffix=LABEL_SUFFIX),
     )
 )
 
@@ -448,26 +448,30 @@ class ReviewEngine:
     # ── Bounding-box helpers ──────────────────────────────────────────────
 
     @staticmethod
-    def _bbox_of_annotation(anns: list[Annotation], idx: Optional[int]):
-        """The annotation's image-coord box, or ``None`` when it has none to read.
+    def _annotation_at(anns: list[Annotation], idx: Optional[int]) -> Optional[Annotation]:
+        """The annotation ``idx`` names in ``anns``, or ``None`` when it names none: the one
+        bounds check every read of a detection's record by index shares."""
+        return anns[idx] if idx is not None and 0 <= idx < len(anns) else None
+
+    @staticmethod
+    def _box_of(record: Optional[Annotation]):
+        """``record``'s image-coord box, or ``None`` when there is no record or no box to read.
 
         A :class:`~tcip_annotation.state.Point` reads as ``None``, like a geometry-less label: a
         verdict's box is what the reviewer looked at and what the entry is keyed by, and a fabricated
         zero-area box at the point would key a real verdict to a shape nobody drew.
         """
-        if idx is None or not (0 <= idx < len(anns)):
-            return None
-        geom = anns[idx].geometry
+        geom = record.geometry if record is not None else None
         if not box_derivable(geom):
             return None
         b = bbox_of(geom)
         return (b.x1, b.y1, b.x2, b.y2)
 
     def _bbox_of_gt(self, ctx: ReviewContext, gt_idx: Optional[int]):
-        return self._bbox_of_annotation(ctx.gt, gt_idx)
+        return self._box_of(self._annotation_at(ctx.gt, gt_idx))
 
     def _bbox_of_pred(self, ctx: ReviewContext, pred_idx: Optional[int]):
-        return self._bbox_of_annotation(ctx.preds, pred_idx)
+        return self._box_of(self._annotation_at(ctx.preds, pred_idx))
 
     def _detection_bbox(self, ctx: ReviewContext, gt_idx, p_idx):
         """Return the image-coord bbox for a detection, covering GT and/or pred."""
@@ -486,26 +490,12 @@ class ReviewEngine:
         y2 = max(b[3] for b in bboxes)
         return (x1, y1, x2, y2)
 
-    def _normalised_bbox(self, ctx: ReviewContext, which: str, det_like) -> Optional[list[float]]:
-        """Return ``[cx, cy, w, h]`` normalised to image dimensions.
-
-        ``det_like`` may be a :class:`ReviewDetection` or a dict with the
-        same keys. ``which`` is ``"gt"`` or ``"pred"``.
-        """
+    def _normalised_bbox(self, ctx: ReviewContext,
+                         record: Optional[Annotation]) -> Optional[list[float]]:
+        """``record``'s box as ``[cx, cy, w, h]`` normalised to the image, or ``None`` with no box."""
         img_w = max(ctx.img_width, 1)
         img_h = max(ctx.img_height, 1)
-
-        if isinstance(det_like, ReviewDetection):
-            gt_idx = det_like.gt_idx
-            p_idx = det_like.pred_idx
-        else:
-            gt_idx = det_like.get("gt_idx")
-            p_idx = det_like.get("pred_idx")
-
-        if which == "gt":
-            b = self._bbox_of_gt(ctx, gt_idx)
-        else:
-            b = self._bbox_of_pred(ctx, p_idx)
+        b = self._box_of(record)
         if b is None:
             return None
         x1, y1, x2, y2 = b
@@ -522,28 +512,24 @@ class ReviewEngine:
         self._reviewed_lookup = ((NO_BUCKET, ""), {}, {})
 
     def _build_reviewed_lookup(self, bucket: str, img_name: str) -> None:
-        img_data = self._verdicts().get((bucket, img_name))
-        if not img_data:
-            self._reviewed_lookup = ((bucket, img_name), {}, {})
-            return
-        reviewed_dets = img_data.get("detections", [])
+        """Index this image's entries by the centre of each box its decoded verdict carries,
+        holding the centre beside the entry so a lookup never reads the entry again."""
+        img_data = self._verdicts().get((bucket, img_name)) or {}
         pred_map: dict = {}
         gt_map: dict = {}
-        for entry in reviewed_dets:
-            e_pred = entry.get("pred_bbox_norm")
-            if e_pred:
-                qk = (round(e_pred[0] * _LOOKUP_QUANT), round(e_pred[1] * _LOOKUP_QUANT))
-                pred_map.setdefault(qk, []).append(entry)
-            e_gt = entry.get("gt_bbox_norm")
-            if e_gt:
-                qk = (round(e_gt[0] * _LOOKUP_QUANT), round(e_gt[1] * _LOOKUP_QUANT))
-                gt_map.setdefault(qk, []).append(entry)
+        for entry in img_data.get("detections", []):
+            verdict = decode_verdict(entry)
+            for box, index in ((verdict.pred_box, pred_map), (verdict.gt_box, gt_map)):
+                if box is not None:
+                    qk = (round(box[0] * _LOOKUP_QUANT), round(box[1] * _LOOKUP_QUANT))
+                    index.setdefault(qk, []).append((box[0], box[1], entry))
         self._reviewed_lookup = ((bucket, img_name), pred_map, gt_map)
 
     def find_reviewed_entry(
         self, bucket: str, det: ReviewDetection, ctx: ReviewContext
     ) -> Optional[dict]:
-        """Return the reviewed-entry dict for ``det`` on this image under ``bucket``, if any."""
+        """Return the reviewed-entry dict for ``det`` on this image under ``bucket``, if any: the
+        entry whose predicted box (a TP or FP) or ground-truth box (an FN) shares its centre."""
         if not ctx.img_name:
             return None
         if self._reviewed_lookup[0] != (bucket, ctx.img_name):
@@ -551,37 +537,18 @@ class ReviewEngine:
         _, pred_map, gt_map = self._reviewed_lookup
 
         if det.det_type in ("tp", "fp"):
-            pred_bbox = self._normalised_bbox(ctx, "pred", det)
-            if not pred_bbox:
-                return None
-            pcx, pcy = pred_bbox[0], pred_bbox[1]
-            qx, qy = round(pcx * _LOOKUP_QUANT), round(pcy * _LOOKUP_QUANT)
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    for entry in pred_map.get((qx + dx, qy + dy), ()):
-                        e_pred = entry.get("pred_bbox_norm")
-                        if (
-                            e_pred
-                            and abs(e_pred[0] - pcx) < _LOOKUP_TOLERANCE
-                            and abs(e_pred[1] - pcy) < _LOOKUP_TOLERANCE
-                        ):
-                            return entry
+            box, index = self._normalised_bbox(ctx, self._annotation_at(ctx.preds, det.pred_idx)), pred_map
         else:  # fn
-            gt_bbox = self._normalised_bbox(ctx, "gt", det)
-            if not gt_bbox:
-                return None
-            gcx, gcy = gt_bbox[0], gt_bbox[1]
-            qx, qy = round(gcx * _LOOKUP_QUANT), round(gcy * _LOOKUP_QUANT)
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    for entry in gt_map.get((qx + dx, qy + dy), ()):
-                        e_gt = entry.get("gt_bbox_norm")
-                        if (
-                            e_gt
-                            and abs(e_gt[0] - gcx) < _LOOKUP_TOLERANCE
-                            and abs(e_gt[1] - gcy) < _LOOKUP_TOLERANCE
-                        ):
-                            return entry
+            box, index = self._normalised_bbox(ctx, self._annotation_at(ctx.gt, det.gt_idx)), gt_map
+        if not box:
+            return None
+        cx, cy = box[0], box[1]
+        qx, qy = round(cx * _LOOKUP_QUANT), round(cy * _LOOKUP_QUANT)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for ex, ey, entry in index.get((qx + dx, qy + dy), ()):
+                    if abs(ex - cx) < _LOOKUP_TOLERANCE and abs(ey - cy) < _LOOKUP_TOLERANCE:
+                        return entry
         return None
 
     # ── Detection list build ──────────────────────────────────────────────
@@ -705,6 +672,7 @@ class ReviewEngine:
         could not resolve one (no recorded map, or ``class_name`` isn't one of its keys), an honest
         "unresolvable" fact, not a guessed default; a consumer building a class-aware reference from
         this verdict (``review_calibration.review_to_records``) must refuse rather than assume 0.
+        Every entry also carries the crowd flag of the ground-truth record its box is read from.
 
         On the first verdict recorded for this image, stamps ``gt_preexisting = bool(ctx.gt)`` onto
         the image-level record: the pristine, pre-mutation GT the caller already holds at that
@@ -737,20 +705,23 @@ class ReviewEngine:
 
         nd = norm_det if norm_det is not None else det
         nc = norm_ctx if norm_ctx is not None else ctx
+        # The record the entry's ground-truth box is read from, read for its crowd flag too.
+        gt_record = self._annotation_at(nc.gt, nd.gt_idx)
         entry = {
             "match_type": det.det_type.upper(),
             "det_status": "reviewed",
             "action": action,
             "reviewed_by": self.current_user,
             "class_name": det.class_name,
-            "gt_bbox_norm": self._normalised_bbox(nc, "gt", nd),
-            "pred_bbox_norm": self._normalised_bbox(nc, "pred", nd),
+            "gt_bbox_norm": self._normalised_bbox(nc, gt_record),
+            "pred_bbox_norm": self._normalised_bbox(nc, self._annotation_at(nc.preds, nd.pred_idx)),
             "iou": round(det.iou, 4) if det.iou is not None else None,
             "conf": round(det.conf, 4) if det.conf is not None else None,
             "producer_identity": producer_identity,
             "conf_threshold": conf_threshold,
             "missed_object_attested": det.gt_idx is None and det.pred_idx is None,
             "class_id": class_id,
+            "iscrowd": gt_record is not None and gt_record.iscrowd,
         }
 
         existing = self.find_reviewed_entry(bucket, det, ctx)
@@ -835,7 +806,7 @@ class ReviewEngine:
             if not d.is_dir():
                 continue
             for src in d.iterdir():
-                if not (src.is_file() and src.suffix == ".json"):
+                if not (src.is_file() and src.suffix == LABEL_SUFFIX):
                     continue
                 if capture_label_baseline(src):
                     captured += 1

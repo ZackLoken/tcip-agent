@@ -43,7 +43,7 @@ def _records(prefix: str, *, size: float, x0: float, det_offset: float) -> list[
         gt, dt = [], []
         for k in range(OBJECTS_PER_IMAGE):
             x = x0 + SPACING * k
-            gt.append({"bbox": [x, y, size, size], "category_id": 1})
+            gt.append({"bbox": [x, y, size, size], "category_id": 1, "iscrowd": 0})
             dt.append({"bbox": [x + det_offset, y, size, size], "category_id": 1, "score": 0.9})
         recs.append({"image_id": f"{prefix}{i}", "width": 200000, "height": 2000,
                      "gt": gt, "dt": dt})

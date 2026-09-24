@@ -25,6 +25,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     coco_detection_metrics,
     governing_counts,
     derive_operating_point_curve,
+    gt_record,
 )
 
 CENTER_MATCH_TOLERANCE = 10.0
@@ -40,9 +41,9 @@ def _asymmetric_iou_records() -> list[dict]:
     one matched, nothing spurious. Pooled that is tp=3, fp=3, fn=2, so precision (3/6) and recall
     (3/5) are distinct numbers and neither equals the F1 they combine into.
     """
-    wide_gt = {"category_id": 1, "bbox": [50, 60, 40, 20], "iscrowd": 0}
-    tall_gt = {"category_id": 1, "bbox": [200, 100, 30, 60], "iscrowd": 0}
-    flat_gt = {"category_id": 1, "bbox": [400, 250, 80, 25], "iscrowd": 0}
+    wide_gt = gt_record([50, 60, 40, 20], 1, 0)
+    tall_gt = gt_record([200, 100, 30, 60], 1, 0)
+    flat_gt = gt_record([400, 250, 80, 25], 1, 0)
     frame_one = build_coco_image_record(
         640, 400,
         [wide_gt, tall_gt, flat_gt],
@@ -56,8 +57,7 @@ def _asymmetric_iou_records() -> list[dict]:
     )
     frame_two = build_coco_image_record(
         300, 500,
-        [{"category_id": 1, "bbox": [40, 40, 60, 15], "iscrowd": 0},
-         {"category_id": 1, "bbox": [150, 300, 25, 90], "iscrowd": 0}],
+        [gt_record([40, 40, 60, 15], 1, 0), gt_record([150, 300, 25, 90], 1, 0)],
         [{"category_id": 1, "bbox": [40, 40, 60, 15], "score": 0.95}],
     )
     return [frame_one, frame_two]

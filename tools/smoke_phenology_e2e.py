@@ -41,6 +41,7 @@ for _path in (*_PKG_SRC, _REPO_ROOT):
 from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image  # noqa: E402
 
+from tcip_mcp.dataset_layout import label_filename  # noqa: E402
 from tcip_mcp.pipelines.postprocessing.export import write_predictions_json  # noqa: E402
 from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar  # noqa: E402
 from tcip_mcp.tools.phenology_tools import (  # noqa: E402
@@ -205,7 +206,7 @@ def main() -> int:
                     # created_by=None: prediction_producer refuses without a real checkpoint
                     # digest, and this scene has no checkpoint behind it to name one from.
                     write_predictions_json(
-                        preds_root / date / f"{stem}.json",
+                        preds_root / date / label_filename(stem),
                         _pred_result(n_open, N_DETECTIONS, width=8, height=8), None,
                         subject=SUBJECT, attribute=ATTRIBUTE, id_map=ID_MAP,
                     )
@@ -264,11 +265,14 @@ def main() -> int:
             # This bucket's sidecar was never validated, so the door refuses unconditionally.
             print("\nStep 2: deliver_phenology_milestones refuses an unacknowledgeable unvalidated delivery")
             csv_out = root / "delivery" / "bud_phenology.csv"
+            plants = sorted({row["plot_name"] for rows in _plant_mapping.load_mapping_rows(
+                root, mapping_name).values() for row in rows if row.get("plot_name")})
             r = deliver_phenology_milestones(
                 trait="bud_opening",
                 mapping_name=mapping_name,
                 predictions_by_date=preds_by_date,
                 output_csv_path=str(csv_out),
+                plants=plants,
             )
             check("refused (no acknowledgement route exists on this tool)", "error" in r, str(r))
             # The tool refuses on the positive class before ever reaching the classifier gate, so

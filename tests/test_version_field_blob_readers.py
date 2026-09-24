@@ -29,11 +29,14 @@ from tcip_mcp.pipelines.data.band_groups import (
 from tcip_mcp.pipelines.image_utils import list_logical_images
 from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 from tcip_mcp.tools.project_tools import register_dataset
-from tcip_annotation.format_io import _parse_coco_json, detect_format
+from tcip_annotation.format_io import parse_coco_annotations
 from tcip_annotation.json_io import (
     UnreadableLabelDocument,
     annotation_record_key,
     annotations_from_bytes,
+    decode_document_bytes,
+    parse_json_document,
+    read_document_bytes,
     read_annotations,
     write_annotations,
 )
@@ -59,9 +62,9 @@ def test_a_label_document_above_the_ceiling_refuses_as_unreadable(tmp_path):
 
 
 def test_a_coco_documents_own_schema_version_is_never_checked_against_annotation_records(tmp_path):
-    """COCO is interop (frozen=False by its own row): a legitimate external COCO document
-    naming a schema_version this platform's own annotation_records store does not know must
-    read, never refuse against a store it never claimed to be."""
+    """A legitimate external COCO document naming a schema_version this platform's own
+    annotation_records store does not know must read, never refuse against a store it never
+    claimed to be."""
     coco_path = tmp_path / "dataset.json"
     coco_path.write_text(json.dumps({
         "images": [{"id": 1, "file_name": "a.png", "width": 10, "height": 10}],
@@ -70,9 +73,13 @@ def test_a_coco_documents_own_schema_version_is_never_checked_against_annotation
         "schema_version": 999,
     }), encoding="utf-8")
 
-    assert detect_format(str(coco_path)) == "coco"
-    coco = _parse_coco_json(str(coco_path))
+    source = str(coco_path)
+    coco = parse_json_document(
+        decode_document_bytes(read_document_bytes(coco_path), source=source), source=source)
     assert coco["schema_version"] == 999
+    no_masks = parse_coco_annotations(
+        coco, decode_rle=lambda segmentation: pytest.fail("no run-length mask here"))
+    assert [a.subject for a in no_masks[1][1]] == ["leaf"]
 
 
 # ── the subject registry ───────────────────────────────────────────────────────

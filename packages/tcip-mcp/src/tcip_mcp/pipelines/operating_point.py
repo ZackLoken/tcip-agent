@@ -23,6 +23,8 @@ from typing import Any, Callable, Sequence
 
 from tcip_store import non_finite_state, stored_number
 
+from tcip_annotation.json_io import xywh
+
 from tcip_mcp.pipelines.data.splits import same_directory
 from tcip_mcp.pipelines.derivations import derive_cross_tile_nms, derive_localization_tolerance_frac
 from tcip_mcp.pipelines.resolution import (
@@ -41,11 +43,15 @@ from tcip_mcp.pipelines.resolution import (
     resolve_tile_size_param,
 )
 from tcip_mcp.pipelines.training.evaluation import (
+    build_coco_image_record,
     classes_with_evidence,
     concordance_correlation_coefficient,
     derive_operating_point_curve,
     gt_class_avg_size,
     gt_class_typical_count,
+    gt_facts,
+    gt_objects,
+    gt_record,
     mean_of_present_counts,
     pick_count_unbiased,
     pick_f1_max,
@@ -372,25 +378,19 @@ def derive_max_dets_from_counts(counts: list[int], floor: int = 100) -> int:
 
 def _max_dets_from_density(records: list[dict], floor: int = 100) -> int:
     """A generous cap = ~1.5x the p99 GT objects-per-image, so dense scenes aren't truncated."""
-    return derive_max_dets_from_counts([len(rec.get("gt", [])) for rec in records], floor=floor)
+    return derive_max_dets_from_counts([len(gt_objects(rec)) for rec in records], floor=floor)
 
 
 def _record_content_hash(rec: dict) -> str | None:
-    """Content identity of one record's GT, ``(width, height, sorted (category_id, bbox))``,
-    ignoring ``image_id``. ``None`` for empty GT: a shared negative must not trip the
+    """Content identity of one record's GT, its dimensions and :func:`gt_facts`, ignoring
+    ``image_id``. ``None`` for empty GT: a shared negative must not trip the
     content-overlap guard (a negative is first-class per CLAUDE.md; empty-GT records hash
     identically across cal/holdout by construction and that is expected, not leakage).
     """
-    gt = rec.get("gt") or []
-    if not gt:
+    facts = gt_facts(rec)
+    if not facts:
         return None
-    key = (
-        int(rec.get("width", 0)), int(rec.get("height", 0)),
-        tuple(sorted(
-            (int(a.get("category_id", 0)), tuple(round(float(v), 6) for v in a.get("bbox", [])))
-            for a in gt
-        )),
-    )
+    key = [rec["width"], rec["height"], facts]
     return hashlib.sha256(json.dumps(key).encode("utf-8")).hexdigest()[:16]
 
 
@@ -1108,7 +1108,7 @@ def resolve_operating_point(
         # discipline already applied to conf, never re-derived per side, or calibration and
         # holdout could disagree on what "a hit" means.
         loc_frac = derive_localization_tolerance_frac(
-            [[a["bbox"] for a in rec.get("gt", [])] for rec in calibration_records])
+            [[a["bbox"] for a in gt_objects(rec)] for rec in calibration_records])
         if loc_frac is not None:
             params["localization_tolerance_frac"] = derived(
                 "localization_tolerance_frac", loc_frac,
@@ -1162,8 +1162,8 @@ def resolve_operating_point(
 
             # Positive-evidence, unconditional, stated per-side (not a union), an all-negative
             # reference on either side can't validate a count operating point.
-            cal_gt_count = sum(len(r.get("gt", [])) for r in calibration_records)
-            hold_gt_count = sum(len(r.get("gt", [])) for r in holdout_records)
+            cal_gt_count = sum(len(gt_objects(r)) for r in calibration_records)
+            hold_gt_count = sum(len(gt_objects(r)) for r in holdout_records)
             # The mean+SE equivalence/CI criterion, rather than a bare mean, degrades correctly
             # at small n (SE grows, so less evidence is harder to pass, not easier) and needs no
             # second, unrelated tolerance constant.
@@ -1417,7 +1417,7 @@ def resolve_operating_point(
     else:
         nms = None
         if calibration_records:
-            nms = derive_cross_tile_nms([[a["bbox"] for a in rec.get("gt", [])]
+            nms = derive_cross_tile_nms([[a["bbox"] for a in gt_objects(rec)]
                                          for rec in calibration_records])
         params["cross_tile_nms"] = (
             derived("cross_tile_nms", nms,
@@ -1539,9 +1539,10 @@ def resolve_classifier_operating_point(
         return by_image
 
     def _content_record(image_id: str | None, items: list[dict]) -> dict:
-        return {"image_id": image_id, "width": 0, "height": 0,
-                "gt": [{"category_id": 1 if it["is_true_positive"] else 0, "bbox": it["bbox"]}
-                      for it in items]}
+        # a classifier item is one object, never a crowd region
+        return build_coco_image_record(0, 0, [
+            gt_record(xywh(*it["bbox"]), 1 if it["is_true_positive"] else 0, False)
+            for it in items], [], image_id=image_id)
 
     cal_by_image = _group_by_image(calibration_items)
     hold_by_image = _group_by_image(holdout_items)

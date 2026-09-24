@@ -34,9 +34,6 @@ from tcip_mcp.registry_paths import is_at_or_under as _is_at_or_under
 SELECTION_NAME = "selection.json"
 CURATED_MANIFEST_NAME = "curated_manifest.json"
 
-LABEL_EXTS = frozenset({".txt", ".xml", ".json"})
-"""Ground-truth label document suffixes archive_project has always bundled."""
-
 
 class AnchorMisplaced(ValueError):
     """A split or curated manifest sits somewhere the derivation constraints exclude."""
@@ -291,6 +288,7 @@ def _blob_files(
     (``launch_training``'s default ``output_dir``) is not confined to either, and a tree that has
     moved away from where it was registered (a staged import) still has to find it.
     """
+    from tcip_mcp.dataset_layout import LABEL_SUFFIX
     from tcip_mcp.dataset_layout import annotation_root as _annotation_root
     from tcip_mcp.dataset_layout import dataset_identity_path, subjects_path
     from tcip_mcp.dataset_layout import image_root as _image_root
@@ -313,9 +311,8 @@ def _blob_files(
                 _add(f)
     ann_dir = _annotation_root(tree)
     if ann_dir.is_dir():
-        for f in ann_dir.rglob("*"):
-            if f.is_file() and f.suffix.lower() in LABEL_EXTS:
-                _add(f)
+        for f in ann_dir.rglob(f"*{LABEL_SUFFIX}"):
+            _add(f)
     _add(subjects_path(tree))
     _add(dataset_identity_path(tree))
 

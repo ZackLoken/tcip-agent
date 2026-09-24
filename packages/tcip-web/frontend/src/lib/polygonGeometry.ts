@@ -64,7 +64,7 @@ export function computePolygonBboxes(polygons: { rings: [number, number][][] }[]
 }
 
 /** A polygon's read-only derived box (the axis-aligned bounds of every ring), for box-mode display
- *  only. Reuses ringsBbox (the same min/max the loader and COCO export re-derive), so it can't
+ *  only. Reuses ringsBbox (the same min/max the loader re-derives), so it can't
  *  drift. */
 export function derivedBoxFromPolygon(p: PolygonShape): Box {
   const [x1, y1, x2, y2] = ringsBbox(p.rings);

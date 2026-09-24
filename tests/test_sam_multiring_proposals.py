@@ -119,6 +119,18 @@ def test_shared_extractor_single_component_is_one_ring() -> None:
     assert len(mask_to_polygon_rings(m)) == 1
 
 
+def test_a_stray_pixel_beside_a_component_yields_the_components_ring_alone() -> None:
+    """A contour too small to be a ring is dropped, so the mask still makes a polygon."""
+    from tcip_annotation.mask_contours import mask_to_polygon_rings
+    from tcip_annotation.state import Polygon
+
+    m = np.zeros((32, 32), dtype=np.uint8)
+    m[5:20, 5:20] = 1
+    m[28, 28] = 1
+    (ring,) = Polygon(mask_to_polygon_rings(m)).rings
+    assert max(x for x, _ in ring) < 20
+
+
 def test_shared_extractor_empty_mask_has_no_rings() -> None:
     from tcip_annotation.mask_contours import mask_to_polygon_rings
 

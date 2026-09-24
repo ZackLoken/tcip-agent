@@ -198,7 +198,7 @@ _OTHER_IDENTITY = {"checkpoint_sha256": "sha-model-b", "experiment_id": None}
 
 def _entry(action, cid, gt, pred, conf, *, producer_identity=_IDENTITY, conf_threshold=None):
     return {"match_type": "TP", "action": action, "class_id": cid,
-            "gt_bbox_norm": gt, "pred_bbox_norm": pred, "conf": conf,
+            "iscrowd": False, "reviewed_by": "", "class_name": "", "missed_object_attested": False, "gt_bbox_norm": gt, "pred_bbox_norm": pred, "conf": conf,
             "producer_identity": producer_identity, "conf_threshold": conf_threshold}
 
 
@@ -401,16 +401,19 @@ def test_route_answers_409_with_the_committed_response_on_a_lost_audit_line(
     "already validated" short-circuit answers differently on a retry against the same bucket, so
     the reference body cannot come from replaying this call against the bucket it just stamped.
 
-    Refuses the route's own line (``audit_gap.record_event_or_raise``, the module-level name
-    ``record_committed`` calls through) rather than every append: the sealed record's own line,
-    inside ``seal_validation``, has its own narrower case below."""
+    Refuses the stamp's own line (``stamp_written``, written by ``update_sidecar`` after the
+    stamp lands) rather than every append: the sealed record's own line, inside
+    ``seal_validation``, has its own narrower case below."""
     import tcip_mcp.audit as audit_module
-    import tcip_web.routes.audit_gap as audit_gap_module
 
     class _AppendRefused(RuntimeError):
         pass
 
-    def _refuse_record(tool: str, arguments: dict, *, scope: str | None, **extra: object) -> None:
+    real_record = audit_module.record_event_or_raise
+
+    def _refuse_record(tool: str, arguments: dict | None = None, **extra: object) -> None:
+        if tool != "stamp_written":
+            return real_record(tool, arguments, **extra)  # type: ignore[arg-type]
         raise audit_module.AuditEntryNotWritten(tool, _AppendRefused(
             "the audit log could not be appended to"))
 
@@ -422,7 +425,7 @@ def test_route_answers_409_with_the_committed_response_on_a_lost_audit_line(
     healthy_body = healthy.json()
 
     proj, pred_dir = _make_dense_reviewed_project(tmp_path / "refused")
-    monkeypatch.setattr(audit_gap_module, "record_event_or_raise", _refuse_record)
+    monkeypatch.setattr(audit_module, "record_event_or_raise", _refuse_record)
     resp = client.post("/api/review/validate_reference", json={
         "dataset_root": proj, "trait": "bud_opening", "pred_dir": pred_dir, "subject": "bud"})
     assert resp.status_code == 409
@@ -452,8 +455,12 @@ def test_route_answers_409_with_the_committed_response_on_a_lost_sealed_record_l
     class _AppendRefused(RuntimeError):
         pass
 
-    def _refuse_append(*args: object, **kwargs: object) -> None:
-        raise _AppendRefused("the audit log could not be appended to")
+    real_append = audit_module.append
+
+    def _refuse_append(key: object, entry: dict, *args: object, **kwargs: object) -> None:
+        if entry["tool"] != "calibration_holdout_drawn":  # the split lock's receipt lands first
+            raise _AppendRefused("the audit log could not be appended to")
+        real_append(key, entry, *args, **kwargs)
 
     proj, pred_dir = _make_dense_reviewed_project(tmp_path)
     monkeypatch.setattr(audit_module, "append", _refuse_append)
@@ -471,11 +478,42 @@ def test_route_answers_409_with_the_committed_response_on_a_lost_sealed_record_l
     assert sc["validated"] is False
 
 
+def test_route_answers_409_naming_the_committed_lock_on_a_lost_lock_receipt(
+    client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """The split lock is drawn before its receipt; a receipt that cannot be written answers the
+    shared audit-gap 409 naming the lock that committed, never a success-shaped body, and the
+    bucket stays unvalidated since no seal was made."""
+    import tcip_mcp.audit as audit_module
+    import tcip_store as ts
+
+    from tcip_mcp.pipelines.data.splits import cal_holdout_lock_key
+
+    real_append = audit_module.append
+
+    def _refuse_lock_receipt(key: object, entry: dict, *args: object, **kwargs: object) -> None:
+        if entry["tool"] == "calibration_holdout_drawn":
+            raise RuntimeError("the audit log could not be appended to")
+        real_append(key, entry, *args, **kwargs)
+
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path)
+    monkeypatch.setattr(audit_module, "append", _refuse_lock_receipt)
+    resp = client.post("/api/review/validate_reference", json={
+        "dataset_root": proj, "trait": "bud_opening", "pred_dir": pred_dir, "subject": "bud"})
+
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["error"] == "audit_entry_not_written"
+    lock = detail["committed"]["calibration_holdout_drawn"]
+    assert detail["committed"]["validated"] is False
+    assert ts.exists(cal_holdout_lock_key(lock["identity_hash"], scope_root=proj))
+    assert _read_sidecar(pred_dir)["validated"] is False
+
+
 def test_route_requires_dataset_root(client, tmp_path: Path) -> None:
     """No read or write happens before the refusal: the field is named rather than left to a
     stamp-scope or bucket-confinement error further in. The request's real ``pred_dir`` would
-    otherwise pass the path guard, surfacing the different 400 ``_dataset_root_of_all`` raises
-    for a bucket whose own dataset root disagrees with the one the request states ("the
+    otherwise pass the path guard, surfacing the different 400 the route raises for a bucket whose own dataset root disagrees with the one the request states ("the
     predictions at ... belong to dataset ... not to ..."), never the path guard's 403."""
     proj, pred_dir = _make_dense_reviewed_project(tmp_path)
     resp = client.post("/api/review/validate_reference", json={

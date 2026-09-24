@@ -159,7 +159,7 @@ def _sweep_records():
         return [cx - s / 2, cy - s / 2, s, s]
 
     def ann(cx, cy, score=None):
-        a = {"category_id": 0, "bbox": box(cx, cy)}
+        a = {"category_id": 0, "bbox": box(cx, cy), "iscrowd": 0}
         if score is not None:
             a["score"] = score
         return a
@@ -283,7 +283,7 @@ def _write_bare_trait(name: str, **extra) -> None:
 
 
 def _per_image(boxes: list[tuple[float, float, float, float]]) -> list[dict]:
-    return [{"gt": [{"bbox": list(b), "category_id": 0} for b in boxes]}]
+    return [{"gt": [{"bbox": list(b), "category_id": 0, "iscrowd": 0} for b in boxes]}]
 
 
 def test_resolve_match_criterion_derives_and_persists_when_unrecorded(tmp_path: Path):
@@ -695,7 +695,7 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts():
 
     per_image = [
         {"width": 64, "height": 64,
-         "gt": [{"category_id": 1, "bbox": [10.0, 10.0, 30.0, 30.0]}],
+         "gt": [{"category_id": 1, "bbox": [10.0, 10.0, 30.0, 30.0], "iscrowd": 0}],
          "dt": [{"category_id": 1, "bbox": [11.0, 11.0, 29.0, 29.0], "score": 0.9}]},
         {"width": 64, "height": 64, "gt": [], "dt": []},
     ]
@@ -1102,3 +1102,162 @@ def test_score_predictions_folder_uses_pycocotools(json_data_dir):
     assert r["total_tp"] == 3 and r["total_fp"] == 3 and r["total_fn"] == 3
     assert r["precision"] == pytest.approx(0.5)
     assert all(p["tp"] == 1 and p["fp"] == 1 and p["fn"] == 1 for p in r["per_image"])
+
+
+# -- a crowd region: COCO's ignore region, never one object ------------------------------------
+
+_OBJECT = [10.0, 10.0, 20.0, 20.0]
+_CROWD = [50.0, 50.0, 40.0, 40.0]
+
+
+def _crowd_records() -> list[dict]:
+    """One image whose object a detection matches and whose crowd region holds another
+    detection, and one image holding only a crowd region no detection matches."""
+    from tcip_mcp.pipelines.training.evaluation import gt_record
+
+    return [
+        build_coco_image_record(100, 100, [gt_record(_OBJECT, 1, 0), gt_record(_CROWD, 1, 1)],
+                                [{"category_id": 1, "bbox": _OBJECT, "score": 0.9},
+                                 {"category_id": 1, "bbox": [55.0, 55.0, 30.0, 30.0], "score": 0.9}]),
+        build_coco_image_record(100, 100, [gt_record(_CROWD, 1, 1)], []),
+    ]
+
+
+def test_a_detection_in_a_crowd_region_is_neither_true_nor_false_and_the_region_no_miss():
+    m = coco_detection_metrics(_crowd_records(), iou_threshold=0.5, conf_threshold=0.25)
+    assert (m["tp"], m["fp"], m["fn"], m["n_gt"]) == (1, 0, 0, 1)
+    assert [c["fn"] for c in m["per_image_counts"]] == [0, 0]
+
+
+def test_the_center_match_count_treats_a_crowd_region_as_cocoeval_does():
+    from tcip_mcp.pipelines.training.evaluation import governing_counts
+
+    counts = governing_counts(_crowd_records(), {"kind": "center_match", "tolerance": 3.0},
+                              conf_threshold=0.25)
+    assert (counts["tp"], counts["fp"], counts["fn"]) == (1, 0, 0)
+
+
+def test_a_targets_records_are_one_shape_on_the_stored_grid_whatever_the_target_holds(tmp_path):
+    """The loader's own target, as lists, as an array and as tensors, becomes the same evaluation
+    records, each box on the stored two-decimal grid: every reader of a target reads it here."""
+    import numpy as np
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.pipelines.data.datasets import target_tensors
+    from tcip_mcp.pipelines.data.label_queries import json_det_targets
+    from tcip_mcp.pipelines.training.evaluation import gt_records
+
+    label = tmp_path / "a.json"
+    json_io.write_annotations(label, [
+        Annotation(subject="bur", geometry=BBox(1.25, 2.5, 30.75, 40.5)),
+        Annotation(subject="bur", geometry=BBox(50.0, 50.0, 90.0, 90.0), iscrowd=True)], 100, 100)
+    listed, _ = json_det_targets(str(label), "bur", None, {"bur": 0})
+    arrays = {k: np.asarray(v) for k, v in listed.items()}
+    off_grid = {**listed, "boxes": [[1.2504, 2.5, 30.7496, 40.5], [50.0, 50.0, 90.0, 90.0]]}
+
+    expected = [{"category_id": 1, "bbox": [1.25, 2.5, 29.5, 38.0], "area": 1121.0, "iscrowd": 0},
+                {"category_id": 1, "bbox": [50.0, 50.0, 40.0, 40.0], "area": 1600.0, "iscrowd": 1}]
+    for target in (listed, arrays, target_tensors(listed), off_grid):
+        assert gt_records(target) == expected
+    flagless = {"boxes": [[0, 0, 10, 10]], "labels": [1]}
+    assert gt_records(flagless) == [
+        {"category_id": 1, "bbox": [0.0, 0.0, 10.0, 10.0], "area": 100.0, "iscrowd": 0}]
+
+
+def test_a_ground_truth_record_is_one_shape_from_a_target_and_from_its_annotation(tmp_path):
+    """The loader's target route and the annotation route build a document's ground truth as
+    the same records, its box, area and crowd flag stated alike, so the scorer fills nothing in."""
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.pipelines.data.label_queries import json_det_targets
+    from tcip_mcp.pipelines.training.evaluation import gt_records, records_from_annotation
+
+    label = tmp_path / "a.json"
+    json_io.write_annotations(label, [
+        Annotation(subject="bur", geometry=BBox(10.1, 10.1, 40.3, 30.3)),
+        Annotation(subject="bur", geometry=BBox(50.0, 50.0, 90.0, 90.0), iscrowd=True)], 100, 100)
+    listed, _ = json_det_targets(str(label), "bur", None, {"bur": 0})
+    _, record = records_from_annotation(json_io.read_annotations(label), [], width=100,
+                                        height=100, name_id={"bur": 1})
+    assert record["gt"] == gt_records(listed)
+    assert all(g["area"] == g["bbox"][2] * g["bbox"][3] for g in record["gt"])
+
+
+def test_a_detectors_record_reads_both_sides_on_the_stored_grid(tmp_path):
+    """The training-time evaluation scores the box the document holds, never the loader's
+    float32 corners, and each detection on the grid its ground truth is stored on."""
+    torch = pytest.importorskip("torch")
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.pipelines.data.datasets import target_tensors
+    from tcip_mcp.pipelines.data.label_queries import json_det_targets
+    from tcip_mcp.pipelines.training.evaluation import records_from_detector
+
+    label = tmp_path / "a.json"
+    json_io.write_annotations(label, [Annotation(subject="bur", geometry=BBox(10.3, 20.7, 40.1, 60.9))],
+                              100, 100)
+    listed, _ = json_det_targets(str(label), "bur", None, {"bur": 0})
+    output = {"boxes": torch.tensor([[10.1, 10.1, 40.3, 30.3]]),
+              "labels": torch.tensor([1]), "scores": torch.tensor([0.9])}
+    record = records_from_detector(target_tensors(listed), output, width=100, height=100)
+    assert [g["bbox"] for g in record["gt"]] == [[10.3, 20.7, 29.8, 40.2]]
+    assert [d["bbox"] for d in record["dt"]] == [[10.1, 10.1, 30.2, 20.2]]
+
+
+def _reference_records(tmp_path, reference: list, detections: list) -> list[dict]:
+    """One image's records, its reference written and read back through the label document."""
+    from tcip_annotation import json_io
+    from tcip_mcp.pipelines.training.evaluation import records_from_annotation
+
+    label = tmp_path / "reference.json"
+    json_io.write_annotations(label, reference, 100, 100, keep_empty=True)
+    return [records_from_annotation(json_io.read_annotations(label), detections,
+                                    width=100, height=100)[1]]
+
+
+@pytest.mark.parametrize("crowd_only", [True, False], ids=["crowd_only", "empty"])
+def test_a_detection_outside_a_reference_with_no_object_is_a_false_positive(tmp_path, crowd_only):
+    """A reference holding no object, crowd regions alone or nothing, is still evaluated: a
+    detection outside every crowd region is one false positive, by COCOeval and by the center
+    match alike, never hidden by a zero-object shortcut."""
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.pipelines.training.evaluation import governing_counts
+
+    reference = [Annotation(subject="bur", geometry=BBox(50, 50, 90, 90), iscrowd=True,
+                            created_by="user:breeder")] if crowd_only else []
+    detection = Annotation(subject="bur", geometry=BBox(5, 5, 20, 20), score=0.9)
+    records = _reference_records(tmp_path, reference, [detection])
+
+    m = coco_detection_metrics(records, iou_threshold=0.5, conf_threshold=0.25)
+    assert (m["tp"], m["fp"], m["fn"], m["n_gt"]) == (0, 1, 0, 0)
+    counts = governing_counts(records, {"kind": "center_match", "tolerance": 3.0},
+                              conf_threshold=0.25)
+    assert (counts["tp"], counts["fp"], counts["fn"]) == (0, 1, 0)
+
+
+def test_a_reference_with_objects_and_no_detection_scores_every_object_a_miss(tmp_path):
+    from tcip_annotation.state import Annotation, BBox
+
+    records = _reference_records(tmp_path, [
+        Annotation(subject="bur", geometry=BBox(5, 5, 20, 20), created_by="user:breeder"),
+        Annotation(subject="bur", geometry=BBox(40, 40, 60, 60), created_by="user:breeder")], [])
+
+    m = coco_detection_metrics(records, iou_threshold=0.5, conf_threshold=0.25)
+    assert (m["tp"], m["fp"], m["fn"], m["n_pred"]) == (0, 0, 2, 0)
+
+
+def test_a_crowd_region_is_no_object_in_a_ground_truth_count(tmp_path):
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.pipelines.data.splits import count_label_lines
+    from tcip_mcp.pipelines.training.evaluation import gt_class_typical_count
+
+    assert gt_class_typical_count(_crowd_records()) == 1.0
+    label = tmp_path / "a.json"
+    json_io.write_annotations(label, [
+        Annotation(subject="bur", geometry=BBox(1, 1, 9, 9)),
+        Annotation(subject="bur", geometry=BBox(20, 20, 60, 60), iscrowd=True)], 100, 100)
+    assert count_label_lines(label, subject="bur") == 1
+    assert count_label_lines(label) == 1

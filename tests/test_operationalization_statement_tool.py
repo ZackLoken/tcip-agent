@@ -64,14 +64,12 @@ def test_one_audit_event_per_statement_in_the_project_log(project: Path, platfor
     assert _entries(platform_root, "state_trait_operationalization") == []
 
 
-def test_a_refused_statement_records_the_call_it_refused_and_writes_nothing(
-    project: Path, platform_root: Path
-):
+def test_a_refused_statement_writes_nothing_and_leaves_no_line(project: Path, platform_root: Path):
     result = _state(project, delivered_phenotypes=["bloom_95per_date"])
 
     assert "error" in result
-    rows = _entries(project, "state_trait_operationalization")
-    assert len(rows) == 1 and rows[0]["status"] == "ok"
+    assert _entries(project, "state_trait_operationalization") == []
+    assert _entries(platform_root, "state_trait_operationalization") == []
     _, stored, _ = fx.resolve(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES)
     assert stored.value is None
 

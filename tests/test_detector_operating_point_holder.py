@@ -102,7 +102,7 @@ def _checkpoint(tmp_path, builder: str) -> str:
     ckpt = tmp_path / "model_best.pt"
     torch.save({"model_source": model_source,
                 "model_state_dict": build_model({"model_source": model_source}).state_dict(),
-                "config": {"data": {"tiling": {"enabled": False}}}}, str(ckpt))
+                "config": {"data": {"tiling": {"enabled": False}, "subject": "bud"}}}, str(ckpt))
     reg = register_model(name=builder, checkpoint_path=str(ckpt), config={},
                          project_path=str(tmp_path))
     assert "error" not in reg, reg

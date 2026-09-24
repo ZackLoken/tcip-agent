@@ -31,7 +31,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 import tcip_store as ts
-from tcip_annotation import format_io, json_io, review_engine
+from tcip_annotation import json_io, review_engine
 from tcip_mcp import (
     audit,
     dataset_layout,
@@ -1856,7 +1856,6 @@ BAND_GROUP_MANIFEST_BYTES = (
 SNAPSHOT_BYTES = "def build():\n    return 'ü'\n".encode("utf-8")
 IMAGE_BYTES = b"\xff\xd8\xff\xe0not a real frame, only bytes handed to the store\x00"
 LABEL_BYTES = '{"annotations": [{"subject": "bud", "bbox": [1.0, 2.0, 3.5, 4.5]}]}'.encode("utf-8")
-COCO_BYTES = '{"images": [{"file_name": "ü_2.jpg"}], "annotations": []}'.encode("utf-8")
 
 
 def _review_state_dir(root: Path) -> Path:
@@ -1880,11 +1879,6 @@ def _split_dir(root: Path) -> Path:
 def _curated_dir(root: Path) -> Path:
     """A curated dataset's output directory, wherever the caller asked it to be materialized."""
     return root / "curated"
-
-
-def _coco_dir(root: Path) -> Path:
-    """A directory holding an assembled COCO view, which no layout resolver describes."""
-    return root / "export"
 
 
 def _plant_mapping_dir(root: Path) -> Path:
@@ -2001,9 +1995,13 @@ def _real_selection() -> dict:
 
 def _real_cal_holdout_lock() -> dict:
     """The shape ``splits.resolve_locked_cal_holdout_split`` writes today, drawn for real over a
-    throwaway directory rather than hand-typed."""
-    return _construct_via_scratch_backend(lambda scratch: splits.resolve_locked_cal_holdout_split(
-        ["a_1", "b_2", "c_3", "d_4"], identity_hash=LOCK_IDENTITY, scope_root=scratch))
+    throwaway directory and read back from its lock rather than hand-typed."""
+    def draw(scratch: Path) -> dict:
+        splits.resolve_locked_cal_holdout_split(
+            ["a_1", "b_2", "c_3", "d_4"], identity_hash=LOCK_IDENTITY, scope_root=scratch)
+        return ts.read(splits.cal_holdout_lock_key(LOCK_IDENTITY, scope_root=scratch))
+
+    return _construct_via_scratch_backend(draw)
 
 
 def _real_job_registry_summary() -> list[dict]:
@@ -2312,9 +2310,6 @@ REGISTERED = {
                      "rejected_count": 1, "label": "labels/ü_2.json"}]},
         lambda root: materialize.curated_manifest_key(_curated_dir(root)),
         "curated/curated_manifest.json", root_of=_curated_dir),
-    "coco_documents": Registered(
-        COCO_BYTES, lambda root: format_io.coco_document_key(_coco_dir(root), "instances"),
-        "export/instances.json", root_of=_coco_dir),
     "audit_log": Registered(
         {"timestamp": "2026-03-04T12:00:00+00:00", "tool": "gui_save_labels",
          "arguments": {"image_path": "images/2026-03-04/a_1.JPG", "n_annotations": 3},

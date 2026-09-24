@@ -82,6 +82,24 @@ def test_two_dated_buckets_with_the_same_stem_stage_and_read_back_independently(
     assert min(xs) == pytest.approx(5.0)
 
 
+def test_an_assignment_naming_no_subject_is_refused_never_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An assigned candidate is an annotation, refused by construction when it names no subject,
+    the refusal naming the assignment; it is never dropped while the rest are staged."""
+    from tcip_mcp.tools.proposal_tools import propose_annotations, stage_proposals
+
+    img_path = tmp_path / "images" / "2026-01-01" / "bur.jpg"
+    _make_image(img_path)
+    _install_stub(monkeypatch, [_candidate(0, 5.0), _candidate(1, 30.0)])
+    assert "error" not in propose_annotations(image_path=str(img_path), engine="sam")
+
+    staged = stage_proposals(image_path=str(img_path), assignments=[
+        {"candidate_id": 0, "subject": "bur"}, {"candidate_id": 1, "subject": ""}])
+    assert staged["error"].startswith("assignment 1: ")
+    assert not (tmp_path / "predictions" / "sam" / "2026-01-01" / "bur.json").exists()
+
+
 def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_ran(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

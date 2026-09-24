@@ -31,6 +31,7 @@ from torch.utils.data import DataLoader
 from tcip_store import Key, StoreDescriptor, register_store, store, stored_numbers
 from tcip_store.file_backend import RootedFileLocator
 
+from tcip_mcp.pipelines.data.datasets import instance_targets
 from tcip_mcp.pipelines.model_contract import TCIPModel
 from tcip_mcp.pipelines.model_build import (
     MODEL_SOURCE_KEY,
@@ -796,7 +797,7 @@ def train(
                     if task in ("detection", "instance_seg"):
                         images, targets = batch
                         images = [img.to(device) for img in images]
-                        targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
+                        targets = instance_targets([{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets])
                     else:
                         images, targets = batch
                         images = images.to(device)

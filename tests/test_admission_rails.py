@@ -101,44 +101,10 @@ def test_ground_truth_shape_ignores_a_bucket_sidecar(tmp_path):
     assert ground_truth_shape(d) == "document"
 
 
-def test_ground_truth_shape_refuses_a_dataset_level_coco(tmp_path):
-    """A dataset-level COCO export in place of per-image documents is refused by name, with both
-    remedies stated, since only the breeder knows which is this dataset's real label source."""
-    from tcip_mcp.pipelines.data.label_queries import ground_truth_shape
-
-    d = tmp_path / "detect"
-    d.mkdir()
-    (d / "dataset.json").write_text(json.dumps(
-        {"images": [{"id": 1, "file_name": "a.jpg"}], "annotations": [], "categories": []}))
-
-    with pytest.raises(ValueError, match="dataset-level COCO") as excinfo:
-        ground_truth_shape(d)
-    assert "dataset.json" in str(excinfo.value)
-    assert "move the export out" in str(excinfo.value)
-    assert "import it into per-image documents" in str(excinfo.value)
-
-
-def test_ground_truth_shape_refuses_a_dataset_level_coco_that_sorts_after_the_documents(tmp_path):
-    """Every document the directory admits is classified, not only the first, so whether an
-    export is found depends on what it holds rather than on the name it happens to sort under."""
-    from tcip_mcp.pipelines.data.label_queries import ground_truth_shape
-
-    d = tmp_path / "detect"
-    d.mkdir()
-    for stem in ("a", "b"):
-        json_io.write_annotations(d / f"{stem}.json", [_box(10, 10, 50, 50)], 100, 100)
-    (d / "zzz-export.json").write_text(json.dumps(
-        {"images": [{"id": 1, "file_name": "a.jpg"}], "annotations": [], "categories": []}))
-
-    with pytest.raises(ValueError, match="dataset-level COCO") as excinfo:
-        ground_truth_shape(d)
-    assert "zzz-export.json" in str(excinfo.value)
-
-
 def test_ground_truth_shape_treats_the_old_objects_schema_as_documents(tmp_path):
-    """The old 'objects' schema, which format detection raises on, is not a dataset-level COCO;
-    the shape read's own never-raise-on-unrecognized contract folds that raise into the document
-    shape, whose admission then reports the file as carrying no record."""
+    """The shape read names which kind of ground truth a place holds and never reads a document:
+    a directory holding an old 'objects' document is the document shape, whose reader refuses
+    that document when admission reads it."""
     from tcip_mcp.pipelines.data.label_queries import ground_truth_shape
 
     d = tmp_path / "detect"
@@ -147,24 +113,37 @@ def test_ground_truth_shape_treats_the_old_objects_schema_as_documents(tmp_path)
     assert ground_truth_shape(d) == "document"
 
 
-def test_admission_refuses_a_dataset_level_coco_misrouted_as_labels_dir(tmp_path, caplog):
-    """The producer's own admission carries the refusal, so a run naming such a directory says so
-    rather than training on a source nobody chose, and says nothing else: a warning about training
-    without validation would send the reader looking for a split problem that is not there."""
+def _subject_bearing_coco(path):
+    """A two-image dataset-level COCO whose records also carry the per-image ``subject`` key, the
+    shape the per-image decoder would otherwise read as one image's labels."""
+    path.write_text(json.dumps({
+        "images": [{"id": 1, "file_name": "img0.jpg"}, {"id": 2, "file_name": "img1.jpg"}],
+        "categories": [{"id": 1, "name": BUD}],
+        "annotations": [
+            {"id": 1, "image_id": 1, "category_id": 1, "subject": BUD, "bbox": [1, 1, 9, 9]},
+            {"id": 2, "image_id": 2, "category_id": 1, "subject": BUD, "bbox": [20, 20, 9, 9]},
+        ],
+    }))
+
+
+def test_a_dataset_level_coco_at_a_label_path_is_refused_by_the_one_reader(tmp_path):
+    """No training or calibration reader reads a COCO document under another name: the per-image
+    reader every one of them shares refuses it, the loaders' target read and admission alike."""
+    from tcip_mcp.pipelines.data.label_queries import json_det_targets
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     images = tmp_path / "images"
     labels = tmp_path / "detect"
     labels.mkdir()
     _make_images(images, ["img0", "img1"])
-    (labels / "dataset.json").write_text(json.dumps(
-        {"images": [{"id": 1, "file_name": "img0.jpg"}], "annotations": [], "categories": []}))
+    json_io.write_annotations(labels / "img1.json", [_box(10, 10, 50, 50)], 100, 100)
+    _subject_bearing_coco(labels / "img0.json")
 
-    with caplog.at_level("WARNING"):
-        with pytest.raises(ValueError, match="dataset-level COCO"):
-            auto_train_val("detection", {"images_dir": str(images), "labels_dir": str(labels),
-                                         "subject": BUD}, None)
-    assert "training without validation" not in caplog.text
+    with pytest.raises(json_io.UnreadableLabelDocument, match="import_coco"):
+        json_det_targets(str(labels / "img0.json"), BUD, None, {BUD: 0})
+    with pytest.raises(json_io.UnreadableLabelDocument, match="dataset-level COCO"):
+        auto_train_val("detection", {"images_dir": str(images), "labels_dir": str(labels),
+                                     "subject": BUD}, None)
 
 
 def test_a_same_stem_provenance_sidecar_is_never_read_as_that_images_label(tmp_path):
@@ -823,8 +802,9 @@ def test_json_det_targets_skips_unlabeled_instead_of_raising(tmp_path):
     ], 100, 100)
 
     id_map = {"open": 0, "closed": 1}
-    boxes, labels, n_unlabeled = json_det_targets(str(path), "bud", "opening", id_map)
-    assert len(boxes) == 1 and labels == [2]  # 0-indexed 1 ("closed") + 1 for background
+    target, n_unlabeled = json_det_targets(str(path), "bud", "opening", id_map)
+    # 0-indexed 1 ("closed") + 1 for background
+    assert len(target["boxes"]) == 1 and target["labels"] == [2] and target["iscrowd"] == [False]
     assert n_unlabeled == 1  # the second instance, disclosed rather than silently dropped
 
     undecodable = tmp_path / "IMG_B.json"
@@ -862,8 +842,7 @@ def test_detection_excludes_a_partially_labeled_stem_from_training(tmp_path):
     assert admitted.counts["skipped_unconfirmed_empty"] == 0
 
     ds = dataset_over("detection", images_dir, labels_dir, subject=BUD, attribute="opening")
-    boxes, _labels = ds.det_targets(ds.stems[0])
-    assert len(boxes) == 1
+    assert len(ds.det_targets(ds.stems[0])["boxes"]) == 1
 
 
 def test_tiled_detection_indexes_no_tile_from_an_attribute_incomplete_image(tmp_path):

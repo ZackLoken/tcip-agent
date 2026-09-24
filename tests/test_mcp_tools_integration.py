@@ -79,30 +79,9 @@ class TestReadAnnotations:
         assert ann["rings"] == [[[10.0, 10.0], [30.0, 10.0], [30.0, 30.0]],
                                 [[60.0, 10.0], [80.0, 10.0], [80.0, 30.0]]]
 
-    def test_forcing_fmt_coco_over_a_per_image_document_is_an_error_not_a_silent_zero(self, tmp_path):
-        """A caller-supplied fmt is a claim the document must satisfy: forcing 'coco' over the
-        canonical per-image schema must not answer an empty, error-free read."""
-        from tcip_annotation import json_io
-        from tcip_annotation.state import Annotation, BBox
-        from tcip_mcp.tools.annotation_tools import read_annotations
-
-        images_dir, labels_dir = tmp_path / "images", tmp_path / "annotations"
-        images_dir.mkdir()
-        labels_dir.mkdir()
-        Image.new("RGB", (100, 100)).save(images_dir / "a.jpg")
-        json_io.write_annotations(
-            str(labels_dir / "a.json"),
-            [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 100, 100)
-
-        result = read_annotations(str(images_dir / "a.jpg"), fmt="coco")
-        assert "error" in result
-        assert "labels" not in result
-
-    def test_forcing_fmt_coco_over_a_labelme_shaped_document_is_an_error_not_a_silent_zero(
-        self, tmp_path,
-    ):
-        """A document carrying neither the per-image nor the COCO shape's markers satisfies no
-        stated fmt: it must be refused, not read as a store with zero annotations."""
+    def test_a_labelme_shaped_document_is_an_error_not_a_silent_zero(self, tmp_path):
+        """A document carrying no per-image ``annotations`` list is refused, not read as a store
+        with zero annotations."""
         from tcip_mcp.tools.annotation_tools import read_annotations
 
         images_dir, labels_dir = tmp_path / "images", tmp_path / "annotations"
@@ -113,15 +92,13 @@ class TestReadAnnotations:
             '{"shapes": [{"label": "bud", "points": [[1, 1], [8, 8]]}]}'
         )
 
-        result = read_annotations(str(images_dir / "a.jpg"), fmt="coco")
+        result = read_annotations(str(images_dir / "a.jpg"))
         assert "error" in result
         assert "labels" not in result
 
-    def test_forcing_fmt_coco_over_an_old_objects_schema_document_is_an_error_not_a_silent_zero(
-        self, tmp_path,
-    ):
-        """The old 'objects'-keyed schema carries neither current shape's markers either, and
-        must be refused the same way, never read in place as an empty COCO store."""
+    def test_an_old_objects_schema_document_is_an_error_not_a_silent_zero(self, tmp_path):
+        """The old 'objects'-keyed schema carries no per-image ``annotations`` list either, and
+        is refused the same way, never read in place as an empty document."""
         from tcip_mcp.tools.annotation_tools import read_annotations
 
         images_dir, labels_dir = tmp_path / "images", tmp_path / "annotations"
@@ -132,7 +109,7 @@ class TestReadAnnotations:
             '{"image": "a", "objects": [{"category_id": 0, "bbox": [1, 1, 9, 9]}]}'
         )
 
-        result = read_annotations(str(images_dir / "a.jpg"), fmt="coco")
+        result = read_annotations(str(images_dir / "a.jpg"))
         assert "error" in result
         assert "labels" not in result
 
@@ -311,8 +288,8 @@ class TestAugmentations:
 
 class TestReadAnnotationsUnknownFormat:
     def test_unrecognized_store_returns_error_not_raise(self, tmp_path):
-        """detect_format refuses an unknown store; read_annotations must surface that as an error
-        dict, matching its own convention and the docs, not propagate an uncaught ValueError."""
+        """The per-image reader refuses an unknown store; read_annotations must surface that as an
+        error dict, matching its own convention and the docs, not propagate an uncaught error."""
         from PIL import Image
 
         from tcip_mcp.tools.annotation_tools import read_annotations
@@ -325,4 +302,4 @@ class TestReadAnnotationsUnknownFormat:
 
         result = read_annotations(str(tmp_path / "images" / "a.jpg"))
         assert "error" in result
-        assert "Cannot determine the annotation format" in result["error"]
+        assert "not the list a label document holds" in result["error"]

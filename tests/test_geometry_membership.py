@@ -48,7 +48,7 @@ def _image(path: Path) -> None:
 
 def _target_geometry(task: str):
     """The geometry one task's loader actually reads: a box for detection, a closed ring for
-    instance_seg, whose ``_read_polys`` filters to polygons and rasterizes their rings."""
+    instance_seg, whose loader reads polygons only and rasterizes their rings."""
     if task == "instance_seg":
         return Polygon(rings=[[(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]])
     return BBox(10.0, 10.0, 30.0, 30.0)

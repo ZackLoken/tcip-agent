@@ -42,7 +42,7 @@ _IDENTITY_B = {"checkpoint_sha256": "sha-model-b", "experiment_id": None}
 def _entry(mt, action, cid, gt, pred, conf, *, producer_identity=_IDENTITY_A, conf_threshold=None,
            missed_object_attested=False):
     return {"match_type": mt, "action": action, "class_id": cid,
-            "gt_bbox_norm": gt, "pred_bbox_norm": pred, "conf": conf,
+            "iscrowd": False, "reviewed_by": "", "class_name": "", "gt_bbox_norm": gt, "pred_bbox_norm": pred, "conf": conf,
             "producer_identity": producer_identity, "conf_threshold": conf_threshold,
             "missed_object_attested": missed_object_attested}
 
@@ -127,6 +127,97 @@ def test_review_to_records_reconstructs_gt_and_dt():
     assert gt0["bbox"] == pytest.approx([90.0, 90.0, 20.0, 20.0])
 
 
+@pytest.mark.parametrize("key", ["action", "reviewed_by", "class_name", "gt_bbox_norm",
+                                 "pred_bbox_norm", "conf", "class_id", "missed_object_attested",
+                                 "iscrowd", "producer_identity", "conf_threshold"])
+def test_a_verdict_entry_missing_a_stated_key_is_refused_by_name(key):
+    """Every entry the engine writes states each of these keys; one that does not is refused
+    naming the key, never read through a default."""
+    from tcip_annotation.verdicts import decode_verdict
+
+    entry = _entry("TP", "accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9)
+    assert decode_verdict(entry).iscrowd is False
+    del entry[key]
+    with pytest.raises(ValueError, match=f"'{key}'"):
+        decode_verdict(entry)
+
+
+_READERS = ["calibration_reference", "review_threshold", "materializer", "engine_lookup",
+            "validation_route"]
+
+
+@pytest.mark.parametrize("reader", _READERS)
+def test_every_reader_of_a_verdict_entry_refuses_one_missing_a_stated_key(tmp_path, reader):
+    """Each reader of a stored verdict entry reads it through the one decoder: an entry the
+    engine wrote, stripped of a key it states, is refused naming the key wherever it is read,
+    never read around by a raw lookup that answers a default."""
+    from tcip_annotation import Annotation, BBox, ReviewContext, ReviewEngine, compute_matches
+
+    bucket = "predictions/m/2025-06-01"
+    engine = ReviewEngine(state_dir=tmp_path, current_user="alice")
+    ctx = ReviewContext(img_name="A.jpg", img_width=400, img_height=400,
+                        gt=[Annotation(subject="bud", geometry=BBox(100, 100, 120, 120))],
+                        preds=[Annotation(subject="bud", geometry=BBox(100, 100, 120, 120),
+                                          score=0.9)])
+    (det,) = engine.build_detection_list(ctx, compute_matches(ctx.gt, ctx.preds))
+    engine.record_detection_action(bucket, det, ctx, "accepted", producer_identity=_IDENTITY_A,
+                                   conf_threshold=0.0, class_id=0)
+    image_state = engine.image_states(bucket)["A.jpg"]
+    del image_state["detections"][0]["producer_identity"]
+    state = {"image": {"A.jpg": image_state}}
+
+    with pytest.raises(ValueError, match="'producer_identity'"):
+        if reader == "calibration_reference":
+            review_to_records(state, bucket_identities=[_IDENTITY_A], only_completed=False)
+        elif reader == "review_threshold":
+            review_conf_threshold(state, bucket_identities=[_IDENTITY_A], only_completed=False)
+        elif reader == "materializer":
+            from tcip_mcp.pipelines.feedback.materialize import partition_review_verdicts
+
+            partition_review_verdicts(state)
+        elif reader == "engine_lookup":
+            engine.find_reviewed_entry(bucket, det, ctx)
+        else:
+            from tcip_web.routes.validation import _recorded_prediction_digests
+
+            _recorded_prediction_digests(image_state)
+
+
+def test_a_review_detection_record_is_the_one_detection_shape_on_its_own_coordinates():
+    """With no image dimensions the records stay on the normalized unit square, never snapped to
+    the pixel grid, and each detection is built in the one detection record shape."""
+    from tcip_mcp.pipelines.training.evaluation import dt_record
+
+    recs = review_to_records(_floored_state(), bucket_identities=[_IDENTITY_A])
+    dts = [d for r in recs for d in r["dt"]]
+    assert dts and all(d == dt_record(d["bbox"], d["category_id"], d["score"]) for d in dts)
+    assert any(round(v, 2) != v for d in dts for v in d["bbox"])
+
+
+def test_a_verdict_on_a_crowd_region_carries_its_flag_into_the_reference(tmp_path):
+    """The verdict entry the engine records on a crowd region carries the flag, and the reference
+    built from it forms that region's ground truth as a crowd, never as one confirmed object."""
+    from tcip_annotation import Annotation, BBox
+    from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
+    from tcip_mcp.pipelines.training.evaluation import gt_objects
+
+    engine = ReviewEngine(tmp_path / "state")
+    ctx = ReviewContext(img_name="A.jpg", img_width=400, img_height=400, gt=[
+        Annotation(subject="bud", geometry=BBox(80.0, 80.0, 120.0, 120.0)),
+        Annotation(subject="bud", geometry=BBox(200.0, 200.0, 300.0, 300.0), iscrowd=True)])
+    for gt_idx, box in ((0, (80.0, 80.0, 120.0, 120.0)), (1, (200.0, 200.0, 300.0, 300.0))):
+        det = ReviewDetection(det_type="fn", class_name="bud", conf=None, iou=None,
+                              gt_idx=gt_idx, pred_idx=None, bbox=box)
+        engine.record_detection_action("bucket", det, ctx, action="accepted",
+                                       producer_identity=_IDENTITY_A, class_id=0)
+    engine.mark_image_reviewed("bucket", "A.jpg")
+
+    (rec,) = review_to_records({"image": engine.image_states("bucket")}, image_dims=_DIMS,
+                               bucket_identities=[_IDENTITY_A])
+    assert [g["iscrowd"] for g in rec["gt"]] == [0, 1]
+    assert len(gt_objects(rec)) == 1
+
+
 def test_review_only_completed_images():
     state = _floored_state()
     state["image"]["C.jpg"] = {"img_status": "started", "detections": [
@@ -186,6 +277,17 @@ def test_review_reference_hash_scopes_to_the_affirmed_reference():
     assert len(h1) == 16
 
 
+def test_review_reference_hash_covers_the_references_facts_and_nothing_derived():
+    """A key a record builder adds re-keys no reference; a moved box is a different one."""
+    recs = review_to_records(_floored_state(), image_dims=_DIMS, bucket_identities=[_IDENTITY_A])
+    h = review_reference_hash(recs)
+    widened = [{**r, "gt": [{**g, "derived": 1.0} for g in r["gt"]]} for r in recs]
+    assert review_reference_hash(widened) == h
+    moved = [{**r, "gt": [{**g, "bbox": [g["bbox"][0] + 1.0, *g["bbox"][1:]]} for g in r["gt"]]}
+             for r in recs]
+    assert review_reference_hash(moved) != h
+
+
 # ── producer-identity scoping ───────────────────────────────────────
 
 
@@ -209,11 +311,10 @@ def test_producer_identity_matches_by_checkpoint_sha_regardless_of_bucket_dir():
 
 
 def test_missing_producer_identity_fails_closed_not_grandfathered():
-    # Verdicts with no producer_identity at all are excluded, never grandfathered in (CLAUDE.md's
-    # no-back-compat rule).
+    # Verdicts whose recorded producer identity is null are excluded, never grandfathered in.
     state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": True, "detections": [
         {"match_type": "TP", "action": "accepted", "class_id": 0,
-         "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
+         "iscrowd": False, "reviewed_by": "", "class_name": "", "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
          "conf": 0.9}
     ]}}}
     recs = review_to_records(state, image_dims=_DIMS, bucket_identities=[_IDENTITY_A])
@@ -228,7 +329,7 @@ def test_unresolvable_class_id_refuses_the_whole_reference_not_a_silent_drop():
     # construction and pass the count-bias gate on a reference missing real evidence.
     state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": True, "detections": [
         {"match_type": "TP", "action": "accepted", "class_id": None, "class_name": "bud",
-         "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
+         "iscrowd": False, "reviewed_by": "", "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
          "conf": 0.9, "producer_identity": _IDENTITY_A}
     ]}}}
     with pytest.raises(ValueError, match="no resolvable class identity"):
@@ -241,7 +342,7 @@ def test_missing_class_id_key_also_refuses_not_defaulted_to_class_one():
     # guessing.
     state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": True, "detections": [
         {"match_type": "TP", "action": "accepted", "class_name": "bud",
-         "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
+         "iscrowd": False, "reviewed_by": "", "class_id": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
          "conf": 0.9, "producer_identity": _IDENTITY_A}
     ]}}}
     with pytest.raises(ValueError, match="no resolvable class identity"):
@@ -254,7 +355,7 @@ def test_class_id_unresolvable_message_is_drawn_from_the_shared_failure_vocabula
     # authored string, so a breeder sees one consistent voice regardless of which check refused.
     state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": True, "detections": [
         {"match_type": "TP", "action": "accepted", "class_id": None, "class_name": "bud",
-         "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
+         "iscrowd": False, "reviewed_by": "", "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
          "conf": 0.9, "producer_identity": _IDENTITY_A}
     ]}}}
     with pytest.raises(ValueError) as exc_info:
@@ -270,8 +371,8 @@ def test_a_coverage_only_attestation_needs_no_resolvable_class_id():
     # and its missed_object_attested stamp must still count toward adjudication coverage.
     state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": False, "detections": [
         {"match_type": "sweep", "action": "swept", "class_id": None, "class_name": "",
-         "gt_bbox_norm": None, "pred_bbox_norm": None, "conf": None,
-         "producer_identity": _IDENTITY_A, "missed_object_attested": True}
+         "iscrowd": False, "reviewed_by": "", "gt_bbox_norm": None, "pred_bbox_norm": None, "conf": None,
+         "producer_identity": _IDENTITY_A, "conf_threshold": None, "missed_object_attested": True}
     ]}}}
     recs = review_to_records(state, image_dims=_DIMS, bucket_identities=[_IDENTITY_A])
     assert len(recs) == 1

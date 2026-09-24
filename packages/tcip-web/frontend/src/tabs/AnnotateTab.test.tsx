@@ -1716,7 +1716,11 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
     act(() => {
       const s = useStore.getState();
       s.addImageAnnotation("subject_a");
-      s.updateImageAnnotation(0, { subject: "subject_a", attributes: { canopy_cover: "sparse" } });
+      s.updateImageAnnotation(0, {
+        subject: "subject_a",
+        attributes: { canopy_cover: "sparse" },
+        iscrowd: false,
+      });
     });
     pressSave();
     await flush();
@@ -1726,6 +1730,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
       {
         subject: "subject_a",
         attributes: { canopy_cover: "sparse" },
+        iscrowd: false,
         created_by: null,
         created_at: null,
         accepted_by: null,

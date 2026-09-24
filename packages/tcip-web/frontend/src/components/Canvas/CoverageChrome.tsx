@@ -32,12 +32,7 @@ import { useEffect, useId, useState } from "react";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import type { OtherLatticeAttestation } from "@/hooks/useRegionCompleteness";
 import { useDisclosure } from "@/hooks/useDisclosure";
-import {
-  breederReadErrorReason,
-  meetsBar,
-  type CellAttestedView,
-  type WorkingScale,
-} from "@/lib/coverage";
+import { meetsBar, type CellAttestedView, type WorkingScale } from "@/lib/coverage";
 import type { ReplaceRequired } from "@/lib/coverageTracker";
 
 /** The sr-only line naming an attestation's own scale provenance: the view scale it was pressed
@@ -362,7 +357,7 @@ export function CoverageChrome(props: {
     ? attestedViewLine(cell, props.activeCellsAttestedView[cell])
     : null;
 
-  const readErrorReason = props.readError ? breederReadErrorReason(props.readError) : null;
+  const readErrorReason = props.readError || null;
   const noticeClass =
     "rounded-md border bg-tcip-panel/95 px-3 py-1.5 text-[11px] shadow-lg backdrop-blur";
 

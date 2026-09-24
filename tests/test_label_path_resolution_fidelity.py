@@ -1,6 +1,5 @@
 """The resolver's identity fidelity: an image's whole filename stem, the date bucket a caller
-asks for, the date a label path can honestly report, and the fact that a format name selects a
-parser rather than a different file on disk."""
+asks for, and the date a label path can honestly report."""
 
 from __future__ import annotations
 
@@ -8,10 +7,8 @@ from pathlib import Path
 
 from tcip_mcp.dataset_layout import (
     annotation_date,
-    annotation_path,
     annotation_path_for_image,
     find_gt_label,
-    label_ext,
     parse_image_path,
 )
 
@@ -84,27 +81,3 @@ def test_caller_supplied_date_wins_over_the_image_paths_own_date() -> None:
     # A flat (non-dated) image with an explicit date lands under that date bucket.
     assert annotation_path_for_image("/ds/images/IMG_9.JPG", date="2026-03-02") == Path(
         "/ds/annotations/2026-03-02/IMG_9.json")
-
-
-def test_label_format_names_all_resolve_to_the_same_file_on_disk(tmp_path: Path) -> None:
-    """``fmt`` picks a parser, never a different file: every label on disk is ``.json``.
-
-    ``json`` and ``coco`` are two readings of the same per-image JSON file, so a reader that
-    asked for one and looked for a different extension would report an existing label as absent.
-    """
-    assert label_ext("json") == ".json"
-    assert label_ext("coco") == ".json"
-    assert label_ext(None) == ".json"
-    assert label_ext("COCO") == ".json"
-    assert annotation_path("/ds", "2026-02-11", "IMG_1", "coco") == annotation_path(
-        "/ds", "2026-02-11", "IMG_1", "json")
-
-    img = tmp_path / "images" / "2026-02-11" / "IMG_1.JPG"
-    img.parent.mkdir(parents=True)
-    img.write_bytes(b"x")
-    label = tmp_path / "annotations" / "2026-02-11" / "IMG_1.json"
-    label.parent.mkdir(parents=True)
-    label.write_text('{"annotations": []}', encoding="utf-8")
-    assert find_gt_label(img, fmt="coco") == label
-    assert find_gt_label(img, fmt="json") == label
-    assert find_gt_label(img) == label

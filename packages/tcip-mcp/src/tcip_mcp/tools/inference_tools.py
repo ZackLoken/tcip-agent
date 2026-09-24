@@ -9,11 +9,14 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from tcip_annotation.json_io import SIDECAR_FILENAMES
-from tcip_store import RECORD_JSON, BadKey, Key, StoreDescriptor, Version, register_store, store
+from tcip_store import (
+    RECORD_JSON, BadKey, Key, StoreDescriptor, StoreError, Version, register_store, store,
+)
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
+from tcip_mcp.dataset_layout import label_filename
 from tcip_mcp.pipelines.postprocessing.export import (
     export_detection_csv,
     mask_binarize_provenance,
@@ -24,6 +27,7 @@ from tcip_mcp.pipelines.postprocessing.export import (
 from tcip_mcp.pipelines.resolution import (
     DeliveryRefused,
     applied_operating_point,
+    bucket_dataset_root,
 )
 from tcip_mcp.project_paths import resolve_output_path
 
@@ -120,6 +124,26 @@ def calibration_curve_identity(body: dict) -> str:
     return _sha256_of_bytes(RECORD_JSON.encode(body))
 
 
+def keep_calibration_curve(body: dict) -> str:
+    """Keep one calibration's curve under its own identity and return that identity.
+
+    The key is the body's own digest, so a record already under it is these same bytes and the
+    call writes nothing and leaves no line; a write leaves its one ``calibration_curve_written``
+    line, whatever the calling door does next. Raises what the identity or the store raises.
+    """
+    from tcip_mcp.audit import record_event_or_raise
+
+    identity = calibration_curve_identity(body)
+    key = calibration_curve_key(identity)
+    if not store.exists(key):
+        store.replace(key, body)
+        record_event_or_raise("calibration_curve_written", {
+            "calibration_evidence_key": identity, "trait": body.get("trait"),
+            "dataset_hash": body.get("dataset_hash"),
+            "checkpoint_sha256": body.get("checkpoint_sha256")})
+    return identity
+
+
 RASTER_PASS_PROGRESS_STORE = "raster_pass_progress"
 _RASTER_PASS_PROGRESS_LOCATOR = RootedFileLocator(
     prefix=(".tcip", "raster_pass_progress"), suffix=".json")
@@ -138,8 +162,9 @@ register_store(
 """One tiled raster pass' resume state: an ``identity`` record naming the pass a bucket is mid-way
 through, plus one ``batch-<index>`` record per tile batch already reconstructed. Sits under
 ``<bucket>/.tcip/raster_pass_progress/``, outside ``prediction_documents``' own non-recursive glob
-of the bucket root, so an interrupted pass' own progress never reads as a prediction document. Not
-frozen: its shape may still move, so a reader checks the identity record's own ``schema_version`` by
+of the bucket root, so an interrupted pass' own progress never reads as a prediction document.
+Scratch, never a state that needs a receipt: written, resumed from and deleted with no audit line,
+since what a pass leaves is its published bucket, which the publication records. Not frozen: its shape may still move, so a reader checks the identity record's own ``schema_version`` by
 hand (``_RASTER_PASS_PROGRESS_SCHEMA_VERSION``) rather than relying on the seam, which only enforces
 that ceiling for a store declared frozen."""
 
@@ -265,7 +290,6 @@ def resolve_decode_id_map(predictor, images_dir: str | None, *,
 
 
 @mcp.tool()
-@audited(scope_arg="output_dir", scope_via=resolve_output_path)
 def run_inference(
     checkpoint_path: str,
     images_dir: str | None = None,
@@ -717,8 +741,9 @@ def _run_inference_verified(
 ) -> dict:
     """The verified body of ``run_inference``: everything after its checkpoint is loaded once.
 
-    Carries no ``@audited`` of its own: the calling tool's audit line is the record of this call.
-    ``deliver_per_image_counts``'s live regime calls this directly with the checkpoint it already
+    Every act of this pass is recorded by the library that makes it (the curve's write, the lock
+    draw, the calibration experiment, the validation record). ``deliver_per_image_counts``'s live
+    regime calls this directly with the checkpoint it already
     loaded, never a second load through ``run_inference`` itself, so a door composing this pass
     never loads the file twice.
     """
@@ -925,15 +950,13 @@ def _run_inference_verified(
             "gate_evidence": conf_param.gate_evidence,
             "calibration_evidence": evidence,
         }
+        # The evidence rides in the curve artifact, read back by identity, never on this response.
         try:
-            curve_identity_hex = calibration_curve_identity(curve_body)
+            curve_identity_hex = keep_calibration_curve(curve_body)
         except (TypeError, ValueError) as exc:
             return {"error": f"the operating-point curve for trait {trait!r} could not be kept "
                              f"(its body cannot be recorded): {exc}"}
-        # The evidence rides in the curve artifact, read back by identity, never on this response.
-        try:
-            store.replace(calibration_curve_key(curve_identity_hex), curve_body)
-        except Exception:
+        except StoreError:
             logger.warning("could not persist operating-point curve", exc_info=True)
         else:
             extra["calibration_curve_path"] = str(calibration_curve_path(curve_identity_hex))
@@ -971,11 +994,8 @@ def _run_inference_verified(
         tile_batch_size=tile_batch_size, global_nms_iou=applied_nms_iou, postprocess=postprocess,
         tile_resize=tile_resize,
     )
-    # A degenerate box is no detection, so it is excluded here too; left at the raw per-image
-    # count when masks are present, since only the writer's mask-to-polygon conversion decides.
-    total_detections = sum(
-        r["count"] if r.get("masks") is not None else positive_detections(r)[0] for r in results
-    )
+    # A detection the writer would not store is no detection, so it is excluded here too.
+    total_detections = sum(positive_detections(r)[0] for r in results)
 
     # Producing-model identity (resolved above, before calibration) travels with the result so every
     # downstream deliverable can name the exact checkpoint (content hash) + run behind the count.
@@ -1026,16 +1046,6 @@ _NO_DATASET_ROOT_NOTE = (
 against a verdict store that holds nothing about it or letting it claim a count nothing can verify."""
 
 
-def _bucket_dataset_root(bucket: Path) -> Path | None:
-    """The dataset root a bucket's count claim is recorded against, or ``None`` when it is under
-    none. Resolved through ``dataset_root_of``, the same derivation the reader recomputes the
-    covered-bucket key from, so a door cannot record a key the verifier will not look for."""
-    from tcip_mcp.dataset_layout import dataset_root_of
-
-    root = dataset_root_of(bucket)
-    return root.resolve() if root is not None else None
-
-
 def _resolve_writable_bucket_for(output_dir: str, *, overwrite: bool):
     """The bucket a run may write for ``output_dir``, its resolution, and its dataset root.
 
@@ -1068,7 +1078,7 @@ def _resolve_writable_bucket_for(output_dir: str, *, overwrite: bool):
     canonical_date = canonical[2] if canonical is not None else None
 
     # The guard reads the bucket's own dataset verdict store; no dataset root means no store to guard against.
-    dataset_root = _bucket_dataset_root(out_path)
+    dataset_root = bucket_dataset_root(out_path)
     review_state_dir = None if dataset_root is None else review_state_dir_of(dataset_root)
 
     try:
@@ -1189,27 +1199,52 @@ def _draft_count_claim(result: dict, *, trait: str | None, bucket: Path,
     return draft, None
 
 
-def _seal_and_stamp(out: Path, stamp_body: dict, draft) -> dict:
-    """Append the record the gate earned over the files as they landed, then write the stamp last.
+def seal_stamp_and_record(out: Path, stamp_body: dict, draft, *, written: int
+                          ) -> tuple[dict, bool | None]:
+    """Append the record the gate earned over the files as they landed, write the stamp last, link
+    the bucket into its run's lineage, and record the publication.
 
-    The last two steps of the order every producer of a prediction bucket follows, in one place so
-    the doors cannot drift into different ones. ``draft`` is ``None`` for a run that earned nothing,
-    which stamps unvalidated with no pointer. A crash between the record and the stamp leaves a row
-    no stamp names, which is inert; a crash before either leaves prediction files that floor.
+    The last steps of the order every producer of a prediction bucket follows, an image bucket and
+    a raster bucket alike, the GUI's inference worker included, in one place so no door records
+    or skips the act on its own.
+    ``draft`` is ``None`` for a run that earned nothing, which stamps unvalidated with no pointer.
+    A crash between the record and the stamp leaves a row no stamp names, which is inert; a crash
+    before either leaves prediction files that floor. The stamp's facts are its own
+    ``stamp_written`` line (``write_sidecar``); the one ``prediction_bucket_published`` line names
+    the documents written and whether the lineage link landed (``None`` when the run names no
+    experiment).
+
+    Returns ``(stamp_body, lineage_linked)``.
     """
+    from tcip_mcp.audit import record_event_or_raise
     from tcip_mcp.pipelines.resolution import seal_validation, write_sidecar
 
     if draft is not None:
         _digest, stamp_body = seal_validation(
             draft, dataset_root=draft.dataset_root, bucket_dirs=[out], stamp_body=stamp_body)
     write_sidecar(out, stamp_body)
-    return stamp_body
+    exp_id = stamp_body.get("experiment_id")
+    lineage_linked = None
+    if exp_id:
+        try:
+            from tcip_mcp.experiments import update_lineage
+
+            update_lineage(exp_id, predictions=str(out))
+            lineage_linked = True
+        except Exception:
+            logger.warning("could not link predictions into experiment lineage", exc_info=True)
+            lineage_linked = False
+    record_event_or_raise(
+        "prediction_bucket_published",
+        {"predictions_dir": str(out), "written": written, "lineage_linked": lineage_linked},
+        scope=bucket_dataset_root(out))
+    return stamp_body, lineage_linked
 
 
 def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
                                trait: str | None, images_dir: str | None,
                                tile_size_validated: str | None, draft
-                               ) -> tuple[list[str], int, dict]:
+                               ) -> tuple[list[str], int, dict, bool | None]:
     """Write one prediction file per image, then earn and stamp over exactly what landed.
 
     True once the bucket's own document refusal has already run: the resolver refuses a publish
@@ -1228,8 +1263,9 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
     condition for a validated stamp: a door opens one only when the run's own dimensions all
     cleared and the bucket sits where a claim can be recorded.
 
-    Returns ``(written, dropped_nonpositive_boxes, stamp_body)``: the middle value is the count of
-    detections dropped for a zero-extent box across every image, for the caller's own summary.
+    Returns ``(written, dropped_nonpositive_boxes, stamp_body, lineage_linked)``: the second value
+    is the count of detections dropped for a zero-extent box across every image, for the caller's
+    own summary; the last is :func:`seal_stamp_and_record`'s.
     """
     from tcip_mcp.pipelines.resolution import operating_point_stamp, prediction_producer
 
@@ -1252,7 +1288,7 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
     has_masks = False
     dropped = 0
     for r in result["results"]:
-        out_json = out / f"{Path(r['image']).stem}.json"
+        out_json = out / label_filename(Path(r["image"]).stem)
         # Read before the write: a drop can empty a mask list that was genuinely there, and
         # has_masks must reflect what this run used, not what happened to survive the drop.
         has_masks = has_masks or bool(r.get("masks"))
@@ -1285,7 +1321,8 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
     if has_masks:
         # The run-constant mask-binarize threshold travels once here rather than per-annotation.
         op_stamp["mask_binarize"] = mask_binarize_provenance()
-    return written, dropped, _seal_and_stamp(out, op_stamp, draft)
+    op_stamp, lineage_linked = seal_stamp_and_record(out, op_stamp, draft, written=len(written))
+    return written, dropped, op_stamp, lineage_linked
 
 
 def _clear_door_refusal_reason(recorded_path: str) -> str | None:
@@ -1348,8 +1385,7 @@ def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, tr
 
     exp_id = result.get("experiment_id")
     if exp_id:
-        # Checked before the publisher writes the bucket, ahead of this door's own @audited entry
-        # (appended only after the caller's body returns), so nothing on disk needs unwinding.
+        # Checked before the publisher writes the bucket, so nothing on disk needs unwinding.
         from tcip_mcp.experiments import lineage_key, pointer_frozen, read_member
 
         frozen = pointer_frozen(exp_id, "lineage", "predictions", str(out))
@@ -1374,23 +1410,9 @@ def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, tr
                     "op_stamp": {}, "tile_size_validated": tile_size_validated,
                     "lineage_linked": None}
 
-    written, dropped_boxes, op_stamp = _publish_image_predictions(
+    written, dropped_boxes, op_stamp, lineage_linked = _publish_image_predictions(
         out, result, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
         tile_size_validated=tile_size_validated, draft=draft)
-
-    # Close the data->model->predictions chain: link this bucket into the producing run's lineage.
-    # Additive first-write, the terminal-state lock permits it into a still-empty predictions field.
-    lineage_linked = None
-    if exp_id:
-        try:
-            from tcip_mcp.experiments import update_lineage
-
-            update_lineage(exp_id, predictions=str(out))
-            lineage_linked = True
-        except Exception:
-            logger.warning("could not link predictions into experiment lineage", exc_info=True)
-            lineage_linked = False
-
     return {"refusal": None, "written": written, "dropped_boxes": dropped_boxes,
             "op_stamp": op_stamp, "tile_size_validated": tile_size_validated,
             "lineage_linked": lineage_linked}
@@ -1522,7 +1544,8 @@ def _reconcile_document(source: Path, destination: Path, stem: str) -> tuple[boo
         if dest_v.value == source_v.value:
             store.delete(source_key, expect=source_v.version)
             return True, None
-        return False, {"error": f"{stem}.json differs between {source} and {destination}: the "
+        return False, {"error": f"{label_filename(stem)} differs between {source} and "
+                                f"{destination}: the "
                                 "staging door wrote a same-stem document over one this clear had "
                                 "already copied; a person must reconcile it, no door removes it."}
     return False, None
@@ -2206,7 +2229,7 @@ def _export_predictions_raster(
     block_evidence: dict | None = None
     claim_scope_validated: str | None = None
     claim_scope_mismatch: str | None = None
-    bucket_root = _bucket_dataset_root(out)
+    bucket_root = bucket_dataset_root(out)
     draft = None
     block_calibration_snapshot: dict | None = None
     bundle_dataset_hash: str | None = None
@@ -2255,9 +2278,7 @@ def _export_predictions_raster(
                     except ValueError as exc:
                         return {"error": f"the count claim for trait {trait!r} was not earned: {exc}"}
         else:
-            from tcip_mcp.pipelines.block_calibration import (
-                BlockCalibrationRefused, resolve_block_calibration_records,
-            )
+            from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
             from tcip_mcp.pipelines.raster_source import (
                 georeferenced_raster_identity_mismatch, raster_identity_matches,
             )
@@ -2272,7 +2293,7 @@ def _export_predictions_raster(
                     export_tile_size=resolved_tile,
                     tile_batch_size=tile_batch_size, postprocess=postprocess,
                 )
-            except BlockCalibrationRefused as exc:
+            except ValueError as exc:  # a named block refusal, or the run's scope refused
                 return {"error": str(exc)}
 
             training_identity = (block_prov["spatial_manifest"] or {}).get("raster_content_identity")
@@ -2427,7 +2448,7 @@ def _export_predictions_raster(
     out.mkdir(parents=True, exist_ok=True)
     sha = identity["sha256"]
     producer = prediction_producer(checkpoint.path, sha)
-    pred_path = out / f"{Path(raster_path).stem}.json"
+    pred_path = out / label_filename(Path(raster_path).stem)
     if raster_attribute is not None:
         unmapped = unmapped_label_ids([result], id_map)
         if unmapped:
@@ -2472,16 +2493,8 @@ def _export_predictions_raster(
     # Reused from the sampling taken at the top of this call, never resampled: a consumer
     # resolving these boxes through a raster's georeferencing needs this to name that raster.
     op_stamp["raster_content_identity"] = raster_identity
-    op_stamp = _seal_and_stamp(out, op_stamp, draft)
-
+    op_stamp, _lineage_linked = seal_stamp_and_record(out, op_stamp, draft, written=1)
     exp_id = identity["experiment_id"]
-    if exp_id:
-        try:
-            from tcip_mcp.experiments import update_lineage
-
-            update_lineage(exp_id, predictions=str(out))
-        except Exception:
-            logger.warning("could not link predictions into experiment lineage", exc_info=True)
 
     # The pass finished: whatever progress it left has nothing left to resume.
     _clear_raster_pass_progress(out)
@@ -2524,7 +2537,6 @@ statement and refuses."""
 
 
 @mcp.tool()
-@audited
 def deliver_per_image_counts(
     checkpoint_path: str | None = None,
     images_dir: str | None = None,
@@ -2954,7 +2966,8 @@ def _bucket_csv_rows(
 ) -> tuple[list[dict], list[str]]:
     """A prediction bucket's own per-image documents as ``export_detection_csv``'s row source.
 
-    Real detections only (``detection_annotations``, a ``Point`` excluded), ordered by document
+    Counted detections only (``detection_annotations``: a ``Point`` and a crowd region excluded),
+    ordered by document
     stem rather than trusted to ``prediction_documents``' own filename sort (which would diverge
     from the live regime's sorted-stem enumeration once ``.json`` changes a stem's relative
     order). The one reader every documents-backed CSV path shares, so a masked detection the
@@ -2969,13 +2982,14 @@ def _bucket_csv_rows(
     let the CSV's own cells silently say less than the caller believes.
     """
     from tcip_annotation.json_io import detection_annotations, prediction_documents, safe_score
+    from tcip_annotation.state import prediction_score
 
     documents = sorted(prediction_documents(bucket_path), key=lambda p: p.stem)
     image_results = []
     fallback_stems = []
     for doc in documents:
         annotations = detection_annotations(doc)
-        scores = [safe_score(a.score) for a in annotations if a.score is not None]
+        scores = [safe_score(prediction_score(a)) for a in annotations]
         filename = (filename_map or {}).get(doc.stem)
         if filename is None:
             filename = doc.stem

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from dataclasses import replace
 
 from shapely.geometry import MultiPolygon as ShapelyMultiPolygon
 from shapely.geometry import Polygon as ShapelyPolygon
@@ -24,7 +25,9 @@ try:
 except ImportError:  # pragma: no cover - older shapely
     ShapelyError = Exception
 
-from tcip_annotation.state import Annotation, BBox, Polygon, box_derivable, polygonal
+from tcip_annotation.state import (
+    Annotation, BBox, Polygon, instances, is_detection, polygonal, prediction_score,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,10 +110,9 @@ def _as_box(a: Annotation) -> BBox:
 def _rings_to_shapely(rings: list[list[tuple[float, float]]]):
     """One or more simple closed rings -> a Shapely Polygon (one ring) or MultiPolygon (several);
     every ring contributes, never just the first/largest."""
-    valid = [r for r in rings if len(r) >= 3]
-    if len(valid) == 1:
-        return ShapelyPolygon(valid[0])
-    return ShapelyMultiPolygon([ShapelyPolygon(r) for r in valid])
+    if len(rings) == 1:
+        return ShapelyPolygon(rings[0])
+    return ShapelyMultiPolygon([ShapelyPolygon(r) for r in rings])
 
 
 def box_ring(bbox: BBox) -> list[tuple[float, float]]:
@@ -128,7 +130,7 @@ def _to_shapely(a: Annotation):
         g = ShapelyPolygon(box_ring(a.geometry))
     elif polygonal(a.geometry):
         g = _rings_to_shapely(a.geometry.rings)
-    else:  # pragma: no cover - callers filter geometry-less annotations out first
+    else:  # a point or no geometry covers nothing
         g = ShapelyPolygon([])
     if not g.is_valid:
         g = make_valid(g)
@@ -143,11 +145,17 @@ def compute_matches(
 ) -> dict:
     """Match predictions to GT; classify as TP / FP / FN.
 
-    ``gt`` / ``preds`` are :class:`Annotation` lists (a prediction carries a ``score``). Matching is
+    ``gt`` / ``preds`` are :class:`Annotation` lists, each prediction stating its ``score``
+    (:func:`~tcip_annotation.state.prediction_score`, which refuses one that does not). Matching is
     per class name (``subject``) using greedy IoU. Geometry-less annotations (image-level labels)
     carry no spatial extent and are ignored here, as is a :class:`~tcip_annotation.state.Point`,
     which has no area and so no IoU with anything: it can be neither matched, nor a FP, nor a FN
     without fabricating a spatial claim it does not make.
+
+    A crowd region is never one object (COCO's own semantics): a predicted crowd region is no
+    detection at all; a ground-truth crowd region is matched by no prediction and is no false
+    negative, and a prediction left unmatched by every object whose area a same-class crowd region
+    covers by ``iou_threshold`` or more is ignored, neither a true nor a false positive.
 
     Returns a dict with keys ``'tp'`` / ``'fp'`` / ``'fn'``:
       - ``tp``: ``{gt_idx, pred_idx, iou, class_name, conf}``
@@ -156,17 +164,20 @@ def compute_matches(
 
     ``gt_idx`` / ``pred_idx`` index into ``gt`` / ``preds`` directly.
     """
-    def _matchable(a: Annotation) -> bool:
-        return box_derivable(a.geometry)
-
     gt_items: list[tuple[int, str, Annotation]] = [
-        (i, a.subject, a) for i, a in enumerate(gt) if _matchable(a)
-    ]
+        (i, a.subject, a) for i, a in enumerate(gt) if is_detection(a)]
+    crowds: dict[str, list[Annotation]] = defaultdict(list)
+    for a in instances(gt, crowd=True):
+        crowds[a.subject].append(a)
     pred_items: list[tuple[int, str, float, Annotation]] = [
-        (i, a.subject, float(a.score if a.score is not None else 1.0), a)
-        for i, a in enumerate(preds)
-        if _matchable(a) and (a.score is None or a.score >= conf_threshold)
-    ]
+        (i, a.subject, prediction_score(a), a) for i, a in enumerate(preds)
+        if is_detection(a) and prediction_score(a) >= conf_threshold]
+
+    def _in_crowd(a: Annotation) -> bool:
+        geom, area = _to_shapely(a)
+        return area > 0 and any(
+            _to_shapely(c)[0].intersection(geom).area / area >= iou_threshold
+            for c in crowds[a.subject])
 
     gt_by_class: dict[str, list[int]] = defaultdict(list)
     for li, item in enumerate(gt_items):
@@ -250,8 +261,8 @@ def compute_matches(
 
     # Unmatched predictions → FP
     fp_list: list[dict] = []
-    for li, (p_idx, p_cname, p_conf, _) in enumerate(pred_items):
-        if li not in matched_pred:
+    for li, (p_idx, p_cname, p_conf, p_ann) in enumerate(pred_items):
+        if li not in matched_pred and not _in_crowd(p_ann):
             fp_list.append({"pred_idx": p_idx, "class_name": p_cname, "conf": round(p_conf, 4)})
 
     # Unmatched GT → FN
@@ -284,15 +295,7 @@ def _project_for_classification(
     projected: list[Annotation] = []
     for a in annotations:
         value = classified_value_of(a, subject=subject, attribute=attribute)
-        if value is None:
-            projected.append(Annotation(subject=a.subject, geometry=None))
-        else:
-            projected.append(Annotation(
-                subject=value, geometry=a.geometry, attributes=a.attributes, score=a.score,
-                created_by=a.created_by, created_at=a.created_at,
-                accepted_by=a.accepted_by, accepted_at=a.accepted_at,
-                accepted_by_rule=a.accepted_by_rule,
-            ))
+        projected.append(replace(a, geometry=None) if value is None else replace(a, subject=value))
     return projected
 
 
@@ -335,17 +338,11 @@ def compute_classified_trait_matches(
     from tcip_annotation.json_io import require_classified_record
 
     projected_gt = _project_for_classification(gt, subject=subject, attribute=attribute)
-    projected_preds: list[Annotation] = []
-    for i, p in enumerate(preds):
-        value = require_classified_record(
+    projected_preds = [
+        replace(p, subject=require_classified_record(
             p, subject=subject, attribute=attribute, vocabulary=vocabulary,
-            source=f"prediction {i}")
-        projected_preds.append(Annotation(
-            subject=value, geometry=p.geometry, attributes=p.attributes, score=p.score,
-            created_by=p.created_by, created_at=p.created_at,
-            accepted_by=p.accepted_by, accepted_at=p.accepted_at,
-            accepted_by_rule=p.accepted_by_rule,
-        ))
+            source=f"prediction {i}"))
+        for i, p in enumerate(preds)]
     matches = compute_matches(projected_gt, projected_preds, iou_threshold, conf_threshold)
 
     fn_by_gt_idx = {fn["gt_idx"]: fn for fn in matches["fn"]}

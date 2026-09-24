@@ -119,9 +119,10 @@ def test_deliver_per_image_counts_takes_no_acknowledge_unvalidated_keyword(tmp_p
     out_csv = tmp_path / "counts.csv"
 
     with pytest.raises(TypeError):
-        itools.deliver_per_image_counts(ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
-                                   conf_threshold=CALLER_PICKED_CONF, device="cpu", tile=False,
-                                   acknowledge_unvalidated=True)
+        itools.deliver_per_image_counts(  # type: ignore[call-arg]
+            ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
+            conf_threshold=CALLER_PICKED_CONF, device="cpu", tile=False,
+            acknowledge_unvalidated=True)
 
 
 def test_a_calibrated_conf_delivers_the_count_csv_untouched(tmp_path, monkeypatch):

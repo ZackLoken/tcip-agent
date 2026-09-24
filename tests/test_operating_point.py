@@ -31,7 +31,7 @@ def _box(cx: float, cy: float, s: float = 20.0) -> list[float]:
 
 
 def _ann(cx, cy, cid=0, score=None):
-    a = {"category_id": cid, "bbox": _box(cx, cy)}
+    a = {"category_id": cid, "bbox": _box(cx, cy), "iscrowd": 0}
     if score is not None:
         a["score"] = score
     return a
@@ -756,7 +756,7 @@ def _overlap_records(idp="d"):
     """Calibration records whose GT boxes overlap (20px, offset 8px), so cross_tile_nms is derivable."""
     boxes = [_box(100, 100), _box(108, 100), _box(116, 100)]  # neighbor IoU ~0.43
     return [{"width": 400, "height": 400, "image_id": f"{idp}_{i}",
-             "gt": [{"category_id": 1, "bbox": bx} for bx in boxes],
+             "gt": [{"category_id": 1, "bbox": bx, "iscrowd": 0} for bx in boxes],
              "dt": [{"category_id": 1, "bbox": bx, "score": 0.9} for bx in boxes]}
             for i in range(2)]
 

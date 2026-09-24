@@ -332,7 +332,7 @@ class TestVisualizeAnnotations:
 
     def test_an_unreadable_label_returns_an_error_naming_the_file(self, viz_dataset: Path):
         """Undecodable text is refused by the shared parser itself (UnreadableLabelDocument),
-        not by detect_format falling through to its own generic 'cannot determine' message."""
+        naming the file, never answered as an image with no labels."""
         from tcip_mcp.tools.vision_tools import visualize
 
         img = str(viz_dataset / "images" / "img_001.jpg")
@@ -409,8 +409,7 @@ class TestVisualizeComparison:
         assert result["pred_count"] == 2
 
     def test_an_unreadable_gt_returns_an_error_naming_the_file(self, viz_dataset: Path):
-        """Same distinction as the annotations source: the shared parser's own message, not
-        detect_format's generic fallback."""
+        """Same as the annotations source: the shared parser's own message, naming the file."""
         from tcip_mcp.tools.vision_tools import visualize
 
         img = str(viz_dataset / "images" / "img_001.jpg")

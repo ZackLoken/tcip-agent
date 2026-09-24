@@ -131,7 +131,9 @@ def test_a_mutating_door_still_leaves_one_line(platform_root: Path) -> None:
     assert rows[-1]["status"] == "ok"
 
 
-def test_status_is_ok_on_return_and_exception_on_raise(platform_root: Path) -> None:
+def test_a_return_is_ok_a_raise_is_an_exception_and_a_refusal_is_no_line(platform_root: Path) -> None:
+    """A refusal returned as the error dict every tool returns is no act and leaves no line; a
+    dict whose ``error`` is null is an ordinary answer."""
     from tcip_mcp.audit import audited
 
     @audited
@@ -152,4 +154,4 @@ def test_status_is_ok_on_return_and_exception_on_raise(platform_root: Path) -> N
         explode()
 
     statuses = [(r["tool"], r["status"]) for r in _rows()]
-    assert statuses == [("refuse", "ok"), ("answer", "ok"), ("explode", "exception")]
+    assert statuses == [("answer", "ok"), ("explode", "exception")]

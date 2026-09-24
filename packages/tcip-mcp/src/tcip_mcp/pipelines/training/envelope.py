@@ -533,29 +533,13 @@ def _reconcile_on_refusal(run: Any, result: dict[str, Any]) -> bool:
     return True
 
 
-def _reconcile_unaudited_refusal(run: Any, exp_id: str, exc: Exception) -> None:
-    """A refusal's own audit line failed to write, so ``complete_run``/``update_status`` raised
-    instead of returning the refusal dict :func:`_reconcile_on_refusal` reads: reconcile from the
-    record itself, the only place the actual state still is, then re-raise so the failure reaches
-    ``run_training_envelope`` rather than being logged away with the refusal it was recording."""
-    from tcip_mcp.experiments import get_experiment
-
-    record = get_experiment(exp_id)
-    status = record.get("status") if "error" not in record else None
-    if isinstance(status, dict):
-        run.status = status.get("state", run.status)
-        run.error = status.get("error", run.error)
-    raise exc
-
-
 def _finalize_run(ctx: TrainContext) -> None:
     """Close status + register the model + record its weights artifact (the completion wiring).
 
-    A refusal whose own audit line failed to write propagates (see
-    :func:`_reconcile_unaudited_refusal`) rather than being swallowed by the outer handler below:
-    reconciliation still runs, from the record directly since the normal refusal return never
-    came back, and ``run_training_envelope`` wraps this call in a ``finally`` so its closing
-    event still reports the reconciled state.
+    A refusal comes back as its dict, which :func:`_reconcile_on_refusal` reads. A registration
+    that committed and could not write its own line propagates rather than
+    being swallowed by the handlers below, and ``run_training_envelope`` wraps this call in a
+    ``finally`` so its closing event still reports the run's state.
     """
     run = ctx.run
     exp_id = ctx.experiment_id
@@ -570,10 +554,7 @@ def _finalize_run(ctx: TrainContext) -> None:
 
     try:
         if run.status == "completed" and ctx.final_weights is not None:
-            try:
-                result = complete_run(exp_id, ctx.final_weights)
-            except AuditEntryNotWritten as exc:
-                _reconcile_unaudited_refusal(run, exp_id, exc)
+            result = complete_run(exp_id, ctx.final_weights)
             if "error" in result:
                 if "state" in result:
                     # completed is the last durable write of a run: a refusal here means the
@@ -590,32 +571,19 @@ def _finalize_run(ctx: TrainContext) -> None:
                         "with an unrecorded digest.", run.id, result["error"])
                     run.status = "failed"
                     run.error = run.error or result["error"]
-                    try:
-                        _reconcile_on_refusal(run, update_status(exp_id, "failed"))
-                    except AuditEntryNotWritten as exc:
-                        _reconcile_unaudited_refusal(run, exp_id, exc)
+                    _reconcile_on_refusal(run, update_status(exp_id, "failed"))
             else:
-                from tcip_mcp.audit import record_event
-
                 try:
                     reg_result = register_model_from_experiment(exp_id, ctx.final_weights)
-                except AuditEntryNotWritten as exc:
-                    _reconcile_unaudited_refusal(run, exp_id, exc)
+                except AuditEntryNotWritten:
+                    raise
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Run %s: model registration failed for weights at %s: %s",
                                    run.id, ctx.final_weights, exc)
-                    record_event("model_registration_failed", {
-                        "experiment_id": exp_id,
-                        "weights_path": str(ctx.final_weights), "reason": str(exc),
-                    })
                 else:
                     if "error" in reg_result:
                         logger.warning("Run %s: model registration refused for weights at %s: %s",
                                        run.id, ctx.final_weights, reg_result["error"])
-                        record_event("model_registration_failed", {
-                            "experiment_id": exp_id,
-                            "weights_path": str(ctx.final_weights), "reason": reg_result["error"],
-                        })
         elif run.status == "completed":
             # No discoverable weights (no model_best.pt/model_final.pt, ctx.set_final_weights()
             # never called): a phantom deliverable, refuse rather than register a nonexistent path.
@@ -625,16 +593,10 @@ def _finalize_run(ctx: TrainContext) -> None:
                 "instead of registering a nonexistent path.", run.id)
             run.status = "failed"
             run.error = run.error or "training completed but produced no final weights file"
-            try:
-                _reconcile_on_refusal(run, update_status(exp_id, "failed"))
-            except AuditEntryNotWritten as exc:
-                _reconcile_unaudited_refusal(run, exp_id, exc)
+            _reconcile_on_refusal(run, update_status(exp_id, "failed"))
         else:
-            try:
-                _reconcile_on_refusal(
-                    run, update_status(exp_id, run.status or "failed", error=run.error or None))
-            except AuditEntryNotWritten as exc:
-                _reconcile_unaudited_refusal(run, exp_id, exc)
+            _reconcile_on_refusal(
+                run, update_status(exp_id, run.status or "failed", error=run.error or None))
     except AuditEntryNotWritten:
         raise
     except Exception as exc:  # noqa: BLE001

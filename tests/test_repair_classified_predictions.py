@@ -263,6 +263,9 @@ def test_a_detector_bucket_is_stamped(tmp_path):
     assert any("stamped the detector pair" in o for o in outcomes), outcomes
     scope = bucket_scope(bucket)
     assert scope.subject == SUBJECT and scope.attribute is None
+    # A stamp-only conform is one act, the stamp library's line; the command adds none of its own.
+    assert _dataset_audit_entries(dataset_root) == []
+    assert _dataset_audit_entries(dataset_root, tool="stamp_written")[-1]["stamp"]["subject"] == SUBJECT
 
 
 def test_a_reviewed_detector_bucket_is_stamped_with_digests_intact(tmp_path):
@@ -280,7 +283,9 @@ def test_a_reviewed_detector_bucket_is_stamped_with_digests_intact(tmp_path):
     state_dir = review_state_dir_of(dataset_root)
     engine = ReviewEngine(str(state_dir))
     engine.raw_state.update({"verdicts": {key: {"img_status": "completed", "detections": [
-        {"action": "accepted", "class_name": SUBJECT,
+        {"action": "accepted", "class_name": SUBJECT, "reviewed_by": "", "conf": None,
+         "class_id": None, "missed_object_attested": False, "iscrowd": False,
+         "producer_identity": None, "conf_threshold": None,
          "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]}}})
     engine.save_review_state()
 
@@ -375,7 +380,9 @@ def test_a_reviewed_classified_bucket_is_reported_with_its_verdict_count_and_unt
     state_dir = review_state_dir_of(dataset_root)
     engine = ReviewEngine(str(state_dir))
     engine.raw_state.update({"verdicts": {key: {"img_status": "completed", "detections": [
-        {"action": "accepted", "class_name": "healthy",
+        {"action": "accepted", "class_name": "healthy", "reviewed_by": "", "conf": None,
+         "class_id": None, "missed_object_attested": False, "iscrowd": False,
+         "producer_identity": None, "conf_threshold": None,
          "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]}}})
     engine.save_review_state()
 
@@ -713,42 +720,20 @@ def test_a_bare_like_rewrite_writes_one_audit_entry_with_its_structured_fields(
     entry = entries[0]
     assert entry["arguments"]["bucket"] == str(bare_copy)
     assert entry["documents_rewritten"] == 1
-    assert entry["stamp_written"] is False
+    assert _platform_audit_entries("stamp_written") == []  # a bare copy's regime is never stamped
     assert (entry["subject"], entry["attribute"]) == (SUBJECT, ATTRIBUTE)
     assert entry["source"] == f"--like {scoped}"
     assert "digest_before" not in entry
     assert entry["outcome"] == outcome
 
 
-def test_a_classified_rewrite_under_no_dataset_root_writes_one_entry_consistent_with_dataset_scope_of(
+def test_a_classified_rewrite_under_no_dataset_root_files_its_entry_where_the_stamp_line_is(
     tmp_path, monkeypatch,
 ):
-    """Coverage of the scope-consistency invariant: a bucket outside any dataset root's canonical
-    layout (no predictions/images/annotations segment in its path) files its one audit entry
-    wherever ``dataset_scope_of`` resolves for it, computed once before any write into the bucket
-    and reused for both the outcome note and the audit entry's own scope, never re-derived
-    afterward from a state this run's own write changed.
-
-    On the file backend that resolves to ``None`` (a genuinely bare directory carries no ``.tcip``
-    of its own): the entry lands in the platform log. On the database backend, a bucket that
-    already carries a stamp of its own answers to itself (``dataset_scope_of``'s own ``.tcip``
-    fallback cannot tell a bucket's own prior stamp from a genuine dataset marker, the seam's
-    known behaviour documented on ``_emit_conform_audit``, not this command's to change): the
-    entry lands under that resolved root's own log instead. Either way the outcome text and the
-    entry's filed scope never disagree, which is the scope-consistency bug this pin guards: reading
-    ``dataset_scope_of`` at two different times (once before the rewrite, once after) risks the
-    stamp write in between making the second read answer differently from the first.
-
-    The guarded assertion is ``entry["outcome"]``/``outcome`` itself, on the sqlite leg only: this
-    bucket resolves under no real dataset root (``dataset_layout.dataset_root_of`` finds no
-    canonical segment in its path) on both backends, so the no-verdict-store note belongs in the
-    outcome regardless of backend; on the database backend, ``dataset_scope_of`` answers the
-    bucket itself, which must not by itself be read as a real dataset root. The scope-consistency
-    assertions below (where the entry is filed) hold independently of this note; they are
-    coverage of a separate fact, not this pin's own claim.
-    """
+    """A bucket outside any dataset root's canonical layout files the rewrite's one entry in the
+    log its stamp's line goes to, the platform log, on either backend: the bucket's root is read
+    from its path, never from the store a stamp write planted in it."""
     import tcip_mcp.audit as audit_module
-    from tcip_mcp.audit import dataset_scope_of
 
     platform_root = tmp_path / "platform"
     platform_root.mkdir()
@@ -759,7 +744,6 @@ def test_a_classified_rewrite_under_no_dataset_root_writes_one_entry_consistent_
     _write_doc(bucket, "img1", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10))])
     _write_doc(bucket, "img2", [Annotation(subject="diseased", geometry=BBox(5, 5, 15, 15))])
     _write_stamp(bucket, _base_stamp(id_map=VALUE_ID_MAP))  # no subject/attribute recorded yet
-    resolved_scope = dataset_scope_of(bucket)
 
     outcome, refused, id_map, changed = module.conform_bucket(
         bucket, root=None, plan=False, like_dir=None,
@@ -770,15 +754,17 @@ def test_a_classified_rewrite_under_no_dataset_root_writes_one_entry_consistent_
     assert changed is True
     assert id_map == VALUE_ID_MAP
     assert "this bucket sits under no dataset root" in outcome
-    if resolved_scope is None:
-        filed_entries = _platform_audit_entries()
-    else:
-        filed_entries = _dataset_audit_entries(resolved_scope)
-        assert _platform_audit_entries() == []
-    assert len(filed_entries) == 1
-    entry = filed_entries[0]
+    (entry,) = _platform_audit_entries()
+    import tcip_store as ts
+
+    from tcip_mcp.audit import audit_log_key
+
+    assert ts.read_log(audit_log_key(bucket)).records == []
     assert entry["documents_rewritten"] == 2
-    assert entry["stamp_written"] is True
+    # The stamp write is its own one line, the stamp library's, beside the rewrite's one.
+    (stamped,) = _platform_audit_entries("stamp_written")
+    assert stamped["arguments"]["pred_dir"] == str(bucket)
+    assert (stamped["stamp"]["subject"], stamped["stamp"]["attribute"]) == (SUBJECT, ATTRIBUTE)
     assert (entry["subject"], entry["attribute"]) == (SUBJECT, ATTRIBUTE)
     assert entry["source"] == "operator statement (--subject/--attribute)"
     assert entry["digest_before"] != entry["digest_after"]

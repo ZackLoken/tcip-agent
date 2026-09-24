@@ -5,16 +5,19 @@
  * a point stays a point, and a geometry-less rating is never silently dropped on the next save.
  */
 
-import type { Annotation, AnnotationPayload, Box, PointShape, PolygonShape } from "@/store/types";
+import type {
+  Annotation,
+  AnnotationPayload,
+  Box,
+  CarriedFields,
+  PointShape,
+  PolygonShape,
+} from "@/store/types";
 
-function provenance(a: {
-  created_by?: string | null;
-  created_at?: string | null;
-  accepted_by?: string | null;
-  accepted_at?: string | null;
-  accepted_by_rule?: string | null;
-}) {
+/** The facts a shape carries through the canvas unchanged ({@link CarriedFields}). */
+function provenance(a: CarriedFields): CarriedFields {
   return {
+    iscrowd: a.iscrowd,
     created_by: a.created_by ?? null,
     created_at: a.created_at ?? null,
     accepted_by: a.accepted_by ?? null,

@@ -1770,6 +1770,51 @@ def test_classification_items_scopes_gt_to_the_run_subject(tmp_path: Path) -> No
     assert items[0]["is_true_positive"] is True  # bud's own "open" attribute
 
 
+def test_classification_items_never_pair_a_crowd_region(tmp_path: Path) -> None:
+    """A crowd region carrying the attribute is no one object, so a prediction on it forms no
+    calibration item; an ordinary object beside it still pairs."""
+    root = _ds_root(tmp_path)
+    _write_bud_opening_registry(root)
+    gt_dir, pred_dir = root / "annotations" / "date", tmp_path / "pred"
+    gt_dir.mkdir(parents=True)
+    pred_dir.mkdir()
+    crowd_box, object_box = BBox(100.0, 100.0, 180.0, 180.0), BBox(10.0, 10.0, 40.0, 40.0)
+    json_io.write_annotations(gt_dir / "a.json", [
+        Annotation(subject="bud", geometry=crowd_box, attributes={"opening": "open"},
+                   iscrowd=True),
+        Annotation(subject="bud", geometry=object_box, attributes={"opening": "closed"}),
+    ], 400, 400)
+    json_io.write_annotations(pred_dir / "a.json", [
+        Annotation(subject="bud", geometry=crowd_box, score=0.9, attributes={"opening": "open"}),
+        Annotation(subject="bud", geometry=object_box, score=0.9,
+                   attributes={"opening": "closed"}),
+    ], 400, 400)
+
+    items = _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+                                  subject="bud", positive_value="open", attribute="opening")
+
+    assert [it["bbox"] for it in items] == [[10.0, 10.0, 40.0, 40.0]]
+
+
+def test_a_crowd_prediction_pairs_no_ground_truth_object(tmp_path: Path) -> None:
+    """A predicted crowd region is no one object either, so it claims no ground-truth object
+    even where it covers one exactly."""
+    root = _ds_root(tmp_path)
+    _write_bud_opening_registry(root)
+    gt_dir, pred_dir = root / "annotations" / "date", tmp_path / "pred"
+    gt_dir.mkdir(parents=True)
+    pred_dir.mkdir()
+    box = BBox(10.0, 10.0, 40.0, 40.0)
+    json_io.write_annotations(gt_dir / "a.json", [
+        Annotation(subject="bud", geometry=box, attributes={"opening": "closed"})], 400, 400)
+    json_io.write_annotations(pred_dir / "a.json", [
+        Annotation(subject="bud", geometry=box, score=0.9, attributes={"opening": "open"},
+                   iscrowd=True)], 400, 400)
+
+    assert _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+                                 subject="bud", positive_value="open", attribute="opening") == []
+
+
 def _write_pair(gt_dir: Path, pred_dir: Path, *, gt_value: str, pred_value: str = "open") -> Path:
     """One matched (GT, pred) instance pair, same box, for a refusal test that never reaches
     the matching machinery's own edge cases. Returns the GT document written."""
@@ -2262,8 +2307,8 @@ def test_writer_delivers_a_forged_stamp_acknowledged_with_no_producer_names(
 def test_deliver_phenology_milestones_records_what_verification_found_in_the_datasets_own_log(
     tmp_path: Path,
 ) -> None:
-    """The delivery's audited arguments say what was asked for; this says which buckets stood behind
-    the numbers and which records answered for them, in the log that travels with the data."""
+    """The delivery's one line says which buckets stood behind the numbers and which records
+    answered for them, in the log that travels with the data, with no call line beside it."""
     from tests._binding_fixtures import record_producing_run
 
     sha = record_producing_run(tmp_path, "exp-producer")
@@ -2288,3 +2333,6 @@ def test_deliver_phenology_milestones_records_what_verification_found_in_the_dat
     assert set(verified) == {str(d1), str(d2)}
     assert all(v["verified"] for v in verified.values())
     assert events[0]["record_digests"], events[0]
+    platform = ts.read_log(audit_log_key()).records
+    assert [e for e in [*page.records, *platform] if e["tool"] == "deliver_phenology_milestones"
+            and "verified_buckets" not in e] == []

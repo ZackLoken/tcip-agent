@@ -58,7 +58,7 @@ def _box(cx: float, cy: float, s: float = 20.0) -> list[float]:
 
 
 def _ann(cx, cy, cid=0, score=None):
-    a = {"category_id": cid, "bbox": _box(cx, cy)}
+    a = {"category_id": cid, "bbox": _box(cx, cy), "iscrowd": 0}
     if score is not None:
         a["score"] = score
     return a
@@ -551,8 +551,10 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
 def _iou_records():
     """Discriminating fixture: an exact match, a 2px-shifted match (IoU~0.68 -> hit@0.5, miss@0.75),
     a spurious FP, and a whole image of GT with no predictions (FN)."""
+    from tcip_mcp.pipelines.training.evaluation import gt_record
+
     def gt(x, y, w, h, cid=1):
-        return {"category_id": cid, "bbox": [float(x), float(y), float(w), float(h)]}
+        return gt_record([float(x), float(y), float(w), float(h)], cid, 0)
 
     def dt(x, y, w, h, score, cid=1):
         return {"category_id": cid, "bbox": [float(x), float(y), float(w), float(h)], "score": score}
@@ -579,7 +581,6 @@ def test_golden_coco_metrics_at_iou_050():
     assert m["map50"] == pytest.approx(0.6633663366336634, abs=1e-9)
     assert m["map75"] == pytest.approx(0.33663366336633654, abs=1e-9)
     assert m["map"] == pytest.approx(0.46732673267326735, abs=1e-9)
-    assert m["map_convention"] == "coco_ap100"
     counts = {int(c["image_id"]): (c["tp"], c["fp"], c["fn"]) for c in m["per_image_counts"]}
     assert counts == {1: (2, 1, 0), 2: (0, 0, 1)}
 

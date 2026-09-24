@@ -123,7 +123,7 @@ derive from the data, not from the phrasing (see
 
 ## 4. Bootstrap annotation (engine-assisted)
 
-There must be something to train on. Two paths (see
+There must be something to train on. Three paths (see
 `packages/tcip-mcp/src/tcip_mcp/knowledge/annotation.md`):
 
 - Agent/MCP path: `propose_annotations` a starter batch with a chosen `engine` (`'sam'` is the
@@ -136,10 +136,13 @@ There must be something to train on. Two paths (see
   only once the breeder marks that image Complete (`.tcip/state/image_status.json`), so an empty
   file you write reads as unannotated until then. Never delete or skip them.
 - Human path: hand off to the GUI Annotate tab for the breeder to label a seed set.
+- Existing labels in an external dataset-level COCO: `import_coco(document, dataset_root, date)`
+  converts them into per-image documents over the images `ingest_images` placed under that date.
+  Nothing trains on the COCO file itself.
 
-Never train or evaluate on an unconfirmed format: `tcip_annotation.format_io.detect_format`
-refuses rather than guesses, inherited by `load_annotations_any` and
-`annotation_tools.read_annotations` (library call, no MCP tool for it).
+Never train or evaluate on an unconfirmed format: the one per-image label reader refuses any
+document of another shape (a dataset-level COCO, the old `objects` schema, an unrecognized one)
+rather than guessing, and every training, calibration and review reader reads through it.
 
 ## 5. Select: `draw_splits`
 
@@ -210,7 +213,8 @@ terminal, so `inspect_project`'s divergence report is the guard in between.
 
 ## Invariants (from CLAUDE.md)
 
-- State changes go through `@audited` MCP tools; `ingest_images` is one.
+- State changes go through audited MCP tools, each leaving one audit line per act (the tool's own,
+  or its library's event); `ingest_images` is one.
 - Experiments are immutable: a new run each time; never overwrite history.
 - Confirm before destructive/outward actions (moving source images, overwriting weights,
   exporting deliverables). Copy-by-default keeps ingestion non-destructive.

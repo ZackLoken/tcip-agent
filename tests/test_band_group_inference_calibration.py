@@ -52,7 +52,9 @@ def _detection_checkpoint(tmp_path: Path) -> str:
     }
     model = build_model({"model_source": model_source})
     ckpt = tmp_path / "model_best.pt"
-    torch.save({"model_source": model_source, "model_state_dict": model.state_dict()}, str(ckpt))
+    # The run's recorded subject, which a calibration reads its reference under.
+    torch.save({"model_source": model_source, "model_state_dict": model.state_dict(),
+                "config": {"data": {"subject": "bud"}}}, str(ckpt))
     result = register_model(name="band-group-test-model", checkpoint_path=str(ckpt), config={},
                             project_path=str(tmp_path))
     assert "error" not in result, result

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from tcip_mcp.server import mcp
-from tcip_mcp.audit import audited
 from tcip_mcp.model_registry import ModelRegistry
 
 
@@ -20,7 +19,6 @@ def _registry_root(project_path: str) -> str:
 
 
 @mcp.tool()
-@audited
 def register_model(
     name: str = "",
     checkpoint_path: str = "",

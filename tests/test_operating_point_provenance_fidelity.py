@@ -41,7 +41,7 @@ def _records(prefix: str, offset: float, n_images: int = N_IMAGES) -> list[dict]
         gt, dt = [], []
         for k in range(OBJECTS_PER_IMAGE):
             box = [offset + 100.0 * k, 50.0 + 10.0 * i, 40.0, 40.0]
-            gt.append({"bbox": box, "category_id": 1})
+            gt.append({"bbox": box, "category_id": 1, "iscrowd": 0})
             dt.append({"bbox": box, "category_id": 1, "score": 0.9})
         recs.append({"image_id": f"{prefix}{i}", "width": 4000, "height": 1000, "gt": gt, "dt": dt})
     return recs

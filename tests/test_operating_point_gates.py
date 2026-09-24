@@ -28,7 +28,7 @@ pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
 def _ann(cx, cy, cid=0, score=None):
-    a = {"category_id": cid, "bbox": _box(cx, cy)}
+    a = {"category_id": cid, "bbox": _box(cx, cy), "iscrowd": 0}
     if score is not None:
         a["score"] = score
     return a
@@ -162,7 +162,7 @@ def _tp_zero_bias_zero_records(id_prefix: str, *, n_images: int = 10, objects_pe
         for k in range(objects_per_image):
             row, col = divmod(k, cols)
             cx, cy = 50.0 + col * 40, 50.0 + row * 40
-            gt.append({"category_id": 0, "bbox": _box(cx, cy)})
+            gt.append({"category_id": 0, "bbox": _box(cx, cy), "iscrowd": 0})
             dt.append({"category_id": 0, "bbox": _box(cx + 100, cy), "score": 0.9})
         records.append({"width": 4000, "height": 4000, "image_id": f"{id_prefix}_{i}",
                         "gt": gt, "dt": dt})

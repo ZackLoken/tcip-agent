@@ -46,14 +46,12 @@ def test_clip_boxes_to_tile_sliver_drop_and_remap():
 
 def test_dedup_boxes_class_aware():
     boxes = np.array([[0., 0., 20., 20.], [1., 1., 19., 19.]])  # IoU 0.81, same label
-    db, _ = tiling.dedup_boxes(boxes, np.array([1, 1]), 0.8)
-    assert len(db) == 1 and np.allclose(db[0], [0, 0, 20, 20])  # larger kept
-    db2, _ = tiling.dedup_boxes(np.array([[0., 0., 10., 10.], [50., 50., 60., 60.]]), np.array([1, 1]), 0.8)
-    assert len(db2) == 2  # distinct boxes both survive
-    db3, _ = tiling.dedup_boxes(boxes, np.array([1, 2]), 0.8, class_aware=True)
-    assert len(db3) == 2  # same geometry, different labels -> both survive
-    db4, _ = tiling.dedup_boxes(boxes, np.array([1, 1]), 1.0)
-    assert len(db4) == 2  # iou_thresh >= 1.0 is a no-op
+    assert tiling.dedup_boxes(boxes, np.array([1, 1]), 0.8) == [0]  # larger kept
+    distinct = np.array([[0., 0., 10., 10.], [50., 50., 60., 60.]])
+    assert tiling.dedup_boxes(distinct, np.array([1, 1]), 0.8) == [0, 1]  # both survive
+    # same geometry, different labels -> both survive
+    assert tiling.dedup_boxes(boxes, np.array([1, 2]), 0.8, class_aware=True) == [0, 1]
+    assert tiling.dedup_boxes(boxes, np.array([1, 1]), 1.0) == [0, 1]  # iou_thresh >= 1.0: no-op
 
 
 def test_reconstruct_core_dedup_seam():

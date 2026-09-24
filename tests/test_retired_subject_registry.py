@@ -387,7 +387,7 @@ def _seed_classified_verdict(state_dir: Path, *, bucket: str) -> None:
     state = {"verdicts": {
         (bucket, "imgA.png"): {"img_status": "completed", "detections": [
             {"action": "accepted", "class_name": "healthy",
-             "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
+             "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "iscrowd": False, "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
     }}
     engine = ReviewEngine(str(state_dir))
     engine.raw_state.update(state)

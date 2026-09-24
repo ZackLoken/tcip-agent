@@ -372,58 +372,9 @@ def refuse_if_terminal(experiment_id: str, op: str, state: str | None) -> None:
     :func:`update_lineage` calls this first instead, inside its own transaction, as its initial
     terminal gate; only when it raises does ``update_lineage`` fall back to the same
     additive-only rule to decide which of the fields it was given the refusal actually blocks.
-
-    Never audits itself: an audit line is a log append, which cannot run inside a record
-    transaction (``store.transaction`` only ever holds ``kind="record"`` keys), and a caller
-    checking this from inside its own transaction would have the append raise
-    ``TransactionMisuse``. The caller audits the refusal once its transaction has closed (or
-    immediately, when it holds none).
     """
     if state in _TERMINAL_STATES:
         raise ExperimentTerminal(f"Experiment {experiment_id} is {state} (terminal); refusing to {op}.")
-
-
-def _audit_refused(
-    experiment_id: str, op: str, detail: dict[str, Any], *, root: Path | str | None = None
-) -> None:
-    """Record a refused post-terminal mutation in the log ``root`` names.
-
-    Through :func:`record_event_or_raise`: the mutation this refusal reports already committed
-    (or, for update_status/complete_run, decided not to), so a line that cannot be appended
-    raises :class:`AuditEntryNotWritten` to the caller rather than vanishing silently.
-
-    ``root`` is the root the refused write was scoped to (a launch's own watchdog passes the
-    root it captured at launch); the default files the line under the current platform root,
-    unchanged for every caller that has no root of its own to name.
-    """
-    from tcip_mcp.audit import record_event_or_raise
-
-    record_event_or_raise("experiment_mutation_refused", {"experiment_id": experiment_id, "op": op,
-                                                           **detail}, status="refused", scope=root)
-
-
-def audit_refusal_reraising(experiment_id: str, op: str, detail: dict[str, Any],
-                            refusal: ExperimentTerminal, *,
-                            root: Path | str | None = None) -> None:
-    """Audit a refusal and re-raise it, whether or not the audit line itself could be written.
-
-    For every caller that lets an :class:`ExperimentTerminal` propagate rather than report it as
-    a return value (``subprocess_worker.py``'s two provenance patches, ``training_tools.py``'s
-    partition write). Those callers sit under an outer ``except Exception`` that would
-    swallow an :class:`~tcip_mcp.audit.AuditEntryNotWritten` raised on its own, together with
-    the refusal it was recording, so a failed append is chained onto ``refusal`` (``raise refusal
-    from audit_exc``) instead: the refusal always reaches the caller and the append failure
-    stays visible on it.
-
-    ``root`` names a platform root other than this process's own, the same escape hatch
-    :func:`update_status` offers a caller resolving a run under a root other than the one it
-    started under.
-    """
-    try:
-        _audit_refused(experiment_id, op, detail, root=root)
-    except Exception as audit_exc:
-        raise refusal from audit_exc
-    raise refusal
 
 
 def mint_experiment_id() -> str:
@@ -525,7 +476,7 @@ def overwrite_config_if_pristine(
     ``training_tools.launch_training``). The launch's own path to that same refresh is
     :func:`stamp_run_identity`, given a ``config`` to write in the same transaction as the stamp;
     this function stays the standalone primitive for a caller wanting the config rewrite alone,
-    with no stamp beside it. Refuses (and audits the refusal) once :func:`is_pristine` says the
+    with no stamp beside it. Refuses once :func:`is_pristine` says the
     record is no longer pristine, a "created" record that already has metrics rows must stay
     protected too, not just the terminal-state lock alone.
 
@@ -553,8 +504,6 @@ def overwrite_config_if_pristine(
         if not refused:
             txn.write(cfg_key, config)
     if refused:
-        _audit_refused(experiment_id, "overwrite_config_if_pristine",
-                       {"state": state, "metrics_logged": metrics_logged}, root=root)
         return {"error": f"Experiment {experiment_id} is no longer pristine; refusing to "
                          f"overwrite its config.json."}
     return {"experiment_id": experiment_id, "overwritten": True}
@@ -584,7 +533,7 @@ def update_status(
     watchdog's reasoned ``failed`` landing after the child's own reasonless ``failed`` still
     records the wall-clock reason, and a second reason never overwrites a first. Any other write
     to a terminal record (``completed``/``failed``, the other terminal state included) refuses
-    through :func:`refuse_if_terminal`, audited once the transaction closes. ``cancelled`` is not
+    through :func:`refuse_if_terminal`. ``cancelled`` is not
     terminal here, so a record in that state still takes any write, including back to ``running``.
 
     ``error`` records a specific failure reason (e.g. a wall-clock-timeout kill) into
@@ -631,7 +580,6 @@ def update_status(
                 txn.write(key, status)
 
     if refused:
-        _audit_refused(experiment_id, "update_status", {"from": current, "to": state}, root=root)
         return {"error": f"Experiment {experiment_id} is {current} (terminal); refusing to "
                          f"move it to {state!r}.", "state": current}
     return {"experiment_id": experiment_id, "state": state}
@@ -653,8 +601,7 @@ def complete_run(
     file-backend transaction applies its writes in named-key order and is not crash-atomic across
     keys, so a crash mid-apply leaves a detectably stale record (a pointer with no digest, or a
     digest recorded on a record still ``running``), never a ``completed`` record carrying a
-    mismatched or absent digest. Refuses (and audits, once the transaction has closed) a run
-    already terminal, naming the weights file that exists on disk so an operator can find it; the
+    mismatched or absent digest. Refuses a run already terminal, naming the weights file that exists on disk so an operator can find it; the
     refusal's ``state`` carries the state the record actually holds, so a caller can reconcile to
     it. The digest is what this call observed of the file, sealed into the transaction that makes
     the run terminal, so nothing a caller does to the path afterwards changes what the run
@@ -702,7 +649,6 @@ def complete_run(
             _mark_completed(status)
             txn.write(st_key, status)
     except ExperimentTerminal as exc:
-        _audit_refused(experiment_id, "complete_run", {"final_weights": final_weights}, root=root)
         return {"error": f"{exc} Final weights at {final_weights!r} were not recorded.",
                 "final_weights": final_weights, "state": current}
 
@@ -1041,7 +987,6 @@ def log_metrics(
     try:
         refuse_if_terminal(experiment_id, "log_metrics", _current_state(experiment_id, root=root))
     except ExperimentTerminal as exc:
-        _audit_refused(experiment_id, "log_metrics", {"epoch": epoch}, root=root)
         return {"error": str(exc)}
 
     key = status_key(experiment_id, root=root)
@@ -1311,8 +1256,6 @@ def record_artifact(
         try:
             refuse_if_terminal(experiment_id, "record_artifact", current)
         except ExperimentTerminal as exc:
-            _audit_refused(experiment_id, "record_artifact", {"artifact": name, "path": path},
-                          root=root)
             return {"error": f"{exc} Artifact {name!r} is already recorded and is immutable; "
                              f"the file at {path!r} was not recorded.",
                     "artifact": name}
@@ -1339,12 +1282,8 @@ def update_lineage(
     ``model_weights_sha256`` are ``complete_run``'s alone: naming either raises ``ValueError``
     before any field, including a legitimate companion in the same call, lands.
 
-    A dropped identity update is audited before the transaction below (it never reaches the
-    transaction at all, see the comment on ``identity_updates``); when that append itself fails,
-    the failure is not raised here, it would abort this call before the transaction applies the
-    other, legitimate updates it was given. It is deferred and raised at the end instead, once
-    those have landed, so the append failure still reaches the caller rather than being logged
-    away, and never at the cost of a write that should have gone through.
+    A field refused (a dataset identity field, or a populated field of a terminal run) is named
+    under ``refused`` in the result, and the others land.
 
     ``root`` names a platform root other than this process's own, the same escape hatch
     :func:`update_status` offers a caller resolving a run under a root other than the one it
@@ -1363,13 +1302,6 @@ def update_lineage(
     # Dataset identity is set once at creation and is immutable, never a lineage edge to backfill: the additive-only lock below would otherwise permit a first write to an empty identity field even post-terminal.
     # That write would be a silent change to what data the run trained on.
     identity_updates = {k: updates.pop(k) for k in ("dataset_id", "dataset_fingerprint") if k in updates}
-    identity_audit_exc: Exception | None = None
-    if identity_updates:
-        try:
-            _audit_refused(experiment_id, "update_lineage_identity",
-                          {"fields": sorted(identity_updates)}, root=root)
-        except Exception as exc:
-            identity_audit_exc = exc
 
     key, state = lineage_key(experiment_id, root=root), status_key(experiment_id, root=root)
     refused: dict[str, Any] = {}
@@ -1388,14 +1320,9 @@ def update_lineage(
         lineage.update(updates)
         txn.write(key, lineage)
 
-    if refused:
-        # Names the orphaned values themselves: for a path-like field (predictions) that value
-        # is the file this refusal left unrecorded.
-        _audit_refused(experiment_id, "update_lineage", {"fields": sorted(refused), **refused},
-                      root=root)
-    if identity_audit_exc is not None:
-        raise identity_audit_exc
-    return {"experiment_id": experiment_id, "lineage": lineage}
+    refused_fields = sorted([*identity_updates, *refused])
+    return {"experiment_id": experiment_id, "lineage": lineage,
+            **({"refused": refused_fields} if refused_fields else {})}
 
 
 def register_model_from_experiment(
@@ -1478,19 +1405,11 @@ def register_model_from_experiment(
     recorded_digest = lineage.get("model_weights_sha256") if isinstance(lineage, dict) else None
     recorded_path = lineage.get("model_weights") if isinstance(lineage, dict) else None
     if state != "completed" or not recorded_digest:
-        _audit_refused(experiment_id, "register_model_from_experiment", {
-            "checkpoint_path": checkpoint_path, "caller_sha256": digest,
-            "recorded_sha256": recorded_digest, "recorded_path": recorded_path,
-        }, root=root)
         return {"error": f"experiment {experiment_id!r} has not completed with a recorded "
                          f"digest (state={state!r}): its run has not said what it produced. "
                          "complete_run records the digest when the run finishes."}
 
     if digest != recorded_digest:
-        _audit_refused(experiment_id, "register_model_from_experiment", {
-            "checkpoint_path": checkpoint_path, "caller_sha256": digest,
-            "recorded_sha256": recorded_digest, "recorded_path": recorded_path,
-        }, root=root)
         return {"error": f"{checkpoint_path} (sha256 {digest}) is not the bytes experiment "
                          f"{experiment_id!r}'s completion recorded (sha256 {recorded_digest}, at "
                          f"{recorded_path!r}): the caller's path must be the recorded path or a "
@@ -1626,47 +1545,6 @@ def list_experiments() -> list[dict[str, Any]]:
     return experiments
 
 
-def _index_refused_mutations(experiment_ids: list[str]) -> dict[str, list[dict[str, Any]]] | None:
-    """Every ``experiment_mutation_refused`` audit entry naming one of ``experiment_ids``, indexed
-    by ``arguments.experiment_id``, from one scan of the platform audit log, the read
-    :func:`compare_experiments` shares across every experiment it compares rather than repeating
-    per experiment. ``None`` for the whole call when the log can't be read: the read itself
-    raised, or :func:`~tcip_store.read_log` reports entries this reader could not use, corrupt
-    bytes on ``page.corrupt`` or an unsupported schema_version on ``page.version_refused``,
-    either kept from raising so an unreadable page would otherwise look like a page with
-    nothing to report. Either way every experiment's own field is then absent, never an empty
-    list, so "no refusals" and "couldn't read the log" are never confused for each other. An id
-    present in the index only when it has at least one entry; an id with none is absent from the
-    index and the caller reads that as an empty list, not as unreadable. A refusal line lands
-    only under the root that holds the record, which is the root this reader must be pinned to
-    for the experiment to resolve at all, so the one-root scan is complete for every experiment
-    it can answer for.
-    """
-    try:
-        from tcip_store import read_log
-
-        from tcip_mcp.audit import audit_log_key
-
-        page = read_log(audit_log_key())
-    except Exception:
-        return None
-    if page.corrupt:
-        return None
-    if page.version_refused:
-        return None
-    wanted = set(experiment_ids)
-    index: dict[str, list[dict[str, Any]]] = {}
-    for e in page.records:
-        if e.get("tool") != "experiment_mutation_refused":
-            continue
-        arguments = e.get("arguments", {})
-        eid = arguments.get("experiment_id")
-        if eid not in wanted:
-            continue
-        index.setdefault(eid, []).append({"timestamp": e.get("timestamp"), "arguments": arguments})
-    return index
-
-
 def _split_summary(experiment_id: str) -> dict[str, Any]:
     """The partition column for one experiment: :func:`read_run_partition_checked` reduced to
     the four states a comparison names. ``{"case": "error", "error": ...}`` for a record that
@@ -1754,10 +1632,8 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600
     of rows whose ``timestamp`` is a later instant than the record's own ``ended`` (the one row an
     unlocked log's own append can admit after the mark, or any row an outside writer appended
     later), ``None`` when the record has no ``ended``, and a row whose own ``timestamp`` is
-    missing or unparseable never counted rather than raising; ``n_epochs``/``n_rows``, always
-    present; and ``refused_mutations``, every refused write the platform audit log recorded
-    against this experiment (see :func:`_index_refused_mutations`), absent rather than empty when
-    that log itself can't be read.
+    missing or unparseable never counted rather than raising; and ``n_epochs``/``n_rows``, always
+    present.
 
     Also per experiment: ``task``/``subject`` from the config already read; ``status_error``, the
     status record's own failure reason (``None`` for a run that never failed, distinct from a
@@ -1772,13 +1648,12 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600
     ``True``, when any compared id is an error entry: a record this call could not even read must
     never be silently dropped from the same-data judgment.
 
-    Reading refused mutations and the registry each cost one scan for the whole call, on top of
-    one :func:`get_experiment` and one :func:`_split_summary` per experiment compared.
+    Reading the registry costs one scan for the whole call, on top of one :func:`get_experiment`
+    and one :func:`_split_summary` per experiment compared.
     """
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
     comparisons: list[dict[str, Any]] = []
-    refused_index = _index_refused_mutations(experiment_ids)
     registry_index, registry_error = _index_registry_entries(experiment_ids)
 
     for eid in experiment_ids:
@@ -1816,9 +1691,6 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600
         # status_error, not "error": that key already marks a comparison entry get_experiment
         # could not even read (the sentinel with_fp/same_dataset_fingerprint filter on below).
         summary["status_error"] = status_doc.get("error")
-
-        if refused_index is not None:
-            summary["refused_mutations"] = refused_index.get(eid, [])
 
         if registry_index is not None:
             summary["registry"] = registry_index.get(eid, [])

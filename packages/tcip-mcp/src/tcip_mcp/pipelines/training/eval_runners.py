@@ -9,9 +9,6 @@ from pathlib import Path
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, store
 from tcip_store.file_backend import RootedFileLocator
 
-# Every box handed to pycocotools goes through this, both sides of a match on the one stored grid.
-from tcip_annotation.json_io import xywh
-
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 
 _RESULTS_DOC = RootedFileLocator(suffix=".json")
@@ -205,7 +202,8 @@ def run_full_frame_evaluation(
     from tcip_mcp.pipelines.operating_point import _cap_saturated_frac
     from tcip_mcp.pipelines.resolution import applied_operating_point, raw_operating_point
     from tcip_mcp.pipelines.training.evaluation import (
-        build_coco_image_record, coco_detection_metrics, governing_counts, resolve_match_criterion,
+        build_coco_image_record, coco_detection_metrics, detection_record, governing_counts,
+        gt_records, resolve_match_criterion,
     )
 
     # The flat fields below are this record's own identity tuple; the mapping raw_operating_point
@@ -274,9 +272,7 @@ def run_full_frame_evaluation(
     n_excluded_incomplete = sample_counts.get("skipped_incomplete_attribute", 0)
     per_image: list[dict] = []
     for key in measured.stems:
-        gboxes, glabels = measured.det_targets(key)
-        gt = [{"category_id": int(lab), "bbox": xywh(x1, y1, x2, y2), "iscrowd": 0}
-              for (x1, y1, x2, y2), lab in zip(gboxes, glabels)]
+        gt = gt_records(measured.det_targets(key))
         # require_masks=False: this gate matches boxes to full-frame GT and never reads masks, so
         # a tile-trained instance_seg checkpoint evaluates exactly as a detector does here.
         r = predictor.predict_tiled(measured.sample_sources[key], tile_size=tile_size,
@@ -284,8 +280,7 @@ def run_full_frame_evaluation(
                                     postprocess=postprocess,
                                     require_masks=False, tile_resize=tile_resize)
         w, h = int(r["width"]), int(r["height"])
-        dt = [{"category_id": int(lab), "bbox": xywh(*b), "score": float(s)}
-              for b, s, lab in zip(r["boxes"], r["scores"], r["labels"])]
+        dt = [detection_record(b, lab, s) for b, s, lab in zip(r["boxes"], r["scores"], r["labels"])]
         rec = build_coco_image_record(w, h, gt, dt, image_id=measured.member_stem_of(key))
         # cap_hit is read off the result, with the direct computation as the fallback for a
         # predictor that does not stamp it.

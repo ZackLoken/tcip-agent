@@ -73,6 +73,7 @@ class _CalStub:
         self.score_threshold = 0.5
         self.train_tile_size = None
         self.train_overlap = None
+        self.config: dict = {"data": {"subject": "bud"}}  # the run's recorded subject
 
     def predict_batch(self, paths, **kw):
         return [{"image": p, "width": IMG, "height": IMG,
@@ -247,6 +248,53 @@ def test_provenance_facts_reports_rule_admitted_unsigned_indices():
     ]
     facts = provenance_facts(records)
     assert facts.rule_admitted_unsigned == [0, 2]
+
+
+def test_a_calibrations_lock_draw_leaves_its_one_receipt_and_a_reuse_none(tmp_path):
+    """The calibration's first draw writes a lock, a mutation whichever door triggered it, so
+    the library that draws it records it once; reading the lock back writes nothing and leaves
+    no line."""
+    import tcip_store as ts
+
+    from tcip_mcp.audit import audit_log_key
+
+    stems = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
+    images_dir, labels_dir = _reference(tmp_path / "ds", stems, lambda s: [_hand_annotation()])
+    keys = dict.fromkeys([audit_log_key(), audit_log_key(tmp_path / "ds"), audit_log_key(labels_dir)])
+
+    def drawn() -> list[dict]:
+        return [row for key in keys for row in ts.read_log(key).records
+                if row["tool"] == "calibration_holdout_drawn"]
+
+    _calibrate(labels_dir, images_dir)
+    (row,) = drawn()
+    assert row["old_membership"] is None
+    assert sorted(row["new_membership"]["calibration"] + row["new_membership"]["holdout"]) == stems
+
+    _calibrate(labels_dir, images_dir)
+    assert len(drawn()) == 1
+
+
+def test_a_calibration_curves_first_write_leaves_one_receipt_and_an_identical_rewrite_none():
+    """The curve is kept under its own body's identity: the first write is an act with its one
+    receipt, and keeping the same body again writes nothing and leaves no line."""
+    import tcip_store as ts
+
+    from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.tools.inference_tools import calibration_curve_key, keep_calibration_curve
+
+    body = {"trait": "cyme count", "dataset_hash": "h", "checkpoint_sha256": "s",
+            "gate_evidence": {"conf": [0.1, 0.2]}}
+
+    def receipts() -> list[dict]:
+        return [r for r in ts.read_log(audit_log_key()).records
+                if r["tool"] == "calibration_curve_written"]
+
+    identity = keep_calibration_curve(body)
+    assert ts.read(calibration_curve_key(identity)) == body
+    assert [r["arguments"]["calibration_evidence_key"] for r in receipts()] == [identity]
+    assert keep_calibration_curve(dict(body)) == identity
+    assert len(receipts()) == 1
 
 
 # --- the rail admits the references that were always legitimate -------------------------------
