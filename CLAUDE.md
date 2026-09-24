@@ -6,12 +6,9 @@ wins; on behavior, this file wins. Machine and harness facts live in `CLAUDE.loc
 shipped); commit, push and prose rules that hold across projects live in the global `CLAUDE.md`.
 
 While the architecture contraction is underway, `docs/NEXT_SESSION_PROMPT.md` governs procedure
-only: which session does what, in what order, with which tools. Its numbered list is one
-session's work, sized to fit one context window, and the session runs the list in order until
-its last item closes the session; work for later sessions sits in a separate ordered list the
-close rewrites the prompt from. This file governs what a change is and how it is judged, and
-the prompt never overrides it; a prompt sentence that would change how a change is judged is a
-conflict brought to the owner rather than followed.
+only: which session does what, in what order, with which tools. This file governs what a change
+is and how it is judged, and the prompt never overrides it; a prompt sentence that would change
+how a change is judged is a conflict brought to the owner rather than followed.
 
 ## The foundation
 
