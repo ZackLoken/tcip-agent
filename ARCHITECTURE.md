@@ -25,13 +25,13 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD fdfd176c.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD e2f76f2c.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD fdfd176c has 442 modules across the six scanned roots (138038 total lines):
+HEAD e2f76f2c has 442 modules across the six scanned roots (138038 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
@@ -159,7 +159,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/generic_trainer.py | Task-agnostic training loop for a bespoke ``model_source`` model. | 17 | 6 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/hpo.py | HPO, hyperparameter optimization on Ray Tune. | 8 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/optimizer_factory.py | Optimizer factory with differential learning rate support. | 0 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/training/run_registry.py | In-process registry of live training runs: ``TrainRun``, its cancel-sentinel protocol, and the create/attach/get/list/cancel operations over the process-global ``_RUNS`` map. | 2 | 3 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/training/run_registry.py | In-process registry of live training runs: ``TrainRun``, its cancel-sentinel protocol, and the create/get/list/cancel operations over the process-global ``_RUNS`` map. | 2 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py | The subprocess entry point ``launch_training`` spawns to run one bespoke training run's body, dataset/loader construction and the audited envelope, ``run_training_envelope()``, in an isolated OS process, so a leak/OOM/hang in one run can't take down the launching process or any other concurrent run's process. | 11 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/tensorboard_guardian.py | Keep one child tied to the life of the process that launched it, on platforms with no job-object equivalent (Linux, macOS). | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/tensorboard_manager.py | TensorBoard process management for training and HPO runs. | 0 | 3 |
