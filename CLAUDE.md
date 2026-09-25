@@ -66,7 +66,7 @@ implementation is replaceable and the guarantee is not.
   validation against a reference sized to the trait, with the provenance recording which reference
   answered for it. No validated measurement, no result. Geometry measures dimensions on a
   validated mask with scale calibration; it never stands in for finding the object or judging a
-  biological state. Tentative domain logic, whatever made it tentative, is labelled tentative and
+  biological state. Tentative domain logic, whatever made it tentative, is labeled tentative and
   validated or removed; it never becomes institutional truth by reuse.
 - Scientific defensibility: every phenotype reproducible and auditable end to end, from data and
   environment through predictions and operating point to the measurement. Parameters are derived

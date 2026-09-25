@@ -12,7 +12,7 @@ src/tcip_store/
   __init__.py          # the public surface: Key, Store, errors, registry helpers, re-exported
   model.py             # Key, Version and the other identity/value types, identical on every backend
   errors.py            # every refusal the seam raises
-  registry.py          # the store catalogue: each store's kind, codec and concurrency policy,
+  registry.py          # the store catalog: each store's kind, codec and concurrency policy,
                         #   declared once by the module that owns it
   schema_version.py    # the version-field accept rule every frozen store's reader applies
   store.py             # the public surface's module functions, bound to one backend per process
