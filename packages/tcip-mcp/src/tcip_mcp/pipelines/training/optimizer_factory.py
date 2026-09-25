@@ -14,19 +14,19 @@ import torch
 from torch import nn
 
 
-def _build_sgd(params, lr: float = 1e-3, momentum: float = 0.9, weight_decay: float = 1e-4, **kw):
+def _build_sgd(params, *, lr: float, weight_decay: float, momentum: float = 0.9, **kw):
     return torch.optim.SGD(params, lr=lr, momentum=momentum, weight_decay=weight_decay)
 
 
-def _build_adam(params, lr: float = 1e-3, weight_decay: float = 0, **kw):
+def _build_adam(params, *, lr: float, weight_decay: float, **kw):
     return torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
 
 
-def _build_adamw(params, lr: float = 1e-3, weight_decay: float = 1e-2, **kw):
+def _build_adamw(params, *, lr: float, weight_decay: float, **kw):
     return torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
 
 
-def _build_lamb(params, lr: float = 1e-3, weight_decay: float = 1e-2, **kw):
+def _build_lamb(params, *, lr: float, weight_decay: float, **kw):
     """LAMB optimizer, requires the optional ``torch_optimizer`` package."""
     try:
         from torch_optimizer import Lamb
@@ -49,12 +49,17 @@ _OPTIMIZER_BUILDERS: dict[str, Callable[..., torch.optim.Optimizer]] = {
 }
 
 
+DEFAULT_BACKBONE_LR = 1e-4
+DEFAULT_HEAD_LR = 1e-3
+DEFAULT_WEIGHT_DECAY = 1e-4
+
+
 def build_optimizer(
     name: str,
     model: nn.Module,
-    backbone_lr: float = 1e-4,
-    head_lr: float = 1e-3,
-    weight_decay: float = 1e-4,
+    backbone_lr: float = DEFAULT_BACKBONE_LR,
+    head_lr: float = DEFAULT_HEAD_LR,
+    weight_decay: float = DEFAULT_WEIGHT_DECAY,
 ) -> torch.optim.Optimizer:
     """Build an optimizer with differential LR.
 

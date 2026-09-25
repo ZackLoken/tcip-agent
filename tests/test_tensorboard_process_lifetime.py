@@ -181,7 +181,7 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypa
     failure. The cleanup covers two ways this test itself can fail: while the guardian is
     still alive, its descendants are enumerated by pid, the guardian itself first re-checked
     against the create time captured at launch, and each is re-checked by create time (a pid
-    inside the stop's ten-second window can be reused) before any is signalled; once the
+    inside the stop's ten-second window can be reused) before any is signaled; once the
     stand-in's own pid is known, captured the moment ``_standin_pid`` answers, it is
     force-killed directly, covering a failure after ``stop_tensorboard`` has already reaped the
     guardian and left the stand-in reparented with nothing watching it. A launch that answers

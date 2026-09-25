@@ -528,7 +528,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
                                       "builder_kwargs": {"num_classes": 1}, "task": "detection"},
                      "data": {"images_dir": str(root / "images"),
                               "labels_dir": str(root / "annotations"), "subject": "bud"}},
-        n_trials=1,
+        n_trials=1, search_seed=0
     )
     study = hpo_result["study_name"]
 

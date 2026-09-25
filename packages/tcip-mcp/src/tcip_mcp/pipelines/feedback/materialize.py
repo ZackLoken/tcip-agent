@@ -1,19 +1,19 @@
 """Materialize a curated detection dataset from human review verdicts.
 
-Torch-free. Turns review verdicts (per-image shards under ``.tcip/state/review/``) into training data:
+Torch-free. Turns review verdicts (per-image shards under ``.tcip/state/review/``) into training
+data:
   - accepted / edited GT boxes  -> positive name-based per-image JSON labels (the canonical format)
   - rejected-only images        -> confirmed-negative JSON (``{"annotations": []}``) backgrounds
     for a detector review; under a classified scope a rejected value call names no absence of the
     object, so every one lands in ``unconfirmed_negatives`` instead
-plus a ``curated_manifest.json`` for provenance. The output layout (``images/`` + ``annotations/``)
-matches ``data_tools._scan_dataset`` so the loop chains straight into ``draw_splits`` /
-``launch_training`` with no glue.
+plus a ``curated_manifest.json`` for provenance, in the platform's ``images/`` + ``annotations/``
+dataset layout.
 
-The verdict log stores normalized center-form boxes (``[cx, cy, w, h]``) plus the class *name*
-(``class_name``, an annotation's subject for a detector review; a classified review's own
-confirmed value instead, written under the reviewed bucket's scope attribute rather than
-``subject``); positives are denormalized to pixel coordinates using the copied image's dimensions
-(the canonical JSON is pixel-space), no inference re-run.
+The verdict log stores normalized center-form boxes (``[cx, cy, w, h]``) plus the class name
+(``class_name``, an annotation's subject for a detector review; a classified review's own confirmed
+value instead, written under the reviewed bucket's scope attribute rather than ``subject``);
+positives are denormalized to pixel coordinates using the copied image's dimensions (the canonical
+JSON is pixel-space), no inference re-run.
 """
 
 from __future__ import annotations
@@ -75,18 +75,15 @@ def curated_manifest_path(output_dir: str | Path) -> Path:
 def partition_review_verdicts(review_state: dict, *, only_completed: bool = False) -> dict[str, dict]:
     """Partition per-image review verdicts into positives / hard-negatives / skip.
 
-    Returns ``{img_name: {"positives": [(class_name, (cx, cy, w, h), iscrowd)], "rejected_count": int,
-    "rejected_subjects": [class_name], "subjects": [class_name], "reviewers": [name],
-    "status": "positive"|"hard_negative"|"skip"}}``.
-    A detection's box is ``gt_bbox_norm or pred_bbox_norm`` (the fallback handles
-    accepted-FP entries that carry only a predicted box); ``class_name`` is the subject.
+    Returns ``{img_name: {"positives": [(class_name, (cx, cy, w, h), iscrowd)], "rejected_count":
+    int, "rejected_subjects": [class_name], "subjects": [class_name], "reviewers": [name],
+    "status": "positive"|"hard_negative"|"skip"}}``. A detection's box is ``gt_bbox_norm or
+    pred_bbox_norm`` (the fallback handles accepted-FP entries that carry only a predicted box);
+    ``class_name`` is the subject.
 
-    ``rejected_subjects`` is what the image's rejections actually answer for, so a caller keying
-    negatives can check that against the subject it is keying them under: a count of rejections
-    says an image was disputed, never which object was found absent. ``subjects`` is every subject
-    any verdict on the image names, rejections included, which is what a review's own subject is
-    derived from. ``reviewers`` is who recorded the rejections, for attributing what they
-    established. A verdict naming no subject contributes to neither set: it answers for nothing.
+    ``rejected_subjects`` is what the image's rejections answer for; ``subjects`` is every subject
+    any verdict on the image names, rejections included. ``reviewers`` is who recorded the
+    rejections. A verdict naming no subject contributes to neither set.
     """
     result: dict[str, dict] = {}
     for img_name, img_data in review_state.get("image", {}).items():
@@ -120,12 +117,9 @@ def partition_review_verdicts(review_state: dict, *, only_completed: bool = Fals
 
 
 def _find_source_image(source_images_dir: str, img_name: str) -> "Path | BandGroupRef | None":
-    """The logical image ``img_name`` names, a plain ``Path``, or (when a ``.bandgroup``
-    manifest groups sibling band files under this stem) a ``BandGroupRef``. ``None`` if unresolvable
+    """The logical image ``img_name`` names, a plain ``Path``, or (when a ``.bandgroup`` manifest
+    groups sibling band files under this stem) a ``BandGroupRef``. ``None`` if unresolvable
     (missing, or a stale group whose manifest references a deleted sibling).
-
-    Lazy-imports ``image_utils`` (which pulls in torch) so this module stays torch-free at import
-    time, matching every other caller in this file.
     """
     from tcip_mcp.pipelines.image_utils import BandGroupIncomplete, resolve_image_source
 
@@ -139,27 +133,21 @@ def _find_source_image(source_images_dir: str, img_name: str) -> "Path | BandGro
 def _write_positive_label(
     path: Path, positives: list[tuple], img_w: int, img_h: int, *, scope=None, vocabulary=None,
 ) -> str | None:
-    """Write one image's positive boxes to its label file, returning the refusal message on
-    failure rather than letting it propagate.
+    """Write one image's positive boxes to its label file, returning the refusal message on failure
+    rather than letting it propagate.
 
     A verdict's normalized box can denormalize to zero extent (the persistence boundary's own
     refusal, ``stored_box_extent_ok`` inside ``write_annotations``); caught here so one degenerate
-    record does not abort a harvest of many images with an uncaught ``ValueError``.
+    record does not abort a harvest of many images.
 
     Under a classified ``scope`` (``resolution.BucketScope``), a verdict's ``class_name`` is the
     confirmed value, not the object: every record carries ``scope.subject`` with that value under
-    ``scope.attribute``, the shape a classified bucket's own records carry, checked against
-    ``vocabulary`` (the bucket's own recorded ``id_map`` keys), required non-empty under a
-    classified scope rather than defaulted away (an absent or empty vocabulary refuses the same
-    way, since neither has anything to check a confirmed value against), since a confirmed value
-    written with nothing to check it against is the rail this scope exists to hold every reader
-    to; the one production caller (``materialize_review_dataset``) already resolves and threads
-    it, refusing by name itself before this call when the bucket records no map at all. Without a
-    classified ``scope``, ``class_name`` is the object class itself, written to ``subject`` as
-    before.
+    ``scope.attribute``, checked against ``vocabulary`` (the bucket's own recorded ``id_map``
+    keys), which must be non-empty. Without a classified ``scope``, ``class_name`` is the object
+    class itself, written to ``subject``.
     """
     def _annotation(name: str, box_norm, iscrowd: bool) -> Annotation:
-        box = BBox.from_normalized_centre(box_norm, img_w, img_h)
+        box = BBox.from_normalized_center(box_norm, img_w, img_h)
         if scope is not None and scope.classified:
             if not vocabulary:
                 raise ValueError(
@@ -203,19 +191,15 @@ def _attribute_negatives(
 
     An image is confirmed negative for ``neg_subject`` only when its own rejections name that
     subject. Every other one is returned in the second list with what its rejections did answer
-    for, so the caller can say which images were left unconfirmed and why instead of keying them
-    under a subject no verdict on them mentions.
+    for.
 
-    Under a classified scope (``classified=True``), ``rejected_subjects`` are the reviewed
-    bucket's attribute values, never object classes, so membership in them is never consulted
-    for a confirmation: an attribute value that happens to be named like the object class is a
-    vocabulary coincidence, not a claim the object is absent, and every rejected-only image lands
-    unconfirmed with that reason stated explicitly, rather than confirming by accident when no
-    value collides with the subject's name.
+    Under a classified scope (``classified=True``), ``rejected_subjects`` are the reviewed bucket's
+    attribute values, never object classes, so every rejected-only image lands unconfirmed with
+    that reason stated.
 
     A confirmation is attributed to the reviewer whose rejections established it when the image's
     rejections name exactly one, and to :data:`MATERIALIZER_IDENTITY` when they name none or
-    several, which is the honest answer where no single person answers for the image.
+    several.
     """
     confirmed: dict[str, dict[str, str]] = {}
     unconfirmed: list[dict] = []
@@ -246,12 +230,11 @@ def _attribute_negatives(
 
 def _copy_source_registry_for_classified_scope(source_images_dir: str, output_dir: str) -> None:
     """Copy the source dataset's own subject registry onto ``output_dir``, before anything else is
-    written: a classified scope's output cannot train without the registry that decodes it,
-    unlike a detector harvest's best-effort copy inside its own confirmed-negatives branch.
+    written: a classified scope's output cannot train without the registry that decodes it.
 
     Raises :class:`ValueError`, naming the primitive that fixes it, when ``source_images_dir``
     names no dataset root, that root's registry does not decode, or ``output_dir`` already holds
-    one: an existing output registry is never silently overwritten by a second harvest into it.
+    one.
     """
     from tcip_mcp.subject_registry import RegistryError, copy_registry, read_registry
     from tcip_mcp.dataset_layout import dataset_root_of, subjects_path
@@ -298,38 +281,28 @@ def materialize_dataset(
 ) -> dict:
     """Write ``output_dir/images/`` + ``output_dir/annotations/`` + manifest.
 
-    The label tree is flat: every image's label lands directly under ``annotations/``, with no
-    per-date segment, since a curated harvest has no capture date of its own to nest under. This
-    is the platform's own undated dataset layout (``annotation_dir(root, None)``), the same shape
-    ``_scan_dataset`` and ``_split_date_dirs`` already read as a dateless entry, not a deviation
-    from it: the per-image document is addressed through ``ANNOTATION_RECORDS_STORE``'s
-    directory-rooted key, which never required a date.
+    The label tree is flat: every image's label lands directly under ``annotations/`` (the
+    platform's undated dataset layout, ``annotation_dir(root, None)``), since a curated harvest has
+    no capture date of its own.
 
-    ``subject`` is the object the review was about (the confirmed negatives are keyed under it). When
-    omitted it is derived from every subject the verdicts name, rejections included, and answers only
-    when they name exactly one. ``producer_model`` (best-effort) records the model whose predictions
-    the human reviewed, for traceability.
+    ``subject`` is the object the review was about (the confirmed negatives are keyed under it).
+    When omitted it is derived from every subject the verdicts name, rejections included, and
+    answers only when they name exactly one. ``producer_model`` (best-effort) records the model
+    whose predictions the human reviewed.
 
     A rejected-only image becomes a confirmed negative only when its own rejections answer for that
     subject. One whose rejections answer for another subject, or for none, is materialized as an
-    unconfirmed empty label and named in ``unconfirmed_negatives`` with why: keying it under the
-    subject at hand would assert the human found that object absent on an image they never gave a
-    verdict about, which is how an image full of one object reaches training as a zero-box sample of
-    it.
+    unconfirmed empty label and named in ``unconfirmed_negatives`` with why.
 
     ``scope`` (``resolution.BucketScope``) is the reviewed bucket's own recorded scope, resolved by
-    the caller. Under a classified scope, ``subject`` is a claim that must equal ``scope.subject``
-    (raises :class:`ValueError` naming both when it disagrees); the verdict-derived subject above is
-    never consulted, since a verdict's ``class_name`` there is a confirmed value, not an object
-    class. No rejected-only image is ever confirmed negative: a rejected value call says the model
-    called the wrong state, never that the object itself is absent, so every one lands in
-    ``unconfirmed_negatives``. The output still needs the source dataset's registry to train under
-    the scope, so it is copied over whether or not any negative was confirmed, raising by name when
+    the caller. Under a classified scope, ``subject`` must equal ``scope.subject`` (raises
+    :class:`ValueError` naming both when it disagrees) and the verdict-derived subject is never
+    consulted. No rejected-only image is confirmed negative there: every one lands in
+    ``unconfirmed_negatives``. The source dataset's registry is copied over, raising by name when
     the source names no dataset root or that root's registry is missing, or when the output already
     holds one. ``vocabulary`` (the bucket's own recorded ``id_map`` keys) is required under a
-    classified scope, refusing by name when absent, and checks a classified verdict's confirmed
-    value before it is written; a value outside it is reported in ``boundary_refused`` rather than
-    written, the same posture a degenerate box already gets.
+    classified scope and checks a classified verdict's confirmed value before it is written; a
+    value outside it is reported in ``boundary_refused`` rather than written.
     """
     if scope is not None and scope.classified and subject is not None and subject != scope.subject:
         raise ValueError(

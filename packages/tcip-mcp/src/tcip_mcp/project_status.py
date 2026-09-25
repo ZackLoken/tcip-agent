@@ -1,22 +1,8 @@
 """Per-project status pointer: a small, persisted summary of recent activity.
 
-A locator module in the same spirit as :mod:`tcip_mcp.dataset_layout`: pure path/read/write
-helpers, no business logic elsewhere duplicates. Read back by ``inspect_project`` and
-``activate_project`` so one call gives the picture that today takes 2-3 separate reads
-(``inspect_project``'s live counts, plus ``load_project_memory`` once per kind).
-
-Deliberately persists status/history only, never a "next step" or plan. A retrospective's
-``would_do_differently``/``knowledge_for_future`` fields are forward-looking; this module never
-caches their text, only a pointer (project_id + timestamp) to the retrospective that holds them,
-so reading the actual content (with its caveats intact) is always one explicit
-``load_project_memory(kind='retrospectives')`` call away, never silently resurfaced. The
-project_id, not a path, is what a reader resolves back to the retrospective: a path is
-backend-dependent (the database backend keeps no such file) while the project_id resolves
-through ``retrospective_key``/``read_retrospective`` under either backend.
-
-Unlike ``.tcip/reports/``/``.tcip/retrospectives/`` (expected to be pruned eventually), this file is
-meant to be a permanent fixture a project operates against for its whole life, so a corrupted
-file is reported as corrupt, not silently treated as "no history yet."
+Persists status/history only, never a "next step" or plan: a retrospective is pointed at by its
+project_id and timestamp, never cached as text. A corrupted file is reported as corrupt, not
+treated as "no history yet."
 """
 
 from __future__ import annotations
@@ -59,12 +45,7 @@ register_store(
 
 
 def project_status_key(project_path: str | Path) -> Key:
-    """The project's status pointer.
-
-    ``cas``: every writer here increments a counter it just read, so the read and the write
-    have to be one serialized step. :func:`_update` names this key in a transaction and does
-    the read-and-decide inside it.
-    """
+    """The project's status pointer, written compare-and-swap."""
     return Key(PROJECT_STATUS_STORE, str(project_path), _STATUS_PARTS)
 
 
@@ -77,13 +58,9 @@ def project_status_path(project_path: str | Path) -> Path:
 def read_project_status(project_path: str | Path) -> dict[str, Any]:
     """The project's status summary, or ``{}`` if none exists yet.
 
-    Distinguishes absence from corruption: a missing file is genuinely "no history yet" and
-    returns ``{}``; a file that exists but fails to decode, or decodes to something other than a
-    dict (mirrors :func:`tcip_mcp.dataset_layout.normalize_status_store`'s shape guard), returns
-    ``{"_corrupt": True}`` instead, so callers surface that honestly rather than silently reading a
-    permanent-fixture store as if it were a clean slate. A file at a schema_version this reader
-    does not accept is a distinct fact, not corruption, so it returns ``{"_version_refused": True}``
-    instead: the bytes are a well-formed document from a newer writer, not garbage.
+    A missing file returns ``{}``; a file that exists but fails to decode, or decodes to something
+    other than a dict, returns ``{"_corrupt": True}``; a file at a schema_version this reader does
+    not accept returns ``{"_version_refused": True}``.
     """
     try:
         raw = read(project_status_key(project_path), default={})
@@ -100,15 +77,10 @@ def read_project_status(project_path: str | Path) -> dict[str, Any]:
 
 def _update(project_path: str | Path, mutate: Callable[[dict[str, Any]], None]) -> None:
     """Best-effort locked read-modify-write: never raises, never blocks the caller it's attached
-    to. A status-file write failing must not fail the report/retrospective/distillation-pass write
-    it's recording, same shape as ``audit.py``'s own best-effort append.
+    to.
 
-    ``mutate`` reads and mutates the current dict *in place*, entirely inside the transaction
-    that holds this key: an increment (``data[k] = data.get(k, 0) + 1``) computed from a read
-    taken outside the lock, then passed in as an absolute value, would lose updates under
-    concurrent callers (two callers reading the same pre-increment value, each writing the same
-    post-increment one). Putting the read-and-decide step inside ``mutate`` is what makes the
-    transaction actually serialize the increment, not just the write.
+    ``mutate`` reads and mutates the current dict in place, entirely inside the transaction that
+    holds this key, so an increment is serialized with its read.
     """
     key = project_status_key(project_path)
     try:
@@ -152,8 +124,8 @@ def record_report(project_path: str | Path) -> None:
 
 def record_retrospective(project_path: str | Path, project_id: str) -> None:
     """Call after a ``write_retrospective`` write: reset the report counter, bump the
-    distillation-retrospective counter, and point at the retrospective by its project_id (no
-    cached text, no path: a path is backend-dependent and the database backend keeps no file)."""
+    distillation-retrospective counter, and point at the retrospective by its project_id.
+    """
     now = datetime.now(timezone.utc).isoformat()
 
     def mutate(data: dict[str, Any]) -> None:
@@ -171,10 +143,9 @@ def record_retrospective(project_path: str | Path, project_id: str) -> None:
 
 
 def record_distillation(project_path: str | Path) -> None:
-    """Call after an owner-reviewed distillation pass (``record_distillation_pass`` MCP tool):
-    reset both distillation counters. Bookkeeping only: records that a pass happened, not what
-    came of it; promoting anything from a worksheet to a skill/CLAUDE.md stays the owner's own,
-    separate, explicit act."""
+    """Call after a distillation pass (``record_distillation_pass`` MCP tool): reset both
+    distillation counters. Records only that a pass happened, not what came of it.
+    """
     now = datetime.now(timezone.utc).isoformat()
 
     def mutate(data: dict[str, Any]) -> None:

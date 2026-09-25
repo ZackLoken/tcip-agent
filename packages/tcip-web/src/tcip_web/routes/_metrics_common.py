@@ -1,8 +1,4 @@
-"""The response shape the tuning trial-metrics route serves.
-
-The route reads an HPO trial's own metrics log under its sweep through the storage layer and
-builds the response here.
-"""
+"""The response shape the tuning trial-metrics route serves."""
 
 from __future__ import annotations
 

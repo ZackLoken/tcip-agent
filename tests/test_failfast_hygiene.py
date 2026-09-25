@@ -38,14 +38,9 @@ def test_uncertainty_scorer_averages_over_heads(tmp_path):
     img = tmp_path / "a.png"
     Image.new("RGB", (16, 16)).save(img)
 
-    class MultiHead(torch.nn.Module):
-        def forward(self, x):
-            return {"head0_logits": torch.tensor([[2.0, 0.0]]),
-                    "head1_logits": torch.tensor([[0.0, 0.0]])}
+    from tests.scorer_models import predictor_for
 
-    from types import SimpleNamespace
-
-    loaded = SimpleNamespace(model=MultiHead(), device=torch.device("cpu"), in_chans=3)
-    scored = UncertaintyScorer(task="classification").score([str(img)], loaded)
+    predictor = predictor_for(tmp_path, "build_two_head", "classification")
+    scored = UncertaintyScorer(task="classification").score([str(img)], predictor)
     expected = (_entropy(torch.tensor([[2.0, 0.0]])) + _entropy(torch.tensor([[0.0, 0.0]]))) / 2
     assert scored[0][1] == pytest.approx(expected)  # averaged across both heads, not first-only

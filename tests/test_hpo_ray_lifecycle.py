@@ -165,7 +165,8 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
         pass
 
     class BasicVariantGenerator(Searcher):
-        pass
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
 
     basic_variant = ModuleType("ray.tune.search.basic_variant")
     basic_variant.BasicVariantGenerator = BasicVariantGenerator
@@ -209,7 +210,7 @@ def _run_one_search() -> dict:
         search_alg="random",
         scheduler=None,
         resources_per_trial={"cpu": 1.0, "gpu": 0.0},
-        storage_path=str(Path(os.environ["TCIP_STATE_ROOT"]) / "hpo"),
+        storage_path=str(Path(os.environ["TCIP_STATE_ROOT"]) / "hpo"), seed=0
     )
 
 
@@ -433,7 +434,7 @@ def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(monk
     invalid`` on a daemon started without a console; a console-free process must kill every
     daemon itself first so ``ray.shutdown()`` finds each one already dead and never signals
     it. Asserts the sweep's exit raises nothing, that every daemon was killed rather than
-    signalled, and that ``ray.shutdown()`` still ran.
+    signaled, and that ``ray.shutdown()`` still ran.
     """
     import tcip_mcp.pipelines.training.hpo as hpo
 
@@ -499,7 +500,7 @@ def test_a_cluster_this_process_starts_is_sized_to_the_sweep_s_own_request(monke
         param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
         num_samples=1, search_alg="random", scheduler=None, max_concurrent=3,
         resources_per_trial={"cpu": 0.5, "gpu": 0.0},
-        storage_path=str(Path(os.environ["TCIP_STATE_ROOT"]) / "hpo"),
+        storage_path=str(Path(os.environ["TCIP_STATE_ROOT"]) / "hpo"), seed=0
     )
     assert ray.init_kwargs["num_cpus"] == 2
 

@@ -11,11 +11,8 @@ from __future__ import annotations
 def _confidence_values(pred: dict) -> list[float]:
     """Flat image-level confidences from a GenericPredictor prediction dict.
 
-    Classification/ordinal heads emit per-image confidences under ``head{i}_confidences``
-    (an agent's multi-head ``nn.Module`` forward-output dict, passed through as-is by
-    ``GenericPredictor._format_other``); matching the suffix covers a model with any number of
-    heads. ``*_probabilities`` is deliberately not matched: SemanticSegHead emits it as a 4-D
-    nested list.
+    Classification/ordinal heads emit per-image confidences under ``head{i}_confidences``; matching
+    the suffix covers a model with any number of heads. ``*_probabilities`` is not matched.
     """
     values: list[float] = []
     for key, val in pred.items():
@@ -25,17 +22,8 @@ def _confidence_values(pred: dict) -> list[float]:
 
 
 def unscoreable(predictions: list[dict]) -> list[dict]:
-    """Predictions with no confidence-bearing signal at all: not detection-shaped (no ``scores``
-    key, checked by presence, not truthiness) and no ``*_confidences`` head output. A regression
-    head's point estimate is the deliberate case, it has no distributional output to derive a
-    legitimate confidence from (unlike an ordinal head's CORN cumulative probabilities, which do
-    carry one). Checking ``scores`` by key presence, not truthiness, matters: a genuine detection
-    negative (``scores: []``, zero boxes found) is a complete, unambiguous signal, not a gap; it
-    must stay excluded here, the same way :func:`auto_accept`/:func:`review_queue` already exclude
-    it, not get swept in as if the architecture couldn't express confidence.
-    Neither :func:`auto_accept` nor :func:`review_queue` can partition a genuinely unscoreable
-    prediction on confidence, so a caller must route it explicitly (e.g. into review) rather than
-    let it silently vanish from every output.
+    """Predictions with no confidence-bearing signal: no ``scores`` key (checked by presence;
+    ``scores: []`` is a scored negative) and no ``*_confidences`` head output.
     """
     return [pred for pred in predictions
             if "scores" not in pred and not _confidence_values(pred)]
@@ -50,10 +38,7 @@ def auto_accept(
 
     Args:
         predictions: List of prediction dicts (from GenericPredictor).
-        threshold: Minimum confidence score for auto-acceptance. Required: turning a
-            prediction into ground truth at an unconfirmed threshold fabricates a label the
-            model was never confirmed to get right, so callers must derive and pass it
-            explicitly rather than accept a pinned default.
+        threshold: Minimum confidence score for auto-acceptance; required.
 
     Returns:
         Predictions where every detection/classification exceeds threshold.

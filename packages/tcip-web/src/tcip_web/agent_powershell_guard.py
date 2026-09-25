@@ -1,19 +1,10 @@
 """PreToolUse PowerShell guard for the fenced in-app agent terminal.
 
-The sibling ``agent_bash_guard.py`` guards the Bash tool; on Windows the fenced agent also has a
-PowerShell tool, which no deny rule covers, so the fence needs a hook of its own here or an agent
-sidesteps it with ``Set-Content packages\\...`` or ``Remove-Item``. This hook
-mirrors the Bash guard for PowerShell.
+Denies full cmdlets and their aliases that write, inline/encoded execution, and writes to the
+fence's own files, classifying each write target through the shared ``agent_fence_rules``.
 
-Honest scope: a guardrail, not a sandbox. It closes the direct bypasses (full
-cmdlets and their aliases, inline/encoded execution, writing the fence's own files), classifying
-each write target through the shared ``agent_fence_rules`` so the two shells fence one boundary
-and a breeder's own same-named file (their ``README.md``) is not caught by basename. A determined
-agent can still evade a string matcher (a ``cd`` then a relative write, a path assembled from
-fragments); those residuals are accepted, and real isolation is the sandbox.
-
-Stdlib only. It only ever denies; anything it can't classify falls through to the normal
-permission flow (a bug here fails open to prompting, never to a broken terminal).
+Stdlib only. It only ever denies; anything it can't classify falls through to the normal permission
+flow.
 """
 
 from __future__ import annotations

@@ -39,7 +39,7 @@ def test_a_sweeps_manifest_records_the_directory_that_holds_it(
     sweeps_root = tmp_path / "sweeps"
 
     result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1,
-                        output_dir=str(sweeps_root))
+                        output_dir=str(sweeps_root), search_seed=0)
     study_name = result["study_name"]
 
     manifest = ts.read(tt.sweep_manifest_key(study_name, str(sweeps_root)))
@@ -57,7 +57,7 @@ def test_a_sweep_launched_without_an_output_dir_is_addressed_the_same_way(
     observed: dict = {}
     tt = _stub_sweep(monkeypatch, observed)
 
-    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1)
+    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, search_seed=0)
 
     study_name = result["study_name"]
     manifest = ts.read(tt.sweep_manifest_key(study_name))

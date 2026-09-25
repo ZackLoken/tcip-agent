@@ -72,7 +72,7 @@ def _run(tmp_path, monkeypatch, *, in_chans, image, builder_kwargs=None, **overr
         "task": "detection",
     })
     return run_inference_verified(
-        str(ckpt), image_paths=[image], images_dir=str(tmp_path), device="cpu",
+        str(ckpt), images_dir=str(tmp_path), device="cpu",
         trait="bud_opening", calibration_labels_dir=str(tmp_path), **overrides)
 
 

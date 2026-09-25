@@ -1,30 +1,18 @@
 """Sensor-agnostic band-group correlation: sibling single-band raster files that are really one
-logical multi-band capture (some multispectral drone sensors write one file per band instead of
-one multi-band file per image), and the ``.bandgroup`` manifest that records a found group.
+logical multi-band capture (some multispectral drone sensors write one file per band instead of one
+multi-band file per image), and the ``.bandgroup`` manifest that records a found group.
 
-A group is recorded, never physically stacked to disk, the originals keep their real names and
-locations; the manifest just names which sibling files belong together and in what band order.
+A group is recorded, never physically stacked to disk: the manifest names which sibling files
+belong together and in what band order. Detection strategies, tried in order:
 
-Detection is a capability with pluggable strategies, tried in order, never a closed switch on
-sensor name:
-
-1. Embedded-metadata grouping, a small declarative table of (group-id tag, band-id tag)
-   pairs to look for in each file's XMP. A new sensor that exposes an exact-match, shared
-   group-id-per-capture tag (most multi-file multispectral rigs) is a new table row, not new code.
-   This does not generalize to a sensor needing tolerance/clustering correlation as its primary
-   grouping key (no exact-match group id at all, only GPS proximity or skewed per-file timestamps
-   to cluster on), that would need new matching code, not a table row. A shared group-id value is
-   still only one signal, though: each strategy also names independently-recorded secondary
-   identity tags (a timestamp, a GPS fix) that must be present and agree within a tight tolerance
-   across every file claiming that group id, so a colliding/reused group-id string can never splice
-   two unrelated captures into one, disagreement refuses the group, and so does a candidate where
-   every declared secondary signal is simply absent (a shared group id with zero independent
-   confirmation is exactly as unproven as one with a disagreeing confirmation).
-2. Explicit manifest, a caller-supplied ``{group_id: {band_name: filename}}`` mapping, for a
-   sensor with no embedded correlation metadata at all.
-3. Refuse, don't guess: no embedded match and no explicit mapping leaves every file exactly
-   as independent as it is. No filename-pattern fallback: a guessed grouping that happens to
-   be wrong would silently corrupt every downstream annotation/measurement.
+1. Embedded-metadata grouping, a declarative table of (group-id tag, band-id tag) pairs to look for
+  in each file's XMP; a sensor with an exact-match, shared group-id-per-capture tag is a new table
+  row. Each row also names secondary identity tags (a timestamp, a GPS fix) that must be present
+  and agree within a tight tolerance across every file claiming that group id; disagreement refuses
+  the group, and so does a candidate where every declared secondary signal is absent.
+2. Explicit manifest, a caller-supplied ``{group_id: {band_name: filename}}`` mapping, for a sensor
+  with no embedded correlation metadata at all.
+3. Otherwise every file stays independent; there is no filename-pattern fallback.
 """
 
 from __future__ import annotations
@@ -68,15 +56,8 @@ register_store(
 
 
 def band_group_manifest_key(images_dir: str | Path, stem: str) -> Key:
-    """The manifest recording which sibling files form the capture ``stem``.
-
-    Scoped to the image directory rather than a dataset root: a group is a fact about files
-    that sit beside each other, and detection runs against a directory that need not be
-    inside a dataset at all.
-
-    A blob because a ``.bandgroup`` file is itself an enumerated logical image
-    (``image_utils``), so it has to sit in the image directory the enumerators walk. The
-    payload is encoded through the canonical ``RECORD_JSON`` codec.
+    """The manifest naming ``stem``'s sibling files, keyed under the image directory (it is itself
+    an enumerated logical image there), encoded through ``RECORD_JSON``.
     """
     return Key(BAND_GROUP_MANIFEST_STORE, str(images_dir), (stem,))
 
@@ -99,19 +80,15 @@ _ELEM_RE = re.compile(r"<([A-Za-z_][\w.-]*:[A-Za-z_][\w.-]*)>([^<]*)</\1>")
 @dataclass(frozen=True)
 class _MetadataStrategy:
     """One (group-id tag, band-id tag) declarative row, plus the secondary identity signal(s) that
-    must independently agree (within a tight tolerance) before files sharing that group-id value are
-    trusted to be the same physical capture.
+    must independently agree (within a tight tolerance) before files sharing that group-id value
+    are trusted to be the same physical capture.
 
-    A shared group-id string is necessary but not sufficient: it is one value an upstream tool wrote
-    (or a corrupt/reused one could collide), never itself proof two files came off the same shutter
-    event. ``identity_checks`` names an ``(tag, kind, tolerance)`` triple per signal, ``kind`` is
+    ``identity_checks`` names an ``(tag, kind, tolerance)`` triple per signal, ``kind`` is
     ``"timestamp"`` (ISO-8601, compared in seconds) or ``"degrees"`` (a plain float, e.g. GPS
     lat/lon), read from each candidate file's own XMP independently of the group-id tag itself. A
-    tag absent from any one file in the candidate group is skipped for that check (unusable, not a
-    disagreement); a tag present on every file but disagreeing beyond its tolerance refuses the whole
-    group, and so does a candidate group where every declared check ends up skipped this way (no
-    secondary signal was ever actually cross-checked), since an unconfirmed group-id match is no
-    safer than a disagreeing one.
+    tag absent from any one file in the candidate group is skipped for that check; a tag present on
+    every file but disagreeing beyond its tolerance refuses the whole group, and so does a
+    candidate group where every declared check was skipped.
     """
 
     group_id_tag: str
@@ -146,9 +123,8 @@ def _identity_disagreement(
     checks: tuple[tuple[str, str, float], ...],
 ) -> tuple[str | None, bool]:
     """The first identity-check tag that disagrees beyond its tolerance across ``paths`` (or
-    ``None``), paired with whether any signal was actually checkable at all. A shared group id with
-    zero independently-verifiable secondary signal is exactly as unproven as one with a disagreeing
-    signal, a caller must refuse both, not silently accept a candidate no signal ever confirmed."""
+    ``None``), paired with whether any signal was actually checkable at all.
+    """
     any_checked = False
     for tag, kind, tolerance in checks:
         raw_values = [tags_by_path[p].get(tag) for p in paths]
@@ -172,10 +148,9 @@ def _identity_disagreement(
 class BandGroupRef:
     """One logical multi-band image, virtually assembled from sibling single-band files.
 
-    ``manifest_path`` is the ``.bandgroup`` file's own path, a first-class field (not re-derived
-    by every consumer) since ``serve_image`` and the dataset gallery route both need it directly.
-    ``bands`` is ``{band_name: file_path}`` in the manifest's declared order (the order pixels are
-    stacked into ``[H, W, C]``).
+    ``manifest_path`` is the ``.bandgroup`` file's own path. ``bands`` is ``{band_name:
+    file_path}`` in the manifest's declared order (the order pixels are stacked into ``[H, W,
+    C]``).
     """
 
     stem: str
@@ -185,10 +160,8 @@ class BandGroupRef:
 
 
 class BandGroupIncomplete(FileNotFoundError):
-    """A ``.bandgroup`` manifest references a sibling file that no longer exists on disk.
-
-    Raised at the resolver (``resolve_image_source``), never surfaced as a bare decode error deep
-    inside a stacking loop, a stale manifest is a named, actionable refusal.
+    """A ``.bandgroup`` manifest references a sibling file that no longer exists on disk. Raised at
+    ``resolve_image_source``.
     """
 
 
@@ -196,9 +169,7 @@ def _read_xmp_tags(path: Path) -> dict[str, str] | None:
     """Flat ``{qualified_tag: value}`` from a raster's embedded XMP packet, or ``None``.
 
     Reads both the XMP attribute shape (``drone-dji:CaptureUUID="..."``) and the nested-element
-    shape (``<Camera:BandName>Green</Camera:BandName>``), a real sensor's own XMP packet (DJI's)
-    uses both shapes in the same file, so a reader that only understood one would silently miss
-    tags the declarative table names.
+    shape (``<Camera:BandName>Green</Camera:BandName>``).
     """
     if path.suffix.lower() not in _METADATA_BEARING_EXTS:
         return None
@@ -369,14 +340,8 @@ def groups_from_explicit_mapping(
 
 def read_band_group_manifest(manifest_path: Path) -> BandGroupRef:
     """Parse a ``.bandgroup`` file into a :class:`BandGroupRef`. Raises ``ValueError`` on a
-    malformed manifest (missing/empty ``bands``).
-
-    A ``schema_version`` this reader does not accept propagates as
-    :class:`tcip_store.SchemaVersionRefused`, uncaught, rather than wrapped as ``ValueError``: a
-    version refusal is a policy fact about a newer writer, never the same fact as a malformed
-    manifest, and a caller's ``except (OSError, ValueError)`` softener (both enumerators of a
-    directory's manifests) must not absorb it and silently dissolve the group into its
-    individual band files.
+    malformed manifest (missing/empty ``bands``); :class:`tcip_store.SchemaVersionRefused`
+    propagates uncaught.
     """
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     check_schema_version(get_descriptor(BAND_GROUP_MANIFEST_STORE), data)
@@ -422,34 +387,24 @@ def detect_and_write_band_groups(
     """Run the band-group detection strategies over ``images_dir`` and write a ``.bandgroup``
     manifest for each newly found group.
 
-    Idempotent: a stem with an existing manifest is never regenerated (a recorded fact is not
-    re-inferred), only files not already claimed by some manifest are offered as candidates.
-    ``explicit_groups`` (strategy 2) is tried first when given; the embedded-metadata table
-    (strategy 1) runs over whatever candidates it leaves unclaimed. No match under either -> those
-    files are left exactly as independent as they are (strategy 3, refuse-don't-guess).
+    Idempotent: a stem with an existing manifest is never regenerated, and only files not already
+        claimed by some manifest are offered as candidates. ``explicit_groups`` (strategy 2) is
+        tried first when given; the embedded-metadata table (strategy 1) runs over whatever
+        candidates it leaves unclaimed. Files no strategy matches are left independent.
 
-    A group whose own stem (the siblings' common prefix, not any one source file's stem) is
-    reserved for a prediction bucket's provenance stamp (``tcip_annotation.json_io.
-    is_sidecar_name``) is not written as a manifest: minting a logical image under that stem would
-    make its label indistinguishable from the stamp everywhere a bucket is walked. Its members are
-    left exactly as the standalone files they were, and the group is reported in
-    ``"reserved_name_skips"`` instead of ``"formed"``.
+    A group whose own stem (the siblings' common prefix) is reserved for a prediction bucket's
+    provenance stamp (``tcip_annotation.json_io.is_sidecar_name``) is not written; its members stay
+    standalone files and the group is reported in ``"reserved_name_skips"``.
 
-    Checked next, against the bucket's own identities (``image_utils.bucket_logical_identities``,
-    read once before this loop and updated in place after each manifest this call writes): a key
-    (``image_utils.stem_collision_key`` of ``group["stem"]``, the canonical common-prefix stem for
-    an embedded-metadata group, the caller's own ``group_id`` for an explicit one) held by any
-    identity other than a manifest already recorded under this group's own exact stem, or one of
-    this group's own about-to-be-claimed members, puts the group under ``"refused"`` naming the
-    colliding file, and writes no manifest, the same fold the ingest door's pre-scan refuses by,
-    so this pass never mints the ambiguity the door exists to keep out. A manifest already
-    recorded under the exact stem keeps the ``Version.ABSENT`` idempotence below rather than
-    counting as a collision. Writing a manifest also removes its own claimed members from the
-    keys they sat under as raw identities, so a later group in this same pass whose stem equals a
-    now-claimed member's stem is checked against the bucket as it now stands, not as it stood
-    before this group formed.
+    A group whose ``image_utils.stem_collision_key`` (of the common-prefix stem, or the caller's
+    ``group_id`` for an explicit group) is held by any identity in the bucket
+    (``image_utils.bucket_logical_identities``) other than a manifest already recorded under this
+    group's exact stem or one of its own members goes under ``"refused"`` naming the colliding
+    file, and writes no manifest. The identities are updated after each manifest this call writes,
+    so a later group is checked against the bucket as it now stands.
 
-    Returns ``{"formed": [...], "refused": [...], "manifests": [...], "reserved_name_skips": [...]}``.
+    Returns ``{"formed": [...], "refused": [...], "manifests": [...], "reserved_name_skips":
+    [...]}``.
     """
     from tcip_annotation.json_io import is_sidecar_name
 

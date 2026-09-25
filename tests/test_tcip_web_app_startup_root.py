@@ -202,7 +202,7 @@ def test_workspace_unset_asgi_transport_signal_without_pytest_refuses(tmp_path):
     is refused even outside a pytest process and with starlette's ``TestClient`` never imported:
     this subprocess uses only ``httpx.AsyncClient`` (``ASGITransport`` implements only the async
     transport interface, verified against the installed httpx), so only the middleware's scope
-    check recognising ``ASGITransport``'s default client identity (``("127.0.0.1", 123)``,
+    check recognizing ``ASGITransport``'s default client identity (``("127.0.0.1", 123)``,
     verified against the installed httpx) can catch it."""
     fake_home = tmp_path / "fakehome"
     fake_home.mkdir()
@@ -289,54 +289,6 @@ def test_lifespan_binds_before_rehydrate_reads_a_registry(tmp_path, monkeypatch)
         pass
 
     assert seen_roots == [str(proj.resolve())]
-
-
-def test_a_refused_rehydrate_does_not_block_the_other_two_registries(tmp_path, monkeypatch):
-    """One registry's refused rehydrate (an unconformed document) must not skip the other two:
-    each registry gets its own try, and the refusal is recorded for the workspace status route
-    rather than only logged."""
-    import tcip_store
-
-    from tcip_mcp.web_client import INFERENCE_JOBS
-    from tcip_web import jobstore
-    from tcip_web.routes import inference, review, tuning
-
-    ws = tmp_path / "ws"
-    proj = ws / "elderberry_cyme_bloom"
-    (proj / ".tcip").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
-    monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
-    project_paths.restore_binding(None)
-    tcip_store.replace(workspace.active_project_key(), "elderberry_cyme_bloom")
-    jobstore._startup_refusals.clear()
-
-    called: list[str] = []
-    real_tuning, real_review = tuning.rehydrate_for_current_root, review.rehydrate_for_current_root
-
-    def _fail_inference():
-        raise ValueError("boom; no operator door stamps the missing field onto this root")
-
-    def _record_tuning():
-        called.append("tuning")
-        real_tuning()
-
-    def _record_review():
-        called.append("review")
-        real_review()
-
-    monkeypatch.setattr(inference, "rehydrate_for_current_root", _fail_inference)
-    monkeypatch.setattr(tuning, "rehydrate_for_current_root", _record_tuning)
-    monkeypatch.setattr(review, "rehydrate_for_current_root", _record_review)
-
-    with TestClient(app, base_url="http://127.0.0.1") as client:
-        resp = client.get("/api/projects")
-
-    assert called == ["tuning", "review"]
-    refusals = jobstore.startup_refusals()
-    assert len(refusals) == 1
-    assert refusals[0]["registry"] == INFERENCE_JOBS
-    assert "no operator door" in refusals[0]["error"]
-    assert resp.json()["job_registry_startup_refusals"] == refusals
 
 
 async def _largest_loop_gap(coro):

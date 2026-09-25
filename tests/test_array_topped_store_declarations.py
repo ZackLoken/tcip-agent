@@ -78,26 +78,6 @@ def test_model_registry_index_reads_as_an_empty_list_for_a_fresh_project(tmp_pat
     assert read_registry_index(tmp_path) == []
 
 
-def test_model_registry_document_with_an_explicit_schema_version_one_reads_the_same(
-    tmp_path: Path,
-):
-    """The reader's explicit-1 accept branch: a document stamped with the frozen ceiling's own
-    number, rather than left absent, is not a version this reader has never seen. No production
-    writer stamps the field (absence is the frozen default), so this plants it by rewriting the
-    record's own raw bytes, the same technique a document from before this store's version-1
-    reset is planted with elsewhere."""
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"weights")
-    ModelRegistry(str(tmp_path)).register_model("a", str(ckpt), {}, metrics_source=None)
-
-    key = registry_index_key(tmp_path)
-    raw = ts.read(key)
-    descriptor = ts.get_descriptor(MODEL_REGISTRY_STORE)
-    _damage_record(key, descriptor.codec.encode({**raw, "schema_version": 1}))
-
-    assert read_registry_index(tmp_path) == raw["entries"]
-
-
 def test_dataset_registry_composes_with_its_own_declaration(tmp_path: Path):
     root = tmp_path / "dataset"
     root.mkdir()

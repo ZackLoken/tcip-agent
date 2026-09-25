@@ -3,6 +3,9 @@ level beside ``model_source`` and ``data``. A nested ``training`` section is ref
 since a key under it would be read by nothing and the run would train at the trainer's own
 defaults in silence; there is no hoist and no precedence rule between two placements."""
 
+import pytest
+from pydantic import ValidationError
+
 from tcip_mcp.pipelines.schemas import (
     NESTED_TRAINING_SECTION_REFUSAL,
     StageSpec,
@@ -62,11 +65,11 @@ def test_the_trainer_reads_the_flat_config_as_given(tmp_path, monkeypatch):
     assert "training" not in run.config
 
 
-def test_stage_spec_declares_no_lr_field_but_tolerates_one():
-    # train() never reads a per-stage lr; the optimizer block sets LR. extra="allow" means a
-    # config carrying stage lr still validates.
-    assert "lr" not in StageSpec.model_fields
-    StageSpec.model_validate({"freeze_to": -1, "epochs": 5, "lr": 1e-3})  # tolerated
+def test_stage_spec_refuses_a_per_stage_lr():
+    """train() reads learning rates from the optimizer block alone, so a stage lr is refused."""
+    StageSpec.model_validate({"freeze_to": -1, "epochs": 5})
+    with pytest.raises(ValidationError, match="lr"):
+        StageSpec.model_validate({"freeze_to": -1, "epochs": 5, "lr": 1e-3})
 
 
 def test_model_source_refuses_an_undeclared_key_by_name():

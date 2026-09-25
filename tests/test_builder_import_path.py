@@ -132,7 +132,7 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
     status: dict = {}
     while time.monotonic() < deadline:
         status = monitor_training(res["experiment_id"])
-        if status.get("status") in ("completed", "failed", "cancelled"):
+        if status.get("status") in ("completed", "failed", "canceled"):
             break
         time.sleep(0.5)
     assert status.get("status") == "completed", status

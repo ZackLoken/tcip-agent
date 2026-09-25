@@ -141,14 +141,14 @@ def test_registry_path_for_recognizes_containment_through_a_symlinked_project_ro
     assert registry_path_for(dataset, alias) == "datasets/main"
 
 
-# ── project_roots (tcip_mcp.store_catalogue): reaches a relatively-registered dataset ───
+# ── project_roots (tcip_mcp.store_catalog): reaches a relatively-registered dataset ───
 
 
 def test_project_roots_reaches_a_relatively_registered_datasets_state(tmp_path: Path):
     """The dataset is registered under a subdirectory of the project, not the project's own
     tree, so a resolved entry can only come from the registry-driven root project_roots adds,
     never from the project root project_roots always adds regardless of the registry."""
-    from tcip_mcp.store_catalogue import project_roots
+    from tcip_mcp.store_catalog import project_roots
     from tcip_store.layout_claims import ROOT
 
     project = tmp_path / "proj"

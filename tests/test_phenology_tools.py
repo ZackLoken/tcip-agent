@@ -22,7 +22,6 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     NEAREST_MATCH_FACTOR,
-    NN_TOLERANCE_METERS,
     plant_mapping_key,
 )
 from tcip_mcp.traits import CENTER_MATCH, get_trait
@@ -79,6 +78,7 @@ def test_build_plant_mapping_wraps_build_and_persists(
         name=name,
         images_root=str(images_root),
         plant_registry=registry,
+        nn_tolerance_m=10.0,
     )
 
     assert "error" not in res, res
@@ -89,8 +89,8 @@ def test_build_plant_mapping_wraps_build_and_persists(
     assert res["n_images"] == 1
     assert res["n_mapped"] + res["n_unattributed"] == 1
     assert "2026-02-11" in res["per_date"]
-    assert res["nn_tolerance_m"] == {"value": NN_TOLERANCE_METERS, "source": "fallback"}
-    assert res["max_match_distance_m"] == pytest.approx(NN_TOLERANCE_METERS * NEAREST_MATCH_FACTOR)
+    assert res["nn_tolerance_m"] == {"value": 10.0, "source": "stated"}
+    assert res["max_match_distance_m"] == pytest.approx(10.0 * NEAREST_MATCH_FACTOR)
     persisted = ts.read(plant_mapping_key(tmp_path, name))
     assert list(persisted["assignments"].keys()) == ["2026-02-11"]
     assert persisted["assignments"]["2026-02-11"][0]["stem"] == "img1"
@@ -667,12 +667,12 @@ def test_deliver_phenology_milestones_refuses_unvalidated_classifier(tmp_path: P
 def _deliver_via_writer(
     *, trait: str, mapping_name: str, predictions_by_date: dict[str, str],
     output_csv_path: Path, classifier_pred_dirs: list[str] | None = None,
-    acknowledgement,
+    acknowledgment,
 ) -> dict:
     """Deliver through the canonical writer directly, built from the same reconciliation, basis
     and mapping ``deliver_phenology_milestones`` itself resolves before calling it.
 
-    Writer-level, not tool-level: the MCP tool takes no acknowledgement, so a test
+    Writer-level, not tool-level: the MCP tool takes no acknowledgment, so a test
     proving what an acknowledged, unvalidated delivery stamps on the CSV runs through this
     instead. The producer path (a real request through the web export route) is exercised by
     ``tests/test_tcip_web_results_routes.py``, not here.
@@ -708,7 +708,7 @@ def _deliver_via_writer(
 
     return phenology.write_phenology_csv(
         "test", result["rows"], Path(output_csv_path), spec, flags=flags,
-        acknowledgement=acknowledgement, basis=stated.basis,
+        acknowledgment=acknowledgment, basis=stated.basis,
         document_reconciliations={
             "operating_point": recon,
             "classifier_operating_point": {
@@ -721,7 +721,7 @@ def _deliver_via_writer(
 
 
 def test_an_acknowledged_delivery_stamps_the_unvalidated_dimension_false(tmp_path: Path) -> None:
-    from tcip_mcp.pipelines.resolution import Acknowledgement
+    from tcip_mcp.pipelines.resolution import Acknowledgment
 
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
@@ -740,8 +740,8 @@ def test_an_acknowledged_delivery_stamps_the_unvalidated_dimension_false(tmp_pat
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=out_csv,
-        acknowledgement=Acknowledgement(  # provisional delivery, clearly flagged
-            acknowledged_by="user:tester", reason="test acknowledgement"),
+        acknowledgment=Acknowledgment(  # provisional delivery, clearly flagged
+            acknowledged_by="user:tester", reason="test acknowledgment"),
     )
     assert cells["positive_state_classifier_validated"] == "false"
     assert out_csv.exists()
@@ -774,7 +774,7 @@ def test_deliver_phenology_milestones_refuses_asymmetric_validation(tmp_path: Pa
 
 
 def test_writer_acknowledge_stamps_each_dimension_independently(tmp_path: Path) -> None:
-    from tcip_mcp.pipelines.resolution import Acknowledgement
+    from tcip_mcp.pipelines.resolution import Acknowledgment
 
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
@@ -794,7 +794,7 @@ def test_writer_acknowledge_stamps_each_dimension_independently(tmp_path: Path) 
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=out_csv,
-        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="test acknowledgement"),
+        acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="test acknowledgment"),
     )
     assert cells["positive_state_classifier_validated"] == "false"  # never upgraded
     assert cells["operating_point_validated"] == "held_out_annotations"
@@ -863,15 +863,15 @@ def test_writer_acknowledged_tile_size_floors_the_csv_operating_point_stamp(
 ) -> None:
     """The CSV's operating_point_validated column is the count operating point's only count-side
     stamp, and the tile scale has no column of its own. A delivery whose tile edge only shipped
-    through an acknowledgement must not read as fully validated there."""
+    through an acknowledgment must not read as fully validated there."""
     import csv
 
-    from tcip_mcp.pipelines.resolution import Acknowledgement
+    from tcip_mcp.pipelines.resolution import Acknowledgment
 
     args = _tile_gate_fixture(tmp_path, _tiled("false"))
     cells = _deliver_via_writer(
-        **args, acknowledgement=Acknowledgement(acknowledged_by="user:tester",
-                                                reason="test acknowledgement"))
+        **args, acknowledgment=Acknowledgment(acknowledged_by="user:tester",
+                                                reason="test acknowledgment"))
     assert cells["operating_point_validated"] == "false"
     rows = list(csv.DictReader(Path(args["output_csv_path"]).open(encoding="utf-8")))
     assert rows and all(r["operating_point_validated"] == "false" for r in rows)
@@ -881,16 +881,16 @@ def test_writer_acknowledged_tile_size_floors_the_csv_classifier_stamp(
     tmp_path: Path,
 ) -> None:
     """The classifier column has no less claim on the tile scale's floor than the count operating
-    point's own column does: a tile edge that only shipped through an acknowledgement must not
+    point's own column does: a tile edge that only shipped through an acknowledgment must not
     let a genuinely-validated classifier read as fully validated beside it."""
     import csv
 
-    from tcip_mcp.pipelines.resolution import Acknowledgement
+    from tcip_mcp.pipelines.resolution import Acknowledgment
 
     args = _tile_gate_fixture(tmp_path, _tiled("false"))
     cells = _deliver_via_writer(
-        **args, acknowledgement=Acknowledgement(acknowledged_by="user:tester",
-                                                reason="test acknowledgement"))
+        **args, acknowledgment=Acknowledgment(acknowledged_by="user:tester",
+                                                reason="test acknowledgment"))
     assert cells["positive_state_classifier_validated"] == "false"
     rows = list(csv.DictReader(Path(args["output_csv_path"]).open(encoding="utf-8")))
     assert rows and all(r["positive_state_classifier_validated"] == "false" for r in rows)
@@ -2271,9 +2271,9 @@ def test_writer_delivers_a_forged_stamp_acknowledged_with_no_producer_names(
     """A stamp claiming validation no record answers for floors the count, and the acknowledged
     CSV says the producer is unknown instead of repeating the names the stamp asserted for itself.
 
-    Delivered through ``_deliver_via_writer`` (the MCP tool takes no acknowledgement).
+    Delivered through ``_deliver_via_writer`` (the MCP tool takes no acknowledgment).
     """
-    from tcip_mcp.pipelines.resolution import Acknowledgement, update_sidecar
+    from tcip_mcp.pipelines.resolution import Acknowledgment, update_sidecar
 
     mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256="a" * 64)
@@ -2292,7 +2292,7 @@ def test_writer_delivers_a_forged_stamp_acknowledged_with_no_producer_names(
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=out_csv,
         classifier_pred_dirs=[str(d1)],
-        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="test acknowledgement"),
+        acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="test acknowledgment"),
     )
 
     assert cells["operating_point_validated"] == "false"

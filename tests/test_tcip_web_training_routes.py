@@ -23,7 +23,7 @@ def _wait_terminal(experiment_id: str, deadline_s: float = 60) -> dict:
     status: dict = {}
     while time.monotonic() < deadline:
         status = monitor_training(experiment_id)
-        if status.get("status") in ("failed", "completed", "cancelled"):
+        if status.get("status") in ("failed", "completed", "canceled"):
             return status
         time.sleep(0.2)
     return status

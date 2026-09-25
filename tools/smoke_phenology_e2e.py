@@ -261,7 +261,7 @@ def main() -> int:
             from tcip_mcp.pipelines.postprocessing import plant_mapping as _plant_mapping
             check("mapping persisted", bool(_plant_mapping.load_mapping(root, mapping_name)))
 
-            # No MCP tool takes an acknowledgement; only the Results tab's export does.
+            # No MCP tool takes an acknowledgment; only the Results tab's export does.
             # This bucket's sidecar was never validated, so the door refuses unconditionally.
             print("\nStep 2: deliver_phenology_milestones refuses an unacknowledgeable unvalidated delivery")
             csv_out = root / "delivery" / "bud_phenology.csv"
@@ -274,7 +274,7 @@ def main() -> int:
                 output_csv_path=str(csv_out),
                 plants=plants,
             )
-            check("refused (no acknowledgement route exists on this tool)", "error" in r, str(r))
+            check("refused (no acknowledgment route exists on this tool)", "error" in r, str(r))
             # The tool refuses on the positive class before ever reaching the classifier gate, so
             # a classifier-gate refusal (not the earlier one) proves every bucket resolved it.
             check("positive_class_assessed true (else the tool would refuse on the class instead)",
@@ -320,7 +320,7 @@ def main() -> int:
             export = client.post("/api/results/export_csv", json={
                 **body, "payload": "milestones", "filename": "bud_phenology_ack.csv",
                 "user": "user:smoketest",
-                "acknowledgement": {"reason": "smoke run over an uncalibrated scene"},
+                "acknowledgment": {"reason": "smoke run over an uncalibrated scene"},
             })
             check("export_csv delivers the acknowledged CSV (200)",
                   export.status_code == 200, export.text)
@@ -335,8 +335,8 @@ def main() -> int:
                     cell = delivered_rows[0]
                     check("acknowledged_by carries the acting user",
                           cell.get("acknowledged_by") == "user:smoketest", str(cell))
-                    check("acknowledgement_reason carries the stated reason",
-                          cell.get("acknowledgement_reason") == "smoke run over an uncalibrated scene",
+                    check("acknowledgment_reason carries the stated reason",
+                          cell.get("acknowledgment_reason") == "smoke run over an uncalibrated scene",
                           str(cell))
                     check("operating_point_validated stamps false (never silently upgraded)",
                           cell.get("operating_point_validated") == "false", str(cell))
@@ -351,7 +351,7 @@ def main() -> int:
                 check("the delivery event carries acknowledged_by",
                       record.get("acknowledged_by") == "user:smoketest", str(record))
                 check("the delivery event carries the reason",
-                      record.get("acknowledgement_reason") == "smoke run over an uncalibrated scene",
+                      record.get("acknowledgment_reason") == "smoke run over an uncalibrated scene",
                       str(record))
         finally:
             if _saved_platform_root is None:

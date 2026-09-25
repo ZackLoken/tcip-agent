@@ -1,33 +1,23 @@
-"""Trait knowledge, the human-defined *semantics* of each measurable trait (Tier C).
+"""Trait knowledge, the human-defined semantics of each measurable trait.
 
-Most fields here are things the domain expert defines once per trait and the agent *reads*, never
-derives, never re-asks per dataset (CLAUDE.md: the human defines a trait's intent/semantics; the
-agent derives the operating points that realize it). Keeping them in one place, versioned with the
-code, stops a measurement definition from living only in a session's memory.
+Most fields here are things the domain expert defines once per trait and the agent reads, never
+derives, never re-asks per dataset.
 
-Two fields are a different shape, by design, neither is authored blind: ``localization`` (what
-"finding one" means) has no default at all, it is derived once from real GT the first time it's
-needed and recorded (a genuine geometric fact about the object's scale, computable from data, see
-``pipelines.derivations.derive_localization_kind``). ``count_objective`` (what the phenotype *is*,
-hence what the operating point optimizes) *does* have a platform default (``COUNT_UNBIASED``,
-errors canceling is the right tolerance for a fraction/ratio phenotype, the common case), used when
-the breeder hasn't decided yet, rather than refusing to calibrate at all: nobody can meaningfully
-answer what a delivered number needs to be reliable for before any result exists to judge it
-against, so the real confirmation point is the delivered result itself (the review-confirmation
-loop), not a blind precondition. ``count_objective`` is an authored field: once a real answer is recorded, it moves through
-``revise_trait_spec`` with a rationale, restating the trait spec's own authoring statement for
-the breeder's re-confirmation. ``localization`` is carried forward, never authored, and stays on
-the plain ``write_trait_spec_fields``. Both are read from the recorded value on every later call.
-A trait whose config omits either field must resolve its own default or derivation, never
-silently inherit another trait's value. ``resolve_operating_point``
-stamps whether a given run's ``count_objective`` was trait-authored or the platform default, so the
-distinction is never silently lost downstream.
+Two fields are a different shape: ``localization`` (what "finding one" means) has no default at
+all; it is derived once from real GT the first time it's needed and recorded
+(``pipelines.derivations.derive_localization_kind``). ``count_objective`` (what the phenotype is,
+hence what the operating point optimizes) has a platform default (``COUNT_UNBIASED``, errors
+canceling is the right tolerance for a fraction/ratio phenotype, the common case), used when the
+breeder hasn't decided yet. ``count_objective`` is an authored field: once a real answer is
+recorded, it moves through ``revise_trait_spec`` with a rationale, restating the trait spec's own
+authoring statement for the breeder's re-confirmation. ``localization`` is carried forward, never
+authored, and stays on the plain ``write_trait_spec_fields``. Both are read from the recorded value
+on every later call. ``resolve_operating_point`` stamps whether a given run's ``count_objective``
+was trait-authored or the platform default.
 
-Everything else in ``TraitSpec`` says: which subject in ``subjects.json`` is the positive/target state,
-the milestone convention, and the tile-seam sliver policy, genuinely authored-once breeder facts.
-Operating-point *values* (conf, IoU, tolerances) and the CV task / pipeline decomposition (detection
-vs classification, one model vs detect-then-classify) are deliberately absent from this whole class,
-those the agent derives and validates per dataset at runtime, the same way the values are.
+Everything else in ``TraitSpec`` says: which subject in ``subjects.json`` is the positive/target
+state, the milestone convention, and the tile-seam sliver policy. Operating-point values (conf,
+IoU, tolerances) and the CV task / pipeline decomposition are absent from this class.
 """
 
 from __future__ import annotations
@@ -115,12 +105,10 @@ class TraitSpec:
     # Milestone crossing fractions and the quantity they cross.
     milestone_fractions: tuple[float, ...] = ()
     milestone_on: str = ""  # e.g. "positive_fraction"
-    # The "majority" milestone (a crops.yml date such as "most pistillate flowers have opened")
-    # maps to this crossing key (e.g. "95per"); read-semantics, not a frozen literal in phenology.py.
+    # The crossing key (e.g. "95per") the crops.yml majority-date milestone maps to.
     majority_milestone: str = ""
-    # Marks the majority crossing mapping as not yet breeder-confirmed; the delivered column
-    # spells the same fact crossing_unconfirmed while this stored key keeps its older word.
-    majority_provisional: bool = False
+    # The majority crossing mapping is not yet breeder-confirmed.
+    crossing_unconfirmed: bool = False
     # Phenology CSV column vocabulary: the milestone-column prefix and the label the majority
     # alias/crossing-unconfirmed columns carry, so the delivered schema derives its own names.
     phenology_prefix: str = ""
@@ -237,9 +225,7 @@ def crops_yml_path() -> Path:
 
 
 def _crops_traits() -> list[dict]:
-    """The raw crops.yml trait records, or [] if it can't be read, the one YAML load every
-    crops.yml-derived reader (vocab, units, the skill guardrail) shares, never re-parsed per
-    reader. A caller that cannot act on an empty vocabulary checks for one and refuses."""
+    """The raw crops.yml trait records, or [] if it can't be read."""
     try:
         import yaml
 
@@ -258,10 +244,6 @@ def _crops_vocab() -> set[str]:
 def registered_crops() -> set[str]:
     """Every crop name crops.yml declares (the union of each trait's own ``crops`` list), or an
     empty set if it can't be read.
-
-    The platform's registered crop vocabulary, not a test's: a fixture or a smoke script that
-    needs a real ``crop`` for ``register_dataset`` reads one from here rather than spelling one
-    of its own.
     """
     return {c for t in _crops_traits() for c in t.get("crops", []) if isinstance(c, str)}
 
@@ -284,40 +266,33 @@ def crops_length_units() -> set[str]:
     """The subset of :func:`crops_units`'s own declared units that are linear length units.
 
     Picked out of whatever crops.yml actually declares by a dimensional rule (a unit symbol that
-    names a metric length), never a hand list of which traits use one: a mass unit (``g``/``kg``) or
-    a mass-ratio concentration (``ug/g``) is never a length regardless of how a trait spells it, and
-    a per-pixel physical scale (a length-per-pixel quantity) is refused in any other unit."""
+    names a metric length): a mass unit (``g``/``kg``) or a mass-ratio concentration (``ug/g``) is
+    never a length regardless of how a trait spells it.
+    """
     return {u for u in crops_units().values() if u in _METRIC_LENGTH_UNITS}
 
 
 def crops_definitions() -> dict[str, str]:
-    """trait name -> crops.yml's declared definition, for every trait that carries one.
-
-    The breeder's own wording for what a delivered phenotype is. A surface that has to show a
-    breeder what a number means quotes this rather than paraphrasing it, so the vocabulary the
-    breeder reads is the vocabulary the vocabulary file holds.
+    """trait name -> crops.yml's declared definition, for every trait that carries one: the
+    breeder's own wording for what a delivered phenotype is.
     """
     return {t["name"]: t["definition"] for t in _crops_traits() if isinstance(t.get("definition"), str)}
 
 
 def _spec_from_config(data: dict, vocab: set[str]) -> tuple[TraitSpec | None, str | None]:
-    """Build a ``TraitSpec`` from one breeder-authored config dict, cross-checked against ``vocab``.
+    """Build a ``TraitSpec`` from one complete spec record, every ``TraitSpec`` field stated,
+    cross-checked against ``vocab``.
 
-    Rejects (returns ``(None, reason)``) a spec with no ``name``, an unknown field, or a
-    ``delivers`` that is empty or names a phenotype absent from crops.yml, so a config file can
-    never introduce a fabricated trait definition. Registering a real new trait means its delivered
-    outputs are all in the controlled vocabulary. ``reason`` is the same text logged as a warning,
-    the one place that wording is authored, so a caller surfacing it (an API response, a
-    write_trait_spec_fields refusal, ``tcip doctor``) never re-derives its own explanation.
+    A record lacking a field raises ``KeyError`` naming it. Rejects (returns ``(None, reason)``)
+    an invalid ``name``, an unknown field, or a ``delivers`` that is empty or names a phenotype
+    absent from crops.yml. ``reason`` is the same text logged as a warning.
 
-    A ``schema_version`` key is not a ``TraitSpec`` field; the store seam already enforces its
-    ceiling on every read (``tcip_store.schema_version.check_schema_version``, run inside
-    ``read_versioned`` before this function ever sees the document), so it is stripped here
-    rather than checked again.
+    A ``schema_version`` key is not a ``TraitSpec`` field; the store seam enforces its ceiling on
+    every read, so it is stripped here.
     """
-    name = data.get("name")
+    name = data["name"]
     if not isinstance(name, str) or not name:
-        reason = f"missing/invalid 'name' ({name!r})"
+        reason = f"invalid 'name' ({name!r})"
         logger.warning("trait spec skipped: %s", reason)
         return None, reason
     data = {k: v for k, v in data.items() if k != "schema_version"}
@@ -326,13 +301,15 @@ def _spec_from_config(data: dict, vocab: set[str]) -> tuple[TraitSpec | None, st
         reason = f"unknown field(s) {sorted(unknown)}"
         logger.warning("trait spec %r skipped: %s", name, reason)
         return None, reason
-    delivers = data.get("delivers") or []
+    kwargs: dict[str, Any] = {
+        k: (tuple(data[k]) if k in _TUPLE_FIELDS else data[k]) for k in sorted(_SPEC_FIELDS)}
+    delivers = kwargs["delivers"]
     off_vocab = [d for d in delivers if d not in vocab]
     if not delivers or off_vocab:
         reason = f"delivers must be non-empty and all in crops.yml (off-vocab: {off_vocab})"
         logger.warning("trait spec %r skipped: %s", name, reason)
         return None, reason
-    floor = data.get("holdout_match_quality_floor")
+    floor = kwargs["holdout_match_quality_floor"]
     if floor is not None and not (isinstance(floor, (int, float)) and 0 < floor <= 1):
         reason = f"holdout_match_quality_floor must be in (0, 1], got {floor!r}"
         logger.warning("trait spec %r skipped: %s", name, reason)
@@ -342,14 +319,7 @@ def _spec_from_config(data: dict, vocab: set[str]) -> tuple[TraitSpec | None, st
     # operating_point.COUNT_OBJECTIVE_PICKERS. resolve_operating_point refuses at resolution time
     # if the name has no registered picker, which is the honest place for that check to live (it
     # needs the picker registry; this module stays torch-free and doesn't import it).
-    # data is arbitrary breeder-authored config; TraitSpec's constructor is the real gate (raises
-    # TypeError on an unknown or missing field), so values are typed Any rather than validated here.
-    kwargs: dict[str, Any] = {k: (tuple(v) if k in _TUPLE_FIELDS else v) for k, v in data.items()}
-    try:
-        return TraitSpec(**kwargs), None
-    except TypeError as e:
-        logger.warning("trait spec %r skipped: %s", name, e)
-        return None, str(e)
+    return TraitSpec(**kwargs), None
 
 
 # ── the trait-spec store ─────────────────────────────────────────────────────
@@ -358,9 +328,8 @@ def _spec_from_config(data: dict, vocab: set[str]) -> tuple[TraitSpec | None, st
 def trait_specs_dir(project_root: str | Path | None = None) -> Path:
     """Where a project's trait specs live: ``<root>/.tcip/state/trait_specs``.
 
-    The one implementation of that placement. ``project_root`` names the project explicitly, for a
-    caller (the web backend, the ``doctor`` command) that serves more than one project per process;
-    omitting it resolves against this process's pinned platform root.
+    ``project_root`` names the project explicitly; omitting it resolves against this process's
+    pinned platform root.
     """
     if project_root is not None:
         return Path(project_root) / _TRAIT_SPECS_RELPATH
@@ -379,13 +348,8 @@ def _resolve_specs_dir(specs_dir: Path | None, project_root: str | Path | None) 
 
 
 def _trait_specs_state_root(specs_dir: Path) -> Path:
-    """The shared ``.tcip/state`` root this store's records actually key against.
-
-    Refuses rather than silently answering from the wrong place: the locator's own
-    ``trait_specs`` prefix is fixed, so ``specs_dir.parent`` is only the right root when
-    ``specs_dir`` is genuinely named ``trait_specs``. A caller that names anything else (a typo,
-    a deliberate rename) would otherwise be read and written against the real ``trait_specs``
-    directory with no refusal anywhere in the path.
+    """The ``.tcip/state`` root the store keys against; refuses a ``specs_dir`` not named
+    ``trait_specs``.
     """
     if specs_dir.name != "trait_specs":
         raise ValueError(
@@ -397,8 +361,6 @@ def _trait_specs_state_root(specs_dir: Path) -> Path:
 
 
 TRAIT_SPECS_STORE = "trait_specs"
-# Every write stamps this ceiling; trait_spec_unconformed refuses a stored record with no stamp
-# or 1.
 TRAIT_SPEC_SCHEMA_VERSION = 2
 _SPEC_FILE = RootedFileLocator(prefix=("trait_specs",), suffix=SPEC_SUFFIX)
 register_store(
@@ -420,11 +382,8 @@ def trait_spec_key(specs_dir: str | Path, trait_name: str) -> Key:
     """One trait's spec record under a spec directory.
 
     The key's root is the shared ``.tcip/state`` directory ``specs_dir`` names (via
-    :func:`_trait_specs_state_root`), the same root every sibling project-state store hangs off;
-    the locator's own ``trait_specs`` prefix supplies the rest of the on-disk placement.
-    Enumeration answers over the records themselves. :func:`write_trait_spec_fields` merges
-    compare-and-set against the version it read, so a field another writer recorded is never
-    dropped.
+    :func:`_trait_specs_state_root`); the locator's own ``trait_specs`` prefix supplies the rest of
+    the on-disk placement. Enumeration answers over the records themselves.
     """
     return Key(TRAIT_SPECS_STORE, str(_trait_specs_state_root(Path(specs_dir))), (trait_name,))
 
@@ -434,43 +393,13 @@ def _spec_filename(specs_dir: Path, trait_name: str) -> str:
     return _SPEC_FILE.relative_path(str(specs_dir), (trait_name,)).name
 
 
-def trait_spec_unconformed(document: dict) -> str | None:
-    """Why a stored ``trait_specs`` record predates the subject-registry rename, else ``None``.
-
-    A mapping with no ``schema_version`` key, or with ``1``, was never written by ``_encode_spec``'s
-    unconditional stamp: either a record written before the rename (``positive_class_name`` is now
-    ``positive_value``), restated through ``author_trait_spec`` with the caller supplying every
-    field the spec carries, or a hand-authored file with no stamp, conformed by hand
-    (``"schema_version": 2`` and ``positive_value`` in place of ``positive_class_name``). Distinct
-    from the seam's own too-new refusal (``SchemaVersionRefused``, ``kind: "version_refused"``):
-    that is a document above this store's declared ceiling; this is a document at or under it whose
-    shape the ceiling alone does not describe, since a field renamed rather than the store gaining a
-    version.
-    """
-    version = document.get("schema_version")
-    if version is None or version == 1:
-        return (
-            "this trait spec record predates the subject-registry rename (positive_class_name is "
-            "now positive_value) and carries no schema_version: 2 stamp; a stored record is "
-            "restated by the agent through its author_trait_spec tool, supplying every field the "
-            "spec carries, which leaves a fresh unconfirmed statement for the breeder to confirm "
-            "in the Results tab; a hand-authored file is conformed by adding "
-            "\"schema_version\": 2 and renaming positive_class_name to positive_value, after "
-            "which the trait's statement reads as stale until restated and re-confirmed; either "
-            "way a confirmed operationalization reads as stale until re-confirmed"
-        )
-    return None
-
-
 def load_trait_specs_with_errors(
     specs_dir: Path | None = None, *, project_root: str | Path | None = None,
 ) -> tuple[list[TraitSpec], list[dict]]:
     """Same scan as :func:`load_trait_specs`, plus the file/reason for every spec skipped.
 
-    This is the one place that detail exists; a caller that needs to tell a breeder or the agent
-    which spec is broken and why (the Results API, the ``doctor`` command) reads it from here
-    rather than re-deriving its own explanation or grepping logs. Either name the project whose
-    registry to read (``project_root``) or the directory itself; the placement is resolved here.
+    Either name the project whose registry to read (``project_root``) or the directory itself; the
+    placement is resolved here.
     """
     directory = _resolve_specs_dir(specs_dir, project_root)
     errors: list[dict] = []
@@ -495,11 +424,6 @@ def load_trait_specs_with_errors(
             logger.warning("trait spec %s skipped: %s", filename, reason)
             errors.append({"file": filename, "reason": reason})
             continue
-        unconformed_reason = trait_spec_unconformed(data)
-        if unconformed_reason is not None:
-            logger.warning("trait spec %s skipped: %s", filename, unconformed_reason)
-            errors.append({"file": filename, "reason": unconformed_reason, "kind": "unconformed"})
-            continue
         spec, reason = _spec_from_config(data, vocab)
         if spec is not None:
             specs.append(spec)
@@ -513,10 +437,13 @@ def load_trait_specs(
 ) -> list[TraitSpec]:
     """Breeder-authored per-trait spec records (``<root>/.tcip/state/trait_specs/*.json``), each
     cross-checked against the crops.yml controlled vocab. A project with no trait spec on record
-    yields none; an invalid or fabricated spec is skipped (so ``get_trait`` later hard-fails
-    honestly rather than serving it). See :func:`load_trait_specs_with_errors` for why each
-    skipped spec was skipped."""
-    specs, _errors = load_trait_specs_with_errors(specs_dir, project_root=project_root)
+    yields none. Raises ``ValueError`` naming every spec record that did not load and why
+    (:func:`load_trait_specs_with_errors` answers them as a list instead).
+    """
+    specs, errors = load_trait_specs_with_errors(specs_dir, project_root=project_root)
+    if errors:
+        named = "; ".join(f"{e['file']}: {e['reason']}" for e in errors)
+        raise ValueError(f"trait spec record(s) did not load ({named}); repair or re-author them")
     return specs
 
 
@@ -537,11 +464,8 @@ def write_trait_spec_fields(
 ) -> TraitSpec:
     """Update one or more fields on an already-registered trait spec, returning it as written.
 
-    ``rationale`` and ``relayed_note`` feed the trait-spec authoring statement this call states
-    or restates. A thin wrapper over :func:`revise_trait_spec_fields`, which holds the
-    compare-and-set loop and the trait-spec statement it restates; the ``revise_trait_spec`` MCP
-    tool calls that function directly for its fuller return, while the derived localization kind
-    and every other field-only caller keep calling this one for its plain ``TraitSpec``.
+    ``rationale`` and ``relayed_note`` feed the trait-spec authoring statement this call states or
+    restates, through :func:`revise_trait_spec_fields`.
     """
     return revise_trait_spec_fields(
         trait_name, fields_, specs_dir, project_root=project_root,
@@ -558,61 +482,35 @@ def revise_trait_spec_fields(
     trait-spec authoring statement when the update calls for it.
 
     Refuses (raises ``ValueError``) if the trait has no spec record on file: creating one is
-    ``author_trait_spec``'s job. Refuses a caller-supplied ``schema_version`` in ``fields_``: it
-    is not a ``TraitSpec`` field, no caller sets it directly, and merging it in would let a
-    config editor stamp a version the store seam never validated; the encoder stamps the current
-    ceiling on every write regardless, so no caller-supplied value could ride through anyway.
-    Refuses a stored record :func:`trait_spec_unconformed` answers a reason for, before any merge;
-    the restatement door for such a record is :func:`author_trait_spec`, never this one.
-    A ``rationale`` that is given must say something, checked before any read.
+    ``author_trait_spec``'s job. Refuses a caller-supplied ``schema_version`` in ``fields_``. A
+    ``rationale`` that is given must say something, checked before any read.
 
-    The statements scope this reads and writes is :func:`trait_spec_statements_scope` (project_root)
-    whenever ``project_root`` is given or neither argument is (the pinned root, where
-    ``trait_specs_dir(None)`` and ``trait_spec_statements_scope(None)`` resolve under one state
-    directory), and :func:`_trait_specs_state_root` (directory) only for a ``specs_dir`` caller,
-    which no production code is. The two coincide except under a monkeypatched
-    ``_TRAIT_SPECS_RELPATH``, which ``tests/test_trait_authoring.py``'s revise-tool test exercises.
+    The statements scope this reads and writes is :func:`trait_spec_statements_scope`
+    (project_root) whenever ``project_root`` is given or neither argument is, and
+    :func:`_trait_specs_state_root` (directory) for a ``specs_dir`` caller.
 
     The read, the merge, the validation and the spec write are one compare-and-set against the
-    version read, retried on conflict against whatever landed meanwhile; the candidate is parsed
-    once here to decide whether to refuse and what moved, and a second time inside
-    :func:`_validate_and_write_spec` on the write itself, the cost of keeping that one shared
-    write path. ``moved`` is whether the merge changes any of ``_AUTHORED_SPEC_FIELDS`` from
-    what is on file now, both sides parsed through :func:`_spec_from_config` so a field merely
-    restated at its own value never reads as moved; a stored record the parser refuses has no
-    parsed values to compare, so ``moved`` reads true for it whatever ``fields_`` names, naming
+    version read, retried on conflict against whatever landed meanwhile. ``moved`` is whether the
+    merge changes any of ``_AUTHORED_SPEC_FIELDS`` from what is on file now, both sides parsed
+    through :func:`_spec_from_config`; a stored record the parser refuses reads as moved, naming
     the authored keys in ``fields_`` when there are any and otherwise saying the stored record's
-    authored values could not be read. ``stale`` is whether the
-    trait-spec statement on file, if any, is absent or no longer matches the candidate
-    (:func:`trait_spec_statement_stale`). A call that moves an authored field over a trait
-    carrying a statement and gives no rationale refuses by name, naming the fields that moved,
-    before any write; every other combination writes the spec.
+    authored values could not be read. ``stale`` is whether the trait-spec statement on file, if
+    any, is absent or no longer matches the candidate (:func:`trait_spec_statement_stale`). A call
+    that moves an authored field over a trait carrying a statement and gives no rationale refuses
+    by name, naming the fields that moved, before any write; every other combination writes the
+    spec.
 
-    A rationale-bearing call then states or restates the trait-spec statement whenever no
-    statement is on file, the one on file is stale, or this call moved an authored field (a spec
-    moved past its confirmed statement by a raw write and then restated back to those same
-    confirmed values still needs a fresh statement and the breeder's second look, since ``moved``
-    is a condition of its own and is never folded into ``stale``); a current, unmoved statement
-    is left alone, and a rationale-less call never touches the statement at all, which is what
-    the derived localization kind's and every other carried-forward write's call relies on.
-    ``relayed_note`` is taken fresh on every statement written here, never carried forward from
-    the one it replaces, since a remark about the old values says nothing about the new ones.
-    The statement write is its own compare-and-set: on conflict, the spec on file is re-read and
-    compared to what this call wrote by authored snapshot; a different snapshot means a
-    concurrent revision to other values landed after this call's own write, and the restatement
-    is abandoned, since a concurrent writer that itself restates leaves its own statement current
-    and one that does not leaves a stale pair the read-time predicate, the doctor and this
-    refusal each catch on their own; an unchanged snapshot retries the statement write against
-    whatever is on file now, creating fresh when the statement was deleted meanwhile. No branch
-    ever leaves a statement whose snapshot already equals this call's own: such a record can only
-    be the old confirmed statement or a confirmation of it landing in the same window, and either
-    way this call's own rationale is what belongs on record for it.
+    A rationale-bearing call then states or restates the trait-spec statement whenever no statement
+    is on file, the one on file is stale, or this call moved an authored field; a current, unmoved
+    statement is left alone, and a rationale-less call never touches the statement at all.
+    ``relayed_note`` is taken fresh on every statement written here, never carried forward from the
+    one it replaces. The statement write is its own compare-and-set: on conflict, the spec on file
+    is re-read and compared to what this call wrote by authored snapshot; a different snapshot
+    abandons the restatement, and an unchanged snapshot retries the statement write against
+    whatever is on file now, creating fresh when the statement was deleted meanwhile.
 
-    Two keys in two stores are never written atomically: a crash between the spec write and the
-    statement write, or a no-rationale authored write racing this call's own statement create in
-    either ordering, can leave a spec whose statement is stale with no version conflict on either
-    side. Both are read-time facts the delivery refusal, the doctor and this function's own
-    no-rationale refusal each catch on their own, never assumed away here.
+    The spec and its statement live in two stores and are never written atomically; a spec whose
+    statement is stale is a read-time fact the delivery refusal and the doctor catch.
     """
     if "schema_version" in fields_:
         raise ValueError(
@@ -641,11 +539,6 @@ def revise_trait_spec_fields(
         if not isinstance(data, dict):
             filename = _spec_filename(directory, trait_name)
             raise ValueError(f"{directory / filename} is not a valid trait spec (not a mapping)")
-        unconformed_reason = trait_spec_unconformed(data)
-        if unconformed_reason is not None:
-            raise ValueError(
-                f"update to trait spec {trait_name!r} refused: {unconformed_reason}"
-            )
 
         merged = dict(data)
         merged.update(fields_)
@@ -730,12 +623,8 @@ def revise_trait_spec_fields(
         except VersionConflict:
             spec_reread = ts.read_versioned(spec_key, default=None)
             reread_data = spec_reread.value
-            # This call's own write just stamped reread_data, so trait_spec_unconformed(reread_data)
-            # cannot answer a reason here; called anyway for symmetry with the other stored reads.
             reread_spec = (
-                _spec_from_config(reread_data, vocab)[0]
-                if isinstance(reread_data, dict) and trait_spec_unconformed(reread_data) is None
-                else None
+                _spec_from_config(reread_data, vocab)[0] if isinstance(reread_data, dict) else None
             )
             if (
                 reread_spec is None
@@ -753,13 +642,8 @@ def revise_trait_spec_fields(
 
 def _encode_spec(spec: TraitSpec) -> dict[str, Any]:
     """An already-valid ``TraitSpec`` as the JSON-safe mapping the store's codec accepts: every
-    tuple field becomes a list, plus the current ``schema_version`` stamp. The one encoding every
-    trait-spec writer and reader shares.
-
-    ``TraitSpec`` itself carries no ``schema_version`` field: the store seam's ceiling check runs
-    on the raw document, not the dataclass. Every write stamps ``TRAIT_SPEC_SCHEMA_VERSION``
-    unconditionally, so a record this encoder ever touches always carries the current ceiling;
-    :func:`trait_spec_unconformed` is what refuses one that predates this encoder.
+    tuple field becomes a list, plus the ``schema_version`` stamp the store seam's ceiling check
+    reads.
     """
     encoded = {
         k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(spec).items()
@@ -769,27 +653,19 @@ def _encode_spec(spec: TraitSpec) -> dict[str, Any]:
 
 
 def _write_spec_record(key: Key, spec: TraitSpec, *, expect: ts.Version | None) -> None:
-    """Encode an already-valid ``TraitSpec`` and write it to ``key`` under compare-and-set at
-    ``expect``. Never validates: the caller either built ``spec`` through ``_spec_from_config``
-    already or otherwise guarantees it is legal."""
+    """Encode ``spec`` and write it to ``key`` under compare-and-set at ``expect``; ``spec`` is
+    written as given, never validated here."""
     ts.replace(key, _encode_spec(spec), expect=expect)
 
 
 def _validate_and_write_spec(
     key: Key, data: dict, *, expect: ts.Version | None,
 ) -> tuple[TraitSpec | None, str | None]:
-    """Validate ``data`` as a trait spec against the crops.yml vocabulary and, if legal, encode
-    and write it to ``key`` under compare-and-set at ``expect``.
+    """Validate ``data`` as a trait spec against the crops.yml vocabulary and, if legal, encode and
+    write it to ``key`` under compare-and-set at ``expect``.
 
-    Returns ``(spec, None)`` on success or ``(None, reason)`` when ``data`` fails validation, so
-    each caller states the refusal in its own words around the same failure rather than this
-    function picking one wording for all of them. Raises ``VersionConflict`` if another writer
-    landed at ``key`` since ``expect`` was read.
-
-    The one write every trait-spec writer shares: ``revise_trait_spec_fields``'s compare-and-set
-    loop, ``author_trait_spec``'s single cas attempt, and the test producer
-    ``_operationalization_fixtures.write_spec`` all call this rather than repeating the
-    validate-encode-write shape.
+    Returns ``(spec, None)`` on success or ``(None, reason)`` when ``data`` fails validation.
+    Raises ``VersionConflict`` if another writer landed at ``key`` since ``expect`` was read.
     """
     spec, reason = _spec_from_config(data, _crops_vocab())
     if spec is None:
@@ -810,7 +686,7 @@ def _no_spec_error(trait_name: str, directory: Path) -> ValueError:
 
 _AUTHORED_SPEC_FIELDS = (
     "delivers", "positive_value", "milestone_fractions", "milestone_on", "majority_milestone",
-    "majority_provisional", "phenology_prefix", "majority_label", "count_objective",
+    "crossing_unconfirmed", "phenology_prefix", "majority_label", "count_objective",
     "count_bias_tolerance_frac", "count_error_tolerance", "classifier_agreement_floor",
     "ordinal_agreement_floor", "regression_skill_floor", "scale_tolerance_frac",
     "holdout_match_quality_floor", "notes",
@@ -821,45 +697,8 @@ of ``TraitSpec`` is not here."""
 
 def _statement_snapshot(spec: TraitSpec) -> dict[str, Any]:
     """The comparable snapshot a trait-spec statement's own ``statement_fields`` holds: every
-    authored field's canonical value. Shared by ``author_trait_spec``, ``revise_trait_spec_fields``
-    and :func:`trait_spec_statement_stale`, so the three sites cannot disagree over what a
-    statement's own fields snapshot means."""
+    authored field's canonical value."""
     return {field: canonical(getattr(spec, field)) for field in _AUTHORED_SPEC_FIELDS}
-
-
-_RETIRED_SPEC_FIELD_NAMES = {"positive_value": "positive_class_name"}
-"""An authored field's name before the subject-registry rename, the one rename
-:func:`trait_spec_unconformed` exists for: a pre-rename record's ``positive_value`` reads back
-under this retired key. Consulted only by :func:`_spec_replaced_values`, when ``author_trait_spec``
-restates a record :func:`trait_spec_unconformed` answers a reason for."""
-
-
-def _spec_replaced_values(
-    old: dict[str, Any], authored: dict[str, Any],
-) -> dict[str, dict[str, Any]]:
-    """Every authored field whose value in ``old`` (a stored record predating the
-    subject-registry rename) differs from the value ``author_trait_spec`` is about to write,
-    each as ``{"recorded": <old>, "authored": <new>}`` in canonical form.
-
-    A pre-rename field is read from its retired name (:data:`_RETIRED_SPEC_FIELD_NAMES`) when the
-    current name is absent from ``old``, so the renamed ``positive_class_name``/``positive_value``
-    pair compares the same underlying value under its two names rather than reading as an
-    always-missing field. A field ``old`` never carried under either name reads as
-    ``recorded: None``, the same as one it stored as null. ``authored`` is the statement snapshot
-    of the parsed spec, so the ``authored`` side agrees with ``statement_fields`` byte for byte.
-    """
-    replaced: dict[str, dict[str, Any]] = {}
-    for field in _AUTHORED_SPEC_FIELDS:
-        if field in old:
-            recorded = old[field]
-        else:
-            retired_name = _RETIRED_SPEC_FIELD_NAMES.get(field)
-            recorded = old.get(retired_name) if retired_name else None
-        recorded_value = canonical(recorded)
-        authored_value = canonical(authored.get(field))
-        if recorded_value != authored_value:
-            replaced[field] = {"recorded": recorded_value, "authored": authored_value}
-    return replaced
 
 
 _CARRIED_FORWARD_SPEC_FIELDS = (
@@ -971,7 +810,7 @@ def author_trait_spec(
     milestone_fractions: Sequence[float] = (),
     milestone_on: str = "",
     majority_milestone: str = "",
-    majority_provisional: bool = False,
+    crossing_unconfirmed: bool = False,
     phenology_prefix: str = "",
     majority_label: str = "",
     count_objective: str = "",
@@ -996,24 +835,6 @@ def author_trait_spec(
     statement record already exists for it: a real collision. When a spec exists with no statement
     behind it (the recovery state after a second write that failed partway), this call proceeds as
     a restatement rather than refusing, since there is nothing to collide with.
-
-    A spec :func:`trait_spec_unconformed` answers a reason for (predates the subject-registry
-    rename, no ``schema_version: 2`` stamp) is also not a collision, whatever its statement: such a
-    record is not one any reader can load, so its own statement describes it no better whether the
-    statement exists or not. This call proceeds as a full restatement, the caller supplying every
-    field the spec carries exactly as on first creation; the carried-forward fields below still
-    come from the old record, since their names did not move. The response, and only the
-    response (the persisted statement carries exactly ``TRAIT_SPEC_STATEMENT_FIELDS`` and the
-    confirmation fields), then carries two more keys: ``replaced_values``, naming every authored
-    field whose value this call replaced (the retired ``positive_class_name`` read as the prior
-    value of the now-renamed ``positive_value``; a field the old record never carried reads as
-    ``recorded: null``), each as ``{"recorded": <old>, "authored": <new>}`` in the statement
-    snapshot's own canonical form; and ``prior_confirmation``, the ``confirmed_by`` and
-    ``confirmed_at`` of the statement this call replaced when the breeder had confirmed it, else
-    ``None``, since the fresh statement is unconfirmed and that confirmation no longer stands.
-    Every field the tool does not receive is written at its default, so the caller reads
-    ``replaced_values`` back and the breeder reads the new values in the Results tab before
-    confirming; nothing here can tell an omitted field from one stated at its default.
 
     ``localization``, ``localization_tolerance``, ``localization_tolerance_frac``,
     ``sliver_policy`` and ``sliver_frac`` are not accepted here: they carry forward unchanged from
@@ -1049,14 +870,7 @@ def author_trait_spec(
             f"author_trait_spec cannot restate trait {trait!r}: the stored trait spec record is "
             "not a mapping; delete or repair the record before authoring the trait again"
         )
-    unconformed_reason = (
-        trait_spec_unconformed(existing_spec.value) if existing_spec.value is not None else None
-    )
-    if (
-        existing_spec.value is not None
-        and existing_statement.value is not None
-        and unconformed_reason is None
-    ):
+    if existing_spec.value is not None and existing_statement.value is not None:
         raise ValueError(_spec_collision_text(trait))
 
     authored: dict[str, Any] = {
@@ -1066,7 +880,7 @@ def author_trait_spec(
         "milestone_fractions": tuple(milestone_fractions),
         "milestone_on": milestone_on,
         "majority_milestone": majority_milestone,
-        "majority_provisional": majority_provisional,
+        "crossing_unconfirmed": crossing_unconfirmed,
         "phenology_prefix": phenology_prefix,
         "majority_label": majority_label,
         "count_objective": count_objective,
@@ -1079,12 +893,9 @@ def author_trait_spec(
         "holdout_match_quality_floor": holdout_match_quality_floor,
         "notes": notes,
     }
-    if existing_spec.value is not None:
-        authored.update({
-            field: existing_spec.value[field]
-            for field in _CARRIED_FORWARD_SPEC_FIELDS
-            if field in existing_spec.value
-        })
+    carried = (existing_spec.value if existing_spec.value is not None
+               else _encode_spec(TraitSpec(name=trait)))
+    authored.update({field: carried[field] for field in _CARRIED_FORWARD_SPEC_FIELDS})
 
     spec, reason = _validate_and_write_spec(spec_key, authored, expect=existing_spec.version)
     if spec is None:
@@ -1102,22 +913,7 @@ def author_trait_spec(
         **{field: None for field in TRAIT_SPEC_CONFIRMATION_FIELDS},
     }
     ts.replace(statement_key, statement, expect=existing_statement.version)
-    if unconformed_reason is None:
-        return statement
-    # The two restatement keys are the response's alone: the persisted statement carries exactly
-    # TRAIT_SPEC_STATEMENT_FIELDS and the confirmation fields, the shape the seen hash covers.
-    prior = existing_statement.value if isinstance(existing_statement.value, dict) else {}
-    prior_confirmation = (
-        {"confirmed_by": prior.get("confirmed_by"), "confirmed_at": prior.get("confirmed_at")}
-        if prior.get("confirmed_by") is not None
-        else None
-    )
-    old_record: dict[str, Any] = existing_spec.value if isinstance(existing_spec.value, dict) else {}
-    return {
-        **statement,
-        "replaced_values": _spec_replaced_values(old_record, snapshot),
-        "prior_confirmation": prior_confirmation,
-    }
+    return statement
 
 
 class TraitSpecStatementNotFound(ValueError):

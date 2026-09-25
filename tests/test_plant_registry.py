@@ -184,7 +184,7 @@ def test_the_happy_path_through_the_platforms_own_producers_refuses_at_the_class
     """Admits valid work: a registered registry that still loads and still hashes to what the
     mapping recorded is admitted by the delivery door, which resolves the mapping, runs the
     per-plant phenology over it and reaches the measurement gate. The scene's classifier is
-    unvalidated and the MCP door takes no acknowledgement, so the gate is where this delivery
+    unvalidated and the MCP door takes no acknowledgment, so the gate is where this delivery
     stops, naming the classifier rather than the registry or the mapping."""
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
@@ -286,7 +286,7 @@ def test_no_build_plant_mapping_call_site_names_the_retired_plant_csv_paths_argu
 
     call_sites: list[tuple[str, str]] = []
     for rel in tracked:
-        if not rel.endswith(".py"):
+        if not rel.endswith(".py") or not (repo_root / rel).exists():
             continue
         text = (repo_root / rel).read_text(encoding="utf-8")
         for block in _call_arg_blocks(text, "build_plant_mapping"):

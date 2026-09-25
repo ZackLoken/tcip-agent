@@ -1,5 +1,5 @@
 """In-process registry of live training runs: ``TrainRun``, its cancel-sentinel protocol, and
-the create/attach/get/list/cancel operations over the process-global ``_RUNS`` map.
+the create/get/list/cancel operations over the process-global ``_RUNS`` map.
 """
 
 from __future__ import annotations
@@ -43,9 +43,6 @@ class TrainRun:
     origin: str = "training"
     # Set by cancel_run() to request a graceful stop; the train loop polls it.
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
-    # Set on resume, True if the checkpoint carried RNG state and it was restored, False
-    # if the checkpoint carried none, the fresh-seed stream stands. None on a non-resumed run.
-    rng_state_restored: bool | None = None
     # None means the loop runs in-process (cancel_event alone is authoritative); set once the
     # parent spawns the subprocess a run's body executes in, when should_cancel polls the sentinel.
     pid: int | None = None
@@ -53,12 +50,8 @@ class TrainRun:
     def should_cancel(self) -> bool:
         """True if cancellation was requested, in-process (``cancel_event``) or via the sentinel
         file a (possibly different) process may have written at ``<output_dir>/<CANCEL_SENTINEL>``.
-        Checked unconditionally, not gated on ``pid`` being set: the object checking this is
-        typically the child's own attached ``TrainRun`` (which has no reason to know its own OS
-        pid), while ``pid`` is meaningful on the parent's copy for a different purpose (deciding
-        whether ``cancel_run`` should set the in-memory ``Event`` or write the sentinel). The single
-        check every poll site and every ``train(ctx)`` loop must use, so a sentinel-triggered stop is
-        never invisible to a check written against the in-memory ``Event`` alone."""
+        Checked whether or not ``pid`` is set.
+        """
         if self.cancel_event.is_set():
             return True
         if self.output_dir:
@@ -86,11 +79,7 @@ _RUNS_LOCK = threading.Lock()
 
 def draw_seed_if_unset(config: dict) -> None:
     """Draw a seed from OS entropy into ``config`` in place, unless the caller already set one.
-
-    Never start an unseeded run. Called by ``launch_training`` before the experiment record is
-    written (so the record's snapshot and a pristine reuse's config refresh both carry the seed
-    the run actually trains with) and by the HPO trial dispatch on its own trial config, before
-    that trial's own ``create_run``.
+    Never start an unseeded run.
     """
     if config.get("seed") is None:
         config["seed"] = random.SystemRandom().randrange(2**31)
@@ -98,27 +87,8 @@ def draw_seed_if_unset(config: dict) -> None:
 
 
 def create_run(config: dict, output_dir: str, *, id: str, origin: str = "training") -> TrainRun:
-    """Register a run under ``id``, the caller's own: this mints nothing and draws no seed,
-    both resolved by the caller before this is called (:func:`draw_seed_if_unset` for the seed;
-    an experiment id, minted or caller-named, for ``id``). ``id`` is a training run's own
-    experiment id, or an HPO trial's resolved trial-directory path; either way the caller
-    supplies it, since nothing here can tell the two apart.
-    """
-    run = TrainRun(id=id, config=config, output_dir=output_dir, origin=origin)
-    with _RUNS_LOCK:
-        _RUNS[id] = run
-    return run
-
-
-def attach_run(id: str, config: dict, output_dir: str, origin: str = "training") -> TrainRun:
-    """Construct a ``TrainRun`` for an id the caller already owns, exactly the shape
-    ``create_run`` returns. Used by the subprocess worker to adopt the exact experiment id the
-    parent already resolved and baked into ``output_dir``/``env.json``/audit events; nothing
-    here draws a seed, since ``config`` (read back from the persisted ``config.json``) already
-    carries the one the parent resolved. Inserts into *this process's own* ``_RUNS``, safe even
-    though the id may already be a key in a different process's registry, since that's different
-    process memory entirely.
-    """
+    """Register a run under ``id`` with ``config`` and ``output_dir``, and return it. Mints no id
+    and draws no seed: ``id`` and ``config["seed"]`` are taken as given."""
     run = TrainRun(id=id, config=config, output_dir=output_dir, origin=origin)
     with _RUNS_LOCK:
         _RUNS[id] = run
@@ -146,17 +116,11 @@ def list_runs(include_hpo_trials: bool = False) -> list[dict]:
 def cancel_run(id: str) -> bool:
     """Request a graceful cancellation of a training run. Returns False if unknown.
 
-    A run whose training body executes in a subprocess (``run.pid is not None``) can't be
-    stopped by setting an in-memory ``Event``, that memory lives in a different process. Writes a
-    sentinel file at ``<output_dir>/<CANCEL_SENTINEL>`` instead, which ``TrainRun.should_cancel()``
-    polls in the child. When this process has no local record of the run at all (it was launched by
-    a *different* process, e.g. the web backend cancelling a run the agent's MCP server's
-    subprocess is running), falls back to reading the experiment record's own status directly for
-    the real output directory rather than guessing one, an id no record could ever carry (a path
-    separator, an empty or dot name) folding to the same refusal an absent record gets; an
-    unresolvable run is refused (``False``), never a silent write to a path nobody polls. The
-    record is read through the store the launching process wrote it to, so a live run is still
-    cancellable when that store is a database rather than a file beside the run.
+    A run whose training body executes in a subprocess (``run.pid is not None``) gets a sentinel
+    file at ``<output_dir>/<CANCEL_SENTINEL>``, which ``TrainRun.should_cancel()`` polls in the
+    child. When this process has no local record of the run at all, the output directory is read
+    from the experiment record's own status, through the store; an id no record could carry (a path
+    separator, an empty or dot name) and an unresolvable run are refused (``False``).
     """
     with _RUNS_LOCK:
         run = _RUNS.get(id)

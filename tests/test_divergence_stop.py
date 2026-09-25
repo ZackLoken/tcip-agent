@@ -117,7 +117,7 @@ def test_stage_boundary_resets_the_diverged_epoch_counter(tmp_path):
 
 def test_cancel_requested_during_the_second_diverged_epoch_still_ends_failed(tmp_path):
     """The landed diverged-before-cancel ordering: a run whose cancel is requested partway
-    through the epoch that trips the two-pass rule ends failed, not cancelled."""
+    through the epoch that trips the two-pass rule ends failed, not canceled."""
     from tests.tiny_trainer_fixtures import CancelSentinelAtCall
 
     train_loader = _train_loader()  # three batches/epoch: epoch 2 is calls 4, 5, 6
@@ -162,7 +162,7 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(tmp_path, mon
     status: dict = {}
     while time.monotonic() < deadline:
         status = monitor_training(experiment_id)
-        if status.get("status") in ("failed", "completed", "cancelled"):
+        if status.get("status") in ("failed", "completed", "canceled"):
             break
         time.sleep(0.5)
 

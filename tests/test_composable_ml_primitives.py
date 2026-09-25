@@ -117,27 +117,6 @@ class TestOptimizerFactory:
             build_optimizer("lamb", model, head_lr=1e-3)
 
 
-class TestTrainConfig:
-    def test_dataclass_defaults(self):
-        from tcip_mcp.pipelines.training.generic_trainer import TrainConfig
-        cfg = TrainConfig(model_source={"builder": "x:y"}, dataset={"task": "classification"})
-        assert cfg.batch_size == 4
-        assert cfg.num_workers == 2
-
-    def test_dead_schedule_fields_removed(self):
-        # stages/optimizer/early_stopping/scheduler and other never-read-post-construction knobs
-        # (including mixed_precision/seed/deterministic, unread duplicates of values already
-        # threaded via run.config) are gone: train() reads run.config directly, never a
-        # TrainConfig instance, except for .sampler/.batch_size/.num_workers.
-        import dataclasses
-        from tcip_mcp.pipelines.training.generic_trainer import TrainConfig
-        field_names = {f.name for f in dataclasses.fields(TrainConfig)}
-        assert not field_names & {
-            "stages", "optimizer", "early_stopping", "scheduler",
-            "evaluation", "stage_warmup_epochs", "lr_scaling",
-            "enforce_monotonic_unfreeze", "checkpoint_every_n_epochs",
-            "gradient_accumulation_steps", "mixed_precision", "seed", "deterministic",
-        }
 
 
 # ====================================================================

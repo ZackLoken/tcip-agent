@@ -15,7 +15,9 @@ import pytest
 
 from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT, write_sidecar
 from tests import _operationalization_fixtures as fx
-from tests._binding_fixtures import calibrated_run_fields, write_bound_sidecar, write_prediction
+from tests._binding_fixtures import (
+    calibrated_run_fields, run_result, write_bound_sidecar, write_prediction,
+)
 from tests._record_damage_fixtures import damage_record
 
 
@@ -61,28 +63,23 @@ def _unvalidated_run_result(*, experiment_id=None, stem="a"):
     """A stand-in live-run result honestly stamped unvalidated: bypasses the earned-evidence path
     (``_draft_count_claim`` returns nothing to open) so a test about the publish bracket's own
     tile/lineage checks is not entangled with the calibration-evidence machinery."""
-    return {"results": [{"image": f"{stem}.png", "width": 100, "height": 100,
-                        "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
-                        "count": 1}],
-           "image_count": 1, "total_detections": 1, "id_map": None,
-           "operating_point": {"conf": {"value": 0.5}}, "validated": False,
-           "conf_source": "default", "experiment_id": experiment_id,
-           "checkpoint_sha256": "deadbeef"}
+    return run_result(
+        {"conf": {"value": 0.5}},
+        [{"image": f"{stem}.png", "width": 100, "height": 100,
+          "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1}],
+        experiment_id=experiment_id, validated=False, conf_source="default")
 
 
 def _earned_run_result(tmp_path, *, trait=fx.COUNT_TRAIT, tiled=False, tile_size=None,
                        tile_size_source="default", stem="a"):
     """A stand-in live-run result that left behind real evidence, so a bucket published from it
     earns a genuine validation record (the same shape test_delivery_gate.py's own helper builds)."""
-    return {
-        "results": [{"image": f"{stem}.png", "width": 100, "height": 100,
-                    "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
-                    "count": 1}],
-        "image_count": 1, "total_detections": 1, "id_map": None,
-        "produced_at": "2026-01-01T00:00:00Z",
+    return run_result(
+        results=[{"image": f"{stem}.png", "width": 100, "height": 100,
+                  "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
+                  "count": 1}],
         **calibrated_run_fields(trait, labels_dir=tmp_path, checkpoint_sha256="deadbeef",
-                                tiled=tiled, tile_size=tile_size, tile_size_source=tile_size_source),
-    }
+                                tiled=tiled, tile_size=tile_size, tile_size_source=tile_size_source))
 
 
 # ── exactly one source, or refuse naming both regimes ──────────────────────
@@ -389,14 +386,12 @@ def test_publish_bracket_refuses_a_fabricated_tile_with_the_bucket_left_absent(t
     import tcip_mcp.tools.inference_tools as itools
 
     def _fake(*a, **kw):
-        return {"results": [{"image": "a.png", "count": 1, "scores": [0.9]}], "image_count": 1,
-                "total_detections": 1,
-                "operating_point": {"conf": {"value": 0.6, "validated_against": VALIDATED_HELD_OUT},
-                                    "tile_size": {"value": 640, "requires_validation": True,
-                                                  "validation_kind": "geometry",
-                                                  "validated_against": VALIDATED_FALSE}},
-                "validated": True, "conf_source": "calibration", "experiment_id": None,
-                "checkpoint_sha256": "deadbeef"}
+        return run_result(
+            {"conf": {"value": 0.6, "validated_against": VALIDATED_HELD_OUT},
+             "tile_size": {"value": 640, "requires_validation": True,
+                           "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}},
+            [{"image": "a.png", "count": 1, "scores": [0.9]}],
+            validated=True, conf_source="calibration")
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake)
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
@@ -431,7 +426,7 @@ def test_publish_bracket_refuses_a_frozen_lineage_pointer(tmp_path, monkeypatch)
 
 def test_publish_bracket_links_a_resolvable_experiments_bucket_into_its_lineage(tmp_path, monkeypatch):
     """The bracket links a resolvable run into its lineage as it publishes, before the CSV's own
-    gate ever runs: an uncalibrated conf with no acknowledgement route refuses the CSV, but the
+    gate ever runs: an uncalibrated conf with no acknowledgment route refuses the CSV, but the
     refusal still discloses the bucket it published and the lineage it linked."""
     import tcip_store
     import tcip_mcp.tools.inference_tools as itools
@@ -449,7 +444,7 @@ def test_publish_bracket_links_a_resolvable_experiments_bucket_into_its_lineage(
                                trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
     assert "error" in r
     assert r["operating_point_validated"] == VALIDATED_FALSE
-    assert r["bucket_published"] is True
+    assert r["files"]
     assert r["lineage_linked"] is True
     lineage = tcip_store.read(lineage_key(eid), default={})
     assert lineage.get("predictions") == str(bucket)
@@ -497,9 +492,8 @@ def test_a_withdrawn_operationalization_mid_flow_is_count_free_in_the_bucket_reg
 def test_a_withdrawn_operationalization_mid_flow_is_count_free_in_the_live_regime(
     tmp_path, monkeypatch,
 ):
-    """The live regime's own except block catches only DeliveryRefused, so the writer's bare
-    meaning-door raise propagates past a bucket the shared bracket already published and linked,
-    never composed into a counts-bearing refusal dict."""
+    """The writer's own meaning-door refusal answers the live regime by its message alone, after
+    the bucket the shared bracket already published and linked, never a counts-bearing dict."""
     from dataclasses import replace
 
     import tcip_mcp.tools.inference_tools as itools
@@ -519,10 +513,11 @@ def test_a_withdrawn_operationalization_mid_flow_is_count_free_in_the_live_regim
     monkeypatch.setattr(op, "check_operationalization", _flaky_check)
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    with pytest.raises(ValueError, match="withdrawn mid-flow"):
-        itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
-    assert bucket.exists()  # the bracket already published before the bare raise escaped
+    result = itools.deliver_per_image_counts(
+        _dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+        trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
+    assert result == {"error": "operationalization withdrawn mid-flow"}
+    assert bucket.exists()  # the bracket already published before the writer refused
 
 
 def test_a_gate_refusal_is_counts_bearing_in_the_bucket_regime(tmp_path):
@@ -543,7 +538,7 @@ def test_a_gate_refusal_is_counts_bearing_in_the_bucket_regime(tmp_path):
 
 
 def test_a_gate_refusal_names_every_disclosure_field_in_the_live_regime(tmp_path, monkeypatch):
-    """Live with predictions_dir, unvalidated conf, no acknowledgement: the bucket lands honestly
+    """Live with predictions_dir, unvalidated conf, no acknowledgment: the bucket lands honestly
     stamped false (the publish bracket only gates tile geometry) and the CSV refuses; the refusal
     is counts-bearing and names every disclosure field, so the review-promotion workflow can
     proceed from what landed."""
@@ -558,8 +553,8 @@ def test_a_gate_refusal_names_every_disclosure_field_in_the_live_regime(tmp_path
     assert "error" in r
     assert r["image_count"] == 1
     assert r["total_detections"] == 1
-    assert r["bucket_published"] is True
-    assert r["predictions_dir"] == str(bucket)
+    assert r["files"]
+    assert r["output_dir"] == str(bucket)
     assert r["bucket_redirected"] is False
     assert r["lineage_linked"] is None
     assert r["csv_delivered"] is False
@@ -749,7 +744,7 @@ def test_live_regime_second_publish_into_a_document_holding_bucket_refuses(tmp_p
                                    calibration_labels_dir=str(tmp_path),
                                    predictions_dir=second["suggested_bucket"])
     assert "error" not in third, third
-    assert third["predictions_dir"] == second["suggested_bucket"]
+    assert third["output_dir"] == second["suggested_bucket"]
 
 
 def test_live_regime_second_publish_refuses_on_documents_even_toward_an_unvalidated_run(
@@ -914,7 +909,7 @@ def test_bucket_regime_over_a_cleared_bucket_refuses_the_floored_binding_naming_
         experiment_id=exp_id, images_dir=str(tmp_path), raster_path=None,
         produced_at="2026-01-01T00:00:00Z", image_filenames={"a": "a.png"},
     )
-    _digest, stamped = seal_validation(
+    stamped = seal_validation(
         draft, dataset_root=dataset_root, bucket_dirs=[bucket], stamp_body=earned_body)
     write_sidecar(bucket, stamped)
 
@@ -935,7 +930,7 @@ def test_bucket_regime_over_a_cleared_bucket_refuses_the_floored_binding_naming_
 
 def test_bucket_regime_re_delivers_the_provisional_floor_identically(tmp_path, monkeypatch):
     """An uncalibrated live call publishes a false-stamped bucket even though its own CSV takes no
-    acknowledgement and refuses; the bucket regime reads the same published bucket back and floors
+    acknowledgment and refuses; the bucket regime reads the same published bucket back and floors
     it identically, both refusing on the same disclosed facts rather than one silently outranking
     the other."""
     import tcip_mcp.tools.inference_tools as itools
@@ -948,7 +943,7 @@ def test_bucket_regime_re_delivers_the_provisional_floor_identically(tmp_path, m
                                   trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
     assert "error" in live
     assert live["operating_point_validated"] == VALIDATED_FALSE
-    assert live["bucket_published"] is True
+    assert live["files"]
     assert not csv_a.exists()
 
     csv_b = tmp_path / "b.csv"
@@ -1038,18 +1033,6 @@ def _damage_stamp_bytes(bucket) -> None:
     damage_record(sidecar_key(bucket, "operating_point"), b"{not json")
 
 
-def _real_stamp_scope_unstated(tmp_path, name: str):
-    """A real ``StampScopeUnstated``, earned from an actual ``bucket_scope`` call over a bucket
-    whose stamp decodes with no pair: a raw sidecar write is the only producer of that shape."""
-    from tcip_mcp.pipelines.resolution import StampScopeUnstated, bucket_scope
-
-    scratch = tmp_path / name
-    _write_raw_stamp(scratch, {"checkpoint_sha256": "f" * 64})
-    with pytest.raises(StampScopeUnstated) as excinfo:
-        bucket_scope(scratch)
-    return excinfo.value
-
-
 def _real_store_error(tmp_path, name: str):
     """A real ``StoreError``, earned from an actual ``bucket_scope`` call over a bucket whose
     stamp will not decode at all."""
@@ -1064,44 +1047,12 @@ def _real_store_error(tmp_path, name: str):
     return excinfo.value
 
 
-def test_the_live_regimes_export_detection_csv_stamp_scope_unstated_becomes_the_tools_own_error(
-    tmp_path, monkeypatch,
-):
-    """This conversion is defence in depth behind an identical earlier check: the fresh stamp
-    ``publish_bucket`` writes at this live site always carries the pair
-    (``operating_point_stamp`` requires it with no default), so a no-pair stamp never survives a
-    live publish and this call site's own conversion has no naturally reachable shape to test
-    through. A real ``StampScopeUnstated``, earned from an actual ``bucket_scope`` call rather
-    than a test-written message, is raised from the monkeypatched ``export_detection_csv``,
-    pinning the type conversion this call site makes (the exception becomes a bare
-    ``{"error": str(exc)}``) and that the seam's own remedy text, naming
-    ``tcip repair-classified-predictions``, survives into it unchanged: this door adds no text
-    of its own."""
-    import tcip_mcp.tools.inference_tools as itools
-
-    monkeypatch.setattr(itools, "_run_inference_verified",
-                        lambda *a, **kw: _unvalidated_run_result())
-    real_exc = _real_stamp_scope_unstated(tmp_path, "no_pair_stamp")
-
-    def _raise(*a, **kw):
-        raise real_exc
-
-    monkeypatch.setattr(itools, "export_detection_csv", _raise)
-
-    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
-                               str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
-                               predictions_dir=str(bucket))
-
-    assert r["error"] == str(real_exc)
-
-
 def test_the_live_regimes_export_detection_csv_store_error_becomes_the_tools_own_error(
     tmp_path, monkeypatch,
 ):
-    """This call site's other conversion arm, defence in depth for the same reason as the
-    ``StampScopeUnstated`` arm above: the fresh stamp ``publish_bucket`` writes at this
-    live site is always readable, so an undecodable stamp never survives a live publish. A real
+    """This call site's conversion arm, defense in depth: the fresh stamp ``publish_bucket``
+    writes at this live site is always readable, so an undecodable stamp never survives a live
+    publish. A real
     ``StoreError``, earned from an actual ``bucket_scope`` call over an undecodable stamp, pins the
     same type conversion (the exception becomes ``{"error": str(exc)}``, verbatim, with no text of
     this door's own)."""
@@ -1124,48 +1075,10 @@ def test_the_live_regimes_export_detection_csv_store_error_becomes_the_tools_own
     assert r["error"] == str(real_exc)
 
 
-def test_per_image_counts_from_bucket_converts_export_detection_csvs_stamp_scope_unstated(
-    tmp_path, monkeypatch,
-):
-    """This conversion is defence in depth behind an identical earlier check:
-    ``per_image_counts_from_bucket``'s own ``bucket_scope`` call at the bucket site already
-    refuses a no-pair stamp before this call site is ever reached, so the bucket under test here
-    carries a real, fully scoped stamp and a real ``StampScopeUnstated``, earned from a separate
-    scratch bucket's actual ``bucket_scope`` call, is raised from the monkeypatched
-    ``export_detection_csv`` to pin the type conversion at this call site specifically (the
-    exception becomes ``CountDeliveryRefused(str(exc))``, the seam's own remedy text surviving
-    into it unchanged, no text of this door's own added)."""
-    import tcip_mcp.tools.inference_tools as itools
-    from tcip_mcp.pipelines.resolution import CountDeliveryRefused
-
-    dataset_root = tmp_path / "ds"
-    bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
-    _write_real_prediction(bucket, "a")
-    stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True,
-             "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
-             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
-    write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
-    real_exc = _real_stamp_scope_unstated(tmp_path, "no_pair_stamp")
-
-    def _raise(*a, **kw):
-        raise real_exc
-
-    monkeypatch.setattr(itools, "export_detection_csv", _raise)
-
-    with pytest.raises(CountDeliveryRefused) as excinfo:
-        itools.per_image_counts_from_bucket(
-            str(bucket), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT)
-
-    assert str(excinfo.value) == str(real_exc)
-
-
 def test_per_image_counts_from_bucket_converts_export_detection_csvs_store_error(
     tmp_path, monkeypatch,
 ):
-    """This call site's other conversion arm, defence in depth for the same reason as the
-    ``StampScopeUnstated`` arm above: ``per_image_counts_from_bucket``'s own ``bucket_scope`` call
-    at the bucket site already refuses an undecodable stamp before this call site is reached. A
-    real ``StoreError``, earned from an actual ``bucket_scope`` call over an undecodable stamp on
+    """This call site's conversion arm, defense in depth: a real ``StoreError``, earned from an actual ``bucket_scope`` call over an undecodable stamp on
     a separate scratch bucket, pins the same type conversion (``CountDeliveryRefused(str(exc))``,
     verbatim, no text of this door's own)."""
     import tcip_mcp.tools.inference_tools as itools

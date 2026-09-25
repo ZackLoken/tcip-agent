@@ -40,11 +40,7 @@ import tcip_mcp.tools.delivery_tools  # noqa: F401, E402
 
 
 def list_registered_tools() -> list[str]:
-    """Return the sorted names of all tools currently registered on the server.
-
-    This is the single source of truth for "how many tools are there": docs and
-    tests read it instead of hard-coding a number.
-    """
+    """Return the sorted names of all tools currently registered on the server."""
     manager = getattr(mcp, "_tool_manager", None)
     if manager is not None and hasattr(manager, "list_tools"):
         return sorted(t.name for t in manager.list_tools())
@@ -56,11 +52,8 @@ def list_registered_tools() -> list[str]:
 
 def binds_from_marker(environ: Mapping[str, str]) -> bool:
     """Whether this MCP server should bind its platform-state root from the workspace's
-    active-project marker at startup: true only inside the platform's own agent terminal,
-    named by ``agent_identity.TERMINAL_SESSION_ENV`` in the environment. A session launched
-    there converges on the project the GUI has open; a developer's own session elsewhere keeps
-    resolving against the repo root or whatever it inherited, and ``inspect_project`` reports
-    the disagreement either way.
+    active-project marker at startup: true only inside the platform's own agent terminal, named by
+    ``agent_identity.TERMINAL_SESSION_ENV`` in the environment.
     """
     from tcip_mcp import agent_identity
 

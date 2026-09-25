@@ -1,17 +1,11 @@
 """Model-kind contract + the predictor factory.
 
-Inference dispatches on a model kind so the platform can run more than one framework of
-detector without special-casing at every call site. A tcip checkpoint (a bespoke model built
-by an agent-written importable builder) is the only kind today; the dispatch stays
-kind-aware, sniffed from the checkpoint, not hardcoded to one implementation, because
-``.kind`` is a real field other code already reads generically (``require_composed_detector``,
-the model registry), not scaffolding for a single implementation.
+Inference dispatches on a model kind sniffed from the checkpoint; a tcip checkpoint (a bespoke
+model built by an agent-written importable builder) is the one kind implemented.
 
 Kind travels three ways: stamped on tcip checkpoints at save time (a top-level ``kind`` key),
-recorded on the registry entry, and, for a foreign ``.pt`` this platform never wrote,
-sniffed from the checkpoint's top-level keys. An undeterminable kind raises rather than
-guessing and running a wrong forward, which would silently corrupt the count (and the count
-is the phenotype).
+recorded on the registry entry, and, for a foreign ``.pt`` this platform never wrote, sniffed from
+the checkpoint's top-level keys. An undeterminable kind raises.
 """
 
 from __future__ import annotations
@@ -20,7 +14,10 @@ import logging
 from typing import TYPE_CHECKING, Any, Callable, NoReturn, Protocol, runtime_checkable
 
 from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY, STATE_DICT_KEY
-from tcip_mcp.pipelines.resolution import DEFAULT_NMS_IOU, DEFAULT_TILE_BATCH_SIZE
+from tcip_mcp.pipelines.resolution import (
+    DEFAULT_IMAGE_BATCH_SIZE, DEFAULT_NMS_IOU, DEFAULT_OVERLAP, DEFAULT_POSTPROCESS,
+    DEFAULT_TILE_BATCH_SIZE,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -41,29 +38,19 @@ DEFAULT_KIND = KIND_TCIP_MODULE
 
 @runtime_checkable
 class Predictor(Protocol):
-    """The inference surface every model kind exposes (today: ``GenericPredictor``; the shape
-    stays open to a future foreign kind).
+    """The inference surface every model kind exposes (``GenericPredictor``).
 
-    Detection result dict:
-    ``{image, width, height, boxes[[x1,y1,x2,y2] px], scores[], labels[], count}`` (tiled adds
-    ``tiles``). For ``task == "instance_seg"``, ``predict``/``predict_batch`` (untiled) additionally
-    carry ``masks``, one soft (unbinarized) ``[H, W]`` probability array per surviving detection,
-    already in full-image coordinates, same order as ``boxes``/``scores``/``labels``.
-    ``predict_tiled`` (whichever source kind, a path/``BandGroupRef`` or a windowed reader) also
-    carries ``masks`` by default (``require_masks=True``), but in a different, tile-local shape:
-    a list of ``{"mask_patch",
-    "offset_x", "offset_y"}`` dicts (a small patch plus its full-image-space origin, never a dense
-    full-image-sized array, since a tile source can be a raster too large to afford one), never
-    interchangeable with the untiled shape above. A caller that never reads masks opts out
-    deliberately with ``predict_tiled(..., require_masks=False)`` and gets ordinary boxes-only tiled
-    inference with no ``masks`` key at all. ``predict_tiled(..., tile_resize=(w, h))`` additionally
-    resizes each tile to ``(w, h)`` before the forward pass and maps every returned box (and mask)
-    back into the tile's own native pixel space, so a run can reproduce the input geometry a
-    checkpoint trained at; every coordinate in a result is in the source's real pixel space either
-    way. Labels are 1-indexed foreground (background = 0), the
-    torchvision convention the rest of the pipeline (JSON prediction export, Review, CSV) already
-    assumes; a future kind that is natively 0-indexed would shift to it at its own boundary,
-    so downstream code never has to know which kind produced a result.
+    Detection result dict: ``{image, width, height, boxes[[x1,y1,x2,y2] px], scores[], labels[],
+    count}`` (tiled adds ``tiles``). For ``task == "instance_seg"``, ``predict``/``predict_batch``
+    (untiled) additionally carry ``masks``, one soft (unbinarized) ``[H, W]`` probability array per
+    surviving detection, already in full-image coordinates, same order as
+    ``boxes``/``scores``/``labels``. ``predict_tiled`` also carries ``masks`` by default
+    (``require_masks=True``), but tile-local: a list of ``{"mask_patch", "offset_x", "offset_y"}``
+    dicts, never interchangeable with the untiled shape; ``require_masks=False`` returns no
+    ``masks`` key. ``predict_tiled(..., tile_resize=(w, h))`` resizes each tile to ``(w, h)``
+    before the forward pass and maps every returned box (and mask) back into the tile's own native
+    pixel space; every coordinate in a result is in the source's real pixel space. Labels are
+    1-indexed foreground (background = 0).
     """
 
     task: str
@@ -82,15 +69,15 @@ class Predictor(Protocol):
 
     def predict_batch(
         self, image_paths: list[str | Path | BandGroupRef], tile: bool = False,
-        tile_size: int | None = None, overlap: float = 0.2, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
-        global_nms_iou: float = DEFAULT_NMS_IOU, batch_size: int = 16, postprocess: str = "nms",
+        tile_size: int | None = None, overlap: float = DEFAULT_OVERLAP, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
+        global_nms_iou: float = DEFAULT_NMS_IOU, batch_size: int = DEFAULT_IMAGE_BATCH_SIZE, postprocess: str = DEFAULT_POSTPROCESS,
         *, require_masks: bool = True, tile_resize: tuple[int, int] | None = None,
     ) -> list[dict]: ...
 
     def predict_tiled(
         self, source: "str | Path | BandGroupRef | WindowedRasterReader",
-        tile_size: int | None = None, overlap: float = 0.2, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
-        global_nms_iou: float = DEFAULT_NMS_IOU, postprocess: str = "nms", *,
+        tile_size: int | None = None, overlap: float = DEFAULT_OVERLAP, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
+        global_nms_iou: float = DEFAULT_NMS_IOU, postprocess: str = DEFAULT_POSTPROCESS, *,
         require_masks: bool = True, source_label: str = "",
         tile_resize: tuple[int, int] | None = None, prior: dict | None = None,
         progress: "Callable[[int, int, dict], None] | None" = None,
@@ -137,18 +124,8 @@ def detect_kind(checkpoint_path: str) -> str:
 def _native_ratio_tile_size(train_native_size: Any) -> tuple[int | None, str]:
     """The tile edge a checkpoint's own uniform untiled training frame justifies, if any.
 
-    A checkpoint trained untiled on frames that all shared one size (``train_native_size``, stamped
-    ``[width, height]``) does justify one tile edge: a tile cut at that frame's own size presents an
-    object to the model at the pixel scale a whole training frame did, which is the entire point of
-    matching tile geometry to training geometry.
-
-    That only holds for a square frame. Tile geometry is one edge everywhere it travels in this
-    platform (``resolve_tile_geometry`` -> the operating point's ``tile_size`` -> the delivery gate
-    -> the tiling core's own ``tile_size``/stride), and no single edge reproduces a ``W x H`` frame
-    when ``W != H``: whichever edge is chosen, one axis presents objects at the wrong scale, and a
-    detector's own internal resize is isotropic so it cannot undo the difference either. A
-    rectangular frame therefore yields no edge here (``"unavailable"``) rather than an edge that
-    silently mis-scales one axis; the caller states a ``tile_size`` explicitly, or runs untiled.
+    A checkpoint trained untiled on frames that all shared one square size (``train_native_size``,
+    stamped ``[width, height]``) justifies that edge. A rectangular frame yields ``"unavailable"``.
     """
     if not isinstance(train_native_size, (list, tuple)) or len(train_native_size) != 2:
         return None, "unavailable"
@@ -174,34 +151,19 @@ def resolve_tile_geometry(
     persisted training geometry (``predictor.train_tile_size``/``train_overlap``, source
     ``"derived"``) > a native-size ratio tier (source ``"native_ratio"``, the square frame size a
     checkpoint trained untiled at a uniform ``predictor.train_native_size`` records, see
-    :func:`_native_ratio_tile_size`) > no real basis at all (source ``"unavailable"``, ``tile_size``
-    itself ``None``). One implementation both ``run_inference`` and the delivery-grade
-    ``run_full_frame_evaluation`` call, so they can't silently disagree on which regime a model
-    actually ran in.
+    :func:`_native_ratio_tile_size`) > no real basis at all (source ``"unavailable"``,
+    ``tile_size`` itself ``None``).
 
-    A ``"native_ratio"`` edge is a real basis to tile at, and a real geometry reference in its own
-    right (``resolution.accepted_references("geometry")`` accepts it): it says what the model saw a
-    frame at, mechanically, never a caller's own statement. Ranked weaker than the persisted tier
+    A ``"native_ratio"`` edge is a geometry reference
+    ``resolution.accepted_references("geometry")`` accepts, ranked weaker than the persisted tier
     and stronger than a caller's explicit edge when a delivery mixes buckets across them (see
-    :func:`~tcip_mcp.pipelines.resolution.reconcile_tile_size_validity`), and sufficient on its
-    own to gate a delivery. Reproducing the training input geometry also takes the recorded train-time
-    resize, which this function does not return; the caller pairs it with
-    :func:`native_ratio_tile_resize`, or calls :func:`resolve_tile_regime`, which does both.
+    :func:`~tcip_mcp.pipelines.resolution.reconcile_tile_size_validity`). The train-time resize is
+    not returned; :func:`native_ratio_tile_resize` or :func:`resolve_tile_regime` gives it.
 
-    Pure fact-return, never raises: this is a capability, not a policy. Returns
-    ``(tile_size, tile_size_source, overlap, overlap_source)`` where ``tile_size`` is ``None`` only
-    when its source is ``"unavailable"`` (nothing to derive a scale from) and each ``*_source`` is
-    one of ``"explicit"``/``"derived"``/``"native_ratio"``/``"unavailable"``. A caller with a stake
-    in the source (e.g. a delivery gate that must not silently fabricate a number) inspects the
-    returned source itself and decides whether to refuse, warn, or proceed, that policy does not
-    belong here, since an exploratory caller (``run_inference``) and a certifying caller
-    (``run_full_frame_evaluation``) legitimately make different calls on the same fact. The one
-    policy every tiling door shares, that a stated edge contradicting the checkpoint's own recorded
-    geometry is never silently accepted, lives in :func:`resolve_tile_regime` instead, since that is
-    where ``tiled`` (the fact that makes a typed edge operative at all) is known.
+    Never raises. Returns ``(tile_size, tile_size_source, overlap, overlap_source)`` where
+    ``tile_size`` is ``None`` only when its source is ``"unavailable"`` and each ``*_source`` is
+    one of ``"explicit"``/``"derived"``/``"native_ratio"``/``"unavailable"``.
     """
-    from tcip_mcp.pipelines.resolution import DEFAULT_OVERLAP
-
     resolved_tile: int | None
     if tile_size is not None:
         resolved_tile, tile_source = int(tile_size), "explicit"
@@ -257,8 +219,7 @@ def explicit_edge_provenance(predictor: Any, edge: int) -> str:
     applies), or stated on a checkpoint that records no tile geometry at all.
 
     Raises :class:`TileEdgeContradiction` if ``edge`` differs from a recorded geometry the
-    checkpoint does carry: that is a contradiction :func:`resolve_tile_regime` should already have
-    refused, and this helper must not describe such a checkpoint as recording no tile geometry.
+    checkpoint does carry.
     """
     recorded, kind = _recorded_geometry_edge(predictor)
     if recorded is None:
@@ -277,17 +238,9 @@ def native_ratio_tile_resize(predictor: Any, tile_size_source: str) -> tuple[int
     """The ``(width, height)`` a native-size tile must be resized to before the forward pass, for a
     run whose tile edge came from the native-size ratio tier; ``None`` for every other tier.
 
-    The tier reproduces the input geometry the checkpoint trained at: a tile cut at the training
-    frame's own size, then the same resize the run's recorded augmentation chain applied to a
-    training frame (:func:`~tcip_mcp.pipelines.data.augmentations.recorded_resize`, which resolves a
-    preset-name config through the builder rather than re-reading it). The recorded chain pinning no
-    size (common) returns ``None`` and the tier reduces to tiling at the native size with no resize.
-
-    Only for a ``"native_ratio"`` tile edge: an explicit or persisted-geometry edge feeds the model
-    the tile as it stands, which is what those tiers mean and what every existing count was produced
-    at. An augmentation config that cannot be built raises from the builder rather than being
-    reported as "no resize", so the door about to tile refuses instead of running at a geometry it
-    could not confirm.
+    The resize is the one the run's recorded augmentation chain applied to a training frame
+    (:func:`~tcip_mcp.pipelines.data.augmentations.recorded_resize`); a chain pinning no size
+    returns ``None``. An augmentation config that cannot be built raises.
     """
     if tile_size_source != "native_ratio":
         return None
@@ -299,29 +252,17 @@ def native_ratio_tile_resize(predictor: Any, tile_size_source: str) -> tuple[int
 def resolve_tile_regime(
     predictor: Any, *, tiled: bool, tile_size: int | None, overlap: float | None,
 ) -> tuple[int | None, str, float, str, tuple[int, int] | None]:
-    """Resolve tile_size/overlap plus the resize a native-ratio edge must run each tile through.
+    """Resolve tile_size/overlap plus the resize a native-ratio edge must run each tile through,
+    composing :func:`resolve_tile_geometry` and :func:`native_ratio_tile_resize`.
 
-    Composes :func:`resolve_tile_geometry` and :func:`native_ratio_tile_resize`, the two facts every
-    tiling door needs together, so a door cannot resolve a native-frame edge and forget to pair it
-    with the resize the checkpoint's own recorded augmentation chain applied to a training frame.
-    ``resolve_tile_geometry`` stays the pure fact-return its own docstring describes, and
-    ``native_ratio_tile_resize`` stays the one place the resize is derived; this wrapper only
-    composes them and raises whatever the resize raises for a native-ratio tier whose recorded
-    augmentation config cannot be built.
+    When ``tiled`` and the caller states an edge, that edge is checked against the checkpoint's own
+    recorded geometry (:func:`_recorded_geometry_edge`, the persisted training tile geometry, or,
+    absent one, the edge its recorded uniform untiled frame yields) and
+    :class:`TileEdgeContradiction` is raised, naming both edges and the recorded geometry's own
+    kind, when they differ. A checkpoint recording neither has nothing to contradict. An untiled
+    call with a stated edge is never checked.
 
-    Also carries the one policy every tiling door shares: when ``tiled`` and the caller states an
-    edge, that edge is checked against the checkpoint's own recorded geometry
-    (:func:`_recorded_geometry_edge`, the persisted training tile geometry, or, absent one, the edge
-    its recorded uniform untiled frame yields) and :class:`TileEdgeContradiction` is raised, naming
-    both edges and the recorded geometry's own kind, when they differ. A checkpoint recording
-    neither (the foreign-checkpoint case) has nothing to contradict, so a stated edge on it always
-    clears. An untiled call with a stated edge is inert: the edge never governs a count there, so it
-    is never checked.
-
-    The resize is resolved only when ``tiled``: an untiled run reads no tile geometry, so an
-    unreadable recorded augmentation config must not sink one. A door that always tiles (the raster
-    export, ``run_full_frame_evaluation``) passes ``tiled=True`` unconditionally; ``run_inference``
-    and the web worker pass their own already-resolved tiled bool.
+    The resize is resolved only when ``tiled``.
 
     Returns ``(tile_size, tile_size_source, overlap, overlap_source, tile_resize)``.
     """
@@ -338,14 +279,13 @@ def resolve_tile_regime(
 def build_predictor(
     checkpoint: "VerifiedCheckpoint", *, kind: str | None = None, **kwargs: Any,
 ) -> "Predictor":
-    """Construct the right predictor for a checkpoint's kind (the one inference entry point).
+    """Construct the right predictor for a checkpoint's kind.
 
     ``checkpoint`` is a :class:`~tcip_mcp.model_registry.VerifiedCheckpoint`, the object
-    :func:`~tcip_mcp.model_registry.load_registered_checkpoint` returns: this function reads no
-    file itself, so a predictor built here always carries a checkpoint the registry named. Pass
-    ``kind`` to skip detection (e.g. the registry already recorded it); the payload it sniffs from
-    is ``checkpoint.payload``, already unpickled by the verified load, never a second read.
-    Predictor kwargs (``device``, ``score_threshold``, ``nms_iou``, ``max_dets``, …) pass through.
+    :func:`~tcip_mcp.model_registry.load_registered_checkpoint` returns; this function reads no
+    file itself. Pass ``kind`` to skip detection (e.g. the registry already recorded it); the
+    payload it sniffs from is ``checkpoint.payload``. Predictor kwargs (``device``,
+    ``score_threshold``, ``nms_iou``, ``max_dets``, ...) pass through.
     """
     if kind is None:
         kind = _kind_from_ckpt(checkpoint.payload, checkpoint.path)

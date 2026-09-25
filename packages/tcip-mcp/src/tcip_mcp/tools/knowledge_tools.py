@@ -1,16 +1,6 @@
-"""The ``serve_domain_knowledge`` MCP tool: the route to the platform's domain knowledge documents for
-a client with no skill or instruction-file mechanism of its own.
-
-Claude Code reaches the same documents through the generated skills under ``.claude/skills/``;
-Codex and Antigravity reach them under ``.agents/skills/`` and, for Codex, the generated block in
-``AGENTS.md`` too (``tools/generate_harness_discovery.py`` renders all three); any other
-client, and a harness with neither a skill nor an instruction-file mechanism, reaches them here.
-Unlike every other tool in this package, its client-visible description is composed at import
-time from the knowledge corpus itself (``tcip_mcp.knowledge.list_documents``) rather than left
-as its bare docstring, so the selection hint a client sees is never a second copy of the corpus
-to fall out of step with it. Composing at import also means a document with malformed or duplicate
-frontmatter fails ``import tcip_mcp.server``, every tool with it: the intended rail, caught by
-the staleness and index tests in ``tests/`` before this one tool would ever be blamed alone.
+"""The ``serve_domain_knowledge`` MCP tool: the route to the platform's domain knowledge documents
+for a client with no skill or instruction-file mechanism of its own. Its client-visible description
+is composed at import time from the knowledge corpus (``tcip_mcp.knowledge.list_documents``).
 """
 
 from __future__ import annotations
@@ -43,12 +33,11 @@ def _description() -> str:
 @mcp.tool(description=_description())
 def serve_domain_knowledge(name: str | None = None) -> dict:
     """Read the platform's domain knowledge: trait semantics, workflow patterns, and per-crop
-    biology, the same documents Claude Code loads as generated skills. A client without skills
-    reaches the identical corpus here.
+    biology.
 
     Args:
-        name: One document's name, from this tool's own description. Omitted or empty returns
-            the index (every document's name and description) instead of a document's content.
+        name: One document's name, from this tool's own description. Omitted or empty returns the
+            index (every document's name and description) instead of a document's content.
     """
     documents = list_documents()
     if not name:

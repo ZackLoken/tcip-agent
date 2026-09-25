@@ -1,20 +1,7 @@
 """The review verdict: its action vocabulary, declared once, and the one reading of a stored entry.
 
-``review_engine.record_detection_action`` is the write boundary for a stored verdict; it checks
-a caller's action against this vocabulary before storing anything, so nothing outside the four
-values reaches the store. ``routes/review.py``'s ``ActionPayload.action`` and
-``Detection.reviewed_action`` fields, and the generated browser union all carry
-``VerdictAction`` rather than restating its values as a separate list, and a branch on one action
-compares against its constant here.
-
-``VerdictAction``'s literal strings are the declaration; ``VERDICT_ACTIONS`` is derived from them
-rather than the reverse, since a ``Literal`` built from a tuple does not typecheck.
-
-Every reader of a stored entry reads it through :func:`decode_verdict` (the engine's own lookup,
-the review routes, the calibration reference, the materializer), so what "the breeder affirmed
-this object" means and where the affirmed box comes from are stated once. What each consumer then
-does with the box is its own: the calibration reference emits COCO ``[x, y, w, h]`` scaled by the
-image, the materializer denormalizes to pixel corners for a label file.
+``VerdictAction``'s literal strings are the declaration; ``VERDICT_ACTIONS`` is derived from them.
+Every stored entry is read through :func:`decode_verdict`.
 """
 
 from __future__ import annotations
@@ -37,8 +24,8 @@ POSITIVE_ACTIONS: frozenset[VerdictAction] = frozenset({ACCEPTED_ACTION, EDITED_
 """The actions by which a breeder affirms an object exists. A rejection is not among them, and
 neither is a verdict that only attests the image was swept."""
 
-_GT_BOX_KEY = "gt_bbox_norm"
-_PRED_BOX_KEY = "pred_bbox_norm"
+GT_BOX_KEY = "gt_bbox_norm"
+PRED_BOX_KEY = "pred_bbox_norm"
 
 Box = tuple[float, float, float, float]
 
@@ -48,19 +35,17 @@ class Verdict:
     """One decoded verdict entry.
 
     ``reviewed_by`` is the bare name of the person who recorded this verdict, as the engine stamped
-    it, or ``""`` when the store holds none: a consumer that attributes what the verdict established
-    reads it here rather than reaching into the entry itself.
+    it, or ``""`` when the store holds none.
 
-    Boxes are the stored normalized centre form ``(cx, cy, w, h)``, or ``None`` when the entry
+    Boxes are the stored normalized center form ``(cx, cy, w, h)``, or ``None`` when the entry
     carries no usable box under that key. ``affirmed_box`` is the ground-truth box when the entry
-    has one and the predicted box otherwise, which is what carries an accepted false positive (it
-    has only what the model drew). ``geometry_recorded`` says whether the entry named a box at all,
-    which is different from naming an unusable one: an entry with neither key is a coverage-only
-    attestation that a human swept the image, and it contributes no object to anything.
-    ``iscrowd`` is the crowd flag of the ground-truth record the verdict was recorded on, which
-    every entry states. ``producer_identity`` and ``conf_threshold`` are the producing bucket's
-    identity and the display threshold the verdict was recorded against, each ``None`` where the
-    caller resolved none.
+    has one and the predicted box otherwise (an accepted false positive has only what the model
+    drew). ``geometry_recorded`` says whether the entry named a box at all: an entry with neither
+    key is a coverage-only attestation that a human swept the image, and it contributes no object
+    to anything. ``iscrowd`` is the crowd flag of the ground-truth record the verdict was recorded
+    on, which every entry states. ``producer_identity`` and ``conf_threshold`` are the producing
+    bucket's identity and the display threshold the verdict was recorded against, each ``None``
+    where the caller resolved none.
     """
 
     action: VerdictAction | None
@@ -94,7 +79,7 @@ def _box(raw: object) -> Box | None:
     return tuple(float(v) for v in raw)  # type: ignore[return-value]
 
 
-_STATED_KEYS = ("action", "reviewed_by", "class_name", _GT_BOX_KEY, _PRED_BOX_KEY, "conf",
+_STATED_KEYS = ("action", "reviewed_by", "class_name", GT_BOX_KEY, PRED_BOX_KEY, "conf",
                 "class_id", "missed_object_attested", "iscrowd", "producer_identity",
                 "conf_threshold")
 """The keys every verdict entry states (``review_engine.record_detection_action`` writes each
@@ -107,7 +92,7 @@ def decode_verdict(entry: Mapping) -> Verdict:
     missing = [k for k in _STATED_KEYS if k not in entry]
     if missing:
         raise ValueError(f"a verdict entry states {missing}; this one carries none: {entry!r}")
-    raw_gt, raw_pred = entry[_GT_BOX_KEY], entry[_PRED_BOX_KEY]
+    raw_gt, raw_pred = entry[GT_BOX_KEY], entry[PRED_BOX_KEY]
     conf, class_id, threshold = entry["conf"], entry["class_id"], entry["conf_threshold"]
     return Verdict(
         action=entry["action"],

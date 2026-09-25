@@ -1,14 +1,12 @@
-"""Rename every workspace project carrying a pending-rename marker onto its own new name: the
-operator/agent entry point for ``tcip_mcp.project_rename.complete_pending_renames``, the same
-walk a served backend runs once at its own startup, run by hand or on a schedule with no backend
-running.
+"""Rename every workspace project carrying a pending-rename marker onto its own new name, through
+``tcip_mcp.project_rename.complete_pending_renames``, with no backend running.
 
     tcip complete-renames [--workspace PATH]
 
 ``--workspace`` defaults to ``$TCIP_WORKSPACE`` (``tcip_mcp.workspace.workspace_root``'s own
-default, ``~/tcip-projects``, when neither is set). Prints one line per outcome and exits 1
-when any rename was blocked, 0 otherwise (a skipped project, its own marker unreadable, is
-printed but does not fail the exit code: the walk still renamed every other pending project).
+default, ``~/tcip-projects``, when neither is set). Prints one line per outcome and exits 1 when
+any rename was blocked, 0 otherwise (a skipped project, its own marker unreadable, is printed but
+does not fail the exit code).
 """
 
 from __future__ import annotations

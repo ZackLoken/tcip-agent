@@ -26,11 +26,8 @@ from tcip_mcp.project_paths import resolve_output_path
 
 
 def _review_state_exists(review_state_dir: str) -> bool:
-    """True if the verdict store rooted at ``review_state_dir`` holds any review shard.
-
-    Enumerated through the store, the way the immutability guard counts verdicts, rather than by
-    globbing the shard directory: shards are placed per prediction bucket, so where a shard sits
-    is the store's own layout question and a reader that answers it a second time undercounts.
+    """True if the verdict store at ``review_state_dir`` holds any review shard, enumerated through
+    the store.
     """
     import tcip_store
 
@@ -68,21 +65,17 @@ def _load_or_refuse(checkpoint_path: str, project_path: str):
 def _resolve_calibration_ids(
     checkpoint, images_dir: Path, *, project_path: str | None = None,
 ) -> tuple[set[str] | None, str | None]:
-    """The bound run's calibration-side member stems whose own image sits in ``images_dir``, or
-    the reason none could be resolved. Returns ``(calibration_stems, marks_unresolved)``.
+    """The bound run's calibration-side member stems whose own image sits in ``images_dir``, or the
+    reason none could be resolved. Returns ``(calibration_stems, marks_unresolved)``.
 
     ``calibration_stems`` is ``None`` with ``marks_unresolved`` also ``None`` for an unbound run:
-    no registry-entry ``experiment_id`` at all (``checkpoint.producer``), or an experiment
-    recorded but never bound to a selection (its ``split.json`` carries no
-    ``selection_binding``). There is nothing to mark and nothing to say about it. A bound run's own
-    split record that cannot be read, or whose named selection can no longer be read, gets
-    ``calibration_stems=None`` with ``marks_unresolved`` naming why, never a guess at membership.
+    no registry-entry ``experiment_id`` at all (``checkpoint.producer``), or an experiment recorded
+    but never bound to a selection (its ``split.json`` carries no ``selection_binding``). A bound
+    run's own split record that cannot be read, or whose named selection can no longer be read,
+    gets ``calibration_stems=None`` with ``marks_unresolved`` naming why.
 
-    Membership turns on each calibration sample's own recorded source: a sample whose image sits
-    in ``images_dir`` is one of this queue's candidates, a sample from another directory the
-    selection also spans is not. There is no date to compare and no recorded root to confirm: a
-    selection names each sample's own path, so the directory a queue is drawn over answers the
-    question directly.
+    A calibration sample whose recorded source sits in ``images_dir`` is one of this queue's
+    candidates; a sample from another directory the selection also spans is not.
     """
     experiment_id = checkpoint.producer
     if not experiment_id:
@@ -98,11 +91,12 @@ def _resolve_calibration_ids(
             f"this run's split record could not be read to mark the queue's calibration-side "
             f"candidates: {decode_error}"
         )
-    selection_binding = split.get("selection_binding")
-    if not selection_binding:
-        return None, None
-    selection_dir = selection_binding.get("selection_dir")
     from tcip_mcp.pipelines.data.selection import read_selection
+    from tcip_mcp.pipelines.data.split_construction import bound_selection_dir
+
+    selection_dir = bound_selection_dir(split)
+    if selection_dir is None:
+        return None, None
 
     try:
         selection = read_selection(selection_dir)
@@ -111,19 +105,16 @@ def _resolve_calibration_ids(
             f"this run is bound to the selection at {selection_dir!r}, but it could not be read "
             f"to mark the queue's calibration-side candidates: {exc}"
         )
-    here = Path(images_dir).resolve()
-    return {
-        Path(s.source).stem for s in selection.on("calibration")
-        if Path(s.source).parent.resolve() == here
-    }, None
+    from tcip_mcp.pipelines.data.splits import same_directory
+    from tcip_mcp.pipelines.image_utils import stem_of
+
+    return {stem_of(s.source) for s in selection.on("calibration")
+            if same_directory(Path(s.source).parent, images_dir)}, None
 
 
 def _calibration_marks(candidates: list, calibration_stems: set[str]) -> list[bool]:
-    """``calibration_member`` for each of ``candidates``, in order: True iff its stem is one of
-    the bound selection's calibration-side samples under this queue's own images directory.
-
-    Only meaningful once the caller (:func:`_resolve_calibration_ids`) has narrowed those samples
-    to the directory the candidates are drawn from, so membership then turns on the stem alone.
+    """``calibration_member`` for each of ``candidates``, in order: True iff its stem is one of the
+    bound selection's calibration-side samples under this queue's own images directory.
     """
     from tcip_mcp.pipelines.image_utils import stem_of
 
@@ -131,11 +122,8 @@ def _calibration_marks(candidates: list, calibration_stems: set[str]) -> list[bo
 
 
 def _resolve_review_bucket(engine, bucket: str | None) -> tuple[str | None, str | None]:
-    """The prediction bucket to read verdicts from, and the refusal when that is not one answer.
-
-    Verdicts are keyed by the bucket they were recorded against, so a store holding several is
-    several reviews and not one; the sole bucket answers when there is exactly one, and several
-    are named for the caller to choose among rather than merged into a reference nobody reviewed.
+    """The prediction bucket to read verdicts from, and the refusal when that is not one answer:
+    the sole bucket when there is exactly one; several are named for the caller to choose among.
     """
     if bucket is not None:
         return bucket, None
@@ -166,29 +154,27 @@ def materialize_review_dataset(
 
     Accepted/edited GT boxes become positive name-based labels; rejected-only images become
     empty-label hard negatives (keyed under ``subject``, derived from the verdicts when omitted).
-    When ``experiment_id`` is given, records the review session as experiment lineage. Output
-    (``images/`` + ``annotations/``) chains straight into ``draw_splits`` / ``launch_training``.
+    When ``experiment_id`` is given, records the review session as experiment lineage. Output is
+    the platform's ``images/`` + ``annotations/`` dataset layout.
 
     The reviewed bucket's own recorded scope (``resolution.bucket_scope``) governs when there is
     one: under a classified scope every positive is written with the object class in ``subject``
     and the confirmed value under the scope's attribute, ``subject`` (if stated) must equal the
-    scope's own, and no rejected-only image is ever confirmed negative (a rejected value call is
-    never an absence of the object), landing in ``unconfirmed_negatives`` instead. The output then
-    needs the source dataset's own registry to train under that scope, copied over whether or not
-    any negative was confirmed; refuses by name when the source names no dataset root, that root
-    has no ``subjects.json``, or the output already holds a registry. A bare directory or a detector
-    scope keeps today's behavior. No prediction file at all (a ground-truth-only review) reads no
-    scope, same as before.
+    scope's own, and no rejected-only image is confirmed negative, landing in
+    ``unconfirmed_negatives`` instead. The source dataset's own registry is then copied over;
+    refuses by name when the source names no dataset root, that root has no ``subjects.json``, or
+    the output already holds a registry. A bare directory or a detector scope, and a
+    ground-truth-only review with no prediction file, read no classified scope.
 
     Args:
         dataset_root: Root of the dataset the review was recorded against. It scopes the verdict
             store read when ``review_state_dir`` is not stated (``<dataset_root>/.tcip/state``),
             and it is what the experiment lineage records as the reviewed dataset.
         source_images_dir: Directory of the reviewed source images.
-        output_dir: Destination for the curated dataset (distinct from the source). A relative
-            path resolves against the platform state root, never the server process's cwd.
-        experiment_id: Optional run record (one run's immutable record, ``tcip_mcp.experiments``)
-            to record the review-session lineage on.
+        output_dir: Destination for the curated dataset (distinct from the source). A relative path
+            resolves against the platform state root, never the server process's cwd.
+        experiment_id: Optional run record (``tcip_mcp.experiments``) to record the review-session
+            lineage on.
         include_hard_negatives: Emit rejected-only images as empty-label backgrounds.
         only_completed: Restrict to fully-reviewed (``img_status=='completed'``) images.
         copy_files: Copy images (True) or symlink (False).
@@ -196,17 +182,13 @@ def materialize_review_dataset(
             omitted it is derived from every subject the verdicts name, rejections included, and
             only when they name exactly one. A rejected image whose own rejections answer for
             another subject, or for none, is materialized as an unconfirmed empty and reported in
-            ``unconfirmed_negatives`` with why, rather than keyed under a subject no verdict on
-            that image mentions.
+            ``unconfirmed_negatives`` with why.
         bucket: Which prediction bucket's verdicts to curate, as
             ``prediction_buckets.bucket_key_of`` spells it. Omitted reads the store's sole bucket
-            and refuses, naming them, when it holds several: two buckets are two reviews, and
-            merging them would curate one date's verdicts against another's images.
+            and refuses, naming them, when it holds several.
         review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
             default) derives the store from ``dataset_root``; stated, it is read verbatim and the
-            response names it as where the shards came from. The two are never merged and neither
-            stands in for the other: a stated store holding no shards is refused, never answered
-            from the dataset's own store.
+            response names it. A stated store holding no shards is refused.
     """
     output_dir = str(resolve_output_path(output_dir))
     if not dataset_root:
@@ -240,7 +222,7 @@ def materialize_review_dataset(
     review_state = {"image": engine.image_states(resolved_bucket)}
     state_path = engine.shard_dir
 
-    from tcip_mcp.pipelines.resolution import StampScopeUnstated, bucket_scope
+    from tcip_mcp.pipelines.resolution import bucket_scope
     from tcip_store import StoreError
 
     scope = None
@@ -259,7 +241,7 @@ def materialize_review_dataset(
             scope_dir = Path(dataset_root) / resolved_bucket
         try:
             scope = bucket_scope(scope_dir)
-        except (StampScopeUnstated, StoreError) as exc:
+        except StoreError as exc:
             return {"error": str(exc)}
         if scope is not None and scope.classified:
             from tcip_mcp.pipelines.postprocessing.phenology import bucket_id_map
@@ -327,14 +309,13 @@ def _prepare_queue_sources(
     skip_reviewed: bool,
     bucket: str | None,
 ):
-    """The checkpoint-file, images-dir and reviewed-skip plumbing both review-queue doors share,
-    in the order each refusal would otherwise be found: checkpoint existence, images directory,
-    logical image enumeration, then which of them the dataset's own review state already covers.
+    """The checkpoint-file, images-dir and reviewed-skip plumbing both review-queue doors share, in
+    order: checkpoint existence, images directory, logical image enumeration, then which of them
+    the dataset's own review state already covers.
 
     Returns ``(sources, reviewed_skipped, build_predictor, error)``; ``error`` is a ready
-    ``{"error": ...}`` dict and the other three are ``None``/``0``/``None`` when it is set.
-    ``build_predictor`` is handed back rather than imported again by the caller, since it is
-    also the point at which a torch-less environment is refused.
+    ``{"error": ...}`` dict and the other three are ``None``/``0``/``None`` when it is set. A
+    torch-less environment is refused at the ``build_predictor`` import.
     """
     if not Path(checkpoint_path).is_file():
         return None, 0, None, {"error": f"Checkpoint not found: {checkpoint_path}"}
@@ -382,7 +363,6 @@ def prioritize_review_queue(
     images_dir: str,
     dataset_root: str = "",
     method: str = "combined",
-    task: str = "detection",
     budget: int = 50,
     skip_reviewed: bool = True,
     bucket: str | None = None,
@@ -392,22 +372,14 @@ def prioritize_review_queue(
     """Rank un-reviewed images by active-learning informativeness for the next review batch.
 
     Scores every candidate with ``method`` and returns the most uncertain/diverse frames first.
-    The sibling tool ``triage_predictions`` sorts predictions by confidence instead, returning a
-    confident set for a caller to accept as ground truth rather than writing anything itself; that
-    is a different, more consequential capability kept as its own door.
 
     When ``checkpoint_path`` names a registry entry produced by a run bound to a selection
     (``selection_binding`` on that run's ``split.json``), each ``queue`` entry carries
     ``calibration_member: bool``, matched against the selection's calibration samples whose own
     source sits in ``images_dir``: reviewing that image edits a label inside the bound run's own
-    calibration universe, which a later validation of that run would then read as moved. A
-    selection names each sample's own path, so membership is read off those paths rather than
-    guessed from a date; a calibration sample the selection holds under another directory is not
-    a candidate here and is not marked. An unbound run (no registry producer, or a producer whose
-    run was never bound to a selection) carries no mark on any entry and no reason: there is
-    nothing to mark. A bound run whose own split record, or whose named selection, can no longer
-    be read carries no mark either, but the response states why under ``marks_unresolved``, never
-    a guess.
+    calibration universe. An unbound run carries no mark on any entry. A bound run whose own split
+    record, or whose named selection, can no longer be read carries no mark either, and the
+    response states why under ``marks_unresolved``.
 
     Args:
         checkpoint_path: Trained model checkpoint (drives scoring).
@@ -416,18 +388,16 @@ def prioritize_review_queue(
             (``<dataset_root>/.tcip/state``) that ``skip_reviewed`` reads. With neither this nor
             ``review_state_dir`` stated, no store is read and every candidate image is ranked.
         method: Informativeness scorer. ``uncertainty`` | ``diversity`` | ``combined`` are the
-            built-in reference implementations, not the allowed set: register your own with
-            ``register_scorer``, or pass a dotted ``module:factory`` you wrote. An
-            unresolvable name is refused rather than silently scored as ``combined``.
-        task: Task type for the uncertainty scorer.
+            built-in reference implementations: register your own with ``register_scorer``, or pass
+            a dotted ``module:factory`` you wrote, scoring under the checkpoint's own task. An
+            unresolvable name is refused.
         budget: Number of images to return.
         skip_reviewed: Exclude already-completed images from the queue.
         bucket: Which prediction bucket's completed reviews ``skip_reviewed`` skips, as
             ``prediction_buckets.bucket_key_of`` spells it. Omitted reads the store's sole bucket
             and refuses, naming them, when it holds several.
         review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
-            default) derives the store from ``dataset_root``; stated, it is read verbatim. The two
-            are never merged and neither stands in for the other.
+            default) derives the store from ``dataset_root``; stated, it is read verbatim.
         project_path: Project root the checkpoint's registry entry is looked up under. Empty
             (default) resolves to the process's own root.
     """
@@ -435,6 +405,14 @@ def prioritize_review_queue(
         checkpoint_path, images_dir, dataset_root, review_state_dir, skip_reviewed, bucket)
     if error is not None:
         return error
+
+    checkpoint, refusal = _load_or_refuse(checkpoint_path, project_path)
+    if refusal is not None:
+        return refusal
+    try:
+        task = checkpoint.task
+    except ValueError as exc:
+        return {"error": str(exc)}
 
     if not sources:
         return {"method": method, "task": task, "total_candidates": 0,
@@ -445,9 +423,6 @@ def prioritize_review_queue(
     except (ImportError, OSError) as e:
         return {"error": f"torch/torchvision unavailable: {e}"}
 
-    checkpoint, refusal = _load_or_refuse(checkpoint_path, project_path)
-    if refusal is not None:
-        return refusal
     predictor = build_predictor(checkpoint)
     guard = require_composed_detector(predictor, purpose="review-queue scoring")
     if guard:
@@ -497,20 +472,15 @@ def triage_predictions(
     review_state_dir: str = "",
     project_path: str = "",
 ) -> dict:
-    """Sort a checkpoint's own predictions by confidence into auto-accept, needs-review and unscoreable queues.
-
-    Not an MCP tool: run through ``tcip triage-predictions``, per the admission standard
-    (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
+    """Sort a checkpoint's own predictions by confidence into auto-accept, needs-review and
+    unscoreable queues.
 
     Returns predictions at or above ``auto_threshold`` as the confident set for a caller to accept
     as ground truth; this door writes nothing itself. Routes predictions between ``low`` and
     ``high`` into the needs-review queue, which can overlap the confident set when
     ``auto_threshold`` sits below ``high``, and separates out predictions with no
     confidence-bearing signal at all (e.g. a regression head's point estimate) into their own
-    ``unscoreable_images`` list rather than let them silently vanish from every output. The
-    sibling tool ``prioritize_review_queue`` ranks images by active-learning informativeness
-    instead, never surfacing a confident set for acceptance; this door is the more consequential
-    capability and stays agent/operator-only.
+    ``unscoreable_images`` list.
 
     Args:
         checkpoint_path: Trained model checkpoint (drives predictions).
@@ -522,18 +492,14 @@ def triage_predictions(
         low: Lower confidence bound for the needs-review band.
         high: Upper confidence bound for the needs-review band.
         auto_threshold: Confidence at/above which a prediction joins the confident set this door
-            returns for a caller to accept as ground truth. ``None`` (default) refuses to
-            auto-accept: turning predictions into GT at a pinned 0.8 fabricates labels the model
-            was never confirmed to get right. Derive this threshold from the model's validated
-            confidence distribution and confirm with a breeder spot-check that high-conf actually
-            equals truth, then pass it explicitly: the result is stamped as requiring that
-            confirmation.
+            returns. ``None`` (default) refuses to auto-accept. Derive it from the model's
+            validated confidence distribution and confirm with a breeder spot-check; the result is
+            stamped as requiring that confirmation.
         bucket: Which prediction bucket's completed reviews ``skip_reviewed`` skips, as
             ``prediction_buckets.bucket_key_of`` spells it. Omitted reads the store's sole bucket
             and refuses, naming them, when it holds several.
         review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
-            default) derives the store from ``dataset_root``; stated, it is read verbatim. The two
-            are never merged and neither stands in for the other.
+            default) derives the store from ``dataset_root``; stated, it is read verbatim.
         project_path: Project root the checkpoint's registry entry is looked up under. Empty
             (default) resolves to the process's own root.
     """

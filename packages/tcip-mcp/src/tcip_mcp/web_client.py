@@ -5,36 +5,21 @@ never through a file on disk.
 
 Every store the web package owns is declared here rather than in the web package: the backend's
 port handoff, the GUI snapshot, the live-canvas pair, the canvas-open binding, the SessionEnd
-learning-capture log, the async job registry, and the per-project annotation-timing stats. Some of
-these MCP tools read directly and cannot import ``tcip_web``; others the web package alone reads
-and writes. Either way the declaration lives here so ``tcip_mcp.store_catalogue`` can see every
-store the platform declares without importing ``tcip_web``, which is the legal dependency
-direction and the same one ``VALID_PANELS`` already takes. A declaration on each side would be two
-stores wearing one name, and whichever imported first would decide where the documents land.
-
-The tab vocabulary (``ActiveTab``/``TAB_NAMES``) lives here for the same reason: the agent's own
-``focus_human_attention`` tool takes a tab name over the wire, so the vocabulary is the protocol's,
-and ``tcip_web.state`` imports it rather than declaring its own.
+learning-capture log, the async job registry, and the per-project annotation-timing stats. The tab
+vocabulary (``ActiveTab``/``TAB_NAMES``) is declared here too.
 
 Port discovery order:
   1. The port record under the workspace root: the port actually bound, so a substituted port
-     (the requested one was taken) is still the one found. The workspace root, not the
-     platform-state root, because it is the one location every process on this machine
-     resolves identically; the platform root moves whenever a process adopts a project, which
-     would otherwise strand a reader pinned to a different one.
-  2. ``TCIP_WEB_PORT`` environment variable: a request, read only when no record parses. The
-     record can fail to exist (a failed publication, or a backend started as bare ``uvicorn
-     tcip_web.app:app --port N``, which never writes one), and the launcher keeps serving either
-     way, so with no record the request is the best information there is.
+     (the requested one was taken) is still the one found.
+  2. ``TCIP_WEB_PORT`` environment variable: a request, read only when no record parses.
   3. Default: 8765.
 
 Host discovery:
   1. ``TCIP_WEB_HOST`` environment variable.
   2. Default: 127.0.0.1.
 
-Connection failures are treated as soft errors: the MCP tool returns
-``{"status": "no_subscribers"}`` rather than raising. This keeps agent
-workflows working when the GUI is closed.
+Connection failures are treated as soft errors: the MCP tool returns ``{"status":
+"no_subscribers"}`` rather than raising.
 """
 
 from __future__ import annotations
@@ -77,9 +62,8 @@ def backend_port_key(root: Path | str | None = None) -> Key:
     """Where the backend publishes the port it bound, for MCP tools in other processes.
 
     ``last_writer_wins``: one backend writes the whole value once per start and reads nothing
-    first. ``root`` defaults to the workspace root: the one location every process on this
-    machine resolves identically, unlike the platform-state root, which moves whenever a
-    process adopts a project. The writer and the reader both pass it explicitly.
+        first. ``root`` defaults to the workspace root, which every process on this machine
+        resolves identically.
     """
     if root is None:
         from tcip_mcp import workspace
@@ -110,10 +94,8 @@ register_store(
 def gui_snapshot_key(project_root: str | Path) -> Key:
     """This project's persisted GUI snapshot.
 
-    ``last_writer_wins``: the backend holds the live state in memory and writes the whole
-    snapshot from it, so the document is one process's view rather than one writers merge
-    into. ``durable=False``: the snapshot is rewritten on a debounce cycle and a crash losing
-    the last one costs a re-selection, not history.
+    ``last_writer_wins``: the backend holds the live state in memory and writes the whole snapshot
+        from it. ``durable=False``: the snapshot is rewritten on a debounce cycle.
     """
     return Key(GUI_SNAPSHOT_STORE, str(project_root), _SNAPSHOT_PARTS)
 
@@ -146,10 +128,8 @@ for _canvas_store in (CANVAS_META_STORE, CANVAS_GEOMETRY_STORE):
 def canvas_meta_key(project_root: str) -> Key:
     """The small meta document every push overwrites.
 
-    ``last_writer_wins``: each push writes the document whole from the payload it was given
-    and reads nothing first; the reader pairs meta with geometry by identity rather than by
-    mutual exclusion. ``durable=False`` carries the canvas route's own stated property, that a
-    crash losing the last push costs nothing because the next push repaints it.
+    ``last_writer_wins``: each push writes the document whole from the payload it was given and
+        reads nothing first. ``durable=False``: the next push repaints a lost one.
     """
     return Key(CANVAS_META_STORE, project_root, _META_PARTS)
 
@@ -183,20 +163,13 @@ def canvas_open_binding_key(*, create: bool = True) -> Key:
     """Which root the GUI currently has open: ``{generation, root, project_name, issued_at,
     released}``.
 
-    Workspace-scoped, one record with two writers: ``/dataset/select`` reads the current record
-    inside a transaction to decide whether ``root`` changed, or the current record was released
-    (either bumps ``generation``), before writing a fresh, unreleased record; an unconditional
-    write would drop a concurrent select's bump. ``tcip_mcp.project_removal.
-    release_project_binding`` is the second writer: inside its own transaction on this key, a
-    record naming the project being released is rewritten with ``generation + 1`` and
-    ``released: True``, never deleted, so a caller still holding the pre-release generation keeps
-    failing its own fence and push the same way it would against any other stale generation.
-    ``released`` is additive and optional, absent from every record a select writes. ``root`` is
-    the server's own resolved open root, never a client string; ``project_name`` is the workspace
-    project name when ``root`` is one, else ``None`` (a registered dataset root or a
-    ``TCIP_IMAGE_ROOTS`` entry binds by root all the same). A reader that must not bring a
-    workspace directory into existence on a bare read (``capture_live_canvas``) passes
-    ``create=False``.
+    Workspace-scoped and written compare-and-set: a select bumps ``generation`` when ``root``
+    changed or the current record was released, before writing a fresh, unreleased record. A
+    release rewrites a record naming the project being released with ``generation + 1`` and
+    ``released: True``, never deleting it. ``released`` is additive and optional, absent from every
+    record a select writes. ``root`` is the server's own resolved open root, never a client string;
+    ``project_name`` is the workspace project name when ``root`` is one, else ``None``. ``create``
+    threads through to the workspace root.
     """
     from tcip_mcp import workspace
 
@@ -221,11 +194,7 @@ register_store(
 
 
 def learning_capture_key(root: str | Path) -> Key:
-    """The session-boundary log under ``root``.
-
-    Every session's hook appends here, from its own process, so the entries are serialized and
-    each one is on disk before the hook exits rather than buffered in a bare handle.
-    """
+    """The session-boundary log under ``root``."""
     return Key(LEARNING_CAPTURE_STORE, str(Path(root).resolve()), _CAPTURE_PARTS)
 
 
@@ -271,9 +240,8 @@ def current_root() -> str:
 def job_registry_key(name: str, *, root: str | Path | None = None) -> Key:
     """One job registry's persisted summaries, under ``root`` (default: :func:`current_root`).
 
-    ``last_writer_wins``: one root's own group of a registry is written whole from the live
-    jobs that carry it, so the file is a snapshot of that root's state rather than a document
-    writers merge into.
+    ``last_writer_wins``: one root's own group of a registry is written whole from the live jobs
+        that carry it.
     """
     resolved = str(Path(root).resolve()) if root is not None else current_root()
     return Key(JOB_REGISTRY_STORE, resolved, (name,))
@@ -297,37 +265,20 @@ register_store(
 
 
 def annotation_stats_key(project_root: str) -> Key:
-    """The project's per-image annotation timings and session rollups.
-
-    ``cas``: every route in ``tcip_web.routes.sessions`` reads the document, edits one session
-    row or one image entry inside it, and writes the whole thing back, so an unconditional
-    write would drop a slice another request had just recorded.
-    """
+    """The project's per-image annotation timings and session rollups, written compare-and-swap."""
     return Key(ANNOTATION_STATS_STORE, project_root, _ANNOTATION_STATS_PARTS)
 
 
 class GuiBindingUnreadable(RuntimeError):
-    """The canvas-open binding record could not be read, or read as something that does not
-    carry the ``root`` field a comparison needs: a store error, an OS-level failure, or a
-    record shape it cannot trust.
-
-    Raised by :func:`read_canvas_binding` and :func:`gui_binding_matches` rather than left to
-    propagate as the underlying ``StoreError``/``OSError``/``KeyError``, so every reader of the
-    binding (``capture_live_canvas``'s initial read and its post-render generation fence,
-    ``focus_human_attention``, ``push_panel_event``) shares one error contract instead of each
-    wrapping the read in its own try/except.
+    """The canvas-open binding record could not be read, or read as something that does not carry
+    the ``root`` field a comparison needs: a store error, an OS-level failure, or a record shape it
+    cannot trust.
     """
 
 
 def read_canvas_binding() -> dict[str, Any] | None:
-    """Read the canvas-open binding record as-is, or ``None`` when none exists yet.
-
-    The one read every binding consumer builds on: :func:`gui_binding_matches`'s own root
-    comparison, and ``capture_live_canvas``'s post-render generation fence, which compares
-    ``generation`` rather than ``root`` and so cannot use :func:`gui_binding_matches` itself.
-    Raises :class:`GuiBindingUnreadable` when the record cannot be read, rather than returning
-    as if none existed: a caller that cannot tell "no binding" from "binding illegible" would
-    refuse the wrong way and might steer a browser it should not.
+    """Read the canvas-open binding record as-is, or ``None`` when none exists yet. Raises
+    :class:`GuiBindingUnreadable` when the record cannot be read.
     """
     try:
         return tcip_store.read(canvas_open_binding_key(create=False), default=None)
@@ -338,14 +289,6 @@ def read_canvas_binding() -> dict[str, Any] | None:
 def binding_released_or_absent(binding: dict[str, Any] | None) -> bool:
     """Whether ``binding`` means nothing is open: absent, or marked ``released`` by
     :func:`tcip_mcp.project_removal.release_project_binding`.
-
-    The one predicate every reader of the canvas-open binding shares, so a released record
-    reads as nothing open everywhere rather than each caller re-deriving it:
-    :func:`gui_binding_matches`, :func:`binding_divergence`,
-    :func:`tcip_mcp.project_removal._open_project_conflict`'s canvas arm and
-    :func:`tcip_mcp.project_removal.binding_release_available`, ``tcip_web.routes.dataset.
-    _write_canvas_binding``'s bump rule, and the canvas push route
-    (``tcip_web.routes.canvas.push_canvas_state``).
     """
     return binding is None or bool(binding.get("released"))
 
@@ -353,19 +296,10 @@ def binding_released_or_absent(binding: dict[str, Any] | None) -> bool:
 def gui_binding_matches(root: str | Path) -> tuple[bool, dict[str, Any] | None]:
     """Whether the GUI's currently open project is ``root``, and the binding compared against.
 
-    The one comparison every caller that drives the live GUI shares: ``capture_live_canvas``,
-    ``focus_human_attention`` and ``push_panel_event`` all refuse when the GUI has moved to
-    another project, and a second, separately-written comparison in each would let the two
-    drift apart. Returns ``(False, None)`` when no binding record exists at all
-    (nothing is open for any root to match); ``(False, binding)`` before ``root`` is even
-    compared when the binding was released (``tcip_mcp.project_removal.
-    release_project_binding``): a released record names what the GUI last had open, not what it
-    has open now, so it can never match (:func:`binding_released_or_absent`). Otherwise
-    ``(matches, binding)``, so a caller refusing a mismatch can name the binding's own project
-    straight from the second element without a re-read. Raises :class:`GuiBindingUnreadable`
-    when the record cannot be read, or reads as a mapping with no ``root`` field: a record this
-    seam itself never writes without one, so a caller seeing it that way must be told the record
-    is illegible rather than have the comparison raise ``KeyError`` out to it.
+    Returns ``(False, None)`` when no binding record exists at all; ``(False, binding)`` before
+    ``root`` is even compared when the binding was released (:func:`binding_released_or_absent`).
+    Otherwise ``(matches, binding)``. Raises :class:`GuiBindingUnreadable` when the record cannot
+    be read, or reads as a mapping with no ``root`` field.
     """
     binding = read_canvas_binding()
     if binding is None:
@@ -383,19 +317,12 @@ def gui_binding_matches(root: str | Path) -> tuple[bool, dict[str, Any] | None]:
 
 
 def binding_divergence(binding: dict[str, Any] | None, own_root: str) -> dict[str, Any]:
-    """Name both sides of a binding disagreement (a foreign project, an unnamed root, or no
-    binding at all) and the step that converges them.
+    """Name both sides of a binding disagreement (a foreign project, an unnamed root, or no binding
+    at all) and the step that converges them.
 
-    Shared by ``capture_live_canvas``'s mismatch and miss branches and by ``gui_tools``'s
-    ``_binding_refusal`` (the same fact reported two ways: nested under ``capture_live_canvas``'s
-    own ``divergence`` key, flattened into ``push_panel_event``'s and ``focus_human_attention``'s
-    top-level refusal), so the naming logic itself lives once. ``activate_project`` can only
-    adopt a named workspace project, so a binding on a non-workspace root (a registered dataset
-    or a ``TCIP_IMAGE_ROOTS`` entry) has no name for it to converge on, and no binding at all has
-    nothing to converge to besides opening one: the GUI's own (re)selection is the route back to
-    agreement in both cases. A released binding (:func:`tcip_mcp.project_removal.
-    release_project_binding`) reports the same as no binding at all: it names what the GUI last
-    had open, not what it has open now.
+    A binding on a non-workspace root (a registered dataset or a ``TCIP_IMAGE_ROOTS`` entry), or no
+    binding at all, converges only through the GUI's own (re)selection. A released binding reports
+    the same as no binding at all.
     """
     from tcip_mcp import workspace
 
@@ -465,18 +392,9 @@ def resolve_web_host() -> str:
 
 
 def resolve_web_port() -> int:
-    """Return the port the FastAPI backend is listening on.
-
-    Reads the record under the workspace root, the same place the web backend writes it,
-    regardless of this process's own platform-state root. The record is the answer: it names
-    the port the backend actually bound, which can differ from any request when the requested
-    one was taken and a free one substituted. ``TCIP_WEB_PORT`` is only ever a request, read
-    when no record parses: the record can be absent (a failed publication, or a backend
-    started as bare ``uvicorn tcip_web.app:app --port N``, which writes none), and the
-    launcher serves either way, so with no record the request is the best information there
-    is. An absent record and an unparseable one both fall through to the env var, then to the
-    default, rather than raising: this runs before the backend is known to be up, so a missing
-    handoff is an ordinary state, not a failure.
+    """Return the port the FastAPI backend is listening on, in the order the module docstring
+    gives: the record under the workspace root, then ``TCIP_WEB_PORT``, then the default. An absent
+    record and an unparseable one both fall through rather than raising.
     """
     from tcip_mcp import workspace
 

@@ -1,7 +1,4 @@
-"""``python -m tcip_web.cli``: a package's own ``__init__.py`` cannot be the ``-m`` target, so
-this thin entry point is what a test (and an operator with no ``tcip`` console script installed
-yet) actually spawns.
-"""
+"""Entry point for ``python -m tcip_web.cli``."""
 
 from __future__ import annotations
 

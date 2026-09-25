@@ -32,8 +32,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # [default] adds the dashboard's own deps (aiohttp, grpcio); hpo._ray_session only requests it when importable.
-hpo = ["ray[default,tune]>=2.9", "optuna>=3.0", "hyperopt", "bayesian-optimization",
-       "nevergrad", "ax-platform"]
+hpo = ["ray[default,tune]>=2.9", "optuna>=3.0", "hyperopt", "bayesian-optimization"]
 dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "pytest-timeout>=2.0", "pytest-xdist>=3.0"]
 
 [build-system]

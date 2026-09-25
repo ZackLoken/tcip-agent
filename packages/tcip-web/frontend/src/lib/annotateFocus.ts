@@ -51,7 +51,7 @@ export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
   }
   if (d.mode) store.setMode(d.mode);
   // The canvas renders only shapes of the active subject, so set it to the subject present on the
-  // focused frame, otherwise a frame labelled for another subject shows a blank canvas even in
+  // focused frame, otherwise a frame labeled for another subject shows a blank canvas even in
   // the right mode.
   if (d.active_subject) store.setActiveSubject(d.active_subject);
   store.setActiveTab("annotate");

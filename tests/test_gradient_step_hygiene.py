@@ -25,7 +25,7 @@ from tests.tiny_trainer_fixtures import (
 
 BUILDER = "tests.tiny_trainer_fixtures:build_data_scaled_gradient_model"
 
-# Deliberately spread over three orders of magnitude: a step that carried a neighbour's gradient
+# Deliberately spread over three orders of magnitude: a step that carried a neighbor's gradient
 # too would land nowhere near the batch's own.
 SKEWED_VALUES = [1.0, 10.0, 100.0]
 SKEWED_INTENSITIES = [0.2, 0.5, 0.9]

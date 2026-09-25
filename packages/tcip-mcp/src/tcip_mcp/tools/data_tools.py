@@ -9,6 +9,7 @@ import tcip_store
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
+from tcip_mcp.pipelines.data.splits import DEFAULT_GROUP_BY, DEFAULT_SEED, DEFAULT_VAL_RATIO
 
 
 @mcp.tool()
@@ -17,47 +18,34 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
     """Freeze a finished run's own drawn train/val partition into a selection, so a later run can
     bind to the identical partition instead of drawing its own.
 
-    A run of any task freezes, whatever shape its ground truth is: the record says per scope which
-    members it holds, which file answered for each, where its pixels came from and what that file
-    digested to at run time, and the selection is composed scope by scope from exactly those, so
-    nothing here reads the config for a place, compares one against the record, or reads two
-    scopes' same-named members as one.
+    A run of any task freezes, whatever shape its ground truth is: the selection is composed scope
+    by scope from what the run's record says per scope, which members it holds, which file answered
+    for each, where its pixels came from and what that file digested to at run time.
 
-    Reads the run's ``split.json`` (through ``read_run_partition_checked``: a record that will
-    not decode refuses rather than reading as absent) and its durable config, and refuses,
-    naming the primitive, when: no split record exists for ``experiment_id`` or it does not
-    decode; the run was bound to a selection already (``selection_binding``: bind to that
-    selection directly instead); the split is spatial (region identities, not stems); the record
-    carries no per-scope ``members`` block at all, so which scope each member's ground truth lives
-    under is not on record; the run's val side is empty (it trained without validation, a
-    partition no bind can use); the config's ``data`` section carries no ``subject`` or
-    ``id_map`` for ground truth that is per-image label documents, whose admission is
-    subject-scoped; the record carries no ``group_by`` at all (no grouping policy recorded; never
-    defaulted to ``"stem"``); a scope block carries no ``label_digests.at_run``, no
-    ``label_digests.ground_truth``, no ``sources`` entry or no ``group_key_map`` for a member (the
-    run recorded no per-member digest, path, source or group key, so the partition cannot be
-    vouched for); a member's ground truth has moved since the run (the file the record names now
-    digests differently, the moved members named), since a selection composed from it would bind a
-    later run to ground truth this one never saw; or a selection already exists at the output
-    directory.
+    Reads the run's ``split.json`` (through ``read_run_partition_checked``: a record that will not
+    decode refuses) and its durable config, and refuses, naming the primitive, when: no split
+    record exists for ``experiment_id`` or it does not decode; the split is spatial (region
+    identities, not stems); the run's val side is empty; the config's ``data`` section carries no
+    ``subject`` or ``id_map`` for ground truth that is per-image label documents; a
+    member's ground truth has moved since the run (the file the record names now digests
+    differently, the moved members named); or a selection already exists at the output directory.
 
-    The frozen selection's ``calibration`` side is always empty: freezing a training run's own
-    train/val draw records no calibration draw, so the calibration doors' own floor refuses any
-    calibration measurement against it by name, and this tool's own answer carries a ``note``
-    saying so instead of quietly minting a selection that looks whole but cannot calibrate.
+    The frozen selection's ``calibration`` side is always empty, so the calibration doors' own
+    floor refuses any calibration measurement against it by name; this tool's answer carries a
+    ``note`` saying so.
 
     Args:
-        experiment_id: The finished run to freeze the drawn partition of, by its record id (one
-            run's immutable record, ``tcip_mcp.experiments``).
+        experiment_id: The finished run to freeze the drawn partition of, by its record id
+            (``tcip_mcp.experiments``).
         output_path: Where to write the selection. Defaults to
             ``<dataset_root>/splits/frozen-<experiment_id>``, resolved from the run's own recorded
             sources through ``dataset_root_of``; refused when that does not resolve (a source
             outside the canonical ``<dataset_root>/images/...`` layout).
     """
-    from tcip_mcp.dataset_layout import dataset_root_of, status_bucket
+    from tcip_mcp.dataset_layout import dataset_root_of
     from tcip_mcp.experiments import config_key, read_member, read_run_partition_checked
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
-    from tcip_mcp.pipelines.data.label_queries import Admitted, admission_date, samples_over
+    from tcip_mcp.pipelines.data.label_queries import Admitted, samples_over
     from tcip_mcp.pipelines.data.selection import (
         DOCUMENT, ClassScope, Sample, Selection, read_selection_checked, shape_of, write_selection,
     )
@@ -70,36 +58,10 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
         return {"error": f"no split record for {experiment_id!r}: this run wrote no split.json "
                          "(it never reached a real dataset build), so there is no drawn "
                          "partition to freeze."}
-    if split.get("selection_binding"):
-        bound_dir = split["selection_binding"].get("selection_dir")
-        if split.get("redrawn_within_selection"):
-            return {"error": f"{experiment_id!r} redrew train and val inside the selection at "
-                             f"{bound_dir!r} already: reproduce it by binding a later run to that "
-                             "same selection with the same seed and "
-                             "data.split.redraw_within_selection=true, with the labels this run's "
-                             "own split.json recorded (label_digests.at_run) unchanged since "
-                             "(the redraw reads per-stem annotation counts at run time, not "
-                             "only the selection's fixed membership), never by freezing."}
-        return {"error": f"{experiment_id!r} was bound to a selection already ({bound_dir!r}): "
-                         "bind a later run to that selection directly instead of freezing "
-                         "this one's."}
-    resolved_group_by = split.get("group_by")
-    if resolved_group_by == "spatial_strip":
+    if split["group_by"] == "spatial_strip":
         return {"error": f"{experiment_id!r}'s split is spatial (region identities, not stems): "
                          "freeze_selection binds a stem-keyed partition, which a spatial split "
                          "never draws."}
-    if not isinstance(split.get("members"), dict):
-        return {"error": f"{experiment_id!r}'s split records no per-scope membership: which scope "
-                         "each member's ground truth lives under, which file answered for it and "
-                         "where its pixels came from are not on record, so this partition cannot "
-                         "be composed. Draw a selection over the current data with draw_splits, "
-                         "or freeze a run trained under the current tree, which records "
-                         "membership per scope."}
-    if resolved_group_by is None:
-        return {"error": f"{experiment_id!r}'s split record carries no group_by at all (no "
-                         "grouping policy recorded): freeze_selection never defaults one, "
-                         "since guessing 'stem' could silently misstate the policy the run "
-                         "actually drew under."}
 
     config = read_member(config_key(experiment_id), {})
     config = config if isinstance(config, dict) else {}
@@ -108,29 +70,18 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
     scope = ClassScope.recorded_in(config.get("data") or {})
     # Composed scope by scope, the way the record is written: a bare member name means one image
     # only within its own scope, so two scopes' same-named members stay two members here.
-    unrecorded: list[str] = []
     moved: list[str] = []
     shapes: set[str] = set()
     samples: list[Sample] = []
     n_train = n_val = 0
-    for gt_scope, block in sorted(split["members"].items()):
-        block = block if isinstance(block, dict) else {}
-        label_digests = block.get("label_digests") or {}
-        recorded = label_digests.get("ground_truth") or {}
-        digests = label_digests.get("at_run") or {}
-        groups = block.get("group_key_map") or {}
-        sources = block.get("sources") or {}
-        train_stems, val_stems = block.get("train") or [], block.get("val") or []
+    for _, block in sorted(split["members"].items()):
+        recorded = block["label_digests"]["ground_truth"]
+        digests = block["label_digests"]["at_run"]
+        train_stems, val_stems = block["train"], block["val"]
         n_train, n_val = n_train + len(train_stems), n_val + len(val_stems)
         here = sorted(set(train_stems) | set(val_stems))
-        unrecorded.extend(
-            m for m in here
-            if m not in recorded or m not in digests or m not in groups or m not in sources)
-        if unrecorded:
-            continue
-        # A member whose ground truth is the scope itself is one row of it, by its own row key.
-        records = [Admitted(member=m, source=sources[m], ground_truth=recorded[m],
-                            row_key=m if recorded[m] == gt_scope else None)
+        records = [Admitted(member=m, source=block["sources"][m], ground_truth=recorded[m],
+                            row_key=block["row_keys"].get(m))
                    for m in here]
         shapes.update(shape_of(r.ground_truth, r.row_key) for r in records)
         try:
@@ -142,29 +93,23 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
         assignment.update({stem: "val" for stem in val_stems})
         # Through the one producer, over this scope's own sources, paths and group keys.
         samples.extend(samples_over(
-            records, assignment, groups.__getitem__,
-            confirmation_bucket=(status_bucket(scope.subject, admission_date(gt_scope))
-                                 if scope.subject else None),
-            digests=digests,
+            records, assignment, block["group_key_map"].__getitem__,
+            confirmation_bucket=block["confirmation_bucket"], digests=digests,
         ))
     if not n_val:
         return {"error": f"{experiment_id!r} trained without validation (an empty val side): "
                          "a partition no bind can use."}
-    if unrecorded:
-        return {"error": f"{experiment_id!r}'s split record carries no ground-truth path, digest, "
-                         f"group key or image source for {sorted(unrecorded)[:5]} "
-                         f"({len(unrecorded)} member(s)): a member the record does not fully "
-                         "describe cannot be composed or checked for movement, so this partition "
-                         "cannot be vouched for."}
     if DOCUMENT in shapes:
         # A label document's admission is subject-scoped and reads the class map the run trained
         # in; a mask raster and a table row are admitted by existing and scope no class space.
-        missing = [name for name, value in
-                   (("subject", scope.subject), ("id_map", scope.id_map)) if not value]
-        if missing:
-            return {"error": f"{experiment_id!r}'s durable config carries no {missing}: "
-                             "freeze_selection needs every one of them to compose a selection "
-                             "over per-image label documents."}
+        try:
+            scope.named_subject(f"{experiment_id!r}'s durable config")
+        except ValueError as exc:
+            return {"error": str(exc)}
+        if not scope.id_map:
+            return {"error": f"{experiment_id!r}'s durable config carries no id_map: a selection "
+                             "over per-image label documents records the class map its run "
+                             "trained in."}
     if moved:
         return {"error": f"the ground truth of {len(moved)} member(s) changed since "
                          f"{experiment_id!r} trained ({sorted(moved)[:5]}): a selection "
@@ -191,26 +136,12 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
     except tcip_store.SchemaVersionRefused as exc:
         return {"error": f"cannot fingerprint the dataset for the frozen selection: {exc}"}
 
-    from datetime import datetime, timezone
-
-    total = n_train + n_val
-    selection = write_selection(out_dir, Selection(
-        samples=tuple(samples), subject=scope.subject if DOCUMENT in shapes else None,
-        attribute=scope.attribute if DOCUMENT in shapes else None,
-        id_map=dict(scope.id_map or {}) if DOCUMENT in shapes else {},
-        seed=int(split.get("seed", 42)), group_by=resolved_group_by,
-        dataset_fingerprint=fingerprint, admission_counts={},
-        realized_ratios={
-            "train": n_train / total if total else 0.0,
-            "val": n_val / total if total else 0.0,
-            "calibration": 0.0,
-        },
-        origin={"experiment_id": experiment_id,
-               "frozen_at": datetime.now(timezone.utc).isoformat()},
+    write_selection(out_dir, Selection(
+        samples=tuple(samples), **scope.selection_fields(DOCUMENT in shapes),
+        seed=split["seed"], group_by=split["group_by"], dataset_fingerprint=fingerprint,
     ))
     return {
-        "selection_dir": str(out_dir), "train": n_train, "val": n_val,
-        "calibration": 0, "origin": selection.origin,
+        "selection_dir": str(out_dir), "train": n_train, "val": n_val, "calibration": 0,
         "note": "the calibration side is empty (a training run's own drawn partition records "
                "no calibration draw): the calibration doors' own floor refuses any calibration "
                "measurement against this selection by name.",
@@ -221,30 +152,21 @@ def _scan_dataset(root: str) -> dict:
     """Scan a directory tree for images and labels.
 
     Labels are the name-based per-image JSON (one file per image, all subjects) under
-    ``annotations/<date>/`` (no detect/segment split), a review baseline directory's copies
-    excluded. The census reads no document: what each holds is its reader's answer, asked per
-    file by the doctor's own ``check_data_quality``.
+    ``annotations/<date>/``, a review baseline directory's copies excluded. The census reads no
+    document.
 
     ``labels`` is a raw ``rglob``, so it counts a file whose name is reserved for a prediction
-    bucket's own provenance stamp the way :func:`~tcip_mcp.dataset_layout.subjects_on_date` and
-    every bucket walk through ``prediction_documents`` would not; ``reserved_name_labels`` names
-    each one, so a caller comparing this census against those walks can tell the difference is a
-    known exclusion rather than a disagreement. ``reserved_name_images`` names every image whose
-    own stem is reserved the same way, since such an image otherwise counts as an ordinary
-    unlabelled one with no signal at all that its label can never be read through any bucket walk.
+    bucket's own provenance stamp; ``reserved_name_labels`` names each one.
+    ``reserved_name_images`` names every image whose own stem is reserved the same way.
     ``predictions`` drops every bucket under the cleared archive
-    (``tcip_mcp.dataset_layout.is_cleared_bucket``), so a document
-    :func:`~tcip_mcp.tools.inference_tools.clear_prediction_bucket` has moved out from under a
-    terminal experiment's own path is never counted as a live prediction here.
+    (``tcip_mcp.dataset_layout.is_cleared_bucket``).
 
-    ``images``, unlike ``labels``, is built per bucket through
-    :func:`~tcip_mcp.pipelines.image_utils.list_logical_images`: a stem collision within one
-    bucket raises :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem` rather than this
-    census silently keeping one raw file of the pair, and a grouped capture counts once, its own
-    manifest, never once per band file. Walks one level under ``images/``: the flat root itself
-    plus each direct date-bucket subdirectory (the same shape the ``doctor`` command's own
-    ``_image_stems`` walks), never a deeper recursive descent. Falls back to a raw walk of the
-    whole dataset root only when there is no canonical ``images/`` tree to route through at all.
+    ``images`` is built per bucket through
+    :func:`~tcip_mcp.pipelines.image_utils.list_logical_images`: a stem collision within one bucket
+    raises :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem`, and a grouped capture
+    counts once, its own manifest. Walks one level under ``images/``: the flat root itself plus
+    each direct date-bucket subdirectory. Falls back to a raw walk of the whole dataset root only
+    when there is no canonical ``images/`` tree.
     """
     from tcip_annotation.json_io import is_sidecar_name, prediction_documents
     from tcip_annotation.review_engine import BASELINE_DIRNAME
@@ -311,20 +233,15 @@ def _scan_dataset(root: str) -> dict:
 def scan_dataset(folder_path: str) -> dict:
     """Scan a folder for images, labels, and predictions.
 
-    Not an MCP tool: run through ``tcip scan-dataset``, per the admission standard
-    (packages/tcip-mcp/CLAUDE.md), while staying importable for its in-package callers.
-
     Reads the name-based per-image JSON labels (one file per image, all subjects).
 
     Expects the canonical layout (see tcip_mcp.dataset_layout):
         images/<date>/  annotations/<date>/<stem>.json  predictions/<model>/<date>/<stem>.json
 
     ``reserved_name_labels`` names every label counted in ``labels_count`` whose filename is
-    reserved for a prediction bucket's own provenance stamp: this census walks with ``rglob`` and
-    counts it, while the bucket walks this platform reads labels through exclude it.
-    ``reserved_name_images`` names every image counted in ``image_count`` whose own stem is
-    reserved the same way; such an image otherwise sits in ``unlabelled_images`` with no signal
-    at all that its label can never be read through any bucket walk.
+    reserved for a prediction bucket's own provenance stamp. ``reserved_name_images`` names every
+    image counted in ``image_count`` whose own stem is reserved the same way; such an image
+    otherwise sits in ``unlabeled_images``.
 
     Args:
         folder_path: Path to the dataset root directory.
@@ -346,7 +263,7 @@ def scan_dataset(folder_path: str) -> dict:
     label_stems = {Path(p).stem for p in scan["labels"]}
 
     paired = sum(1 for stem in image_stems if stem in label_stems)
-    unlabelled = len(image_stems) - paired
+    unlabeled = len(image_stems) - paired
 
     return {
         "path": folder_path,
@@ -354,7 +271,7 @@ def scan_dataset(folder_path: str) -> dict:
         "labels_count": len(scan["labels"]),
         "predictions_count": len(scan["predictions"]),
         "paired_images": paired,
-        "unlabelled_images": unlabelled,
+        "unlabeled_images": unlabeled,
         "image_stems_sample": sorted(image_stems.keys())[:10],
         "reserved_name_labels": scan["reserved_name_labels"],
         "reserved_name_images": scan["reserved_name_images"],
@@ -396,10 +313,10 @@ def _split_date_dirs(folder_path: str | Path) -> list[tuple[str | None, Path, Pa
 def draw_splits(
     folder_path: str,
     train_ratio: float = 0.8,
-    val_ratio: float = 0.2,
+    val_ratio: float = DEFAULT_VAL_RATIO,
     calibration_ratio: float = 0.0,
-    seed: int = 42,
-    group_by: str = "tile_prefix",
+    seed: int = DEFAULT_SEED,
+    group_by: str = DEFAULT_GROUP_BY,
     group_key_map: dict[str, str] | None = None,
     stratify_foreground: bool = True,
     output_path: str | None = None,
@@ -412,67 +329,50 @@ def draw_splits(
     Non-destructive: it copies nothing and moves nothing. With ``output_path`` it writes a
     selection record listing, per sample, the image source, the label document, the group key and
     the side; without one it answers statistics over the tree and writes nothing. Sibling tiles of
-    one source image are kept in the same split (no tree- or canopy-level leakage), and, when
-    ``stratify_foreground`` is set, splits are balanced by annotation count so dense and sparse
-    sources are proportionally represented. Groups whole source images; a within-image split for a
-    folder holding a single source is a training run's own automatic route (``data.tiling`` in the
-    run config), not this tool.
+    one source image are kept in the same split, and, when ``stratify_foreground`` is set, splits
+    are balanced by annotation count. Groups whole source images; a within-image split for a folder
+    holding a single source is a training run's own route (``data.tiling`` in the run config).
 
     Writing a selection is one draw, through the platform's own admission
     (``tcip_mcp.pipelines.data.label_queries.admit``) over whichever ground truth the place it is
-    pointed at holds, the same admission a training run's own draw uses. The draw's group policy,
-    its three-way group-balanced split and its per-side floor are the same whatever that shape is.
+    pointed at holds. The draw's group policy, its three-way group-balanced split and its per-side
+    floor are the same whatever that shape is.
 
     Without ``ground_truth``, the ground truth is the dataset's per-image label tree: for each
     capture date the dataset holds, every image carrying an annotation of ``subject`` (with every
     instance assessed for ``attribute``, when one is given) or a human's negative confirmation for
     it. ``subject`` is therefore required to write such a selection; a call with no ``output_path``
-    answers over every image in the tree instead, no subject needed. Every admitted date enters
-    one selection: a sample names its own source and its own label, so a selection spanning
-    capture dates trains in place, with no derived folder of copied imagery, and two dates holding
-    a same-named image are two samples. ``stratify_foreground`` only toggles the annotation-count
-    balancing; it does not change which images are eligible.
+    answers over every image in the tree instead. Every admitted date enters one selection: a
+    sample names its own source and its own label, and two dates holding a same-named image are two
+    samples. ``stratify_foreground`` only toggles the annotation-count balancing.
 
     With ``ground_truth`` naming a directory of ``<stem>.png`` rasters, the ground truth is a
     per-image mask and a sample is admitted when its mask sits there beside its image; with
     ``ground_truth`` naming a ``.csv`` file, the ground truth is that table and a sample is one
-    row, admitted when the image its key names exists. Neither is subject-scoped and neither reads
-    a human confirmation store, so neither takes ``subject``/``attribute``, and the class space a
-    run binding such a selection trains in is derived from the ground truth it was handed, once
-    for the run. Balancing by foreground count applies to label documents only: a mask or a row is
-    admitted by existing, so every admitted member carries ground truth and counts as one.
+    row, admitted when the image its key names exists. Neither takes ``subject``/``attribute``.
+    Balancing by foreground count applies to label documents only.
 
     The third side, ``calibration``, is the universe every calibration drawn under this selection
-    draws from (the operating point is measured on it, never on ``train`` or ``val``); writing a
-    selection therefore has no default for any of the three ratios and refuses a zero one, naming
-    it. The draw refuses, before any write, when the tree holds fewer foreground groups of
-    ``subject`` (and ``attribute``, when scoped) than the three sides need at minimum (one each
-    for ``train``/``val``, two for ``calibration``, so the locked calibration/holdout draw the
-    calibration door makes later can still halve it), counted for the draw's own subject
-    regardless of ``stratify_foreground``: that flag only toggles the balancing pass, never
-    whether the minimum pass sees real foreground. The answer's
-    ``calibration_foreground_groups`` then reports how many of the calibration side's own groups
-    actually carry a foreground annotation. Both the answer and the record also carry
-    ``realized_ratios``, each side's share of the draw actually delivered: on a tree sized at the
-    floor, the minimum pass can consume every foreground group before the balancing pass ever
-    sees the caller's fractions, so the delivered shares can diverge from the ratios asked for,
-    and this states the shape actually drawn beside them.
+    draws from; writing a selection has no default for any of the three ratios and refuses a zero
+    one, naming it. The draw refuses, before any write, when the tree holds fewer foreground groups
+    of ``subject`` (and ``attribute``, when scoped) than the three sides need at minimum (one each
+    for ``train``/``val``, two for ``calibration``), counted regardless of ``stratify_foreground``.
+    The answer's ``calibration_foreground_groups`` reports how many of the calibration side's own
+    groups carry a foreground annotation. Both the answer and the record also carry
+    ``realized_ratios``, each side's share of the draw actually delivered, which can diverge from
+    the ratios asked for on a tree sized at the floor.
 
     Args:
         folder_path: Path to the dataset root directory.
-        train_ratio: Fraction for training set. Defaults to 0.8, the complement of the
-            unchanged 0.2 validation default once ``calibration_ratio`` is 0.
+        train_ratio: Fraction for training set. Defaults to 0.8.
         val_ratio: Fraction for validation set.
         calibration_ratio: Fraction held out as the calibration universe. Defaults to 0.0 for a
-            stats-only call, and a non-zero value is admitted there too. Writing a selection
-            (``output_path`` given) refuses a zero ratio on any of the three (``train_ratio``,
-            ``val_ratio``, ``calibration_ratio``), naming it, since a selection always draws all
-            three sides.
+            stats-only call. Writing a selection (``output_path`` given) refuses a zero ratio on
+            any of the three (``train_ratio``, ``val_ratio``, ``calibration_ratio``), naming it.
         seed: Random seed for reproducibility.
         group_by: Group selector: ``"tile_prefix"`` (strip a trailing ``_<x>_<y>`` tile offset) or
             ``"stem"`` (one group per member). Ignored when ``group_key_map`` is given. The
-            resolved key is recorded on every sample, so a consumer groups by what was drawn
-            rather than re-resolving a policy.
+            resolved key is recorded on every sample.
         group_key_map: An agent-derived ``{identity: group_key}`` map overriding ``group_by``,
             keyed ``<date>/<stem>`` (the bare ``<stem>`` under a flat tree); must cover every
             admitted member. Recorded as ``group_by="explicit_map"``.
@@ -480,20 +380,15 @@ def draw_splits(
         output_path: Where to write the selection. Omitted, nothing is written and the answer is
             statistics only.
         subject: The object class the selection is drawn for. Required to write one over the
-            dataset's own per-image label tree (``output_path`` given and no ``ground_truth``),
-            whose admission is subject-scoped: it governs which images the draw admits, and a run
-            binding the selection reads it from there rather than restating it. A ``ground_truth``
-            naming label documents takes one too; the producer reads it only where the ground
-            truth it admits is subject-scoped.
-        attribute: Scope the draw to instances already assessed for this attribute of
-            ``subject``; an image carrying an instance never assessed for it is excluded
-            entirely, the same rail a training run applies. ``None`` draws over every instance of
-            ``subject`` regardless of attribute state.
-        ground_truth: Where this dataset's ground truth lives, named explicitly rather than
-            walked as the per-image label tree: a directory of label documents, a directory of
-            ``<stem>.png`` masks, or a ``.csv`` table of one row per image. The producer decides
-            which of those it is from the place itself. Only with ``output_path``; the images are
-            the dataset's own ``images/`` tree either way.
+            dataset's own per-image label tree (``output_path`` given and no ``ground_truth``). A
+            ``ground_truth`` naming label documents takes one too.
+        attribute: Scope the draw to instances already assessed for this attribute of ``subject``;
+            an image carrying an instance never assessed for it is excluded entirely. ``None``
+            draws over every instance of ``subject`` regardless of attribute state.
+        ground_truth: Where this dataset's ground truth lives, named explicitly: a directory of
+            label documents, a directory of ``<stem>.png`` masks, or a ``.csv`` table of one row
+            per image. Only with ``output_path``; the images are the dataset's own ``images/`` tree
+            either way.
     """
     if abs(train_ratio + val_ratio + calibration_ratio - 1.0) > 0.01:
         return {"error": "train_ratio, val_ratio and calibration_ratio must sum to 1.0 (got "
@@ -508,6 +403,7 @@ def draw_splits(
         foreground_group_count,
         group_balanced_split,
         member_identity,
+        recorded_group_by,
         refuse_insufficient_foreground_groups,
         resolve_group_key_fn,
     )
@@ -563,12 +459,11 @@ def draw_splits(
             group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
         except ValueError as exc:
             return {"error": str(exc)}
-        resolved_group_by = "explicit_map" if group_key_map else group_by
+        resolved_group_by = recorded_group_by(group_by, group_key_map)
         parts = group_balanced_split(
             stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
             splits=(train_ratio, val_ratio, calibration_ratio), seed=seed,
         )
-        counts = annotation_counts or {}
         dataset_hashes_by_date: dict[str, str] = {}
         if label_map:
             from tcip_mcp.dataset_layout import annotation_date
@@ -587,21 +482,10 @@ def draw_splits(
         # it would be blind to every date but the first, so it is carried only then.
         dataset_hash = (next(iter(dataset_hashes_by_date.values()))
                         if len(dataset_hashes_by_date) == 1 else None)
-        return {
-            "splits": {k: len(parts[k]) for k in kept_splits},
-            "foreground_annotations": {
-                k: sum(int(counts.get(s, 0)) for s in parts[k]) for k in kept_splits
-            },
-            "total_stems": len(stems),
-            "total_annotations": sum(int(v) for v in counts.values()),
-            "groups": len({group_key_fn(s) for s in stems}),
-            "seed": seed,
-            "dataset_hash": dataset_hash,
-            "dataset_hashes_by_date": dataset_hashes_by_date,
-            "group_by": resolved_group_by,
-            "stratified": stratified,
-            "selection_dir": None,
-        }
+        return _draw_response(
+            parts, {k: len(parts[k]) for k in kept_splits}, annotation_counts, stems,
+            group_key_fn, seed=seed, group_by=resolved_group_by, dataset_hash=dataset_hash,
+            dataset_hashes_by_date=dataset_hashes_by_date, selection_dir=None)
 
     # Writing a selection: one draw, over whatever ground truth the dataset carries, through the
     # producer's own admission for that shape.
@@ -609,7 +493,7 @@ def draw_splits(
     from tcip_mcp.pipelines.data.label_queries import (
         Admission, Admitted, admit, foreground_counts, require_admitted,
     )
-    from tcip_mcp.pipelines.data.selection import DOCUMENT, with_sides
+    from tcip_mcp.pipelines.data.selection import DOCUMENT, ClassScope, with_sides
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, BandGroupIncomplete
     from tcip_mcp.pipelines.resolution import ground_truth_digests
 
@@ -696,7 +580,7 @@ def draw_splits(
         group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
     except ValueError as exc:
         return {"error": str(exc)}
-    resolved_group_by = "explicit_map" if group_key_map else group_by
+    resolved_group_by = recorded_group_by(group_by, group_key_map)
 
     # Through the one producer, once: every admitted member as a sample under the group key this
     # draw groups by, with its ground-truth digest as it reads now. The draw sides them below.
@@ -735,10 +619,6 @@ def draw_splits(
         splits=(train_ratio, val_ratio, calibration_ratio), seed=seed,
         min_foreground_groups=min_foreground_groups, foreground_counts=counted,
     )
-    total_drawn = sum(len(drawn[k]) for k in kept_splits)
-    realized_ratios = {
-        k: (len(drawn[k]) / total_drawn if total_drawn else 0.0) for k in kept_splits
-    }
     calibration_foreground_groups = foreground_group_count(
         drawn["calibration"], counted, group_key_fn)
 
@@ -750,34 +630,40 @@ def draw_splits(
     except tcip_store.SchemaVersionRefused as exc:
         return {"error": f"cannot fingerprint the dataset for the selection: {exc}"}
     try:
-        write_selection(out_dir, with_sides(Selection(
+        written = write_selection(out_dir, with_sides(Selection(
             samples=tuple(sample for _identity, sample in sorted(sample_of.items())
                           if sample.identity in drew),
-            subject=subject if shape == DOCUMENT else None,
-            attribute=(attribute or None) if shape == DOCUMENT else None,
-            id_map=dict(admissions[0].id_map or {}) if shape == DOCUMENT else {},
+            **ClassScope(subject=subject, attribute=attribute or None,
+                         id_map=admissions[0].id_map).selection_fields(shape == DOCUMENT),
             seed=seed, group_by=resolved_group_by, dataset_fingerprint=fingerprint,
-            admission_counts=admission_counts, realized_ratios=realized_ratios,
         ), drew))
     except ValueError as exc:
         return {"error": str(exc)}
 
+    sizes = {k: written.counts()[k] for k in kept_splits}
+    total_drawn = sum(sizes.values())
+    return _draw_response(
+        drawn, sizes, annotation_counts, stems, group_key_fn, seed=seed,
+        group_by=resolved_group_by, subject=written.subject, attribute=written.attribute,
+        admission_counts=admission_counts, selection_dir=str(out_dir),
+        calibration_foreground_groups=calibration_foreground_groups,
+        realized_ratios={k: (sizes[k] / total_drawn if total_drawn else 0.0) for k in sizes})
+
+
+def _draw_response(parts: dict, sizes: dict[str, int], annotation_counts: dict | None,
+                   stems: list[str], group_key_fn, **recorded) -> dict:
+    """What a ``draw_splits`` call answers: each kept side's size (``sizes``) and foreground
+    annotations over ``parts``, the totals, the group count and whether the draw stratified by
+    ``annotation_counts``, beside the call's own ``recorded`` facts.
+    """
     counts = annotation_counts or {}
     return {
-        "splits": {k: len(drawn[k]) for k in kept_splits},
+        "splits": sizes,
         "foreground_annotations": {
-            k: sum(int(counts.get(s, 0)) for s in drawn[k]) for k in kept_splits
-        },
+            k: sum(int(counts.get(s, 0)) for s in parts[k]) for k in sizes},
         "total_stems": len(stems),
         "total_annotations": sum(int(v) for v in counts.values()),
         "groups": len({group_key_fn(s) for s in stems}),
-        "seed": seed,
-        "group_by": resolved_group_by,
-        "stratified": bool(stratify_foreground and shape == DOCUMENT),
-        "subject": subject if shape == DOCUMENT else None,
-        "attribute": attribute if shape == DOCUMENT else None,
-        "admission_counts": admission_counts,
-        "selection_dir": str(out_dir),
-        "calibration_foreground_groups": calibration_foreground_groups,
-        "realized_ratios": realized_ratios,
+        "stratified": annotation_counts is not None,
+        **recorded,
     }

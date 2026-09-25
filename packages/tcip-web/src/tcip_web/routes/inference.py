@@ -1,22 +1,18 @@
 """Inference routes: async tiled runs + live progress WebSocket.
 
-Jobs run on a background thread. Each job writes per-image JSON predictions
-(one ``<stem>.json`` per image, pixel-xyxy boxes + per-object score) to ``output_dir``
-so they plug straight into the Review tab and the per-plant curve pipeline.
+Jobs run on a background thread. Each job writes per-image JSON predictions (one ``<stem>.json``
+per image, pixel-xyxy boxes + per-object score) to ``output_dir``.
 
-Inference goes through ``build_predictor``, the same entry point as the MCP ``run_inference``
-tool, which dispatches on the checkpoint's model kind and runs the tcip composed-model
-checkpoint through its own native SAHI-style tiling.
-The operating point (conf / NMS IoU / tiling / max_dets) is resolved through the same
-``raw_operating_point`` bundle as the MCP door, and the run publishes through the MCP door's own
-publisher (``inference_tools.publish_bucket``): its gates refuse before any image is predicted,
-and the documents, the stamp and the publication's line are written as ``run_inference`` writes
-them, one image at a time as the publisher consumes the predictions.
+Inference goes through ``build_predictor``, which dispatches on the checkpoint's model kind and
+runs the tcip composed-model checkpoint through its own native SAHI-style tiling. The operating
+point (conf / NMS IoU / tiling / max_dets) is resolved through the ``raw_operating_point`` bundle,
+and the run publishes through ``inference_tools.publish_bucket``: its gates refuse before any image
+is predicted, and the documents, the stamp and the publication's line are written one image at a
+time as the publisher consumes the predictions.
 
-A launch into a bucket already holding another run's prediction documents is refused the way
-``run_inference`` refuses one, naming a fresh bucket to write into instead; a bucket a live job of
-this process is still writing is refused by that job's own identity, never by a resolved path a
-second, concurrent pass could still be moving.
+A launch into a bucket already holding another run's prediction documents is refused, naming a
+fresh bucket to write into instead; a bucket a live job of this process is still writing is refused
+by that job's own identity.
 """
 
 from __future__ import annotations
@@ -32,6 +28,8 @@ from typing import TYPE_CHECKING, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from tcip_mcp.pipelines.data.splits import same_directory
+from tcip_mcp.pipelines.resolution import DEFAULT_POSTPROCESS
 from tcip_mcp.web_client import INFERENCE_JOBS, current_root
 from tcip_web import jobstore
 from tcip_web.paths import assert_path_allowed
@@ -43,10 +41,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/inference", tags=["inference"])
-
-INFERENCE_REGISTRY = INFERENCE_JOBS
-"""The job registry this module persists its jobs to."""
-
 
 def _current_root() -> str:
     return current_root()
@@ -69,7 +63,7 @@ class InferenceJob:
     tile_size: Optional[int] = None
     overlap: Optional[float] = None
     max_dets: Optional[int] = None
-    postprocess: str = "nms"  # cross-tile merge: "nms" suppresses, "nmm" unions seam-split boxes
+    postprocess: str = DEFAULT_POSTPROCESS  # cross-tile merge: "nms" suppresses, "nmm" unions seam-split boxes
     total: int = 0
     done: int = 0
     status: JobStatus = "pending"
@@ -86,9 +80,9 @@ class InferenceJob:
     # The platform root this job launched under, resolved on whichever thread constructs it
     # (the request thread for a real launch); a rehydrated job restates the persisted value.
     platform_root: str = field(default_factory=_current_root)
-    # The launch this job answers, held only for the in-flight refusal: never in _summary, so
-    # a rehydrated job (whose worker is gone) never answers an in-flight match.
-    requested_dataset_root: str = ""
+    # The dataset root the launch resolved its bucket under, which the publication is recorded
+    # under; never in _summary, so a rehydrated job never answers an in-flight match.
+    dataset_root: Optional[Path] = None
     requested_model_name: str = ""
     date: Optional[str] = None
 
@@ -103,30 +97,28 @@ def _summary(job: InferenceJob) -> dict:
     }
 
 
-def _from_summary(s: dict, root: str) -> InferenceJob:
+def _from_summary(s: dict) -> InferenceJob:
     """A persisted summary, rehydrated: only the fields the API exposes are restored. An
-    interrupted job's ``done`` and ``dropped_boxes`` are whatever the last persist wrote, not a
-    live measurement: the worker only persists at launch and once more when it finishes or dies,
-    so a crash mid-run restores the counts as of launch rather than the work actually done
-    before the crash."""
+    interrupted job's ``done`` and ``dropped_boxes`` are whatever the last persist wrote.
+    """
     return InferenceJob(
         job_id=s["job_id"],
         checkpoint_path="",
-        images_dir=s.get("images_dir", ""),
-        output_dir=s.get("output_dir", ""),
-        total=s.get("total", 0),
-        done=s.get("done", 0),
-        platform_root=jobstore.require_platform_root(s, name=INFERENCE_REGISTRY, root=root),
+        images_dir=s["images_dir"],
+        output_dir=s["output_dir"],
+        total=s["total"],
+        done=s["done"],
+        platform_root=s["platform_root"],
         status=jobstore.rehydrated_status(s),
-        error=s.get("error"),
-        warning=s.get("warning"),
-        audit_warning=s.get("audit_warning"),
-        dropped_boxes=s.get("dropped_nonpositive_boxes", 0),
+        error=s["error"],
+        warning=s["warning"],
+        audit_warning=s["audit_warning"],
+        dropped_boxes=s["dropped_nonpositive_boxes"],
     )
 
 
 _registry = jobstore.JobRegistry(
-    INFERENCE_REGISTRY, to_summary=_summary, from_summary=_from_summary,
+    INFERENCE_JOBS, to_summary=_summary, from_summary=_from_summary,
 )
 """The dict-plus-lock live registry for this route's own jobs (see ``jobstore.JobRegistry``),
 the shared home review.py's priority queue and tuning.py's sweeps adopt too."""
@@ -142,7 +134,7 @@ def _register(job: InferenceJob) -> None:
 
 def _get(job_id: str) -> Optional[InferenceJob]:
     """A job by id, from any root this process holds: a repin to another project must not
-    make an in-flight job unreachable for cancelling or streaming it."""
+    make an in-flight job unreachable for canceling or streaming it."""
     return _registry.get(job_id)
 
 
@@ -153,13 +145,9 @@ def _list_jobs() -> list[InferenceJob]:
 def rehydrate_for_current_root() -> None:
     """Merge this root's persisted jobs, not already live, into memory via :func:`_from_summary`.
 
-    Called at startup and again after this process repins to another root: the worker
-    threads behind a persisted non-terminal job are gone, so it is surfaced as
-    ``interrupted``. Merges by job id rather than requiring an empty registry first, so it
-    never displaces a job still live from another root. Bounds the dict afterwards the same
-    way registering a job does, so adopting N roots without ever registering a job here still
-    keeps this process's memory bounded rather than growing by ``MAX_JOBS`` for every root
-    adopted.
+    A persisted non-terminal job is surfaced as ``interrupted``. Merges by job id, so it never
+    displaces a job still live from another root, and bounds the dict afterwards the same way
+    registering a job does.
     """
     _registry.rehydrate()
 
@@ -176,7 +164,6 @@ def _worker(job: InferenceJob) -> None:
         _persist()
 
         from tcip_mcp.audit import AuditEntryNotWritten
-        from tcip_mcp.dataset_layout import bucket_dataset_root
         from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
         from tcip_mcp.pipelines.resolution import DEFAULT_TILE_BATCH_SIZE
         from tcip_mcp.tools.inference_tools import _prepare_pass, publish_bucket
@@ -215,9 +202,8 @@ def _worker(job: InferenceJob) -> None:
         run["results"] = predictions()
         try:
             pub = publish_bucket(
-                run, out=Path(job.output_dir), checkpoint_path=job.checkpoint_path, trait=None,
-                images_dir=job.images_dir, dataset_root=bucket_dataset_root(job.output_dir),
-                allow_unvalidated_staging=False)
+                run, out=Path(job.output_dir), trait=None,
+                dataset_root=job.dataset_root, allow_unvalidated_staging=False)
         except AuditEntryNotWritten as exc:
             # The publisher committed an act whose line it could not write; a failed pass's own
             # line carries the error the pass failed on.
@@ -226,9 +212,10 @@ def _worker(job: InferenceJob) -> None:
         else:
             if pub["refusal"] is not None:
                 job.error = pub["refusal"]["error"]
-            job.dropped_boxes = pub["dropped_boxes"]
+            else:
+                job.dropped_boxes = pub["dropped_boxes"]
         terminal_status = ("failed" if job.error is not None
-                           else "cancelled" if job.cancel_event.is_set() else "completed")
+                           else "canceled" if job.cancel_event.is_set() else "completed")
     except Exception as exc:
         logger.exception("inference job %s failed", job.job_id)
         terminal_status = "failed"
@@ -253,17 +240,13 @@ class LaunchInferencePayload(BaseModel):
     # None (default) derives tiling from the checkpoint's own training geometry in the worker,
     # distinct from an explicit caller choice, so the job's provenance can say which happened.
     tile: bool | None = None
-    # conf/iou/slice_h/overlap are all None by default: an omitted
-    # field is a real "let the platform derive it" request, distinguished from an explicit choice
-    # that happens to match the default, the same way `tile` already works. A frozen literal
-    # transmitted on every launch would permanently shadow resolve_tile_geometry's
-    # checkpoint-derived tile_size/overlap and the shared conf/iou defaults below.
+    # None where omitted: the pass derives the value rather than reading a frozen literal.
     conf: float | None = None
     iou: float | None = None
-    slice_h: int | None = None
+    tile_size: int | None = None
     overlap: float | None = None
     max_dets: int | None = None
-    postprocess: str = "nms"
+    postprocess: str = DEFAULT_POSTPROCESS
     # Never overrides the document refusal below (a bucket with no verdict but a document refuses regardless); its one live effect is turning a verdict redirect
     # into a 409 instead of the default auto-redirect, including on exhaustion of every @r<n> variant to the ceiling. The browser client never sends this field.
     overwrite: bool = False
@@ -300,21 +283,15 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
 
     # Prediction-bucket immutability: never silently overwrite a bucket with review verdicts, and
     # never begin a second publish beside one already writing or one a prior run already filled.
-    from tcip_mcp.prediction_buckets import (
-        BucketHasVerdicts,
-        BucketHoldsDocuments,
-        resolve_prediction_bucket,
-        review_state_dir_of,
-    )
+    from tcip_mcp.tools.inference_tools import _resolve_writable_bucket_for, bucket_location
 
     # Keyed on what was requested, not a resolved path a moving document count could shift: a
     # second launch of this (dataset, model, date) while the first still writes names that job.
-    requested_dataset_root = Path(payload.dataset_root).resolve()  # two spellings, one match
     live_job = next(
         (
             j for j in _list_jobs()
             if j.status in ("pending", "running")
-            and Path(j.requested_dataset_root).resolve() == requested_dataset_root
+            and same_directory(j.dataset_root, payload.dataset_root)
             and j.requested_model_name == payload.model_name
             and j.date == payload.date
         ),
@@ -334,35 +311,23 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
             "job_id": live_job.job_id,
         })
 
-    review_state_dir = review_state_dir_of(payload.dataset_root)
-    try:
-        bucket_dir, resolution = resolve_prediction_bucket(
-            payload.dataset_root,
-            payload.model_name,
-            payload.date,
-            review_state_dir=review_state_dir,
-            overwrite=payload.overwrite,
-            refuse_documents=True,
-        )
-    except BucketHasVerdicts as exc:
-        raise HTTPException(409, str(exc)) from exc
-    except BucketHoldsDocuments as exc:
-        requested_output_dir = str(
-            prediction_dir(payload.dataset_root, payload.model_name, payload.date))
-        suggested_output_dir = (
-            str(prediction_dir(payload.dataset_root, exc.suggested, payload.date))
-            if exc.suggested is not None else None
-        )
+    requested_output_dir = str(
+        prediction_dir(payload.dataset_root, payload.model_name, payload.date))
+    bucket_dir, resolution, bucket_root, refusal = _resolve_writable_bucket_for(
+        requested_output_dir, overwrite=payload.overwrite)
+    if refusal is not None:
+        if "verdict_count" in refusal:
+            raise HTTPException(409, refusal["error"])
         raise HTTPException(409, {
             "kind": "bucket_holds_documents",
-            "message": str(exc),
+            "message": refusal["error"],
             "date": payload.date,
             "requested_model_name": payload.model_name,
             "requested_output_dir": requested_output_dir,
-            "document_stem_count": exc.document_stem_count,
-            "suggested_model_name": exc.suggested,
-            "suggested_output_dir": suggested_output_dir,
-        }) from exc
+            "document_stem_count": refusal["document_stem_count"],
+            "suggested_model_name": refusal["suggested_name"],
+            "suggested_output_dir": refusal["suggested_bucket"],
+        })
     resolved_output_dir = str(bucket_dir)
 
     # Every tuning value travels as stated, None where omitted; the worker's pass resolves each.
@@ -371,13 +336,13 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
         checkpoint_path=payload.checkpoint_path,
         images_dir=str(images_dir),
         output_dir=resolved_output_dir,
-        requested_dataset_root=payload.dataset_root,
+        dataset_root=bucket_root,
         requested_model_name=payload.model_name,
         date=payload.date,
         tile=payload.tile,
         conf=payload.conf,
         iou=payload.iou,
-        tile_size=payload.slice_h,
+        tile_size=payload.tile_size,
         overlap=payload.overlap,
         max_dets=payload.max_dets,
         postprocess=payload.postprocess,
@@ -388,15 +353,8 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
     job.thread = t
     t.start()
 
-    requested_dir = (
-        str(prediction_dir(payload.dataset_root, resolution.requested, payload.date))
-        if resolution.redirected
-        else None
-    )
     return {"status": "launched", "job_id": job.job_id, "images_dir": str(images_dir),
-            "output_dir": resolved_output_dir,
-            "bucket_redirected": resolution.redirected,
-            "requested_output_dir": requested_dir}
+            **bucket_location(bucket_dir, resolution, requested_output_dir)}
 
 
 @router.get("/jobs")
@@ -440,7 +398,7 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
                     "warning": job.warning,
                     "audit_warning": job.audit_warning,
                 })
-            # Terminate on any terminal state: a cancelled/interrupted job never
+            # Terminate on any terminal state: a canceled/interrupted job never
             # reaches completed/failed, so keying only on those spun this loop forever.
             if job.status in jobstore.TERMINAL_STATUSES:
                 await websocket.send_json({

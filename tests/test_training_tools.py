@@ -42,7 +42,7 @@ def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
     # 'epochs' is still required per provided stage.
     cfg["stages"] = [{"freeze_to": 0}]
     r2 = preflight_config(cfg)
-    assert any("Stage 0 missing 'epochs'" in i for i in r2["issues"])
+    assert any(i.startswith("stages.0.epochs:") for i in r2["issues"]), r2["issues"]
 
     # No stages at all is fine: launch_training supplies its own default schedule.
     del cfg["stages"]
@@ -173,7 +173,7 @@ def test_preflight_config_overfit_on_all_frozen_model_reports_without_raising(tm
     assert "empty parameter list" in r["overfit_check"]["issue"]
 
 
-def test_preflight_config_warns_on_ignored_per_stage_lr(tmp_path):
+def test_preflight_config_refuses_a_per_stage_lr_by_name(tmp_path):
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -189,12 +189,11 @@ def test_preflight_config_warns_on_ignored_per_stage_lr(tmp_path):
         "stages": [{"freeze_to": -1, "epochs": 5, "lr": 1e-3}],
     }
     r = preflight_config(cfg)
-    assert r["valid"] is True  # a per-stage lr is ignored, not rejected (StageSpec extra="allow")
-    assert any("stages[0].lr is set but ignored" in w for w in r["warnings"])
+    assert r["valid"] is False
+    assert any(i.startswith("stages.0.lr:") for i in r["issues"]), r["issues"]
 
-    # No per-stage lr -> no warning.
     cfg["stages"] = [{"freeze_to": -1, "epochs": 5}]
-    assert preflight_config(cfg)["warnings"] == []
+    assert preflight_config(cfg)["valid"] is True
 
 
 def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
@@ -904,8 +903,8 @@ def test_run_hpo_trial_epoch_cb_prefers_selection_over_val_objective(monkeypatch
 
 
 def test_run_hpo_trial_failed_or_empty_reports_inf(monkeypatch, tmp_path):
-    """A crashed trial (or one with no model_source) reports +inf, the worst value under
-    mode='min', so it can never become the sweep's best."""
+    """A crashed trial reports +inf, the worst value under mode='min', so it can never become
+    the sweep's best."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial
 
@@ -917,10 +916,6 @@ def test_run_hpo_trial_failed_or_empty_reports_inf(monkeypatch, tmp_path):
     reported: list = []
     _run_hpo_trial({"lr": 3e-4}, reported.append, _detection_base(), str(tmp_path / "trial_0"))
     assert reported == [float("inf")]
-
-    empty: list = []
-    _run_hpo_trial({"lr": 3e-4}, empty.append, {"data": {}}, str(tmp_path / "trial_1"))  # no model_source
-    assert empty == [float("inf")]
 
 
 def test_run_hpo_trial_reports_the_highest_value_for_a_higher_is_better_metric(monkeypatch, tmp_path):
@@ -1199,6 +1194,7 @@ def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(tmp_
                  "auto_val": False},
         "device": "cpu",
         "mixed_precision": False,
+        "batch_size": 4,
         "stages": [{"freeze_to": 0, "epochs": 5}],
         "optimizer": {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0},
         "checkpoint_every_n_epochs": 0,
@@ -1419,12 +1415,12 @@ def test_a_sweep_payload_that_json_cannot_hold_is_refused_before_any_trial_runs(
 
     with pytest.raises(TypeError) as space_refused:
         training_tools.run_hyperparameter_search({"model_source": {"builder": "m:f"}},
-                               param_space={"lr": Path("lr.txt")})
+                               param_space={"lr": Path("lr.txt")}, search_seed=0)
     assert "param_space.lr" in str(space_refused.value)
 
     with pytest.raises(TypeError) as config_refused:
         training_tools.run_hyperparameter_search({"model_source": {"builder": Path("m.py")}},
-                               param_space={"lr": [0.1, 0.01]})
+                               param_space={"lr": [0.1, 0.01]}, search_seed=0)
     assert "base_config.model_source.builder" in str(config_refused.value)
 
 
@@ -1451,7 +1447,7 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
     }
-    result = training_tools.run_hyperparameter_search(base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1)
+    result = training_tools.run_hyperparameter_search(base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1, search_seed=0)
 
     assert result["best_params"] == {"lr": 0.01}
     assert seen == [{"lr": [0.1, 0.01]}]
@@ -1468,10 +1464,10 @@ def test_run_hyperparameter_search_refuses_a_param_space_axis_naming_the_dotted_
 
     monkeypatch.chdir(tmp_path)
     result = training_tools.run_hyperparameter_search(
-        {"model_source": {"builder": "m:f"}},
+        {"model_source": {"builder": "m:f", "task": "detection"}},
         param_space={"evaluation.selection_metric": {
             "type": "categorical", "choices": ["map", "iou_mean"],
-        }},
+        }}, search_seed=0
     )
     assert "error" in result
     assert "evaluation.selection_metric" in result["error"]
@@ -1486,11 +1482,11 @@ def test_run_hyperparameter_search_refuses_a_param_space_axis_whose_choices_carr
 
     monkeypatch.chdir(tmp_path)
     result = training_tools.run_hyperparameter_search(
-        {"model_source": {"builder": "m:f"}},
+        {"model_source": {"builder": "m:f", "task": "detection"}},
         param_space={"evaluation": {
             "type": "categorical",
             "choices": [{"selection_metric": "map"}, {"selection_metric": "iou_mean"}],
-        }},
+        }}, search_seed=0
     )
     assert "error" in result
     assert "evaluation" in result["error"]
@@ -1514,7 +1510,7 @@ def test_run_hyperparameter_search_admits_an_lr_sweep_beside_a_base_config_selec
     monkeypatch.setattr(hpo, "tune_search", fake_search)
 
     base_config = {**real_hpo_base_config, "evaluation": {"selection_metric": "map"}}
-    result = training_tools.run_hyperparameter_search(base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1)
+    result = training_tools.run_hyperparameter_search(base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1, search_seed=0)
 
     assert result["best_params"] == {"lr": 0.01}
     assert seen == [{"lr": [0.1, 0.01]}]
@@ -1534,7 +1530,7 @@ def test_run_hyperparameter_search_refuses_a_param_space_axis_that_changes_the_m
         real_hpo_base_config,
         param_space={"model_source.task": {
             "type": "categorical", "choices": ["detection", "classification"],
-        }},
+        }}, search_seed=0
     )
     assert "error" in result
     assert "model_source.task" in result["error"]
@@ -1563,7 +1559,7 @@ def test_run_hyperparameter_search_admits_a_categorical_evaluation_axis_naming_t
         "type": "categorical",
         "choices": [{"selection_metric": "map"}, {"selection_metric": "map"}],
     }}
-    result = training_tools.run_hyperparameter_search(base_config, param_space=param_space, n_trials=1)
+    result = training_tools.run_hyperparameter_search(base_config, param_space=param_space, n_trials=1, search_seed=0)
 
     assert "error" not in result, result
     assert seen == [param_space]
@@ -1633,13 +1629,13 @@ def test_list_launchable_configs_state_agrees_with_the_runs_list_for_a_crashed_r
     assert rows["exp-pristine"]["state"] == "created"
 
 
-def test_cancel_end_to_end_through_the_real_trainer_ends_cancelled_with_records_and_losing_side(
+def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_and_losing_side(
     tmp_path
 ) -> None:
-    """A trial that trains one real epoch and is then cancelled mid-training (the run-level
-    sentinel written only once a genuine score is already on record) ends cancelled, still
+    """A trial that trains one real epoch and is then canceled mid-training (the run-level
+    sentinel written only once a genuine score is already on record) ends canceled, still
     writes its resolved-config record, and reports the losing side as its final value, not
-    that epoch's real score, so a cancelled trial can never outrank one that merely scored
+    that epoch's real score, so a canceled trial can never outrank one that merely scored
     worse."""
     pytest.importorskip("torch")
     import math

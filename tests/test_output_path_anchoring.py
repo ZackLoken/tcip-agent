@@ -89,7 +89,7 @@ def test_launch_training_defaults_into_the_platform_state_roots_experiment_store
     final_status = None
     while time.monotonic() < deadline:
         final_status = training_tools.monitor_training(res["experiment_id"]).get("status")
-        if final_status in ("completed", "failed", "cancelled"):
+        if final_status in ("completed", "failed", "canceled"):
             break
         time.sleep(0.5)
     else:

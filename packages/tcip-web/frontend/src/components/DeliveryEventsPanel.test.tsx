@@ -12,8 +12,10 @@ const BASE: DeliveryEventRecord = {
   output_path: "C:/proj/results_export/subject_a_phenology.csv",
   output_sha256: "a".repeat(64),
   acknowledged_by: null,
-  acknowledgement_reason: null,
+  acknowledgment_reason: null,
   documents: {},
+  document_reconciliations: {},
+  dimension_reconciliations: {},
   produced_at: "2026-02-03T12:00:00+00:00",
   plant_mapping: null,
   superseded: null,
@@ -88,15 +90,6 @@ describe("DeliveryEventsPanel reconciled validity", () => {
 
     render(<DeliveryEventsPanel records={[record]} loadError={null} />);
     const row = screen.getByTestId("delivery-empty-reconciliations");
-
-    expect(within(row).queryByText("Reconciled validity")).not.toBeInTheDocument();
-  });
-
-  it("shows no reconciled-validity section for a record predating the fields", () => {
-    const record: DeliveryEventRecord = { ...BASE, event_id: "predates-reconciliations" };
-
-    render(<DeliveryEventsPanel records={[record]} loadError={null} />);
-    const row = screen.getByTestId("delivery-predates-reconciliations");
 
     expect(within(row).queryByText("Reconciled validity")).not.toBeInTheDocument();
   });

@@ -428,7 +428,7 @@ def test_reconcile_scale_validity_asserted_can_only_lower(tmp_path):
 
 def test_reconcile_scale_validity_unit_mismatch_floors(tmp_path):
     """A scale stamped in one linear unit cannot clear a delivery stated in another:
-    centimetres cannot answer for millimetres."""
+    centimeters cannot answer for millimeters."""
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, reconcile_scale_validity
 
     d = _write_bound_scale_sidecar(tmp_path / "preds", tmp_path, unit="cm")

@@ -1,4 +1,4 @@
-"""A custom-named record, launched by one process, monitored/cancelled/streamed by its own id
+"""A custom-named record, launched by one process, monitored/canceled/streamed by its own id
 from a second process that never held it in its own in-memory registry.
 
 There is one id: a training run's id is always its experiment id (no record, no run), so a
@@ -42,7 +42,7 @@ def test_a_custom_named_record_is_monitored_by_its_own_id_with_no_registry_entry
     assert result["output_dir"] == str(output_dir)
 
 
-def test_a_custom_named_record_is_cancelled_by_its_own_id_with_no_registry_entry(
+def test_a_custom_named_record_is_canceled_by_its_own_id_with_no_registry_entry(
     tmp_path, monkeypatch,
 ):
     monkeypatch.chdir(tmp_path)
@@ -85,4 +85,4 @@ def test_an_id_no_record_ever_stamped_resolves_to_nothing(tmp_path, monkeypatch)
 
     _launch_custom_named_record("exp-004-bud-det", str(tmp_path / "runs" / "a"))
 
-    assert reconstruct_run_status("exp-never-launched") is None
+    assert reconstruct_run_status("exp-never-launched", stale_seconds=600.0) is None

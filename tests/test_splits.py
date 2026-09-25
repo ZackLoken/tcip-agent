@@ -12,7 +12,6 @@ from tcip_mcp.pipelines.data.splits import (
     GROUP_KEY_FNS,
     cal_holdout_lock_key,
     cal_holdout_split,
-    count_lines,
     group_balanced_split,
     label_document_extent,
     resolve_group_key_fn,
@@ -30,13 +29,6 @@ def test_default_group_key_strips_tile_offset():
     # A single trailing "_<int>" field does not match the two-field tile pattern.
     assert default_group_key("img_001") == "img_001"
     assert GROUP_KEY_FNS["stem"]("a_1_2") == "a_1_2"
-
-
-def test_count_lines(tmp_path):
-    p = tmp_path / "lbl.txt"
-    p.write_text("0 0.5 0.5 0.1 0.1\n\n0 0.2 0.2 0.1 0.1\n")
-    assert count_lines(p) == 2  # blank line ignored
-    assert count_lines(tmp_path / "missing.txt") == 0
 
 
 def _grouped(stems):
@@ -144,11 +136,11 @@ def test_selection_calibration_universe_floor_remedy_names_the_ratio_and_the_dir
     labels_dir = tmp_path / "annotations"
     labels_dir.mkdir()
     selection = Selection(samples=tuple(
-        Sample(source=str(tmp_path / "images" / f"{stem}.jpg"),
+        Sample(member=stem, source=str(tmp_path / "images" / f"{stem}.jpg"),
                ground_truth=str(labels_dir / f"{stem}.json"), group=stem, side=side,
                confirmation_bucket="leaf/2026-03-01")
         for stem, side in (("a", "train"), ("b", "val"), ("c", "calibration"))
-    ))
+    ), seed=0, group_by="stem")
 
     # The one calibration member's document carries no foreground of the draw's own subject, so
     # the universe holds no foreground group and the floor refuses.

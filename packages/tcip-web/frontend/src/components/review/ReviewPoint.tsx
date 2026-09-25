@@ -1,6 +1,6 @@
 import { Circle, Line } from "react-konva";
 
-/** A point annotation under review: the Annotate canvas' reticle in the detection's outcome colour.
+/** A point annotation under review: the Annotate canvas' reticle in the detection's outcome color.
  *  Same mark in both tabs, so a location a reviewer accepts is drawn the way it was placed, and no
  *  box is drawn around it, which would show the reviewer an extent the annotation does not claim. */
 export function ReviewPoint({

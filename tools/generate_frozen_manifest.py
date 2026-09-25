@@ -33,7 +33,7 @@ COMMITMENT = (
 
 def manifest() -> dict[str, Any]:
     """The manifest document, derived from the live registry, deterministically ordered."""
-    from tcip_mcp.store_catalogue import bootstrapped_stores
+    from tcip_mcp.store_catalog import bootstrapped_stores
     from tcip_store import get_descriptor
 
     stores: dict[str, Any] = {}

@@ -2,26 +2,13 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import pytest
 
-import torch
-from PIL import Image
+pytest.importorskip("torch")
+from PIL import Image  # noqa: E402
 
-from tcip_mcp.pipelines.active_learning.scorer import UncertaintyScorer
-
-
-class _FakeDetector(torch.nn.Module):
-    """Returns an empty frame on the first call, a low-confidence detection on the second."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._n = 0
-
-    def forward(self, imgs):  # scorer calls model([tensor]) per image
-        self._n += 1
-        scores = torch.tensor([]) if self._n == 1 else torch.tensor([0.3, 0.4])
-        return [{"scores": scores, "boxes": torch.zeros((len(scores), 4)),
-                 "labels": torch.zeros((len(scores),), dtype=torch.int64)}]
+from tcip_mcp.pipelines.active_learning.scorer import UncertaintyScorer  # noqa: E402
+from tests.scorer_models import predictor_for  # noqa: E402
 
 
 def test_empty_frame_ranks_low_not_max(tmp_path):
@@ -29,8 +16,8 @@ def test_empty_frame_ranks_low_not_max(tmp_path):
         Image.new("RGB", (64, 64), (100, 100, 100)).save(tmp_path / f"{name}.png")
     paths = [str(tmp_path / "a.png"), str(tmp_path / "b.png")]
 
-    loaded = SimpleNamespace(model=_FakeDetector(), device=torch.device("cpu"), in_chans=3)
-    ranked = UncertaintyScorer(task="detection").score(paths, loaded)
+    predictor = predictor_for(tmp_path, "build_empty_then_low", "detection")
+    ranked = UncertaintyScorer(task="detection").score(paths, predictor)
     by_path = dict(ranked)
 
     assert by_path[paths[0]] == 0.0  # the empty frame: no ambiguous decision -> does not flood

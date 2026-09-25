@@ -1,16 +1,10 @@
-"""SessionEnd capture hook: the soft backstop for the self-learning loop.
+"""SessionEnd capture hook: appends a session-boundary record to
+``<cwd>/.tcip/learning_capture.jsonl``.
 
-Appends a session-boundary record to ``<cwd>/.tcip/learning_capture.jsonl``, and the terminal
-pins its sessions' cwd to the repo root, so records from every project's sessions pool in one
-platform-level file: this capture feeds platform improvement, not any one project's record.
-Each entry stamps the workspace's active project (when one is adopted) so a distill pass can
-group entries by project without sharding the file. The genuine learnings still come from the
-agent following the ``self-improvement`` skill and the per-project ``.tcip/reports/`` and
-``.tcip/retrospectives/``, which ``tcip distill-learnings`` gathers from each project;
-this only guarantees a record of the session exists.
+The terminal pins its sessions' cwd to the repo root, so records from every project's sessions pool
+in one platform-level file. Each entry stamps the workspace's active project (when one is adopted).
 
-Non-blocking + best-effort: any error is swallowed and the hook exits 0. A capture backstop must
-never break the agent's session (a SessionEnd hook that errors would surface as a failure).
+Best-effort: any error is swallowed and the hook exits 0.
 """
 
 from __future__ import annotations

@@ -228,7 +228,7 @@ def test_export_detection_csv_carries_provenance(tmp_path):
 
     fx.seed_confirmed_count(tmp_path)
     sha = _run_with_a_recorded_checkpoint(tmp_path, "expE")
-    # This door takes no acknowledgement, so the delivery is made genuinely validated: a real
+    # This door takes no acknowledgment, so the delivery is made genuinely validated: a real
     # bucket bound to the checkpoint that produced it, rather than a provisional escape.
     root = tmp_path / "ds"
     bucket = root / "predictions" / "preds"
@@ -261,7 +261,7 @@ def test_export_aggregated_csv_carries_provenance(tmp_path):
     fx.seed_delivery_traits(tmp_path)
     fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
     sha = _run_with_a_recorded_checkpoint(tmp_path, "expA")
-    # This door takes no acknowledgement either, so the same real-bucket route as above
+    # This door takes no acknowledgment either, so the same real-bucket route as above
     # is what earns a genuinely validated delivery.
     root = tmp_path / "ds"
     bucket = root / "predictions" / "preds"
@@ -330,7 +330,7 @@ def test_export_detection_csvs_produced_at_is_present_and_iso_parseable(tmp_path
     from tests._binding_fixtures import write_bound_sidecar, write_prediction
 
     fx.seed_confirmed_count(tmp_path)
-    # This door takes no acknowledgement, so the delivery is made genuinely validated.
+    # This door takes no acknowledgment, so the delivery is made genuinely validated.
     root = tmp_path / "ds"
     bucket = root / "predictions" / "preds"
     write_prediction(bucket, "img_a")
@@ -359,12 +359,12 @@ def test_delivered_tail_treats_a_none_valued_produced_at_key_as_absent(tmp_path)
     caller that actually asserts a ``produced_at``, matching ``corroborated_producer``'s own
     absence convention two functions up."""
     from tcip_mcp.pipelines.resolution import (
-        VALIDATED_FALSE, Acknowledgement, check_delivery_gate, delivered_tail,
+        VALIDATED_FALSE, Acknowledgment, check_delivery_gate, delivered_tail,
     )
 
     gate = check_delivery_gate(
         {"operating_point": VALIDATED_FALSE},
-        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="test acknowledgement"))
+        acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="test acknowledgment"))
     columns = ("produced_at", "operating_point_validated")
 
     tail = delivered_tail({"produced_at": None}, {}, gate, columns=columns)

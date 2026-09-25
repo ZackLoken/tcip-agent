@@ -1,44 +1,11 @@
-"""What the in-app agent fence protects, declared once for both shell guards.
+"""The protected set, target normalization and refusal text both in-app agent shell guards share.
 
-``agent_bash_guard.py`` and ``agent_powershell_guard.py`` police the same boundary in two
-syntaxes. The boundary itself, which repo paths are platform-internal, which paths hold a
-breeder's data, how a write target is normalized before it is classified, and what a refusal
-tells the agent, lives here; each guard keeps only the syntax that recognises a write in its
-own shell and feeds normalized targets back to the shared classifier.
+In development the protected set is the repo tree plus the breeder's project data; with
+``TCIP_FENCE_MODE=prod`` it is only the breeder's project data (annotations, labels, predictions,
+image status, and the trait-state records). Mode defaults to development. Path matching is
+case-insensitive and path-shape only, never an existence check.
 
-The fence is a guardrail, not a sandbox. It has exactly one path where it is the sole gate: a
-write that rides an allow-listed read prefix (``cat``, ``ls``, ``grep``, ``git diff`` and their
-PowerShell peers) through a redirect, which Claude Code runs with no human prompt. Along every
-other path a non-allow-listed verb already reaches an approval prompt, so the guard is
-defense-in-depth there. The redirect grammar and target normalization below are therefore
-airtight; the in-place writer enumeration is deliberately not exhaustive, since a human prompt
-backs it. Real isolation from a determined agent is the OS sandbox, the platform's stated next
-step.
-
-The redirect grammar (``REDIRECT`` below, and ``redirect_targets``) reads the raw command
-string rather than a quote-aware token list, so a quoted ``>`` inside an earlier, unrelated
-argument can be misread as a second redirect operator: ``cat 'text>packages' > scratch.txt``
-denies falsely, reading the quoted fragment ``>packages`` as a second target. This is an
-accepted residual (a false deny, never a missed one), since the source argument's content is
-not something either shell guard needs to parse correctly to keep the redirect path airtight.
-
-Two protected-set modes exist. In development the guard runs inside a source checkout and
-protects the repo tree plus the breeder's project data. In production the platform is an
-installed package with no repo tree and an OS sandbox, so only the breeder's project data
-(annotations, labels, predictions, image status, and the trait-state records) is protected.
-Mode defaults to development, the more protective choice, unless ``TCIP_FENCE_MODE=prod`` is set
-explicitly, so an unknown deployment fails safe. The production settings filtering and the
-enforced sandbox are designed but not built until an installed deployment exists to exercise
-them; ``classify`` already answers correctly for either mode.
-
-Path matching is case-insensitive: the protected filesystem is case-insensitive on the
-platform's Windows host, so ``PACKAGES/x.py`` and ``packages/x.py`` are one file. The guards are
-stateless and cwd-blind, so every check is a path-shape check, never an existence check, and a
-relative write after a ``cd`` into a protected directory is an accepted residual of a
-command-only guard (its real boundary there is the human prompt and, in production, the sandbox).
-
-Stdlib only, and importable both as ``tcip_web.agent_fence_rules`` and as a bare sibling module,
-because the guards run as plain scripts under whatever ``python`` the terminal inherits.
+Stdlib only, and importable both as ``tcip_web.agent_fence_rules`` and as a bare sibling module.
 """
 
 from __future__ import annotations
@@ -134,12 +101,8 @@ def deny(reason: str) -> None:
 
 
 def repo_root() -> "Path | None":
-    """The source-checkout root above this module, or ``None`` when installed.
-
-    The nearest ancestor holding ``.mcp.json`` is the repo root (only the true root carries it),
-    the same signal ``project_paths.repo_root_from_here`` uses. In an installed wheel no ancestor
-    has it, which is the production signal. Used only to anchor the dev-mode repo rules, never to
-    guess a working directory.
+    """The source-checkout root above this module (the nearest ancestor holding ``.mcp.json``), or
+    ``None`` when installed.
     """
     for parent in Path(__file__).resolve().parents:
         if (parent / ".mcp.json").is_file():
@@ -195,11 +158,8 @@ def _declared_targets() -> "tuple[list[str], list[str], list[str]]":
 
 
 def _strip_quotes(token: str) -> str:
-    """Remove unescaped single and double quotes, mirroring shell quote removal.
-
-    ``la"bel"s`` becomes ``labels``: the shell opens the dequoted path, so the classifier must
-    see it too. Over-approximates quote removal in the safe direction (it can only make more
-    targets match); a real filename carrying a literal quote is pathological.
+    """Remove unescaped single and double quotes as the shell would (``la"bel"s`` becomes
+    ``labels``), over-approximating in the direction that matches more targets.
     """
     return re.sub(r"(?<!\\)['\"]", "", token)
 
@@ -207,11 +167,9 @@ def _strip_quotes(token: str) -> str:
 def normalize_target(token: str) -> str:
     """A redirect or path token as a lowercase, forward-slashed, lexically collapsed path.
 
-    Strips quotes, unifies separators, drops a Windows drive-relative prefix (``C:foo`` resolves
-    against the drive's current directory, the repo root at terminal start, so it is treated as
-    the relative ``foo``), keeps an absolute drive or leading-slash root, and collapses ``.`` and
-    ``..`` lexically without touching the filesystem (the guards are cwd-blind, so this is
-    path-shape normalization, never resolution against a real cwd).
+    Strips quotes, unifies separators, drops a Windows drive-relative prefix (``C:foo`` is treated
+    as the relative ``foo``), keeps an absolute drive or leading-slash root, and collapses ``.``
+    and ``..`` lexically without touching the filesystem.
     """
     s = _strip_quotes(token).replace("\\", "/")
     root = ""
@@ -248,8 +206,7 @@ def _repo_relative(norm: str, root: "Path | None") -> "str | None":
     """``norm`` expressed relative to the repo root, or ``None`` if it is not under it.
 
     An absolute target must sit under the repo root to be repo code; a relative target is treated
-    as repo-root-relative (a bare ``packages/x`` after a ``cd`` back to the root is that
-    directory), which is the conservative reading the dev-mode rules rely on.
+    as repo-root-relative.
     """
     if not _is_absolute(norm):
         return norm
@@ -361,9 +318,7 @@ _OPAQUE_TARGET = re.compile(r"^(?:\$\{?\w+\}?|\$env:\w+|\$\(.*\)|`.*`|%\w+%)$")
 def resolve_token(token: str, cmd: str, *, ps: bool = False) -> str:
     """A bare variable-reference token resolved to its value from the command's assignments.
 
-    Used at the classify call sites so an in-place writer or cmdlet naming its target through a
-    variable (``DEST=packages/x; cp evil $DEST``) is judged on the resolved path. A token that is
-    not a bare variable, or a variable assigned nowhere, is returned unchanged.
+    A token that is not a bare variable, or a variable assigned nowhere, is returned unchanged.
     """
     resolved = _resolve_var(_strip_quotes(token), len(cmd), _assignments(cmd, ps))
     return resolved if resolved is not None else _strip_quotes(token)
@@ -373,9 +328,8 @@ def has_opaque_redirect_target(cmd: str, *, ps: bool = False) -> bool:
     """True if a redirect writes to a wholly opaque target (a bare variable or substitution).
 
     Excludes ``$null`` (the PowerShell null sink) and any target carrying a literal path segment,
-    so only the case where the guard can see nothing of the path (``> $T``, ``> $(getpath)``)
-    trips it. The caller pairs this with an allow-listed leading verb (the no-prompt path) to fail
-    closed rather than let an unresolvable target through unseen.
+    so only the case where the guard can see nothing of the path (``> $T``, ``> $(getpath)``) trips
+    it.
     """
     for target in redirect_targets(cmd, ps=ps):
         if target == "$null":
@@ -420,7 +374,7 @@ def leading_is_allow_listed(cmd: str, kind: str) -> bool:
 def inline_exec(cmd: str) -> bool:
     """True if ``cmd`` runs inline/encoded code the guard cannot see through.
 
-    Recognises the code-execution flag anywhere before a ``-m`` module or a script path, so an
+    Recognizes the code-execution flag anywhere before a ``-m`` module or a script path, so an
     interposed flag (``python -X utf8 -c``) is caught while ``python -m pytest -c cfg`` and
     ``python tools/x.py`` stay free.
     """

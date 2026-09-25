@@ -69,9 +69,7 @@ _selected_this_session = False
 class DatasetTree(BaseModel):
     dataset_root: str
     dates_with_images: list[str]
-    # Every subject the dataset's registry (``subjects.json``) declares, e.g.
-    # ["bush", "leaf"]. This is *what a label set is about*, not the shape kind; a label file
-    # names its subject on each annotation rather than in the path.
+    # Every subject the dataset's registry (``subjects.json``) declares, e.g. ["tree", "fruit"].
     subjects: list[str]
     model_names: list[str]       # every model present anywhere, e.g. ["baseline"]
     # Per-date availability: the subjects that actually have labels / models that actually
@@ -105,13 +103,9 @@ def _dir_mtime_ns(p: Path) -> int:
 
 
 def _subjects_by_date(root: Path, dates: list[str]) -> tuple[dict[str, list[str]], Optional[str]]:
-    """``subjects_with_labels`` per date, and the first date's problem when one won't read.
-
-    A date whose labels won't read, or whose annotations directory the path guard refuses,
-    reports an empty subject list for that date rather than aborting the scan: every other
-    date's own labels are unaffected by one date's corrupt file or disallowed storage. The guard
-    checked here is the one ``routes/subjects.py``'s ``load_subjects`` applies to the same
-    directory, so a dataset the subject registry route 403s never lists its subjects here instead.
+    """``subjects_with_labels`` per date, and the first date's problem when one won't read. A date
+    whose labels won't read, or whose annotations directory the path guard refuses, lists an empty
+    subject list.
     """
     from tcip_annotation.json_io import UnreadableLabelDocument
 
@@ -205,19 +199,8 @@ class SelectionRequest(BaseModel):
 def _write_canvas_binding(root: Path) -> int:
     """Record ``root`` as the GUI's open root; return the generation now in force.
 
-    ``project_name`` is resolved before the transaction opens, since it names a directory and
-    reads no store of its own (:func:`tcip_mcp.workspace.workspace_project_name`): no other
-    root's store is read inside this transaction and no new lock order arises from it.
-
-    Read-modify-write inside a transaction, the store's own ``cas`` policy: the current record
-    is read to decide whether ``root`` actually changed (generation bumps only then, so a
-    same-project re-select or ordinary navigation never supersedes a sibling tab), and the write
-    is staged in the same transaction so a concurrent select cannot land between the read and the
-    write and have its own bump silently dropped. A released current record
-    (``tcip_mcp.project_removal.release_project_binding``, :func:`tcip_mcp.web_client.
-    binding_released_or_absent`) bumps regardless of whether ``root`` changed: its own root is not
-    what the GUI has open, whatever it names, so the fresh select this write makes never reuses a
-    generation that release already retired.
+    One read-modify-write transaction: the generation bumps when ``root`` changed or the current
+    record was released, never on a same-project re-select.
     """
     key = canvas_open_binding_key()
     root_str = str(root)
@@ -241,9 +224,9 @@ def _write_canvas_binding(root: Path) -> int:
 
 
 def _pending_marker_message(project_root: str, marker: "workspace.PendingMarker") -> str:
-    """One sentence naming ``project_root`` (the client's own string, kept as
-    ``_pending_removal_message`` already did) and, from ``marker``, which kind is pending and
-    what completes at the next backend start."""
+    """One sentence naming ``project_root`` and, from ``marker``, which kind is pending and what
+    completes at the next backend start.
+    """
     record = marker.record
     if marker.kind == "removal":
         return (
@@ -262,15 +245,8 @@ def _pending_marker_message(project_root: str, marker: "workspace.PendingMarker"
 async def select_dataset(req: SelectionRequest) -> dict:
     """Set the active dataset for the GUI; broadcasts a state delta.
 
-    A ``project_root`` pending removal or pending rename is refused before the binding write,
-    checked on the path the guard resolves rather than the client's raw string. The guard's own
-    excluded-roots check (``assert_path_allowed``) already refuses a path under a pending
-    project by identity, ahead of everything else, with a 403; this route re-reads the marker to
-    answer that same 403 with the pending door's own message rather than the guard's generic
-    one. The route's own marker read that runs when the guard admits the root instead can only
-    fire for a marker written in the narrow window between the guard's own read and this one,
-    since the guard would otherwise already have refused; that race still answers 409 the same
-    way, so a refused select changes no binding and bumps no generation either way.
+    A ``project_root`` pending removal or pending rename is refused before the binding write, with
+    the pending door's own message, so a refused select changes no binding and bumps no generation.
     """
     try:
         project_root = _guarded(req.project_root)
@@ -357,7 +333,7 @@ async def select_dataset(req: SelectionRequest) -> dict:
 
     # Advisory only (never rejects): does the resolved (subject, date) actually have any labels /
     # the (model, date) any predictions? Empty label files count as present (confirmed
-    # negatives), and starting a brand-new annotation on an unlabelled date is still allowed,
+    # negatives), and starting a brand-new annotation on an unlabeled date is still allowed,
     # so we don't block; we just tell the caller (agent or GUI) the canvas will start empty
     # instead of leaving a silent blank canvas.
     annotations_present = False
@@ -402,11 +378,8 @@ class NavRequest(BaseModel):
 
 @router.post("/nav")
 async def set_current_image(req: NavRequest) -> dict:
-    """Persist the browser's current image position into ``GuiState.dataset``.
-
-    The frontend debounces this so rapid arrow-key nav doesn't flood the store; the
-    agent reads the resulting index via ``view_gui_state`` (last image the human
-    looked at). Merges into the live dataset so the other selection fields survive.
+    """Persist the browser's current image position into ``GuiState.dataset``, merging into the
+    live dataset so the other selection fields survive.
     """
     dataset = store.state.dataset
     n = len(dataset.image_list)

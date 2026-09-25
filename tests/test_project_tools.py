@@ -467,46 +467,11 @@ def test_export_import_roundtrip(tmp_path: Path):
     # The registry survived, so the restored labels are still decodable.
     restored = subject_registry.read_registry(dest / "subjects.json")
     assert [s.name for s in restored.subjects] == ["bud"]
-    # dataset.json travelled with the data: identity (id/crop/fingerprint) survives the round-trip.
+    # dataset.json traveled with the data: identity (id/crop/fingerprint) survives the round-trip.
     import json
 
     restored_id = json.loads((dest / "dataset.json").read_text())
     assert restored_id == {"crop": "currant", "id": reg["id"], "fingerprint": reg["fingerprint"]}
-
-
-def _bare_the_registry_entry(project_root: Path, entry: dict) -> str:
-    """Overwrite a real registration's project-registry entry with its bare-hex fingerprint,
-    standing in for a dataset registered under a project before the formula-version prefix
-    existed: the project-registry counterpart to
-    test_dataset_identity_fingerprint_formula.py's own _bare_the_identity, which does this to
-    the dataset's own identity document instead."""
-    bare = entry["fingerprint"].split(":", 1)[1]
-    upsert_dataset(project_root, {**entry, "fingerprint": bare})
-    return bare
-
-
-def test_store_bootstrap_project_roots_admits_a_bare_fingerprint_registry_entry(tmp_path: Path):
-    """project_roots is the path ``tcip adopt-store``/``tcip export-store`` use to reach a
-    project; it must not itself be blocked by the identity problem register_dataset
-    re-registration exists to fix, so it reads locations through read_datasets_raw rather than
-    read_datasets."""
-    from tcip_store.layout_claims import ROOT
-
-    from tcip_mcp.store_catalogue import project_roots
-
-    project = tmp_path / "project"
-    dataset = tmp_path / "dataset"
-    project.mkdir()
-    dataset.mkdir()
-    _make_dataset(dataset)
-    register_dataset(str(dataset), crop="currant", project_root=str(project))
-    _bare_the_registry_entry(project, read_datasets(project)[0])
-
-    with pytest.raises(ValueError, match="register_dataset"):
-        read_datasets(project)
-
-    roots = project_roots(project)
-    assert (str(dataset.resolve()), ROOT) in roots
 
 
 def test_project_roots_names_a_run_output_dir_a_selection_and_a_prediction_bucket(
@@ -518,7 +483,7 @@ def test_project_roots_names_a_run_output_dir_a_selection_and_a_prediction_bucke
     under a registered dataset's own predictions/ tree."""
     from tcip_store.layout_claims import PREDICTION_BUCKET, RUN, SPLITS
 
-    from tcip_mcp.store_catalogue import project_roots
+    from tcip_mcp.store_catalog import project_roots
     from tcip_mcp import experiments
     from tcip_mcp.dataset_layout import prediction_dir
     from tcip_mcp.pipelines.data.split_construction import persist_run_partition
@@ -542,7 +507,8 @@ def test_project_roots_names_a_run_output_dir_a_selection_and_a_prediction_bucke
     split_dir.mkdir(parents=True)
     persist_run_partition(
         "exp-1",
-        {"labels_dir": "", "split": {"selection_binding": {"selection_dir": str(split_dir)}}},
+        {"labels_dir": "", "split": {"resolved_group_by": "stem", "resolved_seed": 0,
+                                     "selection_binding": {"selection_dir": str(split_dir)}}},
     )
 
     bucket = prediction_dir(dataset, "modelA", "2-11-26")
@@ -561,7 +527,7 @@ def test_project_roots_names_the_hpo_root_and_its_sweeps(tmp_path: Path):
     directory training_tools.sweep_dir names a study's own sweep at."""
     from tcip_store.layout_claims import HPO_ROOT, SWEEP
 
-    from tcip_mcp.store_catalogue import project_roots
+    from tcip_mcp.store_catalog import project_roots
     from tcip_mcp.tools import training_tools
 
     project = tmp_path / "project"
@@ -586,7 +552,7 @@ def test_project_roots_names_a_curated_artifact_and_a_lineage_prediction_bucket(
     dataset's own tree."""
     from tcip_store.layout_claims import CURATED, PREDICTION_BUCKET
 
-    from tcip_mcp.store_catalogue import project_roots
+    from tcip_mcp.store_catalog import project_roots
     from tcip_mcp import experiments
 
     project = tmp_path / "project"
@@ -618,7 +584,7 @@ def test_project_roots_keeps_both_layouts_when_one_directory_is_two_kinds_of_roo
     that path."""
     from tcip_store.layout_claims import CURATED, ROOT
 
-    from tcip_mcp.store_catalogue import project_roots
+    from tcip_mcp.store_catalog import project_roots
     from tcip_mcp import experiments
 
     project = tmp_path / "project"
@@ -647,7 +613,7 @@ def test_project_roots_skips_a_recorded_run_output_dir_that_no_longer_exists(
     from nothing."""
     from tcip_store.layout_claims import RUN
 
-    from tcip_mcp.store_catalogue import project_roots
+    from tcip_mcp.store_catalog import project_roots
     from tcip_mcp import experiments
 
     project = tmp_path / "project"
@@ -665,11 +631,9 @@ def test_project_roots_skips_a_recorded_run_output_dir_that_no_longer_exists(
     assert not any(layout == RUN for _, layout in roots)
 
 
-def test_external_dataset_paths_admits_a_bare_fingerprint_registry_entry(tmp_path: Path):
+def test_external_dataset_paths_names_an_external_registry_entry(tmp_path: Path):
     """import_project calls this after extraction to disclose which registered datasets stayed
-    external; a bare pre-prefix fingerprint must not make the door raise after the extraction it
-    is reporting on has already run, so it reads through read_datasets_raw rather than
-    read_datasets."""
+    external."""
     project = tmp_path / "project"
     dataset = tmp_path / "dataset"  # a sibling of project, never nested under it: external
     project.mkdir()
@@ -678,10 +642,6 @@ def test_external_dataset_paths_admits_a_bare_fingerprint_registry_entry(tmp_pat
     register_dataset(str(dataset), crop="currant", project_root=str(project))
     entry = read_datasets(project)[0]
     assert entry["path"] == str(dataset.resolve())  # external entries store absolute
-    _bare_the_registry_entry(project, entry)
-
-    with pytest.raises(ValueError, match="register_dataset"):
-        read_datasets(project)
 
     assert _external_dataset_paths(project) == [str(dataset.resolve())]
 
@@ -919,96 +879,6 @@ def test_import_project_keeps_a_relative_entry_relative_when_the_archive_carries
     assert stored_after == stored_before
     assert imported["checkpoint_paths_unresolved"] == [stored_before]
     assert imported["external_checkpoints"] == []
-
-
-def test_import_project_conforms_a_genuinely_unconformed_registry_the_archive_carries(
-    tmp_path: Path,
-):
-    """An archive carries a bare version-1 registry array; the import door's own on-disk conform
-    (never exercised by a test whose registry the writer already spelled version-2 relative)
-    must wrap and respell it so the weights load at the new location, not merely leave an
-    already-conformed registry untouched."""
-    import zipfile
-
-    from tcip_mcp.model_registry import ModelRegistry, read_registry_index, registry_index_key
-
-    src = tmp_path / "src_project"
-    initialize_project(str(src), site="north orchard")
-    ckpt_dir = src / ".tcip" / "models"
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    content = b"weights an archive made before the family carried"
-    ckpt = ckpt_dir / "m.pt"
-    ckpt.write_bytes(content)
-    ModelRegistry(str(src)).register_model("m", str(ckpt), {}, metrics_source=None)
-
-    zip_path = tmp_path / "export.zip"
-    exported = archive_project(str(src), str(zip_path), include_models=True)
-    assert "error" not in exported, exported
-
-    v1_entries = tcip_store.read(registry_index_key(src))["entries"]
-    downgraded = tmp_path / "downgraded.zip"
-    with zipfile.ZipFile(zip_path) as src_zip, zipfile.ZipFile(downgraded, "w") as dst_zip:
-        for item in src_zip.infolist():
-            data = src_zip.read(item.filename)
-            if item.filename.endswith(".tcip/models/registry.json"):
-                data = tcip_store.RECORD_JSON.encode(v1_entries)
-            dst_zip.writestr(item, data)
-
-    dest = tmp_path / "restored"
-    imported = import_project(str(downgraded), str(dest))
-
-    assert "error" not in imported, imported
-    assert imported["checkpoint_paths_unresolved"] == []
-    assert imported["external_checkpoints"] == []
-    entries = read_registry_index(dest)
-    assert entries[0]["checkpoint_path"] == ".tcip/models/m.pt"
-    resolved = ModelRegistry(str(dest)).get_model("m")["checkpoint_path"]
-    assert Path(resolved).is_file()
-
-
-def test_import_project_conforms_a_stray_schema_version_two_registry_the_archive_carries(
-    tmp_path: Path,
-):
-    """An archive whose registry.json is ``{"schema_version": 2, "entries": [...]}``, a dev-era
-    shape planted by rewriting the bundled index's bytes directly, must still conform through
-    the import door's own on-disk conform, and land with the field dropped rather than refusing
-    the whole import."""
-    import zipfile
-
-    from tcip_mcp.model_registry import ModelRegistry, read_registry_index, registry_index_key
-
-    src = tmp_path / "src_project"
-    initialize_project(str(src), site="north orchard")
-    ckpt_dir = src / ".tcip" / "models"
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    content = b"weights a dev-era writer stamped schema_version 2 onto"
-    ckpt = ckpt_dir / "m.pt"
-    ckpt.write_bytes(content)
-    ModelRegistry(str(src)).register_model("m", str(ckpt), {}, metrics_source=None)
-
-    zip_path = tmp_path / "export.zip"
-    exported = archive_project(str(src), str(zip_path), include_models=True)
-    assert "error" not in exported, exported
-
-    entries = tcip_store.read(registry_index_key(src))["entries"]
-    poisoned = tmp_path / "poisoned.zip"
-    with zipfile.ZipFile(zip_path) as src_zip, zipfile.ZipFile(poisoned, "w") as dst_zip:
-        for item in src_zip.infolist():
-            data = src_zip.read(item.filename)
-            if item.filename.endswith(".tcip/models/registry.json"):
-                data = tcip_store.RECORD_JSON.encode({"schema_version": 2, "entries": entries})
-            dst_zip.writestr(item, data)
-
-    dest = tmp_path / "restored"
-    imported = import_project(str(poisoned), str(dest))
-
-    assert "error" not in imported, imported
-    stored = tcip_store.read(registry_index_key(dest))
-    assert "schema_version" not in stored
-    conformed = read_registry_index(dest)
-    assert conformed[0]["checkpoint_path"] == ".tcip/models/m.pt"
-    resolved = ModelRegistry(str(dest)).get_model("m")["checkpoint_path"]
-    assert Path(resolved).is_file()
 
 
 def test_import_project_discloses_a_designed_external_checkpoint_separately_from_unresolved(

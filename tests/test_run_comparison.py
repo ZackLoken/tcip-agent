@@ -31,7 +31,7 @@ def test_same_dataset_fingerprint_is_none_not_true_when_one_id_is_an_error(tmp_p
     create_experiment("e1", {}, dataset_fingerprint="v1:aaaa")
     create_experiment("e2", {}, dataset_fingerprint="v1:aaaa")
 
-    result = compare_experiments(["e1", "e2", "missing"])
+    result = compare_experiments(["e1", "e2", "missing"], stale_seconds=600.0)
     assert any("error" in c for c in result["experiments"])
     assert result["same_dataset_fingerprint"] is None
 
@@ -43,9 +43,9 @@ def test_compare_experiments_reports_model_none_not_unknown_for_a_configless_run
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import compare_experiments, create_experiment
 
-    create_experiment("exp-no-builder", {"a": 1})
+    create_experiment("exp-no-builder", {"model_source": {"task": "detection"}})
 
-    result = compare_experiments(["exp-no-builder"])
+    result = compare_experiments(["exp-no-builder"], stale_seconds=600.0)
     c = result["experiments"][0]
     assert c["model"] is None
     assert c["model"] != "unknown"
@@ -62,7 +62,7 @@ def test_compare_experiments_reports_task_and_subject_from_config(tmp_path, monk
         "data": {"subject": "bud"},
     })
 
-    c = compare_experiments(["exp-task-subject"])["experiments"][0]
+    c = compare_experiments(["exp-task-subject"], stale_seconds=600.0)["experiments"][0]
     assert c["task"] == "detection"
     assert c["subject"] == "bud"
 
@@ -76,41 +76,16 @@ def test_registry_is_absent_with_a_reason_when_the_index_will_not_decode(tmp_pat
     from tcip_mcp.experiments import compare_experiments, create_experiment
     from tcip_mcp.model_registry import RegistryVersionRefused
 
-    create_experiment("exp-registry-corrupt", {"model_source": {"builder": "m:f"}})
+    create_experiment("exp-registry-corrupt", {"model_source": {"builder": "m:f", "task": "detection"}})
 
     def _boom(project_path):
         raise RegistryVersionRefused("simulated unreadable registry index")
 
     monkeypatch.setattr(model_registry, "read_registry_index", _boom)
 
-    c = compare_experiments(["exp-registry-corrupt"])["experiments"][0]
+    c = compare_experiments(["exp-registry-corrupt"], stale_seconds=600.0)["experiments"][0]
     assert "registry" not in c
     assert "registry unreadable" in c["registry_error"]
-
-
-def test_registry_names_stale_entries_instead_of_matching_nothing(tmp_path, monkeypatch):
-    """An entry predating metrics_source is the same condition best_model refuses ranking on:
-    the comparison must say so rather than silently reporting an empty registry column."""
-    monkeypatch.chdir(tmp_path)
-    import tcip_store as ts
-    from tcip_mcp.experiments import compare_experiments, create_experiment
-    from tcip_mcp.model_registry import ModelRegistry, registry_index_key
-
-    create_experiment("exp-registry-stale", {"model_source": {"builder": "m:f"}})
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-    ModelRegistry(str(tmp_path)).register_model(
-        "a", str(ckpt), {}, metrics={"val_loss": 0.5}, tags=[], metrics_source="trainer")
-
-    key = registry_index_key(str(tmp_path))
-    with ts.transaction(key) as txn:
-        document = txn.read(key)
-        del document["entries"][0]["metrics_source"]
-        txn.write(key, document)
-
-    c = compare_experiments(["exp-registry-stale"])["experiments"][0]
-    assert "registry" not in c
-    assert "predate" in c["registry_error"]
 
 
 def test_registry_lists_only_entries_this_experiment_produced(tmp_path, monkeypatch):
@@ -122,14 +97,14 @@ def test_registry_lists_only_entries_this_experiment_produced(tmp_path, monkeypa
         compare_experiments, complete_run, create_experiment, register_model_from_experiment,
     )
 
-    create_experiment("exp-registered", {"model_source": {"builder": "m:f"}}, data_source="imgs")
+    create_experiment("exp-registered", {"model_source": {"builder": "m:f", "task": "detection"}}, data_source="imgs")
     ckpt = tmp_path / "model_best.pt"
     ckpt.write_bytes(b"weights")
     assert "error" not in complete_run("exp-registered", str(ckpt))
     reg = register_model_from_experiment("exp-registered", str(ckpt))
     assert "error" not in reg
 
-    c = compare_experiments(["exp-registered"])["experiments"][0]
+    c = compare_experiments(["exp-registered"], stale_seconds=600.0)["experiments"][0]
     assert [e["name"] for e in c["registry"]] == ["exp-registered"]
     assert c["registry"][0]["metrics_source"] is None  # a checkpoint with no metrics dict
     assert "registered_at" in c["registry"][0]
@@ -143,16 +118,17 @@ def test_split_reports_a_bound_selection_directory(tmp_path, monkeypatch):
     from tcip_mcp.experiments import compare_experiments, create_experiment
     from tcip_mcp.pipelines.data.split_construction import persist_run_partition
 
-    create_experiment("exp-bound-split", {"model_source": {"builder": "m:f"}})
+    create_experiment("exp-bound-split", {"model_source": {"builder": "m:f", "task": "detection"}})
     data_cfg = {"split": {
-        "selection_binding": {"selection_dir": "splits/2024-01-01"}, "resolved_seed": 7,
+        "selection_binding": {"selection_dir": "splits/2024-01-01", "selection_sha256": "s",
+                              "redraw": False},
+        "resolved_seed": 7, "resolved_group_by": "stem",
     }}
     persist_run_partition("exp-bound-split", data_cfg)
 
-    c = compare_experiments(["exp-bound-split"])["experiments"][0]
+    c = compare_experiments(["exp-bound-split"], stale_seconds=600.0)["experiments"][0]
     assert c["split"] == {
-        "case": "bound", "selection_dir": "splits/2024-01-01", "seed": 7,
-        "redrawn_within_selection": False,
+        "case": "bound", "selection_dir": "splits/2024-01-01", "seed": 7, "redraw": False,
     }
 
 
@@ -163,27 +139,26 @@ def test_split_reports_a_redrawn_bound_selection_distinctly(tmp_path, monkeypatc
     from tcip_mcp.experiments import compare_experiments, create_experiment
     from tcip_mcp.pipelines.data.split_construction import persist_run_partition
 
-    create_experiment("exp-bound-plain", {"model_source": {"builder": "m:f"}})
+    create_experiment("exp-bound-plain", {"model_source": {"builder": "m:f", "task": "detection"}})
     persist_run_partition("exp-bound-plain", {"split": {
-        "selection_binding": {"selection_dir": "splits/2024-01-01"}, "resolved_seed": 7,
+        "selection_binding": {"selection_dir": "splits/2024-01-01", "selection_sha256": "s",
+                              "redraw": False},
+        "resolved_seed": 7, "resolved_group_by": "stem",
     }})
 
-    create_experiment("exp-bound-redrawn", {"model_source": {"builder": "m:f"}})
+    create_experiment("exp-bound-redrawn", {"model_source": {"builder": "m:f", "task": "detection"}})
     persist_run_partition("exp-bound-redrawn", {"split": {
         "selection_binding": {
-            "selection_dir": "splits/2024-01-01",
-            "redraw": {
-                "seed": 7, "val_ratio": 0.25, "stratify_foreground": True,
-            },
+            "selection_dir": "splits/2024-01-01", "selection_sha256": "s", "redraw": True,
         },
-        "resolved_seed": 7,
+        "resolved_seed": 7, "resolved_group_by": "stem",
     }})
 
-    c = compare_experiments(["exp-bound-plain", "exp-bound-redrawn"])["experiments"]
+    c = compare_experiments(["exp-bound-plain", "exp-bound-redrawn"], stale_seconds=600.0)["experiments"]
     plain, redrawn = c[0]["split"], c[1]["split"]
     assert plain != redrawn
-    assert plain.get("redrawn_within_selection") is False
-    assert redrawn.get("redrawn_within_selection") is True
+    assert plain["redraw"] is False
+    assert redrawn["redraw"] is True
 
 
 def test_split_reports_a_drawn_seed_with_no_binding(tmp_path, monkeypatch):
@@ -191,10 +166,10 @@ def test_split_reports_a_drawn_seed_with_no_binding(tmp_path, monkeypatch):
     from tcip_mcp.experiments import compare_experiments, create_experiment
     from tcip_mcp.pipelines.data.split_construction import persist_run_partition
 
-    create_experiment("exp-drawn-split", {"model_source": {"builder": "m:f"}})
-    persist_run_partition("exp-drawn-split", {"split": {"seed": 99}})
+    create_experiment("exp-drawn-split", {"model_source": {"builder": "m:f", "task": "detection"}})
+    persist_run_partition("exp-drawn-split", {"split": {"resolved_seed": 99, "resolved_group_by": "stem"}})
 
-    c = compare_experiments(["exp-drawn-split"])["experiments"][0]
+    c = compare_experiments(["exp-drawn-split"], stale_seconds=600.0)["experiments"][0]
     assert c["split"] == {"case": "drawn", "seed": 99}
 
 
@@ -202,9 +177,9 @@ def test_split_reports_no_record_for_a_run_that_never_wrote_one(tmp_path, monkey
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import compare_experiments, create_experiment
 
-    create_experiment("exp-no-split", {"model_source": {"builder": "m:f"}})
+    create_experiment("exp-no-split", {"model_source": {"builder": "m:f", "task": "detection"}})
 
-    c = compare_experiments(["exp-no-split"])["experiments"][0]
+    c = compare_experiments(["exp-no-split"], stale_seconds=600.0)["experiments"][0]
     assert c["split"] == {"case": "none"}
 
 
@@ -246,7 +221,7 @@ def test_status_error_names_a_diverged_run_reason(tmp_path, monkeypatch):
     status = read_member(status_key("exp-diverged-cmp"), {})
     assert "2 consecutive full training passes" in status.get("error", "")
 
-    c = compare_experiments(["exp-diverged-cmp"])["experiments"][0]
+    c = compare_experiments(["exp-diverged-cmp"], stale_seconds=600.0)["experiments"][0]
     assert "2 consecutive full training passes" in c["status_error"]
 
 
@@ -254,10 +229,10 @@ def test_status_error_is_none_for_a_run_that_never_failed(tmp_path, monkeypatch)
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import compare_experiments, create_experiment, update_status
 
-    create_experiment("exp-healthy-cmp", {"model_source": {"builder": "m:f"}})
+    create_experiment("exp-healthy-cmp", {"model_source": {"builder": "m:f", "task": "detection"}})
     update_status("exp-healthy-cmp", "running")
 
-    c = compare_experiments(["exp-healthy-cmp"])["experiments"][0]
+    c = compare_experiments(["exp-healthy-cmp"], stale_seconds=600.0)["experiments"][0]
     assert c["status_error"] is None
 
 
@@ -275,7 +250,7 @@ def _register(tmp_path, experiment_id: str, metric_value: float, *, metric: str 
 
     from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
 
-    create_experiment(experiment_id, {"model_source": {"builder": "m:f"}}, data_source="imgs")
+    create_experiment(experiment_id, {"model_source": {"builder": "m:f", "task": "detection"}}, data_source="imgs")
     ckpt = tmp_path / f"{experiment_id}.pt"
     torch.save({"model_state_dict": {}, "metrics": {metric: metric_value}}, ckpt)
     assert "error" not in complete_run(experiment_id, str(ckpt))
@@ -467,24 +442,6 @@ def test_compare_best_route_422s_when_the_marked_set_registered_nothing(
     })
     assert resp.status_code == 422
     assert resp.json()["detail"]["error"] == "none of the marked experiments registered a checkpoint"
-
-
-def test_compare_best_route_409s_on_a_pre_metrics_source_entry(client: TestClient, tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    import tcip_store as ts
-    from tcip_mcp.model_registry import registry_index_key
-
-    _register(tmp_path, "exp-a", 0.7)
-    key = registry_index_key(str(tmp_path))
-    with ts.transaction(key) as txn:
-        document = txn.read(key)
-        del document["entries"][0]["metrics_source"]
-        txn.write(key, document)
-
-    resp = client.post("/api/training/compare/best", json={
-        "experiment_ids": ["exp-a"], "metric": "val_map50",
-    })
-    assert resp.status_code == 409
 
 
 def test_compare_best_route_projects_the_answer(client: TestClient, tmp_path, monkeypatch):

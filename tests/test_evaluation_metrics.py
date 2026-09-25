@@ -7,6 +7,8 @@ tests that exercise the detection/classification ``_validate`` path end-to-end.
 
 from __future__ import annotations
 
+from tests._trait_fixtures import complete_spec_record
+
 import csv
 import json
 import math
@@ -276,8 +278,8 @@ def _write_bare_trait(name: str, **extra) -> None:
     specs_dir = resolve_state(_TRAIT_SPECS_RELPATH)
     ts.replace(
         trait_spec_key(specs_dir, name),
-        {"name": name, "delivers": ["leaf_length"], "schema_version": TRAIT_SPEC_SCHEMA_VERSION,
-         **extra},
+        complete_spec_record({"name": name, "delivers": ["leaf_length"], "schema_version": TRAIT_SPEC_SCHEMA_VERSION,
+         **extra}),
         expect=ts.Version.ABSENT,
     )
 
@@ -737,8 +739,6 @@ def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
         def to(self, device):
             pass
 
-    ckpt_path = tmp_path / "model_best.pt"
-    torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, str(ckpt_path))
     monkeypatch.setattr(evaluation, "evaluate", lambda *a, **k: {"loss": 0.1, "map50": 0.5})
 
     import tcip_store as ts
@@ -747,22 +747,26 @@ def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.training.eval_runners import evaluation_results_key
     from tcip_mcp.tools.model_tools import register_model
 
-    result = register_model(name="iou-type-check", checkpoint_path=str(ckpt_path), config={},
-                            project_path=str(tmp_path))
-    assert "error" not in result, result
-    checkpoint = load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
+    def _checkpoint(task: str):
+        ckpt_path = tmp_path / f"{task}.pt"
+        torch.save({"model_source": {"builder": "x:y", "task": task}, "model_state_dict": {}},
+                   str(ckpt_path))
+        result = register_model(name=f"iou-type-check-{task}", checkpoint_path=str(ckpt_path),
+                                config={}, project_path=str(tmp_path))
+        assert "error" not in result, result
+        return load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
 
-    r = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", "instance_seg",
-                            str(tmp_path / "seg"))
+    segmenter, detector = _checkpoint("instance_seg"), _checkpoint("detection")
+
+    r = run_test_evaluation(segmenter, _DummyModel(), None, "cpu", str(tmp_path / "seg"))
     assert r["iou_type"] == "segm"
     on_disk = ts.read(evaluation_results_key(tmp_path / "seg"))
     assert on_disk["iou_type"] == "segm"
 
-    r = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", "detection",
-                            str(tmp_path / "det"))
+    r = run_test_evaluation(detector, _DummyModel(), None, "cpu", str(tmp_path / "det"))
     assert r["iou_type"] == "bbox"
 
-    r = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", "instance_seg",
+    r = run_test_evaluation(segmenter, _DummyModel(), None, "cpu",
                             str(tmp_path / "ovr"), iou_type="bbox")
     assert r["iou_type"] == "bbox"  # explicit override still recorded as-is
 
@@ -792,7 +796,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     test_only_fields = {"selection_dir", "evaluated_stem_count"}
     full_frame_only_fields = {
         "tile_size", "tile_size_source", "overlap", "overlap_source", "scored_images",
-        "sample_counts", "n_excluded_incomplete_attribute", "contradicted_negatives",
+        "sample_counts", "contradicted_negatives",
         "max_dets_cap_saturated_frac", "global_nms_iou", "postprocess", "operating_point",
     }
 
@@ -801,7 +805,8 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
             pass
 
     ckpt_path = tmp_path / "model_best.pt"
-    torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, str(ckpt_path))
+    torch.save({"model_source": {"builder": "x:y", "task": "detection"}, "model_state_dict": {}},
+               str(ckpt_path))
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "precision": 0.4, "recall": 0.5, "f1": 0.44})
     reg = register_model(name="row4-writer-check", checkpoint_path=str(ckpt_path), config={},
@@ -809,7 +814,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     assert "error" not in reg, reg
     checkpoint = load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
     test_out = tmp_path / "test_eval"
-    run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", "detection", str(test_out),
+    run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", str(test_out),
                         selection_dir=str(tmp_path / "manifest"), evaluated_stem_count=3)
     test_result = ts.read(evaluation_results_key(test_out))
 
@@ -821,6 +826,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
                               [Annotation(subject="bud", geometry=BBox(4, 4, 12, 12))], 32, 32)
 
     class _StubPredictor:
+        task = "detection"
         in_chans = 3
 
         def predict_tiled(self, path, **kw):
@@ -875,7 +881,8 @@ def test_a_written_result_carries_one_byte_per_line_ending(tmp_path, monkeypatch
             pass
 
     ckpt_path = tmp_path / "model_best.pt"
-    torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, str(ckpt_path))
+    torch.save({"model_source": {"builder": "x:y", "task": "detection"}, "model_state_dict": {}},
+               str(ckpt_path))
     monkeypatch.setattr(evaluation, "evaluate", lambda *a, **k: {"loss": 0.1, "map50": 0.5})
 
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -886,8 +893,7 @@ def test_a_written_result_carries_one_byte_per_line_ending(tmp_path, monkeypatch
     assert "error" not in result, result
     checkpoint = load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
 
-    r = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", "detection",
-                            str(tmp_path / "out"))
+    r = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", str(tmp_path / "out"))
 
     raw = Path(r["results_path"]).read_bytes()
     assert b"\r\n" not in raw
@@ -913,7 +919,8 @@ def test_run_test_evaluation_hands_back_the_file_it_wrote(tmp_path, monkeypatch)
             pass
 
     ckpt_path = tmp_path / "model_best.pt"
-    torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, str(ckpt_path))
+    torch.save({"model_source": {"builder": "x:y", "task": "detection"}, "model_state_dict": {}},
+               str(ckpt_path))
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "map50": 0.5, "precision": 0.4, "recall": 0.75})
 
@@ -926,7 +933,7 @@ def test_run_test_evaluation_hands_back_the_file_it_wrote(tmp_path, monkeypatch)
     checkpoint = load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
 
     out_dir = tmp_path / "runs" / "test"
-    r = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", "detection", str(out_dir))
+    r = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", str(out_dir))
 
     results_path = Path(r["results_path"])
     assert results_path == out_dir / "test_results.json"

@@ -36,7 +36,7 @@ export interface CanvasViewport {
 }
 
 /** One drawn path. A multi-ring polygon annotation contributes one shape per ring (the render
- *  contract `render_canvas_state` reads is one path per entry), all sharing the instance's colour /
+ *  contract `render_canvas_state` reads is one path per entry), all sharing the instance's color /
  *  dash / tag, with the label on the first so the instance is still named once. A `point` carries a
  *  single coordinate in `points` and is rendered as a mark, never as a path or a derived box. */
 export interface CanvasShape {
@@ -77,7 +77,7 @@ export interface CanvasStateBody {
   cut_armed?: boolean;
   dirty?: boolean;
   user?: string;
-  // The dataset's subjects with their GUI-local colours (the registry stores no colour). Sent
+  // The dataset's subjects with their GUI-local colors (the registry stores no color). Sent
   // under the backend's ``classes`` key, which stores the list verbatim for capture_live_canvas.
   classes: { name: string; color: string }[];
   legend?: Record<string, string> | null;
@@ -136,7 +136,7 @@ export function pointShapeVisible(args: {
  *  everything; polygon mode shows polygons of the active subject plus the selection (outline
  *  only, like the GUI); box mode shows the active-subject boxes plus the selected polygon and the
  *  in-flight rubber-band box; points follow pointShapeVisible. Each shape's label is its subject
- *  name; its colour is GUI-local. */
+ *  name; its color is GUI-local. */
 export function buildAnnotateShapes(args: {
   boxes: Box[];
   polygons: PolygonShape[];
@@ -150,7 +150,7 @@ export function buildAnnotateShapes(args: {
   activeSubject: string;
   visible: boolean;
   colorFor: (subject: string) => string;
-  // The cut tool's pending first click, in the selected polygon's own colour, and the cursor for
+  // The cut tool's pending first click, in the selected polygon's own color, and the cursor for
   // its dashed tail (or none, once the start is placed but the pointer hasn't moved yet).
   cutStart?: { point: [number, number]; color: string } | null;
   cursor?: [number, number] | null;
@@ -213,7 +213,7 @@ export function buildAnnotateShapes(args: {
       shapes.push({
         kind: "polyline",
         points: rPts(args.currentPolygon),
-        // Mirrors the canvas's own InProgressPolygon stroke exactly: the active subject's colour,
+        // Mirrors the canvas's own InProgressPolygon stroke exactly: the active subject's color,
         // amber only in the edge case where nothing is selected (drawing is otherwise blocked).
         color: args.activeSubject ? args.colorFor(args.activeSubject) : "#FFE7B1",
         dashed: true,
@@ -304,7 +304,7 @@ export function buildAnnotateShapes(args: {
  *  annotation's geometry (a box stays a box, a polygon stays a polygon, no geometry kind is
  *  hidden), FP = its prediction (dashed blue when focused), TP/FN = the ground truth (focused FN
  *  goes active-blue; reviewed shapes washed), the focused TP overlays its prediction dashed, and
- *  the focused detection draws last so neighbours never bury it. `admissionConf` (the bucket's
+ *  the focused detection draws last so neighbors never bury it. `admissionConf` (the bucket's
  *  own validated count operating point, or null) marks an admitted prediction's own shape
  *  (`admitted: true`); the mark travels in the state body, never drawn as a mark of its own. */
 export function buildReviewShapes(

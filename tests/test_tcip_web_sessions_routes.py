@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import pytest
@@ -159,13 +158,11 @@ def test_load_splits_time_into_new_annotation_review_and_negative_confirmation(
     )
 
 
-def test_a_status_store_that_will_not_decode_reports_its_time_as_review(
-    client: TestClient, tmp_path: Path, caplog: pytest.LogCaptureFixture
+def test_a_status_store_that_will_not_decode_fails_the_load(
+    client: TestClient, tmp_path: Path
 ) -> None:
-    """An unreadable confirmation store must not read as a confirmed negative.
-
-    The route only displays these numbers, so it keeps answering, but it names the store in the
-    log and counts the time as review: the reading that claims the least.
+    """The confirmation store is read as written: one that will not decode raises out of the
+    load rather than reading as a store holding no confirmation.
 
     Bound to the file backend: the claim needs bytes on disk no codec decodes, which only the
     file backend ever holds raw.
@@ -186,11 +183,40 @@ def test_a_status_store_that_will_not_decode_reports_its_time_as_review(
         "annotations_added_delta": 0, "final_annotation_count": 0,
     })
 
-    with caplog.at_level(logging.WARNING):
-        s = client.get("/api/sessions/load", params={"project_root": pr}).json()["sessions"][0]
-    assert s["review_seconds"] == 4.0
-    assert s["negative_confirmation_seconds"] == 0.0
-    assert str(dataset_root) in caplog.text
+    with pytest.raises(tcip_store.DecodeError, match="image_status"):
+        client.get("/api/sessions/load", params={"project_root": pr})
+
+
+def test_a_recorded_dataset_root_the_server_may_no_longer_read_fails_the_load_naming_it(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Time a session recorded on images under a root the allow-set no longer admits is refused
+    with a 403 naming the root, never classified as review time read off no confirmations."""
+    import tcip_web.paths as paths
+
+    project_root = tmp_path / "proj"
+    dataset_root = tmp_path / "data"
+    dataset_root.mkdir()
+    pr = str(project_root)
+    client.post("/api/sessions/start", json={"project_root": pr, "user": "alice"})
+    assert client.post("/api/sessions/image_event", json={
+        "project_root": pr, "dataset_root": str(dataset_root), "subject": "bud",
+        "date": "2026-02-11", "image_name": "IMG_1", "session_seconds_delta": 9.0,
+        "annotations_added_delta": 0, "final_annotation_count": 0,
+    }).status_code == 200
+
+    real_assert = paths.assert_path_allowed
+
+    def _no_longer_admitted(path, *args, **kwargs):
+        if Path(path).resolve() == dataset_root.resolve():
+            raise ValueError(f"{path} is outside the allowed roots")
+        return real_assert(path, *args, **kwargs)
+
+    monkeypatch.setattr(paths, "assert_path_allowed", _no_longer_admitted)
+    resp = client.get("/api/sessions/load", params={"project_root": pr})
+
+    assert resp.status_code == 403
+    assert str(dataset_root.resolve()) in resp.json()["detail"]
 
 
 def test_load_reflects_a_negative_confirmed_after_the_session_that_spent_time_ended(

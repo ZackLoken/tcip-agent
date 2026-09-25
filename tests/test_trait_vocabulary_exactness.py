@@ -8,6 +8,8 @@ phenotype crops.yml never defines, with nothing in the result saying so.
 
 from __future__ import annotations
 
+from tests._trait_fixtures import complete_spec_record
+
 from pathlib import Path
 
 import pytest
@@ -28,7 +30,7 @@ def _write_spec(directory: Path, name: str, spec: dict) -> None:
 
     ts.replace(
         traits.trait_spec_key(directory, name),
-        {"name": name, "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION, **spec},
+        complete_spec_record({"name": name, "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION, **spec}),
         expect=ts.Version.ABSENT,
     )
 

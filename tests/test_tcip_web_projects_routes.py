@@ -63,8 +63,8 @@ def test_list_projects_lists_workspace_projects(client, workspace_dir):
 
 
 def test_projects_report_per_date_subject_model_availability(client, workspace_dir):
-    # bud labelled on 02-11 (+ baseline predictions there); bush labelled on 03-02;
-    # 03-24 has images but nothing labelled. One name-based label file per image.
+    # bud labeled on 02-11 (+ baseline predictions there); bush labeled on 03-02;
+    # 03-24 has images but nothing labeled. One name-based label file per image.
     from tcip_annotation.json_io import write_annotations
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.dataset_layout import annotation_dir, prediction_dir

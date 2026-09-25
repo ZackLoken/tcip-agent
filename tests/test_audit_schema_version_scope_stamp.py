@@ -68,7 +68,7 @@ def test_project_scoped_writer_carries_the_version_stamp_and_resolved_scope(
     build = MappingBuild(
         name="mapping", project_root=noncanonical, dataset_root=str(tmp_path / "ds"),
         dataset_id="ds-1", built_by="build_plant_mapping", built_at="2026-02-11T00:00:00+00:00",
-        dates_requested=None, dates=[], nn_tolerance_m={"value": 10.0, "source": "fallback"},
+        dates_requested=None, dates=[], nn_tolerance_m={"value": 10.0, "source": "stated"},
         plant_registry={"name": "unregistered", "digest": "0" * 64},
         capture_identity={}, capture_digests={}, unreadable={}, assignments={},
     )

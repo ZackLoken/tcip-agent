@@ -93,8 +93,12 @@ def file_validation_record(
     already hold what the claim is about: prediction bytes for ``operating_point``, image bytes for
     ``resolve_scale`` (a scale claim is a fact about the bucket's imagery, not its predictions, the
     same distinction ``seal_validation`` draws; ``images_dir`` is required for a ``resolve_scale``
-    claim over a non-empty ``pred_dirs``). The other documents cover no bucket and take none.
+    claim over a non-empty ``pred_dirs``). The other documents cover no bucket and take none. An
+    ``operating_point`` stamp is completed over the producer's own skeleton
+    (:func:`complete_stamp`) first.
     """
+    if document == "operating_point":
+        stamp = complete_stamp(stamp)
     from tcip_mcp.experiments import _append_validation, create_experiment, experiment_exists
     from tcip_mcp.pipelines.resolution import _DOCUMENT_PARAM, claim_payload, cleared_reference
     from tcip_mcp.prediction_buckets import bucket_content_digest, bucket_stems_digest
@@ -153,6 +157,14 @@ def file_validation_record(
     assert "error" not in appended, appended
     return {**stamp, "validated_by": {"experiment_id": experiment_id,
                                       "record_digest": appended["record_digest"]}}
+
+
+def complete_stamp(partial: dict) -> dict:
+    """``partial`` over ``operating_point_stamp``'s own skeleton at its unset values, so a fixture
+    naming only the fields it cares about still writes every key the producer writes."""
+    from tcip_mcp.pipelines.resolution import _SKELETON_ARGS, operating_point_stamp
+
+    return {**operating_point_stamp(None, **_SKELETON_ARGS), **partial}
 
 
 def write_bound_sidecar(
@@ -290,7 +302,7 @@ def write_plant_mapping(
         name=name, project_root=str(project_root), dataset_root=str(root), dataset_id=reg["id"],
         built_by="build_plant_mapping", built_at=datetime.now(timezone.utc).isoformat(),
         dates_requested=None, dates=sorted(mapping),
-        nn_tolerance_m={"value": 10.0, "source": "fallback"},
+        nn_tolerance_m={"value": 10.0, "source": "stated"},
         plant_registry={"name": "unregistered", "digest": registry["digest"]},
         capture_identity={d: "0" * 16 for d in mapping},
         capture_digests={d: {} for d in mapping}, unreadable={d: [] for d in mapping},
@@ -368,3 +380,32 @@ def calibrated_run_fields(
         "checkpoint_sha256": checkpoint_sha256,
         "calibration_evidence_key": identity,
     }
+
+
+def run_result(
+    operating_point: dict,
+    results: list[dict],
+    *,
+    checkpoint_sha256: str = "deadbeef",
+    experiment_id: str | None = None,
+    subject: str | None = None,
+    attribute: str | None = None,
+    id_map: dict | None = None,
+    images_dir: str = "images",
+    **fields: Any,
+) -> dict:
+    """A run's own facts built through the pass' own skeleton (``_PreparedPass.result``), for a
+    test standing in for the inference pass: ``fields`` are the run's calibrated or raw extras
+    (``validated``, ``conf_source`` and the like), ``results`` its per-image predictions."""
+    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.tools.inference_tools import _PreparedPass
+
+    prepared = _PreparedPass(
+        checkpoint_path="model_best.pt", predictor=None, images_dir=images_dir, paths=[],
+        identity={"sha256": checkpoint_sha256, "experiment_id": experiment_id},
+        scope=ClassScope(subject=subject, attribute=attribute), id_map=id_map, tiled=False,
+        tiled_source="default", tile_size=None, tile_size_source="default",
+        tile_size_derived_from=None, overlap=0.2, tile_resize=None, conf=0.5, nms_iou=0.3,
+        max_dets=1000, conf_stated=False, max_dets_stated=False, tile_batch_size=96,
+        postprocess="nms")
+    return {**prepared.result(operating_point, fields), "results": results}

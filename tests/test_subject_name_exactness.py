@@ -59,7 +59,7 @@ def test_subject_names_differing_only_by_case_stay_distinct(
         "bud", "Bud", "bush"}
 
 
-def test_registry_derived_from_labels_keeps_each_name_exactly_as_labelled(
+def test_registry_derived_from_labels_keeps_each_name_exactly_as_labeled(
     client: TestClient, tmp_path: Path
 ) -> None:
     """With no saved registry, the draft one lists the names a readable label document

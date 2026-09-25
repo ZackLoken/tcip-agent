@@ -46,17 +46,17 @@ export function ProjectBreadcrumb() {
   // project names. On-demand so the status bar never polls.
   useEffect(() => {
     if (!menu || projects) return;
-    let cancelled = false;
+    let canceled = false;
     api.projects
       .list()
       .then((r) => {
-        if (!cancelled) setProjects(r.projects);
+        if (!canceled) setProjects(r.projects);
       })
       .catch(() => {
-        if (!cancelled) pushToast("Could not load the project list.");
+        if (!canceled) pushToast("Could not load the project list.");
       });
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, [menu, projects, pushToast]);
 

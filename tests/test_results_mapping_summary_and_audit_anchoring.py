@@ -136,7 +136,7 @@ def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answe
 
     assert set(body["nn_tolerance_m"]) == {"value", "source"}
     assert isinstance(body["nn_tolerance_m"]["value"], float)
-    assert body["nn_tolerance_m"]["source"] in {"grid_pitch", "fallback", "stated", "stated_capped"}
+    assert body["nn_tolerance_m"]["source"] in {"grid_pitch", "stated", "stated_capped"}
     assert body["max_match_distance_m"] == pytest.approx(
         body["nn_tolerance_m"]["value"] * NEAREST_MATCH_FACTOR)
 

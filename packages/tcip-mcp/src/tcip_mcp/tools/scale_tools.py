@@ -1,13 +1,8 @@
 """Physical per-pixel scale calibration: the delivery-gating producer for ``resolve_scale.json``.
 
-``calibrate_physical_scale`` is the producer of a validated ``resolve_scale.json``: it reads a
-breeder's own reference measurements, runs
+``calibrate_physical_scale`` reads a breeder's own reference measurements, runs
 ``pipelines.measurement.scale_calibration.resolve_physical_scale``'s locked calibration/holdout
-gate over them, and stamps the result into a prediction bucket's ``resolve_scale.json``, an audit
-seam and a delivery-gating write and therefore a tool rather than a script. A hand-authored
-``resolve_scale.json`` floors at delivery for want of a record that answers for it (see
-``pipelines.measurement.mask_geometry.resolve_scale`` and ``pipelines.resolution.
-reconcile_scale_validity``).
+gate over them, and stamps the result into a prediction bucket's ``resolve_scale.json``.
 """
 
 from __future__ import annotations
@@ -18,6 +13,7 @@ import logging
 from pathlib import Path
 
 from tcip_mcp.server import mcp
+from tcip_mcp.pipelines.data.splits import DEFAULT_CAL_SEED, DEFAULT_HOLDOUT_RATIO
 
 logger = logging.getLogger(__name__)
 
@@ -26,19 +22,16 @@ _REFERENCE_CSV_COLUMNS = ("image_stem", "physical_extent", "unit")
 
 
 class ReferenceCsvError(ValueError):
-    """A reference CSV's header or a row is malformed; the tool reports this rather than guessing
-    through a short row, a non-numeric extent or a repeated stem."""
+    """A reference CSV's header or a row is malformed."""
 
 
 def _read_reference_csv(csv_path: str) -> dict[str, dict[str, float | str]]:
     """``stem -> {"physical_extent": float, "unit": str}`` from the breeder's reference CSV
-    (``image_stem, physical_extent, unit``, one row per reference image), the same standing a
-    ground-truth CSV has for ``calibrate_scalar_operating_point``.
+    (``image_stem, physical_extent, unit``, one row per reference image).
 
     The header is read by name, not by position, so a reordered or extended CSV still resolves the
     three columns this reads. A row with a missing or non-numeric ``physical_extent``, or a stem
-    already seen earlier in the file, raises :class:`ReferenceCsvError` naming its line rather than
-    being silently skipped or silently overwriting the earlier row.
+    already seen earlier in the file, raises :class:`ReferenceCsvError` naming its line.
     """
     out: dict[str, dict[str, float | str]] = {}
     with open(csv_path, newline="") as f:
@@ -91,39 +84,37 @@ def calibrate_physical_scale(
     capture_id: str | None = None,
     group_by: str = "stem",
     group_key_map: dict[str, str] | None = None,
-    seed: int = 0,
-    holdout_ratio: float = 0.5,
+    seed: int = DEFAULT_CAL_SEED,
+    holdout_ratio: float = DEFAULT_HOLDOUT_RATIO,
 ) -> dict:
     """Derive and validate a physical per-pixel scale, and stamp it into ``pred_dir``'s
     ``resolve_scale.json``.
 
     The reference has two halves, both real evidence, never an agent-supplied candidate: the pixel
     extent comes from ``reference_subject`` annotated as a polygon or mask on each reference image
-    under ``labels_dir`` (its principal-axis extent, orientation-independent, never a bounding box's
-    long side, which is refused outright); the physical extent comes from the breeder, in
-    ``reference_csv`` (``image_stem, physical_extent, unit``). Every reference stem must be an image
-    of ``pred_dir`` itself: a scale claim is a fact about the bucket's own imagery, and a reference
-    photographed in some other capture says nothing about this one.
+    under ``labels_dir`` (its principal-axis extent, orientation-independent; a bounding box is
+    refused outright); the physical extent comes from the breeder, in ``reference_csv``
+    (``image_stem, physical_extent, unit``). Every reference stem must be an image of ``pred_dir``
+    itself.
 
     The scale is derived on a locked calibration half of the references and validated against the
     holdout half it was not derived from (``scale_calibration.resolve_physical_scale``), against
-    ``trait``'s own authored ``scale_tolerance_frac``; a trait with none authored refuses rather than
-    validating against a platform-invented number. ``unit`` must be a linear length unit crops.yml
-    declares (``traits.crops_length_units``): a per-pixel scale is a length-per-pixel quantity, and a
-    mass or other non-length unit refuses rather than being silently accepted.
+    ``trait``'s own authored ``scale_tolerance_frac``; a trait with none authored refuses. ``unit``
+    must be a linear length unit crops.yml declares (``traits.crops_length_units``); a mass or
+    other non-length unit refuses.
 
-    On a pass, ``open_validation``/``seal_validation`` earn and record the claim the same two-phase
-    way every other calibration door does, with ``covered_buckets`` keyed by a digest over the bytes
-    of ``pred_dir``'s own images in ``images_dir`` (never its prediction bytes): re-exporting
-    predictions over the same images leaves the scale claim standing, while an image added to,
-    removed from, or replaced in the bucket floors it, a real reason to re-run this tool.
-    ``write_sidecar`` writes the stamp last, whether or not the gate passed, so a failed calibration
-    still leaves a readable, honestly-unvalidated record of what was tried.
+    On a pass, ``open_validation``/``seal_validation`` earn and record the claim, with
+    ``covered_buckets`` keyed by a digest over the bytes of ``pred_dir``'s own images in
+    ``images_dir`` (never its prediction bytes): re-exporting predictions over the same images
+    leaves the scale claim standing, while an image added to, removed from, or replaced in the
+    bucket floors it. ``write_sidecar`` writes the stamp last, whether or not the gate passed, so a
+    failed calibration still leaves a readable, honestly-unvalidated record of what was tried.
 
     Args:
         trait: The registered trait this physical scale is earned for; a delivery reading a
             different trait's scale floors (``reconcile_scale_validity``).
-        pred_dir: The prediction bucket to stamp; the scale claim binds to this bucket's own imagery.
+        pred_dir: The prediction bucket to stamp; the scale claim binds to this bucket's own
+            imagery.
         dataset_root: The dataset this calibration's claim hangs off; the reference locations and
             the locked split are recorded and stored against it.
         images_dir: Directory holding the bucket's own images, one per predicted stem; hashed (not
@@ -137,12 +128,11 @@ def calibrate_physical_scale(
             standoff that can vary image to image); ``None`` (default) scopes it to the whole
             bucket.
         group_by / group_key_map / seed / holdout_ratio: The locked cal/holdout split's grouping
-            policy, same semantics as the ordinal/regression calibrator's own arguments; only the
-            first call for this reference's identity draws the split. ``group_by`` defaults to
-            ``"stem"``: reference objects are not tiles, so the ``"tile_prefix"`` default
-            (``splits.default_group_key``, which strips a trailing ``_<row>_<col>`` tile offset)
-            would collapse ordinary same-prefix camera filenames like
-            ``IMG_20240513_0001``..``0004`` into one group, starving both halves of a locked split.
+        policy, same semantics as the ordinal/regression calibrator's own arguments; only the first
+        call for this reference's identity draws the split. ``group_by`` defaults to ``"stem"``:
+        reference objects are not tiles, so the ``"tile_prefix"`` policy
+        (``splits.default_group_key``, which strips a trailing ``_<row>_<col>`` tile offset) would
+        group same-prefix camera filenames together.
     """
     from tcip_mcp.traits import TraitUnknownError, crops_length_units, get_trait
 
@@ -280,7 +270,7 @@ def calibrate_physical_scale(
                 "stated_values": {"split_identity": identity_hash},
             },
         )
-        _, stamp = seal_validation(draft, dataset_root=dataset_root, bucket_dirs=[pred_dir],
+        stamp = seal_validation(draft, dataset_root=dataset_root, bucket_dirs=[pred_dir],
                                    stamp_body=stamp, images_dir=images_dir)
     write_sidecar(pred_dir, stamp, "resolve_scale")
     return {
@@ -296,10 +286,9 @@ def calibrate_physical_scale(
 
 
 def _relative_to_root(path: str, dataset_root: str) -> str:
-    """``path`` expressed against ``dataset_root``, or the resolved absolute path when it does not
-    sit under it (a CSV over a loose images directory is legitimate work, see
-    ``resolution._relative_location``, the same reasoning applied here to the stamp's own
-    ``reference_csv`` field)."""
+    """``path`` relative to ``dataset_root``, or the resolved absolute path when it does not sit
+    under it.
+    """
     resolved = Path(path).resolve()
     try:
         return resolved.relative_to(Path(dataset_root).resolve()).as_posix()

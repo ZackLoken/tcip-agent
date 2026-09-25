@@ -3,12 +3,10 @@
 All functions return the output file path for the agent's own image-capable read tool to consume.
 Default output directory: .tcip/artifacts/viz/
 
-The renderers take display pixels, never a path: whoever holds the raster decodes it, bounds its
-resolution and composites its bands, so a renderer never has to know how a multi-band or
-overview-bearing raster reads. Annotation coordinates stay in the raster's own full-resolution
-frame, so a renderer handed reduced pixels also takes the ``native_size`` those coordinates are in
-and scales them itself. ``render_grid`` is the exception: it tiles already-rendered artifacts and
-so takes their paths.
+The renderers take display pixels, never a path. Annotation coordinates stay in the raster's own
+full-resolution frame, so a renderer handed reduced pixels also takes the ``native_size`` those
+coordinates are in and scales them itself. ``render_grid`` is the exception: it tiles
+already-rendered artifacts and so takes their paths.
 
 Coordinates: functions accept pixel coordinates.
 """
@@ -57,11 +55,7 @@ rather than imported; a test holds the two strings equal."""
 
 
 def _viz_base() -> Path:
-    """The ``.tcip`` base for viz output. Honors ``TCIP_STATE_ROOT`` (the platform-state root the
-    MCP server / web backend pin to the active project) so renders land under the project, not the
-    process CWD (the agent's CWD is often the repo, which fragments artifacts away from the
-    project and returns a CWD-relative path callers can't resolve). Falls back to CWD-relative
-    for standalone ``tcip_annotation`` use."""
+    """The ``.tcip`` base for viz output: ``TCIP_STATE_ROOT`` when set, else the process CWD."""
     import os
 
     root = os.environ.get(_PLATFORM_ROOT_ENV)
@@ -81,10 +75,8 @@ def _default_output(func_name: str, suffix: str = ".png") -> str:
 def _rgb_frame(image: "Image.Image | np.ndarray") -> Image.Image:
     """The caller's display pixels as an RGB frame this module can draw on.
 
-    A ``uint8 [H, W, 3]`` array or any PIL image; the returned frame is always a new one, so
-    drawing on it can never mutate what the caller passed. An array of another dtype or channel
-    count is refused rather than coerced: the only reading that would rescue it is a display
-    stretch or a band selection, and those belong to whoever read the raster and knows its bounds.
+    A ``uint8 [H, W, 3]`` array or any PIL image; the returned frame is always a new one. An array
+    of another dtype or channel count is refused.
     """
     if isinstance(image, Image.Image):
         return image.convert("RGB")
@@ -451,18 +443,13 @@ def render_grid_overlay(
 ) -> str:
     """Render display pixels with the caller's labeled reference-grid cells overlaid.
 
-    ``cells`` is the caller's own cell list, each entry a mapping or an object carrying
-    ``name`` plus the half-open native-pixel rect ``x0, y0, x1, y1`` (see
-    ``sam_wrapper.cell_fields``, the shape tcip-mcp's reference grid computes and its
-    coverage route serves). Rects scale by the rendered/native ratio like the other
-    renderers, so the lines land on the true cell boundaries, which under a clamped grid
-    are non-uniform at the edges.
+    ``cells`` is the caller's own cell list, each entry a mapping or an object carrying ``name``
+    plus the half-open native-pixel rect ``x0, y0, x1, y1`` (see ``sam_wrapper.cell_fields``).
+    Rects scale by the rendered/native ratio like the other renderers, so the lines land on the
+    true cell boundaries, which under a clamped grid are non-uniform at the edges.
 
-    Boundaries always draw. A cell's name draws only when the rendered cell is at least
-    24 px on its short edge and wide enough to hold the label's own backing box: below
-    the edge floor the 14 px label covers the cell instead of labeling it, and a label
-    wider than its cell runs into the neighbor's. The floor is a display concern of this
-    renderer alone, not a platform constant.
+    Boundaries always draw. A cell's name draws only when the rendered cell is at least 24 px on
+    its short edge and wide enough to hold the label's own backing box.
 
     Args:
         image: Display pixels (uint8 RGB array or PIL image).
@@ -572,18 +559,15 @@ def render_canvas_state(
 ) -> str:
     """Render the live GUI canvas: display-resolved shapes over the pixels the human is viewing.
 
-    ``shapes`` come from the canvas-state push, each already carrying the exact symbology the
-    GUI rendered: ``{kind: box|polygon|polyline|point, xyxy|points (pixel), color '#hex', fill?,
-    dashed?, label?}``, so this draws what the annotator sees rather than re-deriving colors. A
-    ``point`` carries one coordinate in ``points`` and draws as the GUI's mark (a core with radial
-    ticks); it is never widened into a box, which would show the agent an extent the annotation
-    does not claim.
+    ``shapes`` come from the canvas-state push, each already carrying the exact symbology the GUI
+    rendered: ``{kind: box|polygon|polyline|point, xyxy|points (pixel), color '#hex', fill?,
+    dashed?, label?}``. A ``point`` carries one coordinate in ``points`` and draws as the GUI's
+    mark (a core with radial ticks), never widened into a box.
 
     ``image`` is whatever region of the raster the caller read (the human's viewport, or the whole
     frame), ``origin`` is that region's top-left corner in the raster's own full-resolution grid
-    and ``scale`` is the served resolution as a fraction of native. Shape coordinates arrive in
-    the native grid and are placed by those two, so the caller reads exactly the pixels it wants
-    shown rather than this decoding a whole raster to crop it.
+    and ``scale`` is the served resolution as a fraction of native. Shape coordinates arrive in the
+    native grid and are placed by those two.
     """
     if output_path is None:
         output_path = _default_output("canvas", suffix=".jpg")

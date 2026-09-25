@@ -1,9 +1,7 @@
 """Vision tools: render annotations and predictions for visual analysis.
 
-Each tool saves a rendered image to .tcip/artifacts/viz/ and returns the path so the agent
-can call its client's own image-capable read tool on it to visually inspect it. The
-proposal-workflow tools (propose_annotations, stage_proposals, segment_prompt) live in
-proposal_tools.py; this module keeps the renderers.
+Each tool saves a rendered image to .tcip/artifacts/viz/ and returns the path so the agent can call
+its client's own image-capable read tool on it to visually inspect it.
 """
 
 from __future__ import annotations
@@ -66,10 +64,8 @@ def _bounded_target(rect: Rect, max_edge: int) -> tuple[int, int] | None:
 
 
 def _clamped_rect(region: tuple[float, float, float, float], width: int, height: int) -> Rect:
-    """An ``(x, y, w, h)`` region as a non-empty rect inside a ``width`` x ``height`` raster.
-
-    A viewport can hang off any edge of the image (the human pans past it), so it is clamped here
-    rather than refused: what the raster layer will not serve is an out-of-bounds or empty read.
+    """An ``(x, y, w, h)`` region clamped to a non-empty rect inside a ``width`` x ``height``
+    raster.
     """
     from tcip_mcp.pipelines.raster_source import Rect
 
@@ -87,17 +83,12 @@ def _read_for_display(source: "str | Path | BandGroupRef", *,
                       region: tuple[float, float, float, float] | None = None) -> DisplayRead:
     """Read ``source`` as display pixels a renderer can draw on.
 
-    The one decode every visualization tool goes through: the raster layer serves the region (an
-    ``(x, y, w, h)`` rectangle in the raster's own grid, or the whole frame) at or under
-    ``max_edge``, so an overview-bearing raster costs a reduced read rather than a whole decode
-    and nothing is ever materialized to a temp file.
+    The raster layer serves the region (an ``(x, y, w, h)`` rectangle in the raster's own grid, or
+    the whole frame) at or under ``max_edge``, and nothing is ever materialized to a temp file.
 
     An 8-bit raster at 1/3/4 bands already holds display values, so it keeps its own pixels
-    (grayscale repeated, alpha dropped) with no stretch, the plain-RGB reading a viewer is served:
-    an ordinary photograph or RGB GeoTIFF must never reach the agent as a synthetic
-    reinterpretation of its colors. Every other raster has no 8-bit reading of its own, so its
-    first three bands are composited and independently min-max stretched. Both readings go through
-    the shared ``composite_display_rgb``.
+    (grayscale repeated, alpha dropped) with no stretch. Every other raster has its first three
+    bands composited and independently min-max stretched, through ``composite_display_rgb``.
     """
     from tcip_mcp.pipelines.band_stats import composite_display_rgb
     from tcip_mcp.pipelines.derivations import probe_channels
@@ -133,8 +124,7 @@ def _source_for_path(image_path: str) -> "str | Path | BandGroupRef":
 
     The enumeration primitive's own resolution of it, so a ``.bandgroup``-grouped capture reads as
     the group it names. A path the primitive doesn't resolve (one outside any recognized
-    ``images/`` layout) is returned as itself, so the caller's own not-a-file handling surfaces the
-    real error instead of this swallowing it.
+    ``images/`` layout) is returned as itself.
     """
     from tcip_mcp.pipelines import image_utils
 
@@ -174,12 +164,7 @@ def _name_map(idx: dict[str, int]) -> dict[int, str]:
 
 
 def _boxable(anns: list[Annotation]) -> list[Annotation]:
-    """The annotations a box renderer can draw: geometry-bearing, with a Point excluded.
-
-    A Point has no box (``bbox_of`` refuses one) and there is no point renderer in the viz layer yet,
-    so it is skipped by the *draw* call the way a geometry-less label already is. Callers report how
-    many they skipped (``_n_points``) rather than quietly shrinking the annotation count they show.
-    """
+    """The annotations a box renderer can draw: geometry-bearing, with a Point excluded."""
     return [a for a in anns if box_derivable(a.geometry)]
 
 
@@ -235,22 +220,18 @@ def visualize(
 ) -> dict:
     """Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid.
 
-    Not an MCP tool: run through ``tcip visualize``, per the admission standard
-    (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
-
-    One entry point for the common renders. Saves to
-    .tcip/artifacts/viz/ and returns ``image_path`` for the agent's own image-capable read tool.
+    Saves to .tcip/artifacts/viz/ and returns ``image_path`` for the agent's own image-capable read
+    tool.
 
     Rendering conventions, shared across every source: boxes/masks color by class through the
     20-class palette in ``tcip_annotation.viz``, indexed by first-seen order within one render
-    call; this is not the GUI annotation canvas's own coloring (a per-subject-name hash into its
-    own smaller palette) and is not stable across renders. A 'comparison' render outlines GT
-    green and predictions red, with yellow center-to-center lines joining matched pairs. A
-    detection label carries the class name and, when the box carries a confidence score, the
-    score; a segmentation label carries the class name only. Each source image is read at up to
+    call, and not stable across renders. A 'comparison' render outlines GT green and predictions
+    red, with yellow center-to-center lines joining matched pairs. A detection label carries the
+    class name and, when the box carries a confidence score, the score; a segmentation label
+    carries the class name only. Each source image is read at up to
     ``display_bounds.VIZ_ARTIFACT_MAX_EDGE`` (1024px) on its longest edge before rendering; for
-    source='dataset' the per-sample renders built this way are then tiled into a grid that saves
-    at ``cols`` x 256 by ``rows`` x 256 pixels, growing with ``n``.
+    source='dataset' the per-sample renders built this way are then tiled into a grid that saves at
+    ``cols`` x 256 by ``rows`` x 256 pixels, growing with ``n``.
 
     Args:
         source: What to render:
@@ -262,10 +243,10 @@ def visualize(
             containing images/ and labels/).
         path: Image file (annotations/predictions/comparison) or dataset folder (dataset).
         task: 'detect' or 'segment'.
-        class_names: Comma-separated class names (e.g. "leaf,fruit,bud").
+        class_names: Comma-separated class names (e.g. "fruit,shoot").
         conf_threshold: Minimum confidence; filters displayed predictions (source='predictions')
             and the predictions matched against GT (source='comparison'). Defaults to the shared
-            ``DEFAULT_CONF`` so the comparison operating point matches inference/evaluate.
+            ``DEFAULT_CONF``.
         iou_threshold: IoU threshold for a positive match (source='comparison' only).
         n: Number of samples in the grid (source='dataset' only).
     """
@@ -358,7 +339,7 @@ def _viz_predictions(
 
     stem = img.stem
     from tcip_mcp.dataset_layout import find_prediction
-    from tcip_mcp.pipelines.resolution import StampScopeUnstated, bucket_scope
+    from tcip_mcp.pipelines.resolution import bucket_scope
 
     pred_file = find_prediction(image_path)
     if pred_file is None:
@@ -367,7 +348,7 @@ def _viz_predictions(
     try:
         preds = read_predictions(str(pred_file))
         scope = bucket_scope(Path(pred_file).parent)
-    except (UnreadableLabelDocument, StampScopeUnstated, ts.StoreError) as exc:
+    except (UnreadableLabelDocument, ts.StoreError) as exc:
         return {"error": str(exc)}
     preds = [a for a in preds if prediction_score(a) >= conf_threshold]
     idx, index = _subject_indexer()
@@ -406,16 +387,13 @@ def _viz_comparison(
 ) -> dict:
     """Render GT vs prediction comparison with match indicators. See ``visualize``.
 
-    Green = ground truth, Red = predictions, Yellow lines = matched pairs. The match lines come
-    from ``compute_matches`` over the two documents as written: on a conformed classified bucket
-    (predictions carrying the object class in ``subject``, the same shape ground truth carries)
-    they match by object class, while the legend still keys the prediction side by its decoded
-    value (:func:`_legend_name`), so a correctly localized, wrongly classified pair shows as
-    a real match with two different legend colors rather than as an unrelated FP/FN.
+    Green = ground truth, Red = predictions, Yellow lines = matched pairs, from ``compute_matches``
+    over the two documents as written; the legend keys the prediction side by its decoded value
+    (:func:`_legend_name`).
     """
     from tcip_annotation.matching import compute_matches
     from tcip_mcp.dataset_layout import find_gt_label, find_prediction
-    from tcip_mcp.pipelines.resolution import StampScopeUnstated, bucket_scope
+    from tcip_mcp.pipelines.resolution import bucket_scope
 
     img = Path(image_path)
     if not img.is_file():
@@ -440,7 +418,7 @@ def _viz_comparison(
         try:
             preds = _boxable(read_predictions(str(pred_file)))
             scope = bucket_scope(Path(pred_file).parent)
-        except (UnreadableLabelDocument, StampScopeUnstated, ts.StoreError) as exc:
+        except (UnreadableLabelDocument, ts.StoreError) as exc:
             return {"error": str(exc)}
         pred_dicts = [_box_dict(a, index, scope=scope) for a in preds]
         # Match at the caller's conf operating point (not compute_matches' silent 0.25 default).
@@ -540,9 +518,6 @@ def render_failure_cases(
     class_names: str = "",
 ) -> dict:
     """Find and render the worst predictions for failure analysis.
-
-    Not an MCP tool: run through ``tcip render-failure-cases``, per the admission standard
-    (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
 
     Ranks by a count-mismatch + low-confidence heuristic (`get_worst_predictions`); no IoU
     matching, so an image with the right box count but every box mislocated scores as good. Not a
@@ -713,36 +688,28 @@ def capture_live_canvas(
 ) -> dict:
     """Render exactly what the human's GUI canvas shows right now: image, shapes, viewport.
 
-    The GUI continuously pushes its canvas state under ``.tcip/state/``, split into two documents
-    so the cadences never contend: ``canvas_live.json``, a meta document written on every push
-    (image, viewport, classes, legend, counts, tab, mode, active_subject, cut_armed, dirty and
-    user), and
-    ``canvas_shapes.json``, the full display-resolved geometry (the shapes with the exact
-    colors/tags the canvas renders, including unsaved edits and an in-progress drawing), written
-    only when the shapes themselves change. A heartbeat (meta only, no geometry write) fires on
-    view and meta changes, and as the downgrade while a pointer interaction is live, with the
-    full geometry pushed once on release rather than per tick. This tool reads the region being
-    shown at up to ``max_edge``, renders that state over it, and returns the artifact path for
-    the agent's own image-capable read tool, plus the classes schema, review legend,
-    per-tag/per-creator counts, and the state's age.
+    Reads the canvas state the GUI pushes under ``.tcip/state/``: ``canvas_live.json`` (image,
+    viewport, classes, legend, counts, tab, mode, active_subject, cut_armed, dirty and user) and
+    ``canvas_shapes.json`` (the full display-resolved geometry, including unsaved edits and an
+    in-progress drawing). Renders the region being shown at up to ``max_edge`` and returns the
+    artifact path for the agent's own image-capable read tool, plus the classes schema, review
+    legend, per-tag/per-creator counts, and the state's age.
 
     The GUI's currently open project is named by the ``canvas_open_binding`` record, checked
-    against this process's own pinned project before rendering anything: a project the GUI has
-    moved away from is not the live canvas, so a mismatch refuses by default rather than render
-    another project's documents as if they were this one's. Pass ``render_last_known=True`` to
-    render this process's own pinned project's last pushed canvas anyway, labelled not-live.
+    against this process's own pinned project before rendering anything; a mismatch refuses by
+    default. Pass ``render_last_known=True`` to render this process's own pinned project's last
+    pushed canvas anyway, labeled not-live.
 
     Args:
-        refresh: Ping the GUI (via the panel-event hub) to push fresh state first, waiting
-            briefly for it to land. Falls back to the last pushed state if no GUI responds.
-            No-op when the binding names another project: pinging would only make that other
-            project's GUI push under its own root, not this one.
-        crop_to_viewport: Render only the region the human currently sees (their zoom/pan).
-            Pass False for the full frame with the same overlays.
+        refresh: Ping the GUI (via the panel-event hub) to push fresh state first, waiting briefly
+            for it to land. Falls back to the last pushed state if no GUI responds. No-op when the
+            binding names another project.
+        crop_to_viewport: Render only the region the human currently sees (their zoom/pan). Pass
+            False for the full frame with the same overlays.
         max_edge: Downscale the rendered output to at most this edge (px).
-        render_last_known: When the GUI's open project differs from this process's own, render
-            this process's own pinned project's last pushed canvas anyway (labelled not-live)
-            instead of refusing. Ignored when the two agree.
+        render_last_known: When the GUI's open project differs from this process's own, render this
+            process's own pinned project's last pushed canvas anyway (labeled not-live) instead of
+            refusing. Ignored when the two agree.
     """
     import time as _time
 
@@ -931,24 +898,18 @@ def overlay_reference_grid(
 ) -> dict:
     """Render image with a labeled reference-grid overlay for spatial referencing.
 
-    Not an MCP tool: run through ``tcip overlay-reference-grid``, per the admission standard
-    (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests and for
-    ``segment_prompt(grid_cells=...)``, which shares its underlying grid geometry
-    (``reference_grid.reference_cells``) without calling this function itself.
-
-    The grid lives in the raster's native pixel frame: square cells of ``tile_size``
-    native pixels named spreadsheet-style ('A1' top-left; letter columns A-Z then AA,
-    AB, ..., 1-based number rows). Rendered in yellow on the cells' true boundaries; a cell
-    against the image edge clips to the frame rather than drawing past it. A cell's name draws
-    only when the rendered cell's short edge clears the label's legibility floor and the label's
-    own width fits inside the cell; either check failing skips the name and leaves the boundary
-    alone, a property of that cell's own size rather than a rule biased toward grid edges. When
-    ``tile_size`` is omitted it derives from the image dims and the artifact bound
+    The grid lives in the raster's native pixel frame: square cells of ``tile_size`` native pixels
+    named spreadsheet-style ('A1' top-left; letter columns A-Z then AA, AB, ..., 1-based number
+    rows). Rendered in yellow on the cells' true boundaries; a cell against the image edge clips to
+    the frame rather than drawing past it. A cell's name draws only when the rendered cell's short
+    edge clears the label's legibility floor and the label's own width fits inside the cell; either
+    check failing skips the name and leaves the boundary alone. When ``tile_size`` is omitted it
+    derives from the image dims and the artifact bound
     (``reference_grid.derive_pointing_tile_size``) so the rendered labels stay legible. Every
-    response echoes the full grid geometry
-    (``tile_size``, ``overlap``, ``cols``, ``rows``, ``width``, ``height``): pass the
-    echoed ``tile_size``/``overlap`` to ``segment_prompt(grid_cells=...)`` so a cell name
-    resolves against the grid that was actually rendered.
+    response echoes the full grid geometry (``tile_size``, ``overlap``, ``cols``, ``rows``,
+    ``width``, ``height``): pass the echoed ``tile_size``/``overlap`` to
+    ``segment_prompt(grid_cells=...)`` so a cell name resolves against the grid that was actually
+    rendered.
 
     Args:
         image_path: Absolute path to the image file.

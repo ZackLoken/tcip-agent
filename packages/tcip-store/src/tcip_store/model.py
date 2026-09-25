@@ -1,9 +1,8 @@
 """Identity and value types the storage seam speaks, identical on every backend.
 
 No identity here carries a storage location: mapping an identity onto storage is a backend's
-private job, so a record can move from files to a database without a consumer changing. A
-key's root is the one string that holds a directory path, and ``canonical_path`` is where the
-seam and every backend agree on when two spellings of it name one directory.
+private job. A key's root is the one string that holds a directory path, and ``canonical_path``
+decides when two spellings of it name one directory.
 """
 
 from __future__ import annotations
@@ -19,17 +18,12 @@ from typing import Any, ClassVar
 class Key:
     """The identity of one record, log, or blob: which store, which root, which entry.
 
-    ``store`` names a registered store. ``root`` is the directory that store's descriptor
-    says the entry hangs off, as an opaque string: a dataset root for stores that travel with
-    the data, a platform or project root for platform state, a sweep root for HPO trial state.
-    ``parts`` is the identity inside the store, ordered coarse to fine, so a prefix of it is
-    a meaningful scan.
+    ``store`` names a registered store. ``root`` is the directory that store's descriptor says the
+    entry hangs off, as an opaque string: a dataset root for stores that travel with the data, a
+    platform or project root for platform state, a sweep root for HPO trial state. ``parts`` is the
+    identity inside the store, ordered coarse to fine, so a prefix of it is a meaningful scan.
 
-    Each store's owning module publishes a named constructor beside its existing path
-    resolver, so a key's shape is stated once next to the store's declaration and importing
-    the constructor is what guarantees the store is registered. A hand-built key that passes
-    the descriptor's validation is indistinguishable from constructor output; the store
-    layer validates shape, not provenance.
+    The store layer validates a key's shape, not provenance.
     """
 
     store: str
@@ -67,17 +61,12 @@ class Versioned:
 class LogPage:
     """Entries read from a log, the cursor to resume from, and what was not returned.
 
-    ``torn_tail`` is true when the last bytes in the log are a partial entry left by an
-    in-flight appender: those bytes are excluded and ``cursor`` does not advance past them,
-    so a later read picks the entry up once it is complete. ``corrupt`` holds the positions
-    of undecodable entries that are not the tail, counted over every entry encountered in
-    this page including the undecodable ones, so entry 1 of (good, bad, good) is reported
-    while ``records`` holds the two that decoded. An undecodable entry is reported rather
-    than skipped: on a measurement platform, a metrics stream that drops a row and one that
-    says it dropped a row are different things. ``version_refused`` holds the positions of
-    entries that decoded fine but carry a ``schema_version`` this reader does not know, kept
-    apart from ``corrupt`` because a version a newer writer produced is a policy fact, not
-    corruption.
+    ``torn_tail`` is true when the last bytes in the log are a partial entry left by an in-flight
+    appender: those bytes are excluded and ``cursor`` does not advance past them. ``corrupt`` holds
+    the positions of undecodable entries that are not the tail, counted over every entry
+    encountered in this page including the undecodable ones, so entry 1 of (good, bad, good) is
+    reported while ``records`` holds the two that decoded. ``version_refused`` holds the positions
+    of entries that decoded fine but carry a ``schema_version`` this reader does not know.
     """
 
     records: list[Mapping[str, Any]]
@@ -119,12 +108,9 @@ REQUIRED: Any = _Required()
 def canonical_path(path: str | Path) -> str:
     """One spelling for a filesystem path, so two spellings of one directory compare equal.
 
-    Resolution collapses the relative segments and the links; the case rule is the platform's
-    own, which is why the comparison lives here rather than in each caller. Every place that
-    has to decide whether two paths are the same one asks this: the seam comparing the roots
-    a transaction names, and the backend keying its lock registry. A relative path resolves
-    against the process's current directory, so a caller that must refuse one refuses before
-    canonicalizing rather than after.
+    Resolution collapses the relative segments and the links; the case rule is the platform's own.
+    A relative path resolves against the process's current directory, so a caller that must refuse
+    one refuses before canonicalizing.
     """
     return os.path.normcase(str(Path(path).resolve()))
 

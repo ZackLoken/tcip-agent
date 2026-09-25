@@ -1,14 +1,10 @@
-"""Sort a checkpoint's own predictions by confidence into auto-accept, needs-review and
-unscoreable queues, from the command line.
+r"""Sort a checkpoint's own predictions by confidence into auto-accept, needs-review and unscoreable
+queues, from the command line.
 
-The demoted twin of ``feedback_tools.triage_predictions``: returns predictions at or above
-``--auto-threshold`` as the confident set for the caller to accept as ground truth, and writes
-nothing itself. ``--auto-threshold`` keeps the tool's own refusal: omitted, it refuses to
-auto-accept anything, since turning predictions into GT at a pinned threshold fabricates labels
-the model was never confirmed to get right; derive it from the model's validated confidence
-distribution and a breeder spot-check first. It is a command, not an MCP tool, per CLAUDE.md:
-this is the door for a harness with no MCP tool for it, or an operator triaging a batch outside
-any agent session.
+Wraps ``feedback_tools.triage_predictions``: returns predictions at or above ``--auto-threshold``
+as the confident set for the caller to accept as ground truth, and writes nothing itself. With
+``--auto-threshold`` omitted it refuses to auto-accept anything; the threshold is derived from the
+model's validated confidence distribution and a breeder spot-check.
 
 Usage:
     tcip triage-predictions --checkpoint <ckpt.pt> --images-dir <dir> \
@@ -16,8 +12,8 @@ Usage:
         [--low 0.3] [--high 0.8] [--auto-threshold <conf>] [--bucket <name>] \
         [--review-state-dir <dir>]
 
-The checkpoint must be named by a registry entry under --project (register it with
-register_model first); this command refuses one it is not, naming the digest and the root.
+The checkpoint must be named by a registry entry under --project (register it with register_model
+first); this command refuses one it is not, naming the digest and the root.
 """
 
 from __future__ import annotations

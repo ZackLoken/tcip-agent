@@ -20,7 +20,7 @@ def test_cancel_run_helper_and_tool():
     assert "error" in cancel_training("missing-run")
 
 
-def test_cancel_before_training_yields_cancelled(tmp_path):
+def test_cancel_before_training_yields_canceled(tmp_path):
     pytest.importorskip("torchvision")
     from PIL import Image
     from torch.utils.data import DataLoader
@@ -49,6 +49,6 @@ def test_cancel_before_training_yields_cancelled(tmp_path):
     run.cancel_event.set()  # request cancellation before any epoch runs
     run = train(run, loader, task="classification")
 
-    assert run.status == "cancelled"
+    assert run.status == "canceled"
     assert run.current_epoch == 0                                  # stopped before training
     assert (tmp_path / "out" / "model_final.pt").is_file()         # partial progress still saved

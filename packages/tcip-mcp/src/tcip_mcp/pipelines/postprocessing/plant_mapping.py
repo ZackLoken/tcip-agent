@@ -1,35 +1,26 @@
-"""Plant-ID mapping across image capture dates.
-
-iPhone GPS is ~5 m accurate while the Valley_Farm plant grid is ~2.8 m between
-adjacent plots, so nearest-neighbour GPS alone is ambiguous. We resolve the
-ambiguity with a hybrid:
+"""Plant-ID mapping across capture dates, by capture sequence plus GPS:
 
   1. Order images on each date by EXIF DateTime (walker's capture sequence).
-  2. Detect "row breaks" as GPS jumps between consecutive images that stand out from the
-     rest of that date's own walking gaps (derived per date, not a fixed distance, since a
-     walker produces small, roughly uniform steps within a row and one or more much larger
-     jumps at a row transition, whether the row itself is straight or curved).
-  3. Within each row run, assign plants by matching the row end-points to the
-     plant CSV and filling in plants sequentially along the row.
+  2. Detect "row breaks" as GPS jumps between consecutive images that stand out from the rest of
+    that date's own walking gaps (derived per date, not a fixed distance, since a walker produces
+    small, roughly uniform steps within a row and one or more much larger jumps at a row
+    transition, whether the row itself is straight or curved).
+  3. Within each row run, assign plants by matching the row end-points to the plant CSV and filling
+    in plants sequentially along the row.
 
-Fallback: when sequence anchoring fails (missing timestamps, unordered
-capture), fall back to nearest-neighbour GPS with a configurable tolerance.
-Each assignment records its match ``source`` and the GPS ``distance_m`` to the
-matched plant, honest, interpretable signals. It deliberately does not emit a
-0–1 "confidence": a linear ``1 − d/tol`` score read as a probability would be
-fabricated, uncalibrated against any hand-checked assignment; use
-``distance_m`` + ``source`` to judge a match (see the CLAUDE.md
-measurement-integrity invariant).
+Fallback: when sequence anchoring fails (missing timestamps, unordered capture), fall back to
+    nearest-neighbor GPS with a configurable tolerance. Each assignment records its match
+    ``source`` and the GPS ``distance_m`` to the matched plant, never a 0-1 confidence.
 
-A mapping is project state with a name, bound to the dataset it was built over and to its own
-build receipt: ``build_mapping`` produces a :class:`MappingBuild` (provenance plus assignments),
+A mapping is project state with a name, bound to the dataset it was built over and to its own build
+receipt: ``build_mapping`` produces a :class:`MappingBuild` (provenance plus assignments),
 ``persist_mapping`` writes the record and then the receipt that binds it, and ``load_mapping``
 refuses a record no receipt names. ``verify_mapping_inputs`` is the delivery-time check: for each
 mapped date a delivery's own ``predictions_by_date`` actually names, it re-reads only the captures
-the delivery reads (:func:`stems_delivery_reads`) plus the plant CSVs the record names, and
-refuses (never raises) when what is on disk now no longer matches what the build was made from; a
-date the delivery omits, or a capture of a delivered date the delivery does not read, is
-disclosed rather than checked.
+the delivery reads (:func:`stems_delivery_reads`) plus the plant CSVs the record names, and refuses
+(never raises) when what is on disk now no longer matches what the build was made from; a date the
+delivery omits, or a capture of a delivered date the delivery does not read, is disclosed rather
+than checked.
 """
 
 from __future__ import annotations
@@ -57,14 +48,12 @@ logger = logging.getLogger(__name__)
 
 EARTH_RADIUS_M = 6_378_137.0
 
-NN_TOLERANCE_METERS = 10.0
-
 SEQUENCE_MATCH_FACTOR = 2
 """assign_plants' sequence-anchored gate: a run's nearest unclaimed plant is accepted out to this
-many times nn_tolerance_m before falling through to plain nearest-neighbour."""
+many times nn_tolerance_m before falling through to plain nearest-neighbor."""
 
 NEAREST_MATCH_FACTOR = 3
-"""assign_plants' plain nearest-neighbour gate, the loosest a match is ever accepted at: this
+"""assign_plants' plain nearest-neighbor gate, the loosest a match is ever accepted at: this
 many times nn_tolerance_m."""
 
 
@@ -113,31 +102,26 @@ class Assignment:
     date_folder: str
     plot_name: Optional[str]
     accession_name: Optional[str]
-    source: str        # "sequence" | "nearest_neighbour" | "unmapped"
+    source: str        # "sequence" | "nearest_neighbor" | "unmapped"
     distance_m: Optional[float]  # GPS distance to the matched plant (m); None if unmapped
 
 
 def assignment_is_attributed(assignment: "Assignment | dict") -> bool:
     """Whether ``assignment`` (an :class:`Assignment`, or the plain dict row ``MappingBuild.rows``
-    produces) names a real plant: a non-empty ``plot_name``, the one rule a plant CSV's own blank
-    name column and an unmapped capture (``plot_name=None``) both fail by, and nowhere else.
-    ``stems_delivery_reads``, ``verify_mapping_inputs``, ``per_plant_series`` and
-    :meth:`MappingBuild.unattributed` all decide attribution through this one predicate rather than
-    each testing ``plot_name`` truthiness for itself.
+    produces) names a real plant: a non-empty ``plot_name``, the rule a plant CSV's own blank name
+    column and an unmapped capture (``plot_name=None``) both fail by.
     """
     plot_name = assignment.get("plot_name") if isinstance(assignment, dict) else assignment.plot_name
     return isinstance(plot_name, str) and plot_name != ""
 
 
 def require_named_plants(plants: list[PlantRecord]) -> None:
-    """Refuse a registry carrying a blank or duplicate ``plot_name``, the one check every
-    raster-level attribution regime (nearest-neighbour distance, canopy-segment containment)
-    runs over the same registry before attributing a single detection to it.
+    """Refuse a registry carrying a blank or duplicate ``plot_name`` before any raster-level
+    attribution (nearest-neighbor distance, canopy-segment containment) reads it.
 
     A blank name fails :func:`assignment_is_attributed`'s own rule; a duplicate would merge two
     trees' detections into one row once ``aggregate_per_plant`` groups by ``plot_name``. Raises
-    ``ValueError`` naming the offending accession or names, never silently dropping either plant
-    from the registry it was asked to check.
+    ``ValueError`` naming the offending accession or names.
     """
     for p in plants:
         if not assignment_is_attributed({"plot_name": p.plot_name}):
@@ -156,15 +140,13 @@ def require_named_plants(plants: list[PlantRecord]) -> None:
 
 @dataclass
 class MappingBuild:
-    """One build's provenance plus its per-date assignments: the whole persisted record, in
-    memory, before :func:`persist_mapping` writes it and the receipt behind it.
+    """One build's provenance plus its per-date assignments: the whole persisted record, in memory,
+    before :func:`persist_mapping` writes it and the receipt behind it.
 
-    ``dataset_root``/``dataset_id`` are the door's own resolved facts (the dataset identity
-    record's minted id, so a moved-and-re-registered dataset still delivers through this
-    mapping); ``project_root``/``built_by``/``name`` are likewise the door's own facts, not
-    re-derived here. ``capture_digests`` is ``capture_identity``'s per-capture counterpart
-    (:func:`capture_digests`, one entry per stem, derived from the same row builder), so a
-    whole-date identity mismatch can be narrowed to the capture that actually moved.
+    ``dataset_root``/``dataset_id`` are the door's own resolved facts (``dataset_id`` is the
+    dataset identity record's minted id); ``project_root``/``built_by``/``name`` are likewise the
+    door's own facts. ``capture_digests`` is ``capture_identity``'s per-capture counterpart
+    (:func:`capture_digests`, one entry per stem, derived from the same row builder).
     """
 
     name: str
@@ -205,11 +187,9 @@ class MappingBuild:
     per-build value to disagree with itself."""
 
     def to_record(self) -> dict:
-        """The exact document ``persist_mapping`` writes and ``load_mapping`` reads back.
-
-        Built over :data:`_PERSISTED_FIELD_NAMES`, the dataclass's own field list minus
-        ``record_sha256``, so a field added to :class:`MappingBuild` needs its record shape
-        decided once here, never a second key list kept in step by hand.
+        """The exact document ``persist_mapping`` writes and ``load_mapping`` reads back, built
+        over :data:`_PERSISTED_FIELD_NAMES` (the dataclass's own field list minus
+        ``record_sha256``).
         """
         record = {field_name: getattr(self, field_name) for field_name in _PERSISTED_FIELD_NAMES
                   if field_name != "assignments"}
@@ -221,18 +201,16 @@ class MappingBuild:
 
     def rows(self) -> dict[str, list[dict]]:
         """The assignments as plain per-date dict rows, the shape ``per_plant_phenology`` reads,
-        each carrying this build's own ``plant_attribution`` so a caller composing image-
-        granularity aggregation off these rows never hand-copies it from the build separately. A
-        fresh dict per row, never ``a.__dict__`` itself, so this never leaks the extra key into
-        what ``to_record`` persists."""
+        each carrying this build's own ``plant_attribution``. A fresh dict per row, never
+        ``a.__dict__`` itself.
+        """
         return {date: [{**a.__dict__, "plant_attribution": self.plant_attribution} for a in assignments]
                 for date, assignments in self.assignments.items()}
 
     def unattributed(self, dates: Optional[Iterable[str]] = None) -> int:
         """The number of assignments over ``dates`` (every date this mapping holds, when ``None``)
-        for which :func:`assignment_is_attributed` is false: the one place this count is computed,
-        called once per date for a per-date breakdown (:meth:`summary`) and once over a delivery's
-        own delivered dates for its total (:meth:`delivery_disclosure`)."""
+        for which :func:`assignment_is_attributed` is false.
+        """
         scope = self.dates if dates is None else dates
         return sum(
             1
@@ -243,9 +221,8 @@ class MappingBuild:
 
     def summary(self) -> dict:
         """This build's own per-date and total counts: images, mapped, unattributed, and the mean
-        GPS match distance (``None`` for a date with no recorded distance, never a fabricated
-        zero). The one computation both the build and load routes answer their ``summary`` from,
-        and the tool's own flat ``per_date``/totals fill from."""
+        GPS match distance (``None`` for a date with no recorded distance).
+        """
         per_date: dict[str, dict] = {}
         total_images = 0
         total_mapped = 0
@@ -278,9 +255,8 @@ class MappingBuild:
     def delivery_disclosure(self, verified: dict, dates: Iterable[str]) -> dict:
         """The ``plant_mapping`` dict a phenology delivery carries: this build's own identity,
         ``verify_mapping_inputs``'s disclosure, and this delivery's own unattributed-capture count
-        scoped to ``dates`` (a delivery's own delivered dates, never the mapping's full span), the
-        one composition every phenology door (``deliver_phenology_milestones``, both web phenology routes)
-        builds through rather than each assembling its own copy."""
+        scoped to ``dates`` (a delivery's own delivered dates, never the mapping's full span).
+        """
         dates_delivered = sorted(dates)
         return {
             "name": self.name,
@@ -326,11 +302,8 @@ def read_image_stamp(path: Path, date_folder: str) -> ImageStamp:
     """One ``image`` capture's EXIF stamp.
 
     The ``try`` covers ``Image.open`` alone: a capture PIL cannot open (a HEIC with no decoder
-    installed, a locked file) becomes a stamp with ``readable=False`` rather than being
-    swallowed into an indistinguishable all-``None`` stamp; an image that opens and carries no
-    EXIF (or an EXIF read through ``getexif()``, which the pinned Pillow defines for every
-    format, unlike the JPEG-only legacy ``_getexif()``) stays ``readable=True`` with ``None``
-    fields.
+    installed, a locked file) becomes a stamp with ``readable=False``; an image that opens and
+    carries no EXIF stays ``readable=True`` with ``None`` fields.
     """
     stamp = ImageStamp(
         path=str(path), stem=path.stem, date_folder=date_folder, kind="image", name=path.name,
@@ -402,9 +375,7 @@ def _read_date_stamps(logical: dict[str, "Path | BandGroupRef"], date_folder: st
 def _capture_row(s: ImageStamp) -> list[object]:
     """The fields one capture's identity commits to: a manifest's own digest and the member names
     it claims for a ``band_group``, bare identity for a ``raster`` (neither carries EXIF), EXIF for
-    an ``image``. The one row shape :func:`capture_identity` (joined across a date) and
-    :func:`capture_digests` (kept per capture) both build from, so the two spellings cannot drift
-    apart.
+    an ``image``; the row :func:`capture_identity` and :func:`capture_digests` build from.
     """
     if s.kind == "band_group":
         return [s.name, s.kind, s.manifest_sha256, list(s.members)]
@@ -425,23 +396,16 @@ def capture_identity(stamps: list[ImageStamp]) -> str:
     """The sha256[:16] over every capture ``list_logical_images`` enumerated for one date.
 
     An EXIF/manifest identity, never an image-content identity: it certifies the inputs the
-    assignment was made from, and no reader may cite it as provenance for the pixels a phenotype
-    was counted over (the prediction bucket's own stamps carry that). ``build_mapping`` calls
-    this once per date; the delivery's ``verify_mapping_inputs`` recomputes it for a date only
-    when the delivery read every capture the date has, to detect a changed input set at no added
-    cost precisely when it can (see that function's own docstring for the case it can't).
+    assignment was made from, not the pixels a phenotype was counted over (the prediction bucket's
+    own stamps carry that).
     """
     rows = [_capture_row(s) for s in sorted(stamps, key=lambda s: s.name)]
     return _row_digest(rows)
 
 
 def capture_digests(stamps: list[ImageStamp]) -> dict[str, str]:
-    """One digest per capture, keyed by stem, over that capture's own :func:`_capture_row` alone.
-
-    ``capture_identity``'s counterpart: the same row shape, kept apart per capture instead of
-    joined across the whole date, so a whole-date identity mismatch can be narrowed to the exact
-    capture that moved (a band group's manifest rewritten in place, most usefully, since nothing
-    else names that case) rather than only the date.
+    """One digest per capture, keyed by stem, over that capture's own :func:`_capture_row` alone:
+    ``capture_identity``'s per-capture counterpart.
     """
     return {s.stem: _row_digest(_capture_row(s)) for s in stamps}
 
@@ -473,12 +437,8 @@ the header ``tcip_mcp.cli.shp_to_plant_csv.convert_shp_to_plant_csv`` writes ove
 
 
 def read_plant_csv_bytes(data: bytes) -> list[PlantRecord]:
-    """Parse one plant-locations CSV's own bytes into :class:`PlantRecord` rows.
-
-    The row parse :func:`read_plant_csvs` applies per path, extracted so a caller already holding
-    a file's verified bytes (:func:`verify_registry_csv_bytes`'s own return) parses those bytes
-    directly instead of re-opening the file a second time: the read-then-parse race a file
-    replaced in between the two reads could otherwise let slip through.
+    """Parse one plant-locations CSV's own bytes into :class:`PlantRecord` rows (the row parse
+    :func:`read_plant_csvs` applies per path).
     """
     import io
 
@@ -557,30 +517,20 @@ def _shapefile_field_value(properties: dict, field_name: Optional[str]) -> str:
 def read_plant_shapefile(
     path: Path | str, *, field_map: Optional[dict[str, str]] = None,
 ) -> ShapefileRows:
-    """Read a plant-locations shapefile's own features into :data:`PLANT_CSV_COLUMNS`-shaped
-    rows, reprojecting every feature's own coordinate to WGS84 with ``always_xy=True`` (GDAL 3's
-    authority-compliant EPSG:4326 axis order is lat/lon; without this every coordinate would land
-    in the wrong column). An EPSG match is never required and never checked:
-    ``pyproj.Transformer.from_crs`` takes the layer's own CRS object directly, so a custom
-    projected CRS with a valid ``.prj`` converts.
+    """Read a plant-locations shapefile's own features into :data:`PLANT_CSV_COLUMNS`-shaped rows,
+    reprojecting every feature's own coordinate to WGS84 with ``always_xy=True`` (GDAL 3's
+    authority-compliant EPSG:4326 axis order is lat/lon). ``pyproj.Transformer.from_crs`` takes the
+    layer's own CRS object directly, so a custom projected CRS with a valid ``.prj`` converts.
 
     A point's own coordinate is read; a polygon's or multipolygon's centroid is read; any other
-    geometry type refuses by name (naming the feature index and ``geom_type``), rather than
-    centroiding it silently as a plain nearest-point conversion would. A feature with null
-    geometry is skipped and counted in the return's ``skipped_null_geometry``, not raised on.
-    Raises :class:`ShapefileCrsUnknown` when the layer's CRS cannot be resolved, and
-    :class:`ShapefileUnreadable` when fiona cannot open the shapefile at all, so a caller meets
-    one of this module's own two refusals rather than any of the three unrelated exception types
-    fiona's own hierarchy would otherwise hand it.
+    geometry type refuses by name (naming the feature index and ``geom_type``). A feature with null
+    geometry is skipped and counted in the return's ``skipped_null_geometry``. Raises
+    :class:`ShapefileCrsUnknown` when the layer's CRS cannot be resolved, and
+    :class:`ShapefileUnreadable` when fiona cannot open the shapefile at all.
 
-    Yields rows, never :class:`PlantRecord`: that dataclass narrows ``plot_number``,
-    ``row_number`` and ``col_number`` to ``Optional[float]`` (:func:`_maybe_float`), which would
-    turn a plot number like ``"A1"`` into an empty cell no count-only round trip would catch. The
-    narrowing stays in :func:`read_plant_csv_bytes`, the reader every consumer of a registered CSV
-    goes through; this function hands back the DBF value's own string, verbatim.
-
-    fiona, pyproj and shapely are imported inside this function body, the package's convention
-    for GDAL-backed dependencies.
+    Yields rows with the DBF value's own string, verbatim, never :class:`PlantRecord`, whose
+    ``plot_number``, ``row_number`` and ``col_number`` narrow to ``Optional[float]``
+    (:func:`_maybe_float`).
     """
     import fiona
     from pyproj import Transformer
@@ -674,10 +624,8 @@ def _maybe_float(x: Optional[str]) -> Optional[float]:
 
 def registry_content_digest(plants: list[PlantRecord]) -> str:
     """sha256 over ``plants``' own fields, order-independent, so two registrations of the same
-    plants under two paths (or a different row order in one file) are told apart from a real
-    edit: :func:`register_plant_registry_record` compares this digest against a name already
-    taken, and returns the existing record when it matches rather than refusing a harmless
-    re-registration."""
+    plants under two paths (or a different row order in one file) digest equal.
+    """
     from dataclasses import asdict
 
     rows = sorted(
@@ -687,20 +635,16 @@ def registry_content_digest(plants: list[PlantRecord]) -> str:
 
 class ShapefileCrsUnknown(ValueError):
     """A shapefile's coordinate reference system cannot be resolved: fiona reports a missing
-    ``.prj`` as an empty ``layer.crs``, and (probed directly, since fiona raises nothing at open
-    or at read for this case) a ``.prj`` whose WKT does not parse answers the same falsy
-    ``layer.crs`` rather than an exception, so one check catches both. No CRS is ever guessed."""
+    ``.prj``, and a ``.prj`` whose WKT does not parse, as the same falsy ``layer.crs``. No CRS is
+    ever guessed.
+    """
 
 
 class ShapefileUnreadable(ValueError):
     """fiona could not open a shapefile at all: a missing or unreadable ``.shx``/``.dbf`` part, a
-    file that is not a shapefile, a driver or IO failure. Raised in place of whatever fiona threw,
-    since its own exception hierarchy is not one this package's callers can be expected to know:
-    ``CRSError`` and ``DriverError`` subclass ``ValueError``, while ``DriverIOError`` is an
-    ``OSError`` and the base ``FionaError`` is neither, so an unwrapped open reached a direct
-    caller of :func:`read_plant_shapefile` as one of three unrelated exception types. A
-    ``ValueError`` subclass so the command's own ``except ValueError`` keeps refusing by message
-    rather than by traceback."""
+    file that is not a shapefile, a driver or IO failure. Raised in place of whatever fiona threw.
+    A ``ValueError`` subclass.
+    """
 
 
 class NoGeoreferencedPlantsRefusal(Exception):
@@ -733,9 +677,9 @@ register_store(
 
 
 def plant_registry_key(project_root: Path | str, name: str) -> Key:
-    """One project's named plant registry: identity state for a plant-locations CSV set, the
-    same ``.tcip/state``-scoped shape :func:`plant_mapping_key` uses, so a registry travels with
-    the project that registered it rather than the dataset it happens to describe."""
+    """One project's named plant registry: identity state for a plant-locations CSV set, under
+    ``.tcip/state`` like :func:`plant_mapping_key`.
+    """
     root = Path(project_root).absolute() / ".tcip" / "state"
     return Key(PLANT_REGISTRY_STORE, str(root), (name,))
 
@@ -747,14 +691,9 @@ def load_registry(project_root: Path | str, name: str) -> Optional[dict]:
 
 
 def registry_csv_entries(record: Optional[dict]) -> list[dict]:
-    """The ``{path, sha256, n_plants}`` entries a loaded registry record carries, or an empty
-    list when ``record`` is ``None``.
-
-    A bare accessor over a record already in hand, never the decision of what a missing or
-    mismatched registry means for a mapping that names it: that decision is
-    :func:`registry_entries_or_refusal`'s, called by every mapping-facing reader
-    (:func:`verify_mapping_inputs`, :func:`resolve_delivery_mapping`) so a vanished or moved
-    registry refuses by name rather than silently verifying nothing.
+    """The ``{path, sha256, n_plants}`` entries a loaded registry record carries, or an empty list
+    when ``record`` is ``None``. What a missing or mismatched registry means is
+    :func:`registry_entries_or_refusal`'s.
     """
     return list(record["csvs"]) if record else []
 
@@ -763,14 +702,8 @@ def registry_entries_or_refusal(
     build: "MappingBuild", project_root: Path | str,
 ) -> tuple[list[dict], Optional[str]]:
     """The CSV entries ``build.plant_registry`` names, or the refusal naming the registry, the
-    mapping and ``project_root`` when they cannot be trusted.
-
-    Refuses when the named registry no longer loads (deleted since the mapping was built) and
-    when it loads but its own ``digest`` no longer matches ``build.plant_registry["digest"]`` (the
-    registration a mapping was built against has moved under its own name), rather than letting
-    either case verify silently against nothing, the same document
-    :func:`verify_mapping_inputs` and :func:`resolve_delivery_mapping` would each otherwise read
-    on their own and could drift apart on.
+    mapping and ``project_root`` when they cannot be trusted: the named registry no longer loads,
+    or its own ``digest`` no longer matches ``build.plant_registry["digest"]``.
     """
     registry_name = (build.plant_registry or {}).get("name")
     if not registry_name:
@@ -798,18 +731,10 @@ def verify_registry_csv_bytes(
     n_plants}`` shape) recorded bytes against what is on disk now, reading each present file's
     bytes exactly once.
 
-    Returns every missing path (the loop runs to completion rather than stopping at the first
-    rewritten file), the fact that the first rewritten file was rewritten, naming it, or ``None``
-    when every present path's bytes still match what was registered, and the verified bytes this
-    call read for every present path, keyed by the entry's own ``path``. A caller parses a verified
-    file from that third return rather than re-opening it a second time: reading bytes here and
-    parsing them again from the path afterward is a read-then-parse race a file replaced in
-    between could slip through, closed by parsing the one snapshot this call already took
-    (:func:`read_plant_csv_bytes`). This function reports the bytes facts only, never a remedy: a
-    caller decides for itself what a missing path means and composes its own wording for a
-    rewritten one (:func:`verify_mapping_inputs` and
-    :func:`~tcip_mcp.tools.orthomosaic_tools.deliver_orthomosaic_plant_counts` each refuse under a
-    different remedy, since one can rebuild a mapping against a new registry and the other cannot).
+    Returns every missing path, the first rewritten file (or ``None`` when every present path's
+    bytes still match what was registered), and the verified bytes this call read for every present
+    path, keyed by the entry's own ``path``, for :func:`read_plant_csv_bytes` to parse. Reports the
+    bytes facts only; the caller composes its own remedy.
     """
     missing: list[str] = []
     rewritten: Optional[str] = None
@@ -829,14 +754,11 @@ def verify_registry_csv_bytes(
 
 def parse_plant_registry_csvs(csv_paths: list[Path]) -> tuple[list[dict], str, int]:
     """Parse ``csv_paths`` into the registry's own ``{path, sha256, n_plants}`` entries, the
-    content digest over every parsed row and the total plant count: the read-only half of
-    :func:`register_plant_registry_record` that commits nothing, so a preview can compute
-    exactly what a real registration would write without writing it.
+    content digest over every parsed row and the total plant count, committing nothing.
 
     Raises :class:`NoGeoreferencedPlantsRefusal`, naming every file that parsed no georeferenced,
     named plant or is not UTF-8 text (a binary file, a shapefile's own ``.shp``/``.shx``/``.dbf``
-    included, would otherwise raise an unguarded ``UnicodeDecodeError`` out of this function), the
-    same check :func:`register_plant_registry_record` runs before it writes.
+    included).
     """
     failed: list[str] = []
     csvs_meta: list[dict] = []
@@ -878,16 +800,13 @@ def register_plant_registry_record(
     """Register ``csv_paths`` under ``name`` in this project's plant registry, and return the
     stored record.
 
-    Parses every path through :func:`parse_plant_registry_csvs`, so a refusal names exactly which
-    file parsed no georeferenced, named plant (:class:`NoGeoreferencedPlantsRefusal`); the record
-    holds the same ``{path, sha256, n_plants}`` entries the mapping record held before this door
-    existed, plus ``crop``, ``site``, ``registered_by``, ``registered_at`` and the parsed content's
-    digest. The read-then-write is one transaction (:func:`tcip_store.transaction`, this store's
-    own ``concurrency="cas"``): a second registration under a taken name returns the existing
-    record unchanged when the digest matches (the same plants again, read from a different path or
-    in a different row order), and raises :class:`PlantRegistryNameConflict` otherwise, naming the
-    two digests, since overwriting a taken name would silently move what every mapping already
-    citing it means.
+    Parses every path through :func:`parse_plant_registry_csvs`
+    (:class:`NoGeoreferencedPlantsRefusal` names the file that parsed no georeferenced, named
+    plant); the record holds the ``{path, sha256, n_plants}`` entries plus ``crop``, ``site``,
+    ``registered_by``, ``registered_at`` and the parsed content's digest. The read-then-write is
+    one transaction (:func:`tcip_store.transaction`, this store's own ``concurrency="cas"``): a
+    second registration under a taken name returns the existing record unchanged when the digest
+    matches, and raises :class:`PlantRegistryNameConflict` otherwise, naming the two digests.
     """
     csvs_meta, digest, n_plants = parse_plant_registry_csvs(csv_paths)
     key = plant_registry_key(project_root, name)
@@ -928,18 +847,10 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def stems_delivery_reads(rows: "Iterable[Assignment | dict]", pred_dir: Path | str) -> set[str]:
-    """Stems of ``rows`` (one date's assignment rows, :class:`Assignment` objects or the plain
-    dict rows :meth:`MappingBuild.rows` produces) :func:`assignment_is_attributed` calls
-    attributed, whose stem also carries a prediction document under ``pred_dir``: the one
-    predicate for "which prediction documents this delivery reads," never whether the underlying
-    image still exists on disk.
-
-    Both :func:`verify_mapping_inputs` (which of those stems it may re-check a fresh stamp for)
-    and :func:`~tcip_mcp.pipelines.postprocessing.phenology.per_plant_series` (which of those
-    stems it aggregates rather than counts missing) call this rather than each inlining the same
-    test, so the two can never disagree about which predictions a delivery reads. Whether a read
-    prediction's own capture can still be verified is a further partition ``verify_mapping_inputs``
-    makes on its own, one this predicate does not speak to.
+    """Stems of ``rows`` (one date's assignment rows, :class:`Assignment` objects or the plain dict
+    rows :meth:`MappingBuild.rows` produces) :func:`assignment_is_attributed` calls attributed,
+    whose stem also carries a prediction document under ``pred_dir``: which prediction documents
+    this delivery reads, never whether the underlying image still exists on disk.
     """
     from tcip_mcp.prediction_buckets import bucket_stems
 
@@ -1058,7 +969,7 @@ def assign_plants(
     stamps: list[ImageStamp],
     plants: list[PlantRecord],
     *,
-    nn_tolerance_m: float = NN_TOLERANCE_METERS,
+    nn_tolerance_m: float,
 ) -> list[Assignment]:
     """Assign each image to a plant by sequence-anchored NN matching.
 
@@ -1137,7 +1048,7 @@ def assign_plants(
                             date_folder=s.date_folder,
                             plot_name=plant.plot_name,
                             accession_name=plant.accession_name,
-                            source="nearest_neighbour",
+                            source="nearest_neighbor",
                             distance_m=nn_d,
                         )
                     )
@@ -1182,11 +1093,36 @@ def grid_pitch_m(plants: list[PlantRecord]) -> float:
     return nn[len(nn) // 2]
 
 
+class NoMatchTolerance(ValueError):
+    """No match tolerance is stated and the plant layout derives none."""
+
+
+def resolve_nn_tolerance_m(plants: list[PlantRecord], stated: float | None = None) -> dict:
+    """The tolerance (meters) a capture or detection is matched to a plant within, and where it
+    came from: ``{"value": float, "source": str}``.
+
+    Derived as ``grid_pitch_m(plants) / 6`` (``"grid_pitch"``), so ``assign_plants``' loosest
+    ``NEAREST_MATCH_FACTOR``-times gate keeps the match radius within half a grid cell. A stated
+    value is honored (``"stated"``) up to that ceiling and capped at it (``"stated_capped"``).
+    Raises :class:`NoMatchTolerance` naming ``nn_tolerance_m`` when nothing is stated and the layout carries too
+    few georeferenced plants to derive a pitch from.
+    """
+    pitch = grid_pitch_m(plants)
+    if stated is None:
+        if pitch <= 0:
+            raise NoMatchTolerance(
+                "the plant layout carries fewer than two georeferenced plants, so no grid pitch "
+                "derives a match tolerance: state nn_tolerance_m (meters)")
+        return {"value": pitch / 6, "source": "grid_pitch"}
+    if pitch > 0 and stated > pitch / 6:
+        return {"value": pitch / 6, "source": "stated_capped"}
+    return {"value": stated, "source": "stated"}
+
+
 def match_gates(nn_tolerance_m: float) -> dict:
-    """The distances a match is actually accepted out to, given ``nn_tolerance_m``: the stated
-    tolerance itself, the sequence-anchored gate's own ceiling, and ``max_match_distance_m``,
-    ``assign_plants``' loosest gate (the plain nearest-neighbour fallback). Derived once here so
-    a caller states the same ceiling ``assign_plants`` enforces rather than restating its factors.
+    """The distances a match is accepted out to, given ``nn_tolerance_m``: the stated tolerance
+    itself, the sequence-anchored gate's own ceiling, and ``max_match_distance_m``,
+    ``assign_plants``' loosest gate (the plain nearest-neighbor fallback).
     """
     return {
         "nn_tolerance_m": nn_tolerance_m,
@@ -1208,58 +1144,33 @@ def build_mapping(
     dates: Optional[list[str]] = None,
     nn_tolerance_m: Optional[float] = None,
 ) -> MappingBuild:
-    """Build one project's named plant mapping: per-date assignments plus the provenance that
-    binds the record to the inputs it was built from.
+    """Build one project's named plant mapping: per-date assignments plus the provenance that binds
+    the record to the inputs it was built from.
 
     ``name``/``dataset_root``/``dataset_id``/``project_root``/``built_by`` are the caller's own
-    resolved facts (the door already checked the dataset identity and the project record before
-    calling here); this function does not re-derive them. ``plant_csv_paths`` are the files this
-    build actually reads the plants from (resolved by the caller from ``plant_registry``'s own
-    ``name``); ``plant_registry`` is the ``{"name": ..., "digest": ...}`` reference stored on the
-    record in their place, so a later read finds the files through the registry rather than a
-    copy of the paths and hashes here.
+    resolved facts. ``plant_csv_paths`` are the files this build reads the plants from (resolved by
+    the caller from ``plant_registry``'s own ``name``); ``plant_registry`` is the ``{"name": ...,
+    "digest": ...}`` reference stored on the record in their place.
 
-    ``nn_tolerance_m`` is derived from the plot's ``grid_pitch_m`` when the caller does not pin it
-    (not a pinned 10 m): pitch/6, so assign_plants' loosest ``NEAREST_MATCH_FACTOR``-times gate
-    keeps the effective match radius within half a grid cell. An explicit value is honored but
-    still capped at that pitch-derived ceiling; ``nn_tolerance_m`` on the record carries which of
-    the four branches (``grid_pitch``, ``fallback``, ``stated_capped``, ``stated``) produced the
-    value.
+    ``nn_tolerance_m`` resolves through :func:`resolve_nn_tolerance_m`, whose value and source
+    the record carries.
 
-    A date's captures are enumerated through ``image_utils.list_logical_images``, so a band
-    raster or a band group ingested under a mapped date is a capture the identity sees. That
-    enumeration raises :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem` when the
-    bucket holds more than one logical identity under one case-folded stem, standalone-versus-
-    standalone or standalone-versus-band-group alike; this function lets it propagate, and the
-    calling door catches it and refuses in its own error shape.
+    A date's captures are enumerated through ``image_utils.list_logical_images``, so a band raster
+    or a band group ingested under a mapped date is a capture the identity sees; its
+    :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem` propagates.
 
-    Raises :class:`UngeoreferencedCaptureRefusal`: naming ``images_root`` when the requested
-    dates carry no capture at all, and with :func:`ungeoreferenced_capture_message` (naming any
-    capture PIL could not open before the position clause) when every capture that was read
-    carries no position this door reads.
+    Raises :class:`UngeoreferencedCaptureRefusal`: naming ``images_root`` when the requested dates
+    carry no capture at all, and with :func:`ungeoreferenced_capture_message` (naming any capture
+    PIL could not open before the position clause) when every capture that was read carries no
+    position this door reads.
     """
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
     plant_csv_paths = [Path(p) for p in plant_csv_paths]
     plants = read_plant_csvs(plant_csv_paths)
 
-    # The ceiling: assign_plants' loosest gate is NEAREST_MATCH_FACTOR x nn_tolerance, so pitch/6
-    # -> effective radius <= pitch/2; derive the tolerance from the layout, cap only an override.
-    pitch = grid_pitch_m(plants)
-    _cap = pitch / 6
-    tolerance_source: str
-    if nn_tolerance_m is None:
-        if pitch > 0:
-            nn_tolerance_m, tolerance_source = _cap, "grid_pitch"
-        else:
-            nn_tolerance_m, tolerance_source = NN_TOLERANCE_METERS, "fallback"
-        logger.info("nn_tolerance_m derived %.2f (%s)", nn_tolerance_m, tolerance_source)
-    elif pitch > 0 and nn_tolerance_m > _cap:
-        logger.info("capping nn_tolerance_m %.1f -> %.2f (grid pitch %.1f: effective radius <= pitch/2)",
-                    nn_tolerance_m, _cap, pitch)
-        nn_tolerance_m, tolerance_source = _cap, "stated_capped"
-    else:
-        tolerance_source = "stated"
+    tolerance = resolve_nn_tolerance_m(plants, nn_tolerance_m)
+    logger.info("nn_tolerance_m %.2f (%s)", tolerance["value"], tolerance["source"])
 
     images_root = Path(images_root)
     dates_walked: list[str] = []
@@ -1285,7 +1196,7 @@ def build_mapping(
             capture_digests_by_date[date] = capture_digests(stamps)
             unreadable[date] = sorted(
                 s.name for s in stamps if s.kind == "image" and s.readable is False)
-            assignments[date] = assign_plants(stamps, plants, nn_tolerance_m=nn_tolerance_m)
+            assignments[date] = assign_plants(stamps, plants, nn_tolerance_m=tolerance["value"])
 
     if n_stamps == 0:
         raise UngeoreferencedCaptureRefusal(
@@ -1305,7 +1216,7 @@ def build_mapping(
         built_at=datetime.now(timezone.utc).isoformat(),
         dates_requested=list(dates) if dates is not None else None,
         dates=sorted(dates_walked),
-        nn_tolerance_m={"value": nn_tolerance_m, "source": tolerance_source},
+        nn_tolerance_m=tolerance,
         plant_registry=plant_registry,
         capture_identity=capture_ids,
         capture_digests=capture_digests_by_date,
@@ -1333,15 +1244,12 @@ register_store(
 def plant_mapping_key(project_root: Path | str, name: str) -> Key:
     """One project's named plant-mapping build, addressed by the project that owns it.
 
-    A mapping is project state: a dataset can be read by more than one project, and each
-    project's mapping is its own. The key root is ``<project_root>/.tcip/state``; the document
-    lives at ``plant_mappings/<name>.json`` under it (the same ``STATE``-scoped shape
-    ``delivery_events`` uses, and the shape the layout claim in ``tcip_store.layout_claims``
-    declares for this store).
+    A mapping is project state: a dataset can be read by more than one project, and each project's
+    mapping is its own. The key root is ``<project_root>/.tcip/state``; the document lives at
+    ``plant_mappings/<name>.json`` under it.
 
     ``last_writer_wins``: a mapping is assigned whole in memory and written in one call, and a
-    later build under the same name is a fresh assignment replacing that one rather than a
-    merge into it. No writer reads the record first.
+        later build under the same name replaces it. No writer reads the record first.
     """
     root = Path(project_root).absolute() / ".tcip" / "state"
     return Key(PLANT_MAPPING_STORE, str(root), (name,))
@@ -1362,11 +1270,8 @@ def plant_mapping_names(project_root: Path | str) -> list[str]:
 
 
 def record_digest(record: dict) -> str:
-    """The one digest a mapping record earns: sha256 over ``RECORD_JSON.encode(record)``.
-
-    Called from :func:`persist_mapping` (what the receipt names) and :func:`load_mapping` (what
-    the receipt is checked against), so the write side and the read side can never spell this
-    digest differently.
+    """The digest a mapping record earns: sha256 over ``RECORD_JSON.encode(record)``, what the
+    receipt names and what :func:`load_mapping` checks it against.
     """
     return hashlib.sha256(RECORD_JSON.encode(record)).hexdigest()
 
@@ -1408,32 +1313,25 @@ def persist_mapping(
 ) -> None:
     """Write the mapping record, then the receipt that binds it to this build.
 
-    The record is committed before the receipt (a log append cannot join a record transaction):
-    a receipt that cannot be written fails loudly (``AuditEntryNotWritten`` propagates, never
-    swallowed) and leaves a record no receipt names, which :func:`load_mapping` refuses to read
-    until a rebuild replaces it.
+    The record is committed before the receipt (a log append cannot join a record transaction): a
+    receipt that cannot be written fails loudly (``AuditEntryNotWritten`` propagates) and leaves a
+    record no receipt names, which :func:`load_mapping` refuses to read until a rebuild replaces
+    it.
 
-    ``project_root`` names which log the receipt lands in, and this function's two production
-    callers pass two different roots for it: the ``build_plant_mapping`` MCP tool passes the
-    process's own pinned platform root, so the receipt lands in the platform log's own file (a
-    project's, once that root is an adopted project); the web build route passes its own guarded
-    project root instead, which can differ from the process's pin when the browser has a
-    different project open.
+    ``project_root`` names which log the receipt lands in.
 
     A rebuild under ``name`` whose current record is still cited by a delivery event under this
     project raises :class:`MappingRebuildRefusal`, naming the citing events, unless
     ``supersede=True``. In that case the current record is archived first, under
-    ``plant_mapping_key(project_root, f"{name}@{digest[:12]}")`` (a name :func:`plant_mapping_names`
-    never lists, since it carries ``@`` and fails ``NAME_SEGMENT``), with a fresh
-    ``plant_mapping_built`` receipt appended under that archived name so :func:`load_mapping` can
-    still read it back; ``build.supersedes`` is set to the archived digest before this writes the
-    new record, and the new record's own receipt names both digests. An uncited rebuild replaces
-    as it always has, and records nothing extra.
+    ``plant_mapping_key(project_root, f"{name}@{digest[:12]}")`` (a name
+    :func:`plant_mapping_names` never lists, since it carries ``@`` and fails ``NAME_SEGMENT``),
+    with a fresh ``plant_mapping_built`` receipt appended under that archived name so
+    :func:`load_mapping` can still read it back; ``build.supersedes`` is set to the archived digest
+    before this writes the new record, and the new record's own receipt names both digests. An
+    uncited rebuild replaces the record.
 
-    A rebuild under ``name`` whose *current* record is stored in a shape this reader no longer
-    recognizes also raises :class:`MappingRebuildRefusal`: an unparseable existing record cannot
-    be checked for citations, so it can never be safely archived or silently replaced either, and
-    no operator door repairs it in place.
+    A rebuild under ``name`` whose current record this reader does not recognize also raises
+    :class:`MappingRebuildRefusal`.
     """
     from tcip_mcp.audit import record_event_or_raise
 
@@ -1494,11 +1392,8 @@ def persist_mapping(
 
 
 def load_mapping_rows(project_root: Path | str, name: str) -> dict[str, list[dict]]:
-    """The persisted mapping as plain per-date rows, for a consumer that works in dicts.
-
-    Reads through :func:`load_mapping`, so a caller handing the rows to the phenology pipeline
-    gets the fields that reader fills in and the types it coerces, rather than whatever a
-    particular writer happened to leave out. ``{}`` when no mapping is stored under ``name``.
+    """The persisted mapping as plain per-date rows, read through :func:`load_mapping`. ``{}`` when
+    no mapping is stored under ``name``.
     """
     build = load_mapping(project_root, name)
     return build.rows() if build is not None else {}
@@ -1539,14 +1434,13 @@ assert set(_REQUIRED_TOP_KEYS) == set(_PERSISTED_FIELD_NAMES), (
     "MappingBuild's own fields and _REQUIRED_TOP_KEYS's key set have drifted apart")
 _ASSIGNMENT_ROW_KEYS = (
     "image_path", "stem", "date_folder", "plot_name", "accession_name", "source", "distance_m")
-_VALID_SOURCES = {"sequence", "nearest_neighbour", "unmapped"}
+_VALID_SOURCES = {"sequence", "nearest_neighbor", "unmapped"}
 
 
 def _validated_record(raw: object, project_root: Path | str, name: str) -> dict:
     """``raw`` as a plant-mapping record, or the ``ValueError`` naming the project, the name and
-    the field this reader does not recognize. A rebuild through ``build_plant_mapping`` is not
-    named as the remedy here: :func:`persist_mapping` itself refuses a rebuild over a record this
-    function cannot validate, and no operator door corrects an existing record in place."""
+    the field this reader does not recognize.
+    """
     remedy = "no operator door corrects an existing record in place"
     if not isinstance(raw, dict):
         raise ValueError(
@@ -1672,16 +1566,10 @@ def resolved_mapping_key_for_citation(
     project_root: Path | str, name: str, record_sha256: str,
 ) -> Optional[str]:
     """The name a reader loads to see exactly the record a delivery event's own
-    ``plant_mapping.record_sha256`` cites: ``name`` itself when the record currently stored
-    under it still hashes to ``record_sha256``, the archived key a superseding rebuild moved
-    it to (``f"{name}@{record_sha256[:12]}"``) when that key holds a stored record, or ``None``
-    when neither does, so a caller renders the citation unresolved rather than a key that reads
-    back nothing.
-
-    For a delivery-event reader (the Results tab's panel route) to call, never for
-    :func:`resolve_delivery_mapping`: a delivery resolves the mapping it is about to read by
-    name, against the mapping's current inputs, not a historical record it may already have
-    superseded.
+    ``plant_mapping.record_sha256`` cites: ``name`` itself when the record currently stored under
+    it still hashes to ``record_sha256``, the archived key a superseding rebuild moved it to
+    (``f"{name}@{record_sha256[:12]}"``) when that key holds a stored record, or ``None`` when
+    neither does.
     """
     current = tcip_store.read(plant_mapping_key(project_root, name), default=None)
     if isinstance(current, dict):
@@ -1698,9 +1586,8 @@ def resolved_mapping_key_for_citation(
 
 def _describe_capture(stamps_by_stem: dict[str, ImageStamp], stem: str) -> str:
     """Name one capture for a refusal message: its kind and file name when a fresh stamp for
-    ``stem`` was read this call, else the bare stem (a capture that vanished between the record
-    and this recompute, which the added/missing-stem checks above already refuse before this is
-    ever reached)."""
+    ``stem`` was read this call, else the bare stem.
+    """
     s = stamps_by_stem.get(stem)
     if s is None:
         return stem
@@ -1717,58 +1604,39 @@ def verify_mapping_inputs(
     """Check what this delivery can verify about a mapping's recorded inputs against what is on
     disk now, for the captures it actually reads, at delivery time.
 
-    The disclosures name what could not be verified, never merely what was not read: a delivered
-    date whose image folder is absent, or an archived date, still has every one of its stems'
-    predictions read and counted by the phenology aggregation (:func:`stems_delivery_reads` never
-    checks whether the underlying image still exists), while its captures cannot be checked here
-    and are disclosed unverified all the same; a date the delivery genuinely omits is unread in
-    the ordinary sense too, every stem the mapping names for it counted missing downstream.
-
     A mapped date not named in ``predictions_by_date`` is never walked (no enumeration, no EXIF):
     disclosed in ``captures_unverified`` as the bare date string, the same as a named date whose
     image folder is absent. A named date's folder is enumerated once
-    (``image_utils.list_logical_images``, still refusing by name on
-    :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem`); an enumerated stem the
-    mapping's own assignment rows for that date do not name means the mapping does not cover what
-    is on disk, and refuses, naming the date, the file(s) and the rebuild remedy. A recorded stem
-    no longer enumerated (its capture moved or was deleted) is disclosed as ``"<date>/<name>"``,
-    using the recorded row's own file name; so is a recorded, still-enumerated stem this
-    delivery's own prediction bucket carries no document for (:func:`stems_delivery_reads`),
-    never opened to check.
+    (``image_utils.list_logical_images``, refusing by name on
+    :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem`); an enumerated stem the mapping's
+    own assignment rows for that date do not name refuses, naming the date, the file(s) and the
+    rebuild remedy. A recorded stem no longer enumerated is disclosed as ``"<date>/<name>"``, using
+    the recorded row's own file name; so is a recorded, still-enumerated stem this delivery's own
+    prediction bucket carries no document for (:func:`stems_delivery_reads`).
 
-    Only a capture this delivery reads gets its fresh stamp read. For each: a capture readable
-    when this mapping was built and unreadable now refuses by name (the reverse cannot occur: an
-    unreadable capture carries no GPS, so ``assign_plants`` never mapped it, and an unmapped
-    capture is never among what a delivery reads through predictions). A row that recorded a
-    plant position (:func:`assignment_is_attributed` true, with a ``distance_m``) refuses by
-    name when the capture's fresh GPS position no longer sits ``distance_m`` from any plant of
-    that name in the plant CSVs whose bytes this same call just verified, or when the fresh capture carries no GPS
-    position at all. When no verified plant CSV can answer for this capture's own recorded plant
-    (that plant's own CSV is itself among ``plant_csvs_unverified``), the position is disclosed
-    rather than compared against nothing: the recorded fact stands unrechecked, not confirmed
-    unchanged.
+    Only a capture this delivery reads gets its fresh stamp read. For each: a capture readable when
+    this mapping was built and unreadable now refuses by name. A row that recorded a plant position
+    (:func:`assignment_is_attributed` true, with a ``distance_m``) refuses by name when the
+    capture's fresh GPS position no longer sits ``distance_m`` from any plant of that name in the
+    plant CSVs whose bytes this same call just verified, or when the fresh capture carries no GPS
+    position at all. When that plant's own CSV is itself among ``plant_csvs_unverified``, the
+    position is disclosed rather than compared.
 
-    When every mapped capture of a date was read (``missing_stems`` empty and ``read_set`` equal
-    to the recorded stems :func:`assignment_is_attributed` calls attributed), the whole date's
-    identity (:func:`capture_identity`) is recomputed over every capture the date enumerates, the unmapped
-    ones (a raster, a band group) included, and compared against the record, refusing on a
-    mismatch; a capture verified only this way is not also listed in ``captures_unverified``, since
-    the digest just re-checked it. The refusal names the capture(s) whose own
-    :func:`capture_digests` entry moved (a band group's manifest rewritten in place, most usefully,
-    since nothing else names that case), not only the date, by comparing the record's per-capture
-    digests against a fresh recompute over the same enumeration. Under a partial read, that digest
-    does not run, so an in-place EXIF timestamp or band-group manifest change on a read capture goes
-    undetected whenever some other mapped capture of the same date was not read: the position and
-    readability checks above catch a moved plant or a capture gone unreadable, never a
-    same-position, same-readability change in place.
+    When every mapped capture of a date was read (``missing_stems`` empty and ``read_set`` equal to
+    the recorded stems :func:`assignment_is_attributed` calls attributed), the whole date's
+    identity (:func:`capture_identity`) is recomputed over every capture the date enumerates, the
+    unmapped ones (a raster, a band group) included, and compared against the record, refusing on a
+    mismatch and naming the capture(s) whose own :func:`capture_digests` entry moved; a capture
+    verified this way is not also listed in ``captures_unverified``. Under a partial read that
+    digest does not run, so an in-place EXIF timestamp or band-group manifest change on a read
+    capture goes undetected when some other mapped capture of the same date was not read.
 
     Never raises: returns ``{"refusal": str}`` for any of the above; otherwise
     ``{"captures_unverified": [...], "plant_csvs_unverified": [...]}``, entries in ``build.dates``
-    order and, within a date, sorted by name. A missing plant CSV is still disclosed in
-    ``plant_csvs_unverified`` as before; a rewritten one now refuses under this function's own
-    remedy (restore the file's registered bytes, or register the current file under a new
-    registry name, rebuild the mapping against it, and deliver under that name), composed here
-    rather than read from :func:`verify_registry_csv_bytes`, which reports the bytes fact only.
+    order and, within a date, sorted by name. A missing plant CSV is disclosed in
+    ``plant_csvs_unverified``; a rewritten one refuses (restore the file's registered bytes, or
+    register the current file under a new registry name, rebuild the mapping against it, and
+    deliver under that name).
     """
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.image_utils import (
@@ -1897,12 +1765,8 @@ def verify_mapping_inputs(
 def ungeoreferenced_capture_message(walked: str, unreadable: Sequence[str] = ()) -> str:
     """The refusal sentence for a walk whose captures carry no position this door reads.
 
-    ``walked`` names what was walked (the build passes ``images_root``; a delivery passes the
-    mapping's name and dataset root), so the same sentence composer serves both doors this
-    condition can refuse from. ``unreadable``, when given, opens the sentence by naming the
-    captures PIL could not open at all, before the position clause: a capture that could not be
-    read never carried a position to read either, and this says so rather than folding it into
-    "no position" as if it had been opened and found blank.
+    ``walked`` names what was walked. ``unreadable``, when given, opens the sentence by naming the
+    captures PIL could not open at all, before the position clause.
     """
     prefix = ""
     if unreadable:
@@ -1929,9 +1793,9 @@ class UngeoreferencedCaptureRefusal(Exception):
 
 class MappingDeliveryRefusal(Exception):
     """A phenology delivery cannot proceed from a named mapping; ``str(exc)`` is the caller-facing
-    message. ``status`` is the web door's HTTP status for it (400 by default, 404 for a mapping
-    that is not stored, 409 for a store-level problem reading it), unused by an MCP tool door,
-    which reports ``str(exc)`` in its own ``{"error": ...}`` shape instead."""
+    message. ``status`` is the HTTP status for it (400 by default, 404 for a mapping that is not
+    stored, 409 for a store-level problem reading it).
+    """
 
     def __init__(self, message: str, *, status: int = 400) -> None:
         super().__init__(message)
@@ -1941,24 +1805,19 @@ class MappingDeliveryRefusal(Exception):
 def resolve_delivery_mapping(
     project_root: Path | str, name: str, predictions_by_date: dict[str, str],
 ) -> tuple[MappingBuild, dict]:
-    """The two phenology doors' shared preamble: load the named mapping, refuse a
-    ``predictions_by_date`` date it does not cover, resolve the delivered buckets' one dataset
-    root and require it to carry the mapping's own minted dataset id, then verify the mapping's
-    recorded inputs against that resolved root for exactly the captures
-    ``predictions_by_date`` reads, so a dataset moved (or copied and the original renamed) after
-    registration still verifies without re-reading a delivery's own unread captures. A delivery
-    whose delivered dates attribute nothing (:func:`assignment_is_attributed` false for every one
-    of them, a date recorded with no capture at all included) refuses on the record's own
-    evidence, before ``verify_mapping_inputs`` re-reads anything, since a delivery that can
-    attribute nothing has nothing for a re-read to disclose about; the no-capture-at-all reason is
-    named only inside that same nothing-attributed scope, so a delivery naming a fully attributed
-    date beside an empty one still ships: the empty date names no plant at all, so it is simply
-    absent from every plant's own per-plant_phenology series rather than blocking the delivery.
+    """Load the named mapping, refuse a ``predictions_by_date`` date it does not cover, resolve the
+    delivered buckets' one dataset root and require it to carry the mapping's own minted dataset
+    id, then verify the mapping's recorded inputs against that resolved root for exactly the
+    captures ``predictions_by_date`` reads.
+
+    A delivery whose delivered dates attribute nothing (:func:`assignment_is_attributed` false for
+    every one of them, a date recorded with no capture at all included) refuses on the record's own
+    evidence, before ``verify_mapping_inputs`` re-reads anything. An empty date beside a fully
+    attributed one ships, absent from every plant's series.
+
     Returns the loaded build and :func:`verify_mapping_inputs`'s disclosure; raises
-    :class:`MappingDeliveryRefusal`, naming the remedy, for every case a delivery must not
-    proceed from, a ``StoreError`` reading the mapping store included, so a root whose state is
-    still in the file layout refuses with the store's own sentence rather than escaping as an
-    unhandled exception.
+    :class:`MappingDeliveryRefusal`, naming the remedy, for every case a delivery must not proceed
+    from, a ``StoreError`` reading the mapping store included.
     """
     from tcip_store import StoreError
 

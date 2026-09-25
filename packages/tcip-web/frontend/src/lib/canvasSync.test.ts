@@ -145,8 +145,8 @@ describe("buildAnnotateShapes", () => {
     expect(shapes[1].label).toBe("other");
   });
 
-  it("an in-progress drawing rides along as a dashed polyline in the active subject's colour", () => {
-    // The mirror must match the real canvas's InProgressPolygon stroke, the active subject's colour:
+  it("an in-progress drawing rides along as a dashed polyline in the active subject's color", () => {
+    // The mirror must match the real canvas's InProgressPolygon stroke, the active subject's color:
     // a divergence here is what capture_live_canvas would show that the breeder's own screen does not.
     const shapes = buildAnnotateShapes({
       ...base,
@@ -175,7 +175,7 @@ describe("buildAnnotateShapes", () => {
     expect(shapes.at(-1)).toMatchObject({ kind: "polyline", color: "#FFE7B1" });
   });
 
-  it("a pending cut start rides as an in_progress polyline labelled cut, start and cursor", () => {
+  it("a pending cut start rides as an in_progress polyline labeled cut, start and cursor", () => {
     const shapes = buildAnnotateShapes({
       ...base,
       cutStart: { point: [3, 4], color: "#123456" },
@@ -258,7 +258,7 @@ describe("buildAnnotateShapes", () => {
     expect(derived[0].dashed).toBe(true); // dashed = derived/read-only, not a real editable box
   });
 
-  it("pushes every ring of a multi-ring polygon, sharing its colour, labelled once", () => {
+  it("pushes every ring of a multi-ring polygon, sharing its color, labeled once", () => {
     // The agent's view of the canvas must not drop a region either: an occlusion-split subject_a is one
     // annotation drawn as two paths (render_canvas_state draws one path per shape entry).
     const multi = {
@@ -282,7 +282,7 @@ describe("buildAnnotateShapes", () => {
     expect(shapes).toHaveLength(2);
     expect(shapes.map((s) => s.points)).toEqual(multi.rings);
     expect(shapes.every((s) => s.color === "#FF0000" && s.tag === "gt")).toBe(true);
-    // Labelled once: a two-part subject_a is one subject_a, not two.
+    // Labeled once: a two-part subject_a is one subject_a, not two.
     expect(shapes.filter((s) => s.label === "subject_a")).toHaveLength(1);
   });
 
@@ -569,7 +569,7 @@ describe("buildReviewShapes", () => {
     const predShapes = shapes.filter((s) => s.tag === "pred");
     expect(predShapes).toHaveLength(1);
     expect(predShapes[0].admitted).toBe(true);
-    expect(predShapes[0].color).toBe(COLORS.tp); // outcome colour, never the active colour
+    expect(predShapes[0].color).toBe(COLORS.tp); // outcome color, never the active color
     expect(predShapes[0].dashed).toBeFalsy();
     // With ground truth hidden the canvas draws nothing for an unfocused tp and marks nothing,
     // so the mirror carries no shape for it either.
@@ -650,7 +650,7 @@ describe("buildReviewShapes", () => {
     expect(shapes.filter((s) => s.kind === "polygon")).toHaveLength(1);
   });
 
-  it("an occlusion-split prediction pushes every ring, in the same outcome colour", () => {
+  it("an occlusion-split prediction pushes every ring, in the same outcome color", () => {
     // A verdict on a two-part prediction is a verdict on both parts, so the agent's mirror of the
     // review canvas has to show both: one shape entry per ring, not just the first.
     const split = {
@@ -694,7 +694,7 @@ describe("buildReviewShapes", () => {
       ],
       image_status: "started",
     } as unknown as MatchesResponse;
-    const shapes = buildReviewShapes(split, COLORS, -1); // not focused: plain outcome colour
+    const shapes = buildReviewShapes(split, COLORS, -1); // not focused: plain outcome color
     expect(shapes).toHaveLength(2);
     expect(
       shapes.every((s) => s.kind === "polygon" && s.color === COLORS.fp && s.tag === "fp"),
@@ -713,7 +713,7 @@ describe("buildReviewShapes", () => {
     ]);
   });
 
-  it("draws the focused detection last so neighbours never bury it", () => {
+  it("draws the focused detection last so neighbors never bury it", () => {
     const shapes = buildReviewShapes(matches, COLORS, 0);
     expect(shapes.at(-1)!.tag).toBe("pred"); // the focused TP's overlay is on top
   });

@@ -22,7 +22,7 @@ def test_run_hyperparameter_search_threads_storage_path_and_writes_result(tmp_pa
                 "study_name": kw.get("study_name")}
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
-    tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path))
+    tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path), search_seed=0)
 
     # A unique study name + storage_path under output_dir were threaded into the search.
     assert captured["study_name"].startswith("hpo_")
@@ -46,7 +46,7 @@ def test_run_hyperparameter_search_resolves_direction_from_the_top_level_evaluat
     cfg["evaluation"] = {"selection_metric": "f1"}  # higher-is-better -> mode "max"
 
     nested = {**cfg, "training": {"evaluation": {"selection_metric": "loss"}}}
-    refused = tt.run_hyperparameter_search(base_config=nested, n_trials=1, output_dir=str(tmp_path))
+    refused = tt.run_hyperparameter_search(base_config=nested, n_trials=1, output_dir=str(tmp_path), search_seed=0)
     assert "error" in refused
     assert any("'training' is not a config section" in issue for issue in refused["issues"])
 
@@ -58,7 +58,7 @@ def test_run_hyperparameter_search_resolves_direction_from_the_top_level_evaluat
                 "study_name": kw.get("study_name")}
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
-    tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path))
+    tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path), search_seed=0)
 
     # metric is always the fixed composite name; mode alone carries the resolved direction.
     assert captured["metric"] == "objective"
@@ -76,7 +76,7 @@ def test_run_hyperparameter_search_defaults_storage_to_platform_root_when_no_out
     # Pin the platform root so the store lands under this tmp dir, not the real repo.
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
 
-    tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1)  # no output_dir
+    tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, search_seed=0)  # no output_dir
     assert (tmp_path / ".tcip" / "hpo").as_posix() in captured["storage_path"].replace("\\", "/")
 
 
@@ -103,7 +103,7 @@ def test_run_hyperparameter_search_stamps_a_running_manifest_and_namespaces_tria
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
     result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1,
-                        output_dir=str(tmp_path))
+                        output_dir=str(tmp_path), search_seed=0)
     study = result["study_name"]
 
     running = observed["while_running"]
@@ -122,7 +122,7 @@ def test_run_hyperparameter_search_stamps_a_running_manifest_and_namespaces_tria
     assert finished["result"]["best_params"] == {"lr": 0.1}
 
 
-def test_run_hyperparameter_search_honours_a_callers_study_name(tmp_path, real_hpo_base_config, monkeypatch):
+def test_run_hyperparameter_search_honors_a_callers_study_name(tmp_path, real_hpo_base_config, monkeypatch):
     """A caller that already minted its own sweep id (the Tuning route's launch, so its own
     registry entry, manifest and every sweep route agree on it) must have the real search,
     not a stand-in, write the manifest and the sweep directory under that same id."""
@@ -137,7 +137,7 @@ def test_run_hyperparameter_search_honours_a_callers_study_name(tmp_path, real_h
     given_id = "hpo-caller-supplied-id"
     result = tt.run_hyperparameter_search(
         base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
-        study_name=given_id,
+        study_name=given_id, search_seed=0
     )
 
     assert result["study_name"] == given_id
@@ -160,7 +160,7 @@ def test_run_hyperparameter_search_marks_the_manifest_failed_when_the_search_rai
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", exploding_search)
 
     with pytest.raises(RuntimeError):
-        tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path))
+        tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path), search_seed=0)
 
     manifest = ts.read(tt.sweep_manifest_key(captured["study_name"], str(tmp_path)))
     assert manifest["status"] == "failed"
@@ -180,8 +180,8 @@ def test_run_hyperparameter_search_refuses_before_minting_when_the_base_config_f
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = tt.run_hyperparameter_search(base_config={"model_source": {"builder": "not.a:real_builder"}},
-                        n_trials=1, output_dir=str(tmp_path))
+    result = tt.run_hyperparameter_search(base_config={"model_source": {"builder": "not.a:real_builder", "task": "detection"}},
+                        n_trials=1, output_dir=str(tmp_path), search_seed=0)
 
     assert "error" in result
     assert not ran
@@ -208,7 +208,7 @@ def test_run_hyperparameter_search_checks_a_swept_placeholder_axis_at_its_resolv
                     "data": real_hpo_base_config["data"]},
         param_space={"model_source.builder": {
             "type": "categorical", "choices": ["tests.bespoke_models:build_bespoke_detection"]}},
-        n_trials=1, output_dir=str(tmp_path),
+        n_trials=1, output_dir=str(tmp_path), search_seed=0
     )
 
     assert "error" not in result
@@ -234,7 +234,7 @@ def test_run_hyperparameter_search_refuses_when_every_sampled_value_of_a_swept_a
                                       "builder_kwargs": {"num_classes": 1}, "task": "detection"},
                     "data": real_hpo_base_config["data"]},
         param_space={"model_source.builder": {"type": "categorical", "choices": ["still:bad"]}},
-        n_trials=1, output_dir=str(tmp_path),
+        n_trials=1, output_dir=str(tmp_path), search_seed=0
     )
 
     assert "error" in result
@@ -264,7 +264,7 @@ def test_run_hyperparameter_search_refuses_when_a_non_first_swept_choice_fails_p
         param_space={"model_source.builder": {
             "type": "categorical",
             "choices": ["tests.bespoke_models:build_bespoke_detection", "still:bad"]}},
-        n_trials=1, output_dir=str(tmp_path),
+        n_trials=1, output_dir=str(tmp_path), search_seed=0
     )
 
     assert "error" in result
@@ -292,7 +292,7 @@ def test_run_hyperparameter_search_admits_a_swept_axis_whose_every_choice_resolv
             "type": "categorical",
             "choices": ["tests.bespoke_models:build_bespoke_detection",
                         "tests.bespoke_models:build_bare_score_thresh_detector"]}},
-        n_trials=1, output_dir=str(tmp_path),
+        n_trials=1, output_dir=str(tmp_path), search_seed=0
     )
 
     assert "error" not in result
@@ -311,7 +311,7 @@ def test_run_hyperparameter_search_carries_best_value_state_into_the_completed_m
                 **stored_number("best_value", float("nan"))}
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
-    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path))
+    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path), search_seed=0)
 
     manifest = ts.read(tt.sweep_manifest_key(result["study_name"], str(tmp_path)))
     assert manifest["result"]["best_value"] is None
@@ -330,7 +330,7 @@ def test_run_hyperparameter_search_passes_agent_search_and_scheduler_choices(
 
     tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=3,
                output_dir=str(tmp_path), search_alg="bayesopt", scheduler="median",
-               max_concurrent=2)
+               max_concurrent=2, search_seed=0)
     assert captured["search_alg"] == "bayesopt"
     assert captured["scheduler"] == "median"
     assert captured["max_concurrent"] == 2

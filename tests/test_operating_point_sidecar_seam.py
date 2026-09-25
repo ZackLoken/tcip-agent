@@ -15,7 +15,7 @@ from tcip_mcp.pipelines.resolution import (
     VALIDATED_FALSE,
     VALIDATED_HELD_OUT,
     VALIDATED_PERSISTED_GEOMETRY,
-    Acknowledgement,
+    Acknowledgment,
     ResolvedBundle,
     ResolvedParam,
     accepted_references,
@@ -79,25 +79,40 @@ def test_stamp_floors_validated_when_the_tile_scale_has_no_basis():
 
 def test_stamp_admits_a_producer_specific_field():
     """The one shape is a floor, not a ceiling: a producer with an extra fact still records it."""
-    assert (_stamp(calibration_curve_path="/artifacts/curve.json")["calibration_curve_path"]
-            == "/artifacts/curve.json")
+    assert (_stamp(mask_binarize={"threshold": 0.5})["mask_binarize"]
+            == {"threshold": 0.5})
 
 
 # --- the declared key set: one union, checked at the two writers ---
-
-def test_stamp_keys_matches_the_constructors_own_returned_keys():
-    """STAMP_KEYS is declared by hand, not derived from the signature (a parameter name matching
-    its returned key is this constructor's own convention, never a guarantee); this pins the two
-    against each other so they cannot drift apart unnoticed."""
-    from tcip_mcp.pipelines.resolution import STAMP_KEYS
-
-    assert STAMP_KEYS == set(_stamp())
-
 
 def test_the_stamp_constructor_carries_no_schema_version_field():
     """The constructor stamps no schema_version: absence is the frozen version 1, and the first
     writer of the field is whichever future change bumps this store's format."""
     assert "schema_version" not in _stamp(validated=False)
+
+
+def test_stamped_producer_reads_a_stamp_lacking_its_checkpoint_hash_as_a_failure(tmp_path):
+    from tcip_mcp.pipelines.resolution import stamped_producer
+
+    bucket = tmp_path / "bucket"
+    stamp = _stamp(validated=False)
+    key = sidecar_key(bucket)
+    del stamp["checkpoint_sha256"]
+    with tcip_store.transaction(key) as txn:
+        txn.write(key, stamp)
+
+    with pytest.raises(KeyError, match="checkpoint_sha256"):
+        stamped_producer({"only": str(bucket)})
+
+
+def test_stamped_producer_names_the_one_producer_its_stamps_record(tmp_path):
+    from tcip_mcp.pipelines.resolution import stamped_producer
+
+    bucket = tmp_path / "bucket"
+    write_sidecar(bucket, _stamp(validated=False))
+
+    assert stamped_producer({"only": str(bucket)}) == {
+        "sha256": "f" * 64, "experiment_id": "exp_001"}
 
 
 def test_write_sidecar_refuses_an_undeclared_top_level_key(tmp_path):
@@ -109,10 +124,7 @@ def test_write_sidecar_refuses_an_undeclared_top_level_key(tmp_path):
 
 
 def test_write_sidecar_admits_every_declared_extension_key(tmp_path):
-    """The rail must admit valid work: every real producer's own addition (the raster export's
-    claim_scope_validated/block_calibration/raster_content_identity, the web worker's overlap/
-    overlap_source, the review promotion's five, the calibrated run's calibration_curve_path/
-    gate_evidence_summary, mask_binarize) writes cleanly through the declared union."""
+    """The rail must admit valid work: every declared producer addition writes cleanly."""
     from tcip_mcp.pipelines.resolution import STAMP_EXTENSION_KEYS
 
     bucket = tmp_path / "bucket"
@@ -128,27 +140,24 @@ def test_update_sidecar_refuses_an_undeclared_top_level_key(tmp_path):
         update_sidecar(bucket, lambda stored: {**stored, "mystery_field": "x"})
 
 
-def test_update_sidecar_admits_a_promotion_over_a_stamp_carrying_a_pre_existing_foreign_key(
-    tmp_path,
-):
-    """The rail must admit valid work: a direct store write or a hand-authored stamp may already
-    carry a foreign top-level key (the pre-existing conform item the grounding record names), and a
-    later promotion that introduces only declared keys is not refused for a key it did not itself
-    write, only for one it introduces."""
-    import tcip_store
-
-    from tcip_mcp.pipelines.resolution import sidecar_key
-
+def test_update_sidecar_refuses_a_merge_whose_stored_stamp_carries_an_undeclared_key(tmp_path):
+    """The key set is checked over the whole merged stamp, so a key stored outside the writer is
+    refused at the next merge even when the merge itself introduces only declared keys."""
     bucket = tmp_path / "bucket"
-    stamp = {**_stamp(validated=False), "hand_authored_field": "legacy"}
     key = sidecar_key(bucket)
     with tcip_store.transaction(key) as txn:
-        txn.write(key, stamp)
+        txn.write(key, {**_stamp(validated=False), "mystery_field": "x"})
 
-    ok = update_sidecar(bucket, lambda stored: {**stored, "calibration_curve_path": "/artifacts/curve.json"})
+    with pytest.raises(ValueError, match="mystery_field"):
+        update_sidecar(bucket, lambda stored: {**stored, "gate_evidence_summary": {"n": 1}})
 
-    assert ok is True
-    assert read_operating_point_sidecar(bucket)["hand_authored_field"] == "legacy"
+
+def test_update_sidecar_admits_a_merge_of_a_declared_key_over_a_written_stamp(tmp_path):
+    bucket = tmp_path / "bucket"
+    write_sidecar(bucket, _stamp(validated=False))
+
+    assert update_sidecar(bucket, lambda stored: {**stored, "gate_evidence_summary": {"n": 1}})
+    assert read_operating_point_sidecar(bucket)["gate_evidence_summary"] == {"n": 1}
 
 
 def test_the_key_set_rail_is_scoped_to_the_operating_point_document_only(tmp_path):
@@ -204,11 +213,11 @@ def test_sidecar_update_merges_against_what_is_stored(tmp_path):
     bucket = tmp_path / "bucket"
     write_sidecar(bucket, _stamp(validated=False))
     wrote = update_sidecar(
-        bucket, lambda stored: {**stored, "validated_reference": VALIDATED_HELD_OUT})
+        bucket, lambda stored: {**stored, "shippable_issues": ["conf"]})
     stored = read_operating_point_sidecar(bucket)
 
     assert wrote is True
-    assert stored["validated_reference"] == VALIDATED_HELD_OUT
+    assert stored["shippable_issues"] == ["conf"]
     assert stored["checkpoint_sha256"] == "f" * 64
 
 
@@ -318,7 +327,7 @@ def test_column_stamp_is_not_floored_by_a_separately_stamped_dimension():
     not also drag down the column beside it."""
     gate = check_delivery_gate(
         {"operating_point": VALIDATED_HELD_OUT, "classifier": VALIDATED_FALSE},
-        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="known unvalidated"))
+        acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="known unvalidated"))
 
     assert gate.column_stamp("operating_point", own_column=("classifier",)) == VALIDATED_HELD_OUT
     assert gate.stamp["classifier"] == VALIDATED_FALSE

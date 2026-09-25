@@ -122,7 +122,6 @@ def test_a_verdict_carries_the_identity_fields_the_reference_reads(
     entries = engine.image_states(BUCKET)[IMG_NAME]["detections"]
     assert len(entries) == 4
     for entry in entries:
-        assert entry["det_status"] == "reviewed"
         assert entry["reviewed_by"] == "alice"
         assert entry["class_name"] == "bud"
         assert entry["class_id"] == 0

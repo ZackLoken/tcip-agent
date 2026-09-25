@@ -10,6 +10,8 @@ the entry point itself and not only by in-process calls.
 """
 from __future__ import annotations
 
+from tests._trait_fixtures import complete_spec_record
+
 import os
 import time
 from pathlib import Path
@@ -47,7 +49,7 @@ def _seed_bare_trait(name: str) -> None:
     specs_dir = resolve_state(_TRAIT_SPECS_RELPATH)
     ts.replace(
         trait_spec_key(specs_dir, name),
-        {"name": name, "delivers": ["leaf_length"], "schema_version": TRAIT_SPEC_SCHEMA_VERSION},
+        complete_spec_record({"name": name, "delivers": ["leaf_length"], "schema_version": TRAIT_SPEC_SCHEMA_VERSION}),
         expect=ts.Version.ABSENT,
     )
 
@@ -58,7 +60,7 @@ def _wait_terminal(run_id: str, seconds: float) -> str:
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         status = training_tools.monitor_training(run_id)
-        if status.get("status") in ("completed", "failed", "cancelled"):
+        if status.get("status") in ("completed", "failed", "canceled"):
             return str(status.get("status"))
         time.sleep(0.5)
     pytest.fail("timed out waiting for the training subprocess to reach a terminal state")

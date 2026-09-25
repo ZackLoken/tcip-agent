@@ -1,27 +1,23 @@
-"""Pydantic v2 config schemas for structural/type validation.
-
-Used by ``training_tools.preflight_config`` to surface type/structure errors. The
-runtime trainer still reads the raw config dict; these schemas are validation-only.
+"""Pydantic v2 config schemas for structural/type validation; the runtime trainer reads the raw
+config dict.
 
 A training config has one shape: every key ``generic_trainer.train()`` reads (``batch_size``,
 ``stages``, ``mixed_precision``, ``device``, ``seed``, ``evaluation``, ...) sits at the top level
-of the config, beside ``model_source`` and ``data``. There is no nested ``training`` section and
-no precedence rule between placements: a config carrying a ``training`` key is refused by name,
-since a key under it would otherwise be read by nothing and the run would train at the
-trainer's defaults in silence.
+of the config, beside ``model_source`` and ``data``. A config carrying a ``training`` key is
+refused by name.
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 
 class StageSpec(BaseModel):
     """One progressive-unfreeze step: the trainer reads ``freeze_to`` and ``epochs``, while the
-    learning rate comes from the top-level ``optimizer`` block, never per stage. Extra keys are
-    allowed, so a config carrying a per-stage ``lr`` validates and the value is ignored."""
+    learning rate comes from the top-level ``optimizer`` block, never per stage. Any other key,
+    a per-stage ``lr`` included, is refused by name."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
     epochs: int
     freeze_to: int | None = None
 
@@ -76,13 +72,17 @@ NESTED_TRAINING_SECTION_REFUSAL = (
 )
 
 
+DEFAULT_BATCH_SIZE = 2
+"""Images per training step when a config states no ``batch_size``."""
+
+
 class TrainConfigSchema(BaseModel):
     """The one training config shape: trainer keys at the top level, no nested section."""
 
     model_config = ConfigDict(extra="allow", protected_namespaces=())
     model_source: ModelSourceSchema | None = None
     data: dict | None = None
-    batch_size: int = 2
+    batch_size: int = Field(DEFAULT_BATCH_SIZE, ge=1)
     stages: list[StageSpec] | None = None
     evaluation: dict | None = None
 

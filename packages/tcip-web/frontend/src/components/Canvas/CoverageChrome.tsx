@@ -311,7 +311,7 @@ export function CoverageChrome(props: {
 
   function cancel() {
     setConfirmPending(false);
-    setAnnouncement("Attestation cancelled.");
+    setAnnouncement("Attestation canceled.");
   }
 
   function pressReplace() {
@@ -330,7 +330,7 @@ export function CoverageChrome(props: {
 
   function cancelReplace() {
     setReplaceArmed(false);
-    setAnnouncement("Replace cancelled.");
+    setAnnouncement("Replace canceled.");
   }
 
   let label = "";

@@ -13,6 +13,8 @@ constructed to prove the structural invariant.
 
 from __future__ import annotations
 
+from tests._trait_fixtures import complete_spec_record
+
 from pathlib import Path
 
 import pytest
@@ -45,7 +47,7 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
         # No majority alias: crops.yml names no single "most blooms open" date for currant, unlike
         # bud_opening's bud_majority_date. Left empty rather than copied from bud_opening.
         "majority_milestone": "",
-        "majority_provisional": False,
+        "crossing_unconfirmed": False,
         "phenology_prefix": "bloom",
         "majority_label": "",
         "sliver_policy": "class_avg_size",
@@ -56,6 +58,7 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
                  "generalizes to a second trait. Not a domain-expert-confirmed measurement.",
         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION,
     }
+    spec = complete_spec_record(spec)
     ts.replace(traits.trait_spec_key(specs_dir, "currant_bloom"), spec, expect=ts.Version.ABSENT)
     # A second trait needs its own confirmed meaning too: nothing about the record is bud_opening-shaped.
     from tests._operationalization_fixtures import seed_confirmed_crossing
@@ -80,7 +83,7 @@ def _currant_bloom_fixture(
 
     _seed_currant_bloom_trait(tmp_path)
     dates = ["2026-02-11", "2026-02-25", "2026-03-10", "2026-03-24"][: len(fractions)]
-    # A covered-bucket key is relative to a dataset root, recognised by its annotations/predictions segment.
+    # A covered-bucket key is relative to a dataset root, recognized by its annotations/predictions segment.
     root = tmp_path / "ds"
     mapping, preds = {}, {}
     for date_str, frac in zip(dates, fractions):

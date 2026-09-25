@@ -27,13 +27,9 @@ EMPTY_SCORES = np.zeros((0,), dtype=np.float32)
 class MaskPatch(NamedTuple):
     """One detection's instance-seg mask, kept tile-local rather than expanded to a full-raster
     canvas: ``patch`` is a small dense soft-mask array (tile-sized as a per-tile model forward
-    produces it), ``offset_x``/``offset_y`` place its ``[0, 0]``
-    pixel in full-image (or full-raster) pixel space. A consumer that needs full-image pixel
-    coordinates (a polygon for export, a composited canvas) adds the offset at the point of use,
-    the same "defer the expansion" convention ``export.py`` already uses for the untiled path's own
-    dense masks (see ``mask_to_polygon_points``): this representation just makes that deferral
-    mandatory instead of optional, since a tiled source raster can be too large to ever hold one
-    full-size mask per detection.
+    produces it), ``offset_x``/``offset_y`` place its ``[0, 0]`` pixel in full-image (or
+    full-raster) pixel space. A consumer that needs full-image pixel coordinates adds the offset at
+    the point of use.
     """
 
     patch: np.ndarray
@@ -69,10 +65,9 @@ def tile_positions(height: int, width: int, tile_size: int, stride: int) -> list
 def tile_within_extent(tile_x: int, tile_y: int, tile_size: int, width: int, height: int) -> bool:
     """Whether a tile's full rect fits inside the image's real (unpadded) extent.
 
-    ``tile_positions`` only excludes an origin that falls entirely in the padding region; a
-    tile whose origin is in-bounds can still extend past ``width``/``height`` on its far edge
-    (the case ``crop_pad_tile`` zero-pads). A caller that needs every kept tile fully real
-    (no synthetic padding pixels), such as a spatial train/val split, filters on this first.
+    ``tile_positions`` only excludes an origin that falls entirely in the padding region; a tile
+    whose origin is in-bounds can still extend past ``width``/``height`` on its far edge (the case
+    ``crop_pad_tile`` zero-pads).
     """
     return tile_x + tile_size <= width and tile_y + tile_size <= height
 
@@ -102,24 +97,17 @@ def region_halo(
     rect: tuple[int, int, int, int], mosaic_width: int, mosaic_height: int,
     tile_size: int, overlap: float,
 ) -> tuple[tuple[int, int, int, int], tuple[int, int, int, int]]:
-    """The ``(haloed_rect, inner_rect)`` pair for tiled inference over one sub-region of a
-    larger mosaic (a block-aware calibration/holdout region), each a half-open pixel rect.
+    """The ``(haloed_rect, inner_rect)`` pair for tiled inference over one sub-region of a larger
+    mosaic (a block-aware calibration/holdout region), each a half-open pixel rect.
 
-    ``halo = ceil((tile_size - stride) / 2)`` is :func:`reconstruct_core`'s own ``margin``,
-    rounded up to a whole pixel: the minimum context production tiling already guarantees at
-    every tile's edge from its neighbor, never a separately chosen, larger buffer. Expanding
-    ``rect`` by ``halo`` on every side (clipped to the mosaic's own ``(0, 0, mosaic_width,
-    mosaic_height)`` bounds) restores exactly that minimum around the sub-region's own boundary.
-    A caller runs tiled inference (``predict_tiled``) over a ``_RegionView`` on the returned
-    haloed rect, then keeps only detections whose box center lands in the returned inner rect
-    (``rect`` unchanged) and clips GT the same way, discarding the halo band from the scored
-    result, never from the pixels the model actually saw.
+    ``halo = ceil((tile_size - stride) / 2)`` is :func:`reconstruct_core`'s own ``margin``, rounded
+    up to a whole pixel. ``rect`` is expanded by ``halo`` on every side, clipped to the mosaic's
+    own ``(0, 0, mosaic_width, mosaic_height)`` bounds; the inner rect is ``rect`` unchanged. A
+    caller runs tiled inference over the haloed rect and keeps only detections (and GT) whose box
+    center lands in the inner rect.
 
     This bounds, but does not eliminate, a small perimeter bias at the inner rect's own edge (see
-    :func:`reconstruct_core`'s own docstring): a detection near that edge still sees only
-    production's minimum guaranteed context, not the fuller context an interior detection sees
-    from tiles further beyond it. Kept as designed; shrinking it further is not this function's
-    job.
+    :func:`reconstruct_core`).
     """
     x0, y0, x1, y1 = rect
     halo = math.ceil((tile_size - compute_stride(tile_size, overlap)) / 2.0)
@@ -137,14 +125,10 @@ def clip_boxes_to_tile(
     """Intersect full-image-px boxes with a ``tile_w`` x ``tile_h`` tile; drop seam slivers; emit
     tile-local xyxy.
 
-    A box clipped by the tile edge is dropped only when the *visible* (clipped) part is a sliver:
-    its characteristic size ``sqrt(iw*ih) < min_box_size``. ``min_box_size`` is derived per dataset
-    from the class's average box size (a partial object counts unless it's a tiny sliver; see
-    ``TiledDetectionDataset``), not a fixed fraction. Boxes fully inside the tile are always kept.
-
-    ``tile_w``/``tile_h`` need not be equal: every square caller (a sliding-window training/
-    inference tile) passes ``tile_w == tile_h == tile_size``, and the rectangular case exists for
-    a haloed calibration/holdout block, whose own extent need not be square.
+    A box clipped by the tile edge is dropped only when the visible (clipped) part is a sliver: its
+    characteristic size ``sqrt(iw*ih) < min_box_size``. ``min_box_size`` is derived per dataset
+    from the class's average box size (see ``TiledDetectionDataset``). Boxes fully inside the tile
+    are always kept. ``tile_w``/``tile_h`` need not be equal.
     """
     boxes = np.asarray(boxes)
     labels = np.asarray(labels)
@@ -176,13 +160,11 @@ def clipped_boxes_per_tile(
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     """:func:`clip_boxes_to_tile` for every position at once.
 
-    Result ``i`` equals ``clip_boxes_to_tile(boxes, labels, *positions[i], ...)`` exactly
-    (values, dtypes, ordering, fresh arrays), but the cost scales with the box-tile incidences
-    rather than positions times boxes: each box's candidate tile rows/columns come from one
-    ``searchsorted`` over the distinct origins, and only tiles with a candidate pay a clip call.
-    The candidate range is a strict superset of visibility, so :func:`clip_boxes_to_tile` stays
-    the one authority on what a tile keeps. ``positions`` is a :func:`tile_positions` result:
-    distinct origins on a regular grid.
+    Result ``i`` equals ``clip_boxes_to_tile(boxes, labels, *positions[i], ...)`` exactly (values,
+    dtypes, ordering, fresh arrays), but the cost scales with the box-tile incidences rather than
+    positions times boxes: each box's candidate tile rows/columns come from one ``searchsorted``
+    over the distinct origins, and only tiles with a candidate pay a clip call. ``positions`` is a
+    :func:`tile_positions` result: distinct origins on a regular grid.
     """
     n_pos = len(positions)
     boxes = np.asarray(boxes)
@@ -291,11 +273,8 @@ def reconstruct_core(
     ``per_tile_masks[i]`` (optional), when given, is the ``[N_i, tile_size, tile_size]`` tile-local
     soft-mask stack for tile ``i``, same order/length as ``per_tile_boxes[i]``. A surviving
     detection's mask travels with it (as a :class:`MaskPatch`, still tile-local, offset by the
-    tile's own full-image origin, never expanded to a full-image canvas here); a detection dropped
-    by the center-in-core check or never returned from a tile drops its mask too, so there is never
-    an orphaned mask for a box that did not survive. Returns a 4-tuple (boxes, scores, labels,
-    masks) when ``per_tile_masks`` is given, else the original 3-tuple, byte-identical to the
-    boxes-only behavior every existing caller of this function already depends on.
+    tile's own full-image origin); a dropped detection drops its mask too. Returns a 4-tuple
+    (boxes, scores, labels, masks) when ``per_tile_masks`` is given, else a 3-tuple.
     """
     margin = (tile_size - stride) / 2.0
     collect_masks = per_tile_masks is not None
@@ -419,19 +398,15 @@ def global_merge(
     per_det_masks: list[MaskPatch] | None = None,
 ) -> (tuple[np.ndarray, np.ndarray, np.ndarray]
       | tuple[np.ndarray, np.ndarray, np.ndarray, list[MaskPatch]]):
-    """Cross-tile Non-Max *Merging*: union overlapping same-class boxes (bbox hull, max score)
-    instead of suppressing the lower-score one, recovering an object split across a tile seam
-    into two partial boxes (SAHI's NMM). Returns merged ``(boxes, scores, labels)``, new boxes,
-    not a subset of indices like :func:`global_nms`, so callers consume the arrays directly.
+    """Cross-tile Non-Max Merging: union overlapping same-class boxes (bbox hull, max score)
+    instead of suppressing the lower-score one, recovering an object split across a tile seam into
+    two partial boxes (SAHI's NMM). Returns merged ``(boxes, scores, labels)``, new boxes, not a
+    subset of indices like :func:`global_nms`.
 
     ``per_det_masks`` (optional), parallel to ``boxes``, carries each input detection's tile-local
     :class:`MaskPatch`. When given, every merged cluster's absorbed patches are composited (see
     :func:`_composite_mask_patches`) into one new :class:`MaskPatch` sized to the merged box's own
-    hull, and returned as a 4th value parallel to the merged boxes; the cluster membership used to
-    do that compositing is exactly the ``used``/absorption walk this function already performs, so
-    a caller never has to reconstruct it from a separately-exposed group index. Omitting
-    ``per_det_masks`` returns the original 3-tuple, byte-identical to the boxes-only behavior every
-    existing caller of this function already depends on.
+    hull, returned as a 4th value parallel to the merged boxes. Omitting it returns a 3-tuple.
     """
     boxes = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
     scores = np.asarray(scores, dtype=np.float64)

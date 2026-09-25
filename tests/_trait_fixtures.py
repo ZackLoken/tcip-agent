@@ -15,7 +15,16 @@ that distinction rather than reusing one string for both.
 
 from __future__ import annotations
 
-from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec
+from typing import Any, Mapping
+
+from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec, _encode_spec
+
+
+def complete_spec_record(partial: Mapping[str, Any]) -> dict[str, Any]:
+    """``partial`` over the complete record the platform's own encoder writes for a spec of that
+    name: every field a stored spec states, each one ``partial`` does not name at the authoring
+    default ``author_trait_spec`` would have written."""
+    return {**_encode_spec(TraitSpec(name=partial.get("name", ""))), **partial}
 
 BUD_OPENING = TraitSpec(
     name="bud_opening",
@@ -28,7 +37,7 @@ BUD_OPENING = TraitSpec(
     milestone_fractions=(0.05, 0.50, 0.95),
     milestone_on="positive_fraction",
     majority_milestone="95per",
-    majority_provisional=True,
+    crossing_unconfirmed=True,
     phenology_prefix="bud",
     majority_label="majority",
     sliver_policy="class_avg_size",

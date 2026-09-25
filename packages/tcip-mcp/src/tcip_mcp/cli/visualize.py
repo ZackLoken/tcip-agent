@@ -1,14 +1,12 @@
-"""Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid, from the
+r"""Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid, from the
 command line.
 
-The demoted twin of ``vision_tools.visualize``: one entry point for the common renders, saved to
-``.tcip/artifacts/viz/``, path returned for a human to read. It writes an artifact and carries a
-platform audit line, so it stays a command rather than a bare library call: --project (or
-$TCIP_STATE_ROOT) is required, since both land under it.
+Wraps ``vision_tools.visualize``: saved to ``.tcip/artifacts/viz/``, path returned. --project (or
+$TCIP_STATE_ROOT) is required, since the artifact and the platform audit line land under it.
 
 Usage:
     tcip visualize --source annotations --path <image.jpg> \
-        --project <platform_root> [--task detect] [--class-names leaf,fruit,bud] \
+        --project <platform_root> [--task detect] [--class-names fruit,shoot] \
         [--conf-threshold <default>] [--iou-threshold 0.5] [--n 16]
 
 --source is one of 'annotations' (path = image file), 'predictions' (path = image file),
@@ -37,7 +35,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                              "Required (or set $TCIP_STATE_ROOT).")
     parser.add_argument("--task", default="detect", choices=["detect", "segment"])
     parser.add_argument("--class-names", default="",
-                        help="Comma-separated class names (e.g. 'leaf,fruit,bud').")
+                        help="Comma-separated class names (e.g. 'fruit,shoot').")
     parser.add_argument("--conf-threshold", type=float, default=None,
                         help="Minimum confidence; filters displayed predictions (source="
                              "predictions) and the predictions matched against GT (source="
@@ -54,13 +52,12 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
     bind_default()
 
-    from tcip_mcp.tools.vision_tools import DEFAULT_CONF, visualize
+    from tcip_mcp.tools.vision_tools import visualize
 
-    conf_threshold = args.conf_threshold if args.conf_threshold is not None else DEFAULT_CONF
+    stated = {} if args.conf_threshold is None else {"conf_threshold": args.conf_threshold}
     result = visualize(
         args.source, args.path, task=args.task, class_names=args.class_names,
-        conf_threshold=conf_threshold, iou_threshold=args.iou_threshold, n=args.n,
-    )
+        iou_threshold=args.iou_threshold, n=args.n, **stated)
     print(json.dumps(result, indent=2))
     return 1 if "error" in result else 0
 

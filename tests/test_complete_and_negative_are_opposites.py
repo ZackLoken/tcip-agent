@@ -29,8 +29,8 @@ def _box(subject: str, x1: float, y1: float, x2: float, y2: float) -> Annotation
 
 
 @pytest.fixture
-def labelled_dataset(tmp_path: Path) -> Path:
-    """Three labelled images carrying different subjects, and one image with no label file."""
+def labeled_dataset(tmp_path: Path) -> Path:
+    """Three labeled images carrying different subjects, and one image with no label file."""
     labels = tmp_path / "annotations"
     labels.mkdir()
     write_annotations(
@@ -73,11 +73,11 @@ def _read_back(client: TestClient, root: Path, subject: str) -> dict[str, str]:
 
 
 def test_an_image_finished_with_content_never_reads_back_as_a_confirmed_negative(
-    client: TestClient, labelled_dataset: Path
+    client: TestClient, labeled_dataset: Path
 ) -> None:
     """Content for the subject makes a finished image ``complete``; content belonging only to some
     other subject leaves it empty for this one, which is what a confirmed negative means."""
-    root = labelled_dataset
+    root = labeled_dataset
     images = ["img_buds.jpg", "img_bush.jpg", "img_blank.jpg", "img_missing.jpg"]
     derived = _derive(client, root, "bud", images,
                       ["img_buds.jpg", "img_bush.jpg", "img_blank.jpg"])
@@ -96,11 +96,11 @@ def test_an_image_finished_with_content_never_reads_back_as_a_confirmed_negative
 
 
 def test_one_image_is_a_negative_for_one_subject_and_finished_for_another(
-    client: TestClient, labelled_dataset: Path
+    client: TestClient, labeled_dataset: Path
 ) -> None:
     """A confirmation is a statement about one subject on one image: the bush image is a bud
     negative while it is a finished bush image, and the bud image is the mirror of that."""
-    root = labelled_dataset
+    root = labeled_dataset
     images = ["img_buds.jpg", "img_bush.jpg"]
     for subject in ("bud", "bush"):
         _store(client, root, subject, _derive(client, root, subject, images, images))

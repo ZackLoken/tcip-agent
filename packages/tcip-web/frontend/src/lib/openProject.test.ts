@@ -48,10 +48,10 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks());
 
 describe("openProjectByName", () => {
-  it("opens on the newest LABELLED date, not the newest date (which would be blank)", async () => {
+  it("opens on the newest LABELED date, not the newest date (which would be blank)", async () => {
     const p = project({
       name: "hz",
-      // Agent just ingested a still-unlabelled 2026-03-24; labels live on 2026-02-11.
+      // Agent just ingested a still-unlabeled 2026-03-24; labels live on 2026-02-11.
       dates: ["2026-02-11", "2026-03-24"],
       subjects: ["bush", "subject_a"], // flat list would pick "bush"
       models: ["baseline"],
@@ -78,7 +78,7 @@ describe("openProjectByName", () => {
     expect(arg.model_name).toBe("baseline");
   });
 
-  it("falls back to the newest date when nothing is labelled yet (empty project)", async () => {
+  it("falls back to the newest date when nothing is labeled yet (empty project)", async () => {
     const p = project({
       name: "fresh",
       dates: ["2026-02-11", "2026-03-24"],
@@ -101,11 +101,11 @@ describe("openProjectByName", () => {
     await openProjectByName("fresh");
 
     const arg = vi.mocked(api.dataset.select).mock.calls[0][0];
-    expect(arg.date).toBe("2026-03-24"); // newest overall (nothing labelled to prefer)
+    expect(arg.date).toBe("2026-03-24"); // newest overall (nothing labeled to prefer)
     expect(arg.subject).toBeNull();
   });
 
-  it("uses the labelled subject/model when the default date has them", async () => {
+  it("uses the labeled subject/model when the default date has them", async () => {
     const p = project({
       name: "hz2",
       dates: ["2026-02-11"],

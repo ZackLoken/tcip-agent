@@ -20,17 +20,19 @@ import {
   type DeliveryEventRecord,
   type DeliveryGateRefusal,
   type ExportCountCsvHeaders,
-  type ExportCountCsvRequest,
-  type ExportCsvRequest,
   type OperationalizationRecord,
   type OperationalizationRefusal,
-  type PhenologyRequest,
   type OnsetRow,
   type PerPlantRow,
   type PlantMappingSummary,
-  type PlantMappingTolerance,
   type TraitSpecStatementRecord,
 } from "@/api/inference";
+import type {
+  ExportCountCsvPayload,
+  ExportCsvPayload,
+  MatchTolerance,
+  PhenologyPayload,
+} from "@/api/types.generated";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
 import { flatStatementFields, StatementPanel } from "@/components/StatementPanel";
 import { TabHeading } from "@/components/TabHeading";
@@ -49,11 +51,10 @@ function recordKey(record: { trait: string; delivery_kind: string }): string {
   return `${record.trait}::${record.delivery_kind}`;
 }
 
-// build_mapping's own four nn_tolerance_m sources, in the breeder's words; a source string this
+// resolve_nn_tolerance_m's own three sources, in the breeder's words; a source string this
 // map does not know renders as its own raw string.
 const TOLERANCE_SOURCE_PHRASES: Record<string, string> = {
   grid_pitch: "derived from the plot's grid pitch",
-  fallback: "the fallback, since fewer than two plants had positions",
   stated: "the stated value",
   stated_capped: "the stated value, capped to the grid pitch",
 };
@@ -360,7 +361,7 @@ export function ResultsTab() {
   // Off by default: a rebuild a delivery event still cites answers 409 unless this is sent true.
   const [supersedeMapping, setSupersedeMapping] = useState(false);
   const [buildSummary, setBuildSummary] = useState<PlantMappingSummary | null>(null);
-  const [buildTolerance, setBuildTolerance] = useState<PlantMappingTolerance | null>(null);
+  const [buildTolerance, setBuildTolerance] = useState<MatchTolerance | null>(null);
   const [buildMaxMatchDistance, setBuildMaxMatchDistance] = useState<number | null>(null);
   const [buildMsg, setBuildMsg] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
@@ -371,7 +372,7 @@ export function ResultsTab() {
   const [loading, setLoading] = useState<boolean>(false);
   // The exact request the displayed numbers came from: the CSV door recomputes from these inputs
   // rather than being handed the rows, so export and screen share one producer.
-  const [lastRequest, setLastRequest] = useState<PhenologyRequest | null>(null);
+  const [lastRequest, setLastRequest] = useState<PhenologyPayload | null>(null);
   // Reconciled evidence for what is currently displayed. `unvalidated` is true whenever a dimension
   // lacked on-disk backing, so the tables can say so instead of rendering a phenology date as "valid".
   const [unvalidated, setUnvalidated] = useState(false);
@@ -421,7 +422,7 @@ export function ResultsTab() {
   const [deliveryEventsError, setDeliveryEventsError] = useState<string | null>(null);
 
   // Count export: per_image_count and orthomosaic_plant_counts, the two delivery kinds this
-  // route serves, reachable here only (an MCP tool call builds no acknowledgement for either).
+  // route serves, reachable here only (an MCP tool call builds no acknowledgment for either).
   const [countKind, setCountKind] = useState<"per_image_count" | "orthomosaic_plant_counts">(
     "per_image_count",
   );
@@ -828,7 +829,7 @@ export function ResultsTab() {
     if (!lastRequest) return;
     if (unvalidated && !ackReason.trim()) return;
     try {
-      const body: ExportCsvRequest = {
+      const body: ExportCsvPayload = {
         project_root: lastRequest.project_root,
         mapping_name: lastRequest.mapping_name,
         predictions_by_date: lastRequest.predictions_by_date,
@@ -837,7 +838,7 @@ export function ResultsTab() {
         payload,
         filename,
         user: useStore.getState().user || undefined,
-        acknowledgement: unvalidated ? { reason: ackReason.trim() } : null,
+        acknowledgment: unvalidated ? { reason: ackReason.trim() } : null,
       };
       const blob = await resultsApi.downloadCsv(body);
       const url = URL.createObjectURL(blob);
@@ -885,7 +886,7 @@ export function ResultsTab() {
     setCountOperationalizationRefusal(null);
     setCountResultHeaders(null);
     try {
-      const delivery: ExportCountCsvRequest["delivery"] =
+      const delivery: ExportCountCsvPayload["delivery"] =
         countKind === "per_image_count"
           ? { kind: "per_image_count", predictions_dir: countPredictionsDir, trait: countTrait }
           : {
@@ -898,12 +899,12 @@ export function ResultsTab() {
               pipeline_version: countPipelineVersion || undefined,
               canopy_subject: countCanopySubject || undefined,
             };
-      const body: ExportCountCsvRequest = {
+      const body: ExportCountCsvPayload = {
         project_root: projectRoot,
         delivery,
         filename: countFilename.trim(),
         user: useStore.getState().user || undefined,
-        acknowledgement: countShowAck ? { reason: countAckReason.trim() } : null,
+        acknowledgment: countShowAck ? { reason: countAckReason.trim() } : null,
       };
       const { blob, headers } = await resultsApi.downloadCountCsv(body);
       const url = URL.createObjectURL(blob);
@@ -949,7 +950,7 @@ export function ResultsTab() {
   const downloadCurvesCsv = () => {
     if (exportBlocked) return;
     // A curve export is the same delivered phenology measurement as the milestone one, just
-    // un-summarised: same producer, same gate.
+    // un-summarized: same producer, same gate.
     void downloadCsv("curves", `${trait}_curves.csv`);
   };
 

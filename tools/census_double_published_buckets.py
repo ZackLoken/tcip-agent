@@ -2,7 +2,7 @@
 """Census of prediction buckets published more than once before the live-bucket refusal.
 
 Read-only. For each project root given, every live prediction bucket the project's own records
-name (``store_catalogue.project_roots``, the same enumeration ``tcip adopt-store`` and ``tcip
+name (``store_catalog.project_roots``, the same enumeration ``tcip adopt-store`` and ``tcip
 export-store`` walk: the buckets under each registered dataset's ``predictions/`` tree and
 each experiment's lineage bucket) is checked two ways; a bucket already moved into the cleared
 archive (``predictions/.cleared/``, populated only by ``clear_prediction_bucket``) is skipped,
@@ -122,7 +122,7 @@ def census_project(project_root: Path) -> ProjectCensus:
     from tcip_mcp import dataset_layout
     from tcip_mcp.experiments import experiment_ids_with_status, read_validations
     from tcip_mcp.prediction_buckets import bucket_content_digest
-    from tcip_mcp.store_catalogue import project_roots
+    from tcip_mcp.store_catalog import project_roots
 
     result = ProjectCensus(project_root=project_root)
     roots = project_roots(project_root)

@@ -1,13 +1,8 @@
 """Entry point: ``python -m tcip_web``.
 
-Reads ``TCIP_WEB_HOST`` / ``TCIP_WEB_PORT`` for network binding (default
-127.0.0.1:8765) and writes the chosen port to ``.tcip/state/web_port.txt``
-so MCP tools in other processes can discover the backend.
-
-The instance the port write binds is closed once that write returns, before uvicorn imports
-the app and binds its own: the process ends up holding one backend's connections rather than
-two, so a project-removal rename at the next start is never blocked by a handle this entry
-point forgot to release.
+Reads ``TCIP_WEB_HOST`` / ``TCIP_WEB_PORT`` for network binding (default 127.0.0.1:8765) and writes
+the chosen port to ``.tcip/state/web_port.txt`` so MCP tools in other processes can discover the
+backend.
 """
 
 from __future__ import annotations
@@ -29,11 +24,8 @@ DEFAULT_PORT = 8765
 
 
 def _pick_port(host: str, requested: int) -> int:
-    """Return ``requested`` if free on ``host``, else an OS-assigned free port.
-
-    Probes the *actual* bind host: a port free on 127.0.0.1 can be taken on the interface
-    we're about to bind (and vice-versa), so probing anything else gives the wrong answer for
-    a non-loopback ``TCIP_WEB_HOST``.
+    """Return ``requested`` if free on ``host`` (probed on that host), else an OS-assigned free
+    port.
     """
     for candidate in (requested, 0):
         try:
@@ -46,12 +38,7 @@ def _pick_port(host: str, requested: int) -> int:
 
 
 def _write_port_file(port: int) -> None:
-    """Publish the bound port for MCP tools in other processes.
-
-    A failure here is non-fatal: those tools fall back to ``TCIP_WEB_PORT`` or the default, so
-    refusing to serve would be worse than serving on a port they have to be told. It is logged
-    rather than swallowed, because that fallback silently misses a port picked by the OS.
-    """
+    """Publish the bound port for MCP tools in other processes; a failure is logged, never raised."""
     from tcip_mcp import workspace
 
     try:

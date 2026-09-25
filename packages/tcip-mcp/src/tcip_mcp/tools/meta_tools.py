@@ -115,9 +115,7 @@ def _report_path(project_path: str, report_id: str) -> Path:
 
 
 def _path_if_written(path: Path) -> str | None:
-    """The document's file path when the bound backend wrote one (the file backend), else None:
-    under the database backend the record lives in the store and no such file exists, so a path
-    answered regardless would name a file a caller cannot open."""
+    """The document's file path when the bound backend wrote one (the file backend), else None."""
     return str(path) if path.is_file() else None
 
 
@@ -127,20 +125,13 @@ def _retrospective_path(project_path: str, project_id: str) -> Path:
 
 
 def report_document_name(report_id: str) -> str:
-    """The file name one report's document carries, taken from the store's own locator.
-
-    The extension is stated here and nowhere else, so a reader presenting a report by name
-    never restates it.
-    """
+    """The file name one report's document carries, taken from the store's own locator."""
     return f"{report_id}{_REPORT_DOC.suffix}"
 
 
 def read_report(project_path: str, report_id: str) -> dict:
     """One friction report's decoded document, or ``{}`` when nothing is recorded under that id.
-
-    The one read of this store, so a consumer never re-spells its decode. Raises
-    ``DecodeError`` for a report whose bytes are present but will not read as JSON, which is
-    the distinction a panel needs to show the row as malformed rather than drop it.
+    Raises ``DecodeError`` for a report whose bytes are present but will not read as JSON.
     """
     entry = tcip_store.read(friction_report_key(project_path, report_id), default=None)
     if entry is None:
@@ -157,11 +148,8 @@ def read_retrospective(project_path: str, project_id: str) -> str:
 @dataclass(frozen=True)
 class MemoryDocument:
     """One project-memory document: the key part naming it, its value, and the time it states.
-
-    ``timestamp`` is the document's own, read out of what it holds. It is empty for a document
-    that states none, and nothing supplies one from the filesystem: a copy, a restore or an
-    export rewrites when bytes landed, and ordering a corpus by that would reshuffle a session's
-    history every time the state moved.
+    ``timestamp`` is the document's own, read out of what it holds, and empty for a document that
+    states none.
     """
 
     name: str
@@ -170,10 +158,8 @@ class MemoryDocument:
 
 
 def _newest_first(documents: list[MemoryDocument]) -> list[MemoryDocument]:
-    """Documents ordered by the timestamp each states, newest first, undated ones last by name.
-
-    Two passes over a stable sort, so documents sharing a timestamp and the undated tail alike
-    come back in one deterministic order rather than whichever the enumeration happened to give.
+    """Documents ordered by the timestamp each states, newest first, undated ones last by name, in
+    one deterministic order.
     """
     documents.sort(key=lambda document: document.name)
     documents.sort(key=lambda document: document.timestamp, reverse=True)
@@ -181,12 +167,8 @@ def _newest_first(documents: list[MemoryDocument]) -> list[MemoryDocument]:
 
 
 def report_documents(project_path: str) -> list[MemoryDocument]:
-    """Every friction report under a project, newest stated timestamp first.
-
-    The one enumeration of this corpus: the memory tool, the GUI panel and the distillation
-    worksheet all read it through here, so they cannot answer with three different orders. A
-    report that will not decode is carried as a malformed row rather than dropped, since a
-    reader that silently omits it reports a corpus smaller than the one on record.
+    """Every friction report under a project, newest stated timestamp first. A report that will not
+    decode is carried as a malformed row.
     """
     documents: list[MemoryDocument] = []
     for key in tcip_store.keys(FRICTION_REPORT_STORE, str(project_path)):
@@ -218,11 +200,7 @@ def _latest_section(content: str) -> str:
 
 
 def retrospective_documents(project_path: str) -> list[MemoryDocument]:
-    """Every retrospective under a project, latest stated section first.
-
-    The counterpart to :func:`report_documents`, and the one ordering of this corpus for the
-    same three readers.
-    """
+    """Every retrospective under a project, latest stated section first."""
     documents: list[MemoryDocument] = []
     for key in tcip_store.keys(RETROSPECTIVE_STORE, str(project_path)):
         name = key.parts[0]
@@ -242,28 +220,19 @@ def report_friction(
 ) -> dict:
     """Log structured friction when you get stuck, confused, or surprised.
 
-    Call this whenever you hit a problem you'd otherwise push through silently.
-    Surfacing friction is how the system gets smarter. Do not wait until the
-    end of the session; report while the context is fresh.
-
-    The free-text `detail` is more load-bearing than the `category` tag:
-    categorical labels are easy to get wrong, but a clear written description
-    of what went wrong survives mis-labeling.
+    Call this whenever you hit a problem you'd otherwise push through silently, while the context
+    is fresh.
 
     Args:
         project_path: Root directory of the project.
-        category: One of: missing_tool, ambiguous_data, cant_find_file,
-            confused_about_domain, failed_repeatedly, needs_human_judgment,
-            unexpected_behavior.
-        detail: Free-text description of what went wrong. Be specific:
-            what you tried, what you expected, what happened, what you need.
-        context: Optional structured context (file paths, tool names, trait,
-            crop, session_id, error messages). Preserves raw signal for later
-            review.
-        user_disagreement: True when this report is capturing the user pushing
-            back on or disagreeing with your approach, independent of category;
-            lets a later distill pass pull every disagreement out of the pile on
-            its own, rather than mixed into general friction.
+        category: One of: missing_tool, ambiguous_data, cant_find_file, confused_about_domain,
+            failed_repeatedly, needs_human_judgment, unexpected_behavior.
+        detail: Free-text description of what went wrong. Be specific: what you tried, what you
+            expected, what happened, what you need.
+        context: Optional structured context (file paths, tool names, trait, crop, session_id,
+            error messages).
+        user_disagreement: True when this report is capturing the user pushing back on or
+            disagreeing with your approach, independent of category.
     """
     if category not in REPORT_CATEGORIES:
         return {
@@ -308,27 +277,20 @@ def load_project_memory(
     category: str = "",
     filter_substring: str = "",
 ) -> dict:
-    """Read one project-memory corpus into context so context isn't lost between sessions.
+    """Read one project-memory corpus into context.
 
-    The read side of the session-start ritual. ``kind`` selects a single corpus (a
-    selector, not an aggregator: one honest read of the chosen store):
-    ``'reports'`` reads the friction reports (the counterpart to ``report_friction``);
-    ``'retrospectives'`` reads the retrospectives (the counterpart to
-    ``write_retrospective``). Call it early, once per kind, to pick up problems and
-    context a previous session surfaced but did not resolve. Entries come back newest
-    first, by the timestamp each one states rather than by when its bytes landed.
+    ``kind`` selects a single corpus: ``'reports'`` reads the friction reports (the counterpart to
+    ``report_friction``); ``'retrospectives'`` reads the retrospectives (the counterpart to
+    ``write_retrospective``). Entries come back newest first, by the timestamp each one states.
 
     Args:
         kind: Which corpus to read: 'reports' or 'retrospectives'.
-        project_path: Root directory of the project. Empty defaults to the active
-            project (matching ``inspect_project``) so the CLAUDE.md session-start
-            flow (load_project_memory + inspect_project) needs no path.
+        project_path: Root directory of the project. Empty defaults to the active project.
         limit: Maximum number of entries to return (default 5).
-        category: Reports only, optional exact category filter (e.g. 'missing_tool'),
-            one of the ``report_friction`` categories; empty means all. Ignored for
-            retrospectives.
-        filter_substring: Optional case-insensitive substring matched against each
-            entry's filename or its text.
+        category: Reports only, optional exact category filter (e.g. 'missing_tool'), one of the
+            ``report_friction`` categories; empty means all. Ignored for retrospectives.
+        filter_substring: Optional case-insensitive substring matched against each entry's filename
+            or its text.
     """
     from tcip_mcp import workspace
 
@@ -343,9 +305,7 @@ def load_project_memory(
 
 def _parse_audit_timestamp(value: str | None) -> datetime | None:
     """Parse an audit entry's own stated timestamp, or ``None`` when it is absent or will not
-    parse. An entry is data the platform itself wrote, never a caller argument to refuse over,
-    so a bad or missing timestamp sorts and filters as "unknown" rather than aborting the read.
-    A naive result is treated as UTC, matching what every writer through ``audit._entry`` stamps.
+    parse. A naive result is treated as UTC.
     """
     if not value:
         return None
@@ -387,54 +347,35 @@ def read_audit_log(
     status: str | None = None,
     limit: int = 200,
 ) -> dict:
-    """Read one audit log's own entries: which door touched a dataset or project, when, with
-    what status.
+    """Read one audit log's own entries: which door touched a dataset or project, when, with what
+    status.
 
-    ``scope`` resolves through ``tcip_mcp.audit.dataset_scope_of``, the one resolver ``audited``
-    itself calls to file a writer's own entry: a path under a dataset's canonical segment
-    (``annotations``, ``predictions``, ``images``, ``labels``) resolves up to its dataset root,
-    and a bare directory counts as a root only when it carries its own ``.tcip`` directory or a
-    registered dataset marker (``subjects.json``, or the retired ``classes.json``, either one
-    counting as evidence), which a project root does too. ``scope=None``
-    is the platform default. A ``scope`` that resolves to none of these refuses by name, naming
-    what was passed, rather than answering from whichever log a typo or an unrecognized inner
-    path happened to resolve to (indistinguishable from an empty log otherwise). The whole log is
-    read through ``tcip_store.read_log`` (no cursor: this is a bounded lookback, not a stream a
-    caller resumes), filtered in memory on each entry's own ``tool`` name, ``status``, and
-    ``timestamp``, then returned newest first by each entry's own stated timestamp, the same
-    basis ``load_project_memory`` sorts its corpora on, never by append order (a relaunched or
-    backfilled entry need not land in the order it was appended). ``skipped`` states how many
-    entries this call is not returning, whether filtered out or truncated by ``limit``, so a
-    caller can tell "nothing matched" apart from "more exists".
+    ``scope`` resolves through ``tcip_mcp.audit.dataset_scope_of``: a path under a dataset's
+    canonical segment (``annotations``, ``predictions``, ``images``, ``labels``) resolves up to its
+    dataset root, and a bare directory counts as a root only when it carries its own ``.tcip``
+    directory or a ``subjects.json``, which a project root does too. ``scope=None`` is the platform
+    default. A ``scope`` that resolves to none of these refuses by name. The whole log is read
+    through ``tcip_store.read_log``, filtered in memory on each entry's own ``tool`` name,
+    ``status``, and ``timestamp``, then returned newest first by each entry's own stated timestamp.
+    ``skipped`` states how many entries this call is not returning, whether filtered out or
+    truncated by ``limit``.
 
     ``since``/``until`` are ISO-8601 strings parsed with ``datetime.fromisoformat`` (a trailing
     ``Z`` is accepted), inclusive on both ends against each entry's own parsed timestamp; a bound
-    that will not parse refuses by name rather than falling back to a lexical string comparison
-    that would silently mis-order non-padded or mixed-precision timestamps. A date-only ``until``
-    (no time part) means the end of that whole day, not its midnight start, so
+    that will not parse refuses by name. A date-only ``until`` means the end of that whole day, so
     ``until="2026-03-02"`` includes every entry from that date.
 
-    A page carrying undecodable entries, unknown-schema-version entries, or a torn tail (an
-    appender's own in-flight, not-yet-newline-terminated fragment) is refused rather than
-    answered from what did decode: a provenance read that silently dropped rows would be worse
-    than one that says it cannot answer.
+    A page carrying undecodable entries, unknown-schema-version entries, or a torn tail is refused.
 
-    This call's own audit entry is written after this function returns (:func:`audited` appends
-    it around the call), so it is never present in this call's own result; a later read of the
-    same scope sees it, the same as any earlier call's entry appears in this one.
-
-    This is a read, not a replacement for the reader that already scans this log for its own
-    narrow question: the plant-mapping receipt scan (``pipelines.postprocessing.plant_mapping._scan_receipts``)
-    keeps its own targeted read, since a general-purpose page here would make it re-filter a
-    result shaped for something else. A read of the record leaves no line on it: the log holds
-    mutations only, the same as ``load_project_memory`` and every other read-only door.
+    This call's own audit entry is written after this function returns, so it is never present in
+    this call's own result.
 
     Args:
         scope: Dataset root, project root, a path under either, or ``None`` for the platform log.
         tool: Exact tool-name filter, e.g. 'save_annotations'.
         since: Only entries whose own timestamp is at or after this ISO-8601 string.
-        until: Only entries whose own timestamp is at or before this ISO-8601 string; a
-            date-only string means the end of that day.
+        until: Only entries whose own timestamp is at or before this ISO-8601 string; a date-only
+            string means the end of that day.
         status: Exact status filter, 'ok' or 'exception'.
         limit: Maximum entries to return (default 200), newest first.
     """
@@ -582,7 +523,7 @@ def write_retrospective(
 
     Args:
         project_path: Root directory of the project.
-        project_id: Short identifier for the project (e.g. 'chestnut-bur-phase0').
+        project_id: Short identifier for the project (e.g. '<crop>-<trait>-trial').
             Becomes the filename.
         task: What you were trying to accomplish.
         worked: What went well. Approaches, tools, decisions that paid off.
@@ -664,14 +605,11 @@ def write_retrospective(
 @mcp.tool()
 @audited
 def record_distillation_pass(project_path: str) -> dict:
-    """Record that you reviewed this project's friction/retrospectives (e.g. via
-    ``tcip distill-learnings``); resets its distillation-backlog counters.
+    """Record that you reviewed this project's friction/retrospectives (e.g. via ``tcip
+    distill-learnings``); resets its distillation-backlog counters.
 
-    Call this after actually reading a distillation worksheet, not before. It only records that a
-    review happened; it never applies, promotes, or writes anything from the worksheet itself:
-    turning a recurring theme into a skill line, a CLAUDE.md rule, or a tool change stays your own,
-    separate, explicit edit. ``tcip distill-learnings`` itself stays read-only; this is the one
-    audited write in the loop, kept out of that command on purpose.
+    Call this after reading a distillation worksheet. It records only that a review happened; it
+    never applies, promotes, or writes anything from the worksheet itself.
 
     Args:
         project_path: Root directory of the project (or workspace project) reviewed.

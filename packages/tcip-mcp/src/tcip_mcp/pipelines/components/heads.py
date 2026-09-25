@@ -1,7 +1,7 @@
 """Task-specific heads: each knows its loss, metric, and output format.
 
 Every head implements ``BaseHead`` with ``forward()``, ``compute_loss()``,
-and ``decode()`` so the composer and trainer are task-agnostic.
+and ``decode()`` so the trainer is task-agnostic.
 """
 
 from __future__ import annotations
@@ -190,11 +190,8 @@ class RegressionHead(BaseHead):
 class SemanticSegHead(BaseHead):
     """Pixel-wise semantic segmentation (DeepLab-style).
 
-    Takes no ``loss`` name, and ``default_loss`` is empty on purpose: this head computes its own
-    CE + multi-class Dice blend in ``compute_loss``, and there is no registry loss to route to.
-    ``build_loss("cross_entropy+dice")`` constructs but raises at forward: the registry's
-    ``DiceLoss`` is binary (sigmoid + flatten) while this head emits multi-class logits.
-    ``class_weights`` *is* honored, applied to the CE term.
+    Computes its own CE + multi-class Dice in ``compute_loss``; takes no ``loss`` name
+    (``default_loss`` is empty); ``class_weights`` applies to the CE term.
     """
 
     task_type = "semantic_seg"

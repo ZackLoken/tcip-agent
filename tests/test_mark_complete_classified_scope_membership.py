@@ -1,7 +1,7 @@
 """``mark_complete``'s classified-scope membership admission: a classified stamp admits exactly its
 own object class as a Complete's stated subject, never one of its attribute's values, and a stamp
-this door cannot resolve at all (a neither-key stamp, an undecodable one, a bare directory) omits
-the coverage entry rather than refusing the Complete.
+this door cannot resolve at all (an undecodable one, a bare directory) omits the coverage entry
+rather than refusing the Complete.
 """
 
 from __future__ import annotations
@@ -13,6 +13,8 @@ from fastapi.testclient import TestClient
 
 from tcip_annotation.json_io import write_annotations
 from tcip_web.app import app
+
+from tests._binding_fixtures import complete_stamp
 
 IMG_W, IMG_H = 160, 100
 SUBJECT = "bud"
@@ -28,7 +30,7 @@ def _seed_sidecar(pred_dir: Path, sidecar: dict) -> None:
     import tcip_store
     from tcip_mcp.pipelines.resolution import sidecar_key
 
-    tcip_store.replace(sidecar_key(pred_dir, "operating_point"), sidecar,
+    tcip_store.replace(sidecar_key(pred_dir, "operating_point"), complete_stamp(sidecar),
                        expect=tcip_store.Version.ABSENT)
 
 
@@ -93,26 +95,6 @@ def test_a_classified_stamp_admits_its_own_subject_and_omits_a_value_name(
     })
     assert value_name.status_code == 200
     state = _shard(dataset_root, "IMG_0011.JPG")
-    assert not (state.get("adjudication_covered") or {})
-
-
-def test_a_neither_key_stamp_omits_the_entry_and_still_completes(
-    client: TestClient, tmp_path: Path,
-) -> None:
-    d = tmp_path / "predictions" / "classifier" / "2026-05-11"
-    d.mkdir(parents=True)
-    write_annotations(str(d / "IMG_0020.json"), [], IMG_W, IMG_H, keep_empty=True)
-    _seed_sidecar(d, {"id_map": {"open": 0, "closed": 1}})
-    dataset_root = _dataset_root(tmp_path)
-
-    resp = client.post("/api/review/mark_complete", json={
-        "dataset_root": str(dataset_root), "image_name": "IMG_0020.JPG",
-        "pred_dir": str(d), "subject": SUBJECT,
-    })
-
-    assert resp.status_code == 200
-    assert resp.json()["image_status"] == "completed"
-    state = _shard(dataset_root, "IMG_0020.JPG")
     assert not (state.get("adjudication_covered") or {})
 
 

@@ -207,13 +207,14 @@ def test_prioritize_review_queue_skips_what_the_dataset_s_own_store_holds(tmp_pa
     """Coverage of the ranking door's own dataset_root/skip_reviewed/bucket forwarding through
     _prepare_queue_sources: both reviewed images drop out before any scorer runs, the same
     plumbing triage_predictions shares."""
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
     dataset_root, images = _setup(tmp_path)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
 
     r = prioritize_review_queue(
-        checkpoint_path=str(ckpt), images_dir=str(images), dataset_root=str(dataset_root),
-        skip_reviewed=True, bucket=BUCKET)
+        checkpoint_path=ckpt, images_dir=str(images), dataset_root=str(dataset_root),
+        skip_reviewed=True, bucket=BUCKET, project_path=str(tmp_path))
     assert r["reviewed_skipped"] == 2
     assert r["total_candidates"] == 0
     assert r["queue"] == []
@@ -955,24 +956,6 @@ def test_materialize_refuses_a_classified_scope_into_a_populated_output(tmp_path
     assert "error" in r
     assert "already holds a subject registry" in r["error"]
     assert (out / "subjects.json").read_text(encoding="utf-8") == '{"other": {}}'
-
-
-def test_materialize_refuses_a_neither_key_stamp(tmp_path):
-    from tcip_mcp.pipelines.resolution import sidecar_key
-    import tcip_store
-
-    dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(_own_store(dataset_root))
-    bucket_dir = dataset_root / CLASSIFIED_BUCKET
-    tcip_store.replace(sidecar_key(bucket_dir, "operating_point"),
-                       {"id_map": {"healthy": 0, "diseased": 1}}, expect=tcip_store.Version.ABSENT)
-    src = _source_images(tmp_path / "src")
-
-    r = materialize_review_dataset(
-        str(dataset_root), str(src), str(tmp_path / "out"), bucket=CLASSIFIED_BUCKET)
-
-    assert "error" in r
-    assert "repair-classified-predictions" in r["error"]
 
 
 def test_materialize_refuses_an_undecodable_stamp(tmp_path):

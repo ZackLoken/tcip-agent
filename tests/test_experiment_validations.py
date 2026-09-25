@@ -295,8 +295,9 @@ def test_a_row_earned_through_the_real_gate_round_trips(tmp_path):
         experiment_id=None, images_dir=None, raster_path=None,
         produced_at="2026-03-04T12:00:00+00:00", subject="bud", attribute=None,
     )
-    digest, stamped = seal_validation(draft, dataset_root=tmp_path, bucket_dirs=(), stamp_body=stamp)
+    stamped = seal_validation(draft, dataset_root=tmp_path, bucket_dirs=(), stamp_body=stamp)
     experiment_id = stamped["validated_by"]["experiment_id"]
+    digest = stamped["validated_by"]["record_digest"]
 
     rows = read_validations(experiment_id)
     assert len(rows) == 1

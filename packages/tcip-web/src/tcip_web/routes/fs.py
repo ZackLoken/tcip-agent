@@ -1,11 +1,8 @@
 """Local-filesystem directory browsing for the frontend's folder picker.
 
-The picker is how a human browses to data the platform does not know yet (images, plant
-locations, annotations to bring in), so on a connection from this machine it lists any directory
-the server's user can read: the backend runs on the breeder's own machine, and the filesystem it
-shows is theirs. A connection that arrived through a routable address is confined to the derived
-allow-set like every other route, since whole-machine enumeration must not reach the network.
-Directories only, never files.
+On a connection from this machine it lists any directory the server's user can read. A connection
+that arrived through a routable address is confined to the derived allow-set like every other
+route. Directories only, never files.
 """
 
 from __future__ import annotations

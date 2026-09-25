@@ -41,9 +41,9 @@ def _in_cell(point: tuple[float, float], cell: Cell) -> bool:
 
 
 def _digest_of_records(records: list[dict]) -> str:
-    """Canonical-json + sha256[:16] recipe ``subject_registry.attribute_schema_digest`` also uses,
-    shared by :func:`cell_annotation_digest` and :func:`cell_annotation_digests` so the two never
-    drift into computing "the same" digest two different ways."""
+    """Canonical-json + sha256[:16], the recipe ``subject_registry.attribute_schema_digest`` also
+    uses.
+    """
     ordered = sorted(records, key=lambda r: json.dumps(r, sort_keys=True))
     canonical = json.dumps(ordered, separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
@@ -53,10 +53,8 @@ def cell_annotation_digest(annotations: list[Annotation], subject: str, cell: Ce
     """Content digest of ``subject``'s annotations centered inside ``cell``.
 
     Deterministic in the annotation content alone (subject, geometry, attribute values). An empty
-    cell still gets a real, stable digest, of an empty list. Rescans ``annotations`` in full;
-    a caller checking many cells at once (:func:`stale_cells`) should use
-    :func:`cell_annotation_digests` instead, one pass over ``annotations`` for every cell rather
-    than one pass per cell.
+    cell gets the digest of an empty list. Rescans ``annotations`` in full;
+    :func:`cell_annotation_digests` digests many cells in one pass.
     """
     records = []
     for a in annotations:
@@ -72,17 +70,12 @@ def cell_annotation_digest(annotations: list[Annotation], subject: str, cell: Ce
 def _bin_annotations(
     annotations: list[Annotation], cells: list[Cell], tile_size: int, overlap: float,
 ) -> dict[str, list[Annotation]]:
-    """Every one of ``annotations`` whose center falls in one of ``cells``, one pass over
-    ``annotations``: O(annotations + cells) instead of O(annotations x cells), the real cost at
-    real orthomosaic scale (thousands of annotations, up to hundreds of reserved-region cells).
-    No subject filter: :func:`annotations_by_cell` and :func:`annotation_counts_by_cell` apply
-    theirs after, so the one pass over ``annotations`` here serves either.
+    """Every one of ``annotations`` whose center falls in one of ``cells``, in one pass over
+    ``annotations``: O(annotations + cells). No subject filter.
 
-    ``overlap == 0.0`` (every real region-completeness/coverage grid carries it) bins by direct
-    ``tile_size`` floor-division of each annotation's center, the same origin math
-    :func:`~tcip_mcp.pipelines.reference_grid.reference_cells` itself uses. A non-zero overlap
-    would put some points in more than one cell, which floor-division alone cannot resolve, so
-    that case falls back to per-cell containment instead of silently computing a wrong bin.
+    ``overlap == 0.0`` bins by direct ``tile_size`` floor-division of each annotation's center, the
+    origin math :func:`~tcip_mcp.pipelines.reference_grid.reference_cells` uses. A non-zero overlap
+    falls back to per-cell containment.
     """
     buckets: dict[str, list[Annotation]] = {c.name: [] for c in cells}
     if overlap != 0.0:
@@ -111,10 +104,7 @@ def annotations_by_cell(
     overlap: float = 0.0,
 ) -> dict[str, list[Annotation]]:
     """``subject``'s annotations from ``annotations``, binned by which of ``cells`` each one's
-    center falls in (:func:`_bin_annotations`): the shared binning
-    :func:`cell_annotation_digests` and the completeness route's per-cell saved-annotation counts
-    (:func:`annotation_counts_by_cell`) both read off, so the two can never drift into computing
-    "which cell" two different ways.
+    center falls in (:func:`_bin_annotations`).
     """
     by_cell = _bin_annotations(annotations, cells, tile_size, overlap)
     return {name: [a for a in anns if a.subject == subject] for name, anns in by_cell.items()}
@@ -124,8 +114,7 @@ def annotation_counts_by_cell(
     annotations: list[Annotation], cells: list[Cell], tile_size: int, overlap: float = 0.0,
 ) -> dict[str, dict[str, int]]:
     """Every subject's per-cell annotation count over ``cells``, one pass over ``annotations``
-    (:func:`_bin_annotations`) regardless of how many subjects are present: the completeness
-    route's ``annotation_counts`` field, read once per raster rather than once per subject.
+    (:func:`_bin_annotations`) regardless of how many subjects are present.
     """
     by_cell = _bin_annotations(annotations, cells, tile_size, overlap)
     counts: dict[str, dict[str, int]] = {}
@@ -149,52 +138,47 @@ def cell_annotation_digests(
             for name, anns in by_cell.items()}
 
 
+def record_annotations(dataset_root: str | Path, record: dict) -> list:
+    """The current annotations of the label file a completeness record's own ``stem``/``date``
+    resolve to (``dataset_layout.annotation_path``), ``[]`` when there is no such file; an
+    unreadable file raises ``UnreadableLabelDocument``."""
+    from tcip_annotation.json_io import read_annotations
+
+    from tcip_mcp.dataset_layout import annotation_path
+
+    label_path = annotation_path(dataset_root, record["date"], record["stem"])
+    return read_annotations(str(label_path)) if label_path.is_file() else []
+
+
 def stale_cells(
-    dataset_root: str | Path,
     record: dict,
+    annotations: list,
     stamped_digests: dict[str, str],
     subject: str,
 ) -> list[str]:
     """Names, from ``record['cells_complete']``, whose current annotation content disagrees with
     the digest stamped at attestation time: a cell edited or deleted since it was attested.
 
-    Reads the label file the record's own ``stem``/``date`` resolve to
-    (``dataset_layout.annotation_path``) fresh, recomputes every attested cell's digest in one
-    pass via :func:`cell_annotation_digests`, and compares. A cell with no stamp at all (an
-    attestation made
-    before the digest sidecar existed, or the sidecar itself lost) is reported stale: this gate has
-    no escape hatch by design, and there is no legitimate no-digest case to preserve (no real
-    attestation predates the digest sidecar, since the platform carries no user data yet). A cell
-    absent from the record's own recomputed grid (``cell is None``, a different, structurally-
-    impossible-in-normal-operation condition) is still skipped, unchanged.
+    ``annotations`` is the record's label as it reads now (:func:`record_annotations` reads it
+    for a caller holding only the dataset root). Recomputes every attested cell's digest in one
+    pass via :func:`cell_annotation_digests`, and compares. A cell with no stamp at all is
+    reported stale. A cell absent from the record's own recomputed grid is skipped.
     """
-    from tcip_annotation.json_io import read_annotations
-
-    from tcip_mcp.dataset_layout import annotation_path
     from tcip_mcp.pipelines.reference_grid import reference_cells
 
-    stem = record.get("stem")
-    grid = record.get("grid") or {}
-    cells_complete = record.get("cells_complete") or []
-    if not stem or not cells_complete:
+    grid = record["grid"]
+    cells_complete = record["cells_complete"]
+    if not cells_complete:
         return []
-    try:
-        cells_by_name = {
-            c.name: c
-            for c in reference_cells(
-                grid["width"], grid["height"], grid["tile_size"], grid.get("overlap", 0.0),
-                clamp=True,
-            )
-        }
-    except (KeyError, TypeError, ValueError):
-        return []
-    label_path = annotation_path(dataset_root, record.get("date"), stem)
-    annotations = read_annotations(str(label_path)) if label_path.is_file() else []
-
+    cells_by_name = {
+        c.name: c
+        for c in reference_cells(
+            grid["width"], grid["height"], grid["tile_size"], grid["overlap"], clamp=True,
+        )
+    }
     complete_cells = [cells_by_name[name] for name in cells_complete if name in cells_by_name]
     digests = cell_annotation_digests(
-        annotations, subject, complete_cells, int(grid["tile_size"]),
-        float(grid.get("overlap", 0.0)))
+        annotations, subject, complete_cells, int(grid["tile_size"]), float(grid["overlap"]))
 
     stale: list[str] = []
     for name in cells_complete:
@@ -211,40 +195,29 @@ def incomplete_cells_for_rect(
 ) -> list[str] | None:
     """Cell names inside ``rect`` (a half-open pixel rect, full-mosaic coordinates) that are not
     attested complete for ``subject`` on the raster ``stem``, or are stale (edited since
-    attestation): the exact list a completeness gate (block calibration's own hard door) names in
-    its refusal. ``None`` when no completeness record exists at all for this ``(subject, stem)``
-    bucket, distinct from an attested-but-gapped record: a caller phrases "never attested" and
-    "attested but incomplete" differently.
+    attestation). ``None`` when no completeness record exists at all for this ``(subject, stem)``
+    bucket, distinct from an attested-but-gapped record.
 
-    Reads the record's own recorded grid, whatever lattice the breeder actually attested cells
-    against, never a caller's own block/tile geometry: the cells that matter here are the ones a
-    human toggled, not this call's own tiling choice.
+    Reads the record's own recorded grid, the lattice the breeder attested cells against, never a
+    caller's own block/tile geometry.
     """
     from tcip_mcp.dataset_layout import (
-        normalize_region_completeness_store, region_completeness_digest_key,
-        region_completeness_key, status_bucket,
+        region_completeness_digest_key, region_completeness_key, status_bucket,
     )
     from tcip_mcp.pipelines.data.tiling import rects_overlap
     from tcip_mcp.pipelines.reference_grid import reference_cells
 
     bucket = status_bucket(subject, stem)
-    store = normalize_region_completeness_store(
-        tcip_store.read(region_completeness_key(dataset_root), default={}))
-    record = store.get(bucket)
+    record = tcip_store.read(region_completeness_key(dataset_root), default={}).get(bucket)
     if record is None:
         return None
-    grid = record.get("grid") or {}
-    try:
-        cells = reference_cells(
-            int(grid["width"]), int(grid["height"]), int(grid["tile_size"]),
-            float(grid.get("overlap", 0.0)), clamp=True,
-        )
-    except (KeyError, TypeError, ValueError):
-        return None
+    grid = record["grid"]
+    cells = reference_cells(
+        grid["width"], grid["height"], grid["tile_size"], grid["overlap"], clamp=True)
     rx0, ry0, rx1, ry1 = rect
     intersecting = [c for c in cells if rects_overlap((c.x0, c.y0, c.x1, c.y1), (rx0, ry0, rx1, ry1))]
-    complete = set(record.get("cells_complete") or [])
+    complete = set(record["cells_complete"])
     digests = tcip_store.read(region_completeness_digest_key(dataset_root), default={})
-    stamped = digests.get(bucket) if isinstance(digests, dict) else None
-    stale = set(stale_cells(dataset_root, record, stamped if isinstance(stamped, dict) else {}, subject))
+    stale = set(stale_cells(record, record_annotations(dataset_root, record),
+                            digests.get(bucket, {}), subject))
     return sorted({c.name for c in intersecting if c.name not in complete or c.name in stale})

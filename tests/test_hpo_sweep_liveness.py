@@ -19,7 +19,7 @@ def test_sweep_state_helper():
         now - timedelta(seconds=TCIP_HEARTBEAT_STALE_SECONDS + 60)).isoformat()}
     assert sweep_state(stale, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS) == "interrupted"
 
-    no_heartbeat = {"status": "running"}
+    no_heartbeat = {"status": "running", "heartbeat": None}
     assert sweep_state(no_heartbeat, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS) == "interrupted"
 
     done = {"status": "completed", "heartbeat": None}
@@ -31,8 +31,8 @@ def test_sweep_state_driver_live_wins_over_a_stale_or_missing_heartbeat():
     still alive) reads "running" even the instant before its next heartbeat write lands."""
     from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS, sweep_state
 
-    assert sweep_state({"status": "running"}, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS,
-                       driver_live=True) == "running"
+    assert sweep_state({"status": "running", "heartbeat": None},
+                       stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS, driver_live=True) == "running"
 
     stale = {"status": "running", "heartbeat": (
         datetime.now(timezone.utc) - timedelta(seconds=TCIP_HEARTBEAT_STALE_SECONDS + 60)
@@ -45,8 +45,8 @@ def test_sweep_state_driver_live_never_overrides_a_recorded_done_state():
     lingering after its own terminal write must not resurrect a completed sweep as running."""
     from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS, sweep_state
 
-    for status in ("completed", "failed", "cancelled"):
-        manifest = {"status": status}
+    for status in ("completed", "failed", "canceled"):
+        manifest = {"status": status, "heartbeat": None}
         assert sweep_state(manifest, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS,
                            driver_live=True) == status
 
@@ -63,7 +63,7 @@ def test_run_hyperparameter_search_stamps_a_fresh_heartbeat_at_or_after_started_
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path))
+    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path), search_seed=0)
     manifest = ts.read(tt.sweep_manifest_key(result["study_name"], str(tmp_path)))
 
     started_at = datetime.fromisoformat(manifest["started_at"])
@@ -101,7 +101,7 @@ def test_run_hyperparameter_search_heartbeat_thread_stops_before_the_terminal_wr
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path))
+    tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path), search_seed=0)
     count_at_return = len(writes)
     assert count_at_return >= 3  # the initial write, at least one restamp, the terminal write
     assert writes[-1]["status"] == "completed"
@@ -150,7 +150,7 @@ def test_heartbeat_loop_survives_a_store_error_and_keeps_restamping(
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
     with caplog.at_level("WARNING", logger=tt.logger.name):
-        result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path))
+        result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path), search_seed=0)
 
     assert result["best_value"] == 0.25  # run_hyperparameter_search returned normally past the failed restamp
     manifest = tt.store.read(tt.sweep_manifest_key(result["study_name"], str(tmp_path)))

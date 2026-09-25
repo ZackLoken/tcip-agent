@@ -2,7 +2,7 @@ import type { ImageBandInfo } from "@/api/client";
 import type { BandSelection, Stretch } from "@/lib/bandSelection";
 
 /** How a band reads in the picker: its wavelength where the sensor reported one, and otherwise
- *  what the file says it holds, so a transparency band is not offered as if it were a colour a
+ *  what the file says it holds, so a transparency band is not offered as if it were a color a
  *  viewer might want to look at. */
 function bandLabel(band: ImageBandInfo): string {
   if (band.wavelength_nm != null) return `${band.name} (${band.wavelength_nm}nm)`;

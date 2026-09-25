@@ -1,16 +1,11 @@
 """The filesystem backend: identity to path, atomic replace, file locks, logs, and blobs.
 
-Byte-compatible with the layout it serves. Nothing moves on disk, and no envelope, version
-field, or metadata sidecar is added, because adding one would change bytes. A record's
-version is therefore derived from its content on every read rather than persisted.
+Byte-compatible with the layout it serves: no envelope, version field, or metadata sidecar is
+added, so a record's version is derived from its content on every read. Roots are resolved at use
+time from the key.
 
-Roots are resolved at use time, not at bind time: the key carries the root, so a
-process that repins its platform root mid-run keeps writing where the caller says.
-
-Records and logs are refused on a root that holds a store database: a file written beside one
-is a write the database never sees and the next read never returns. Reads are unaffected, which
-is what keeps every file-reading tool working on an exported root, and so is a blob write
-anywhere but on a record's own claimed path beside the database holding that record.
+Records and logs are refused on a root that holds a store database; reads are unaffected, and so is
+a blob write anywhere but on a record's own claimed path beside the database holding that record.
 """
 
 from __future__ import annotations
@@ -78,21 +73,14 @@ _DATABASE_ARTIFACTS = frozenset(
 
 
 def creation_temp_name(destination: str, token: str) -> str:
-    """The name a file is built under before it is installed at ``destination``.
-
-    Hidden and temp-suffixed, which is what ``_is_bookkeeping`` already recognizes, so a build
-    in flight is never enumerated as an entry of whatever store owns the directory.
+    """The name a file is built under before it is installed at ``destination``: hidden and
+    temp-suffixed, never enumerated as an entry.
     """
     return f".{destination}.{token}{_TEMP_SUFFIX}"
 
 
 def require_absolute_root(root: str) -> Path:
-    """The root as a path, or the refusal every backend owes a relative one.
-
-    Refused before anything resolves it, so no answer can depend on the directory the process
-    happens to be in. Enumeration refuses here too rather than answering with an empty list,
-    which would read as "this root holds nothing" when it means "this root names nothing".
-    """
+    """The root as a path, or the refusal every backend owes a relative one."""
     directory = Path(root)
     if not directory.is_absolute():
         raise BadKey(
@@ -105,13 +93,9 @@ def require_absolute_root(root: str) -> Path:
 class Locator(Protocol):
     """One store's identity map: where an entry of it lives under its root.
 
-    The two methods are an inverse pair, which is what makes the mapping checkable:
-    enumeration is ``parts_from`` applied over the files under a root, so it cannot drift
-    from ``relative_path`` the way two independent callables would. ``parts_from`` returns
-    None for a path that is not an entry of this store.
-
-    A locator exists for the file backend only. A backend that keys on (store, root, parts)
-    ignores it, which is why it is declared here and not in the shared model.
+    The two methods are an inverse pair: enumeration is ``parts_from`` applied over the files under
+    a root. ``parts_from`` returns None for a path that is not an entry of this store. The file
+    backend reads locators; a backend that keys on (store, root, parts) ignores them.
     """
 
     def relative_path(self, root: str, parts: tuple[str, ...]) -> PurePosixPath: ...
@@ -123,14 +107,12 @@ class Locator(Protocol):
 class RootedFileLocator:
     """Addresses an entry by its own path segments under a fixed directory of the root.
 
-    ``prefix`` is the directory chain under the root, ``suffix`` the extension the
-    last part carries on disk. A key's parts are the remaining segments, so parts
-    ``("2026-03-04", "img_0001")`` under prefix ``("annotations",)`` with suffix ``".json"``
-    is ``<root>/annotations/2026-03-04/img_0001.json``.
+    ``prefix`` is the directory chain under the root, ``suffix`` the extension the last part
+    carries on disk. A key's parts are the remaining segments, so parts ``("2026-03-04",
+    "img_0001")`` under prefix ``("annotations",)`` with suffix ``".json"`` is
+    ``<root>/annotations/2026-03-04/img_0001.json``.
 
-    This is the generic locator, for a store that is addressed by an explicit relative path
-    and nothing more. A store with real layout rules wraps its own resolver instead, so the
-    path is stated once, in the module that owns it.
+    The generic locator, for a store addressed by an explicit relative path and nothing more.
     """
 
     prefix: tuple[str, ...] = ()
@@ -180,13 +162,9 @@ def _filelock_classes() -> tuple[Any, Any]:
 
 
 def _locks_for(canonical: str, lock_path: str) -> tuple[threading.RLock, Any]:
-    """The one lock pair for a canonical path in this process.
-
-    One ``FileLock`` instance per path is a hard requirement, not an optimization: two
-    separately constructed instances on the same path do not exclude re-entry within one
-    process, so a write nested inside a transaction on the same key would deadlock against
-    itself. One instance with the library's default thread-local counting gives counted
-    same-thread re-entry and blocks a second thread.
+    """The one lock pair for a canonical path in this process, one ``FileLock`` instance per path
+    with the library's default thread-local counting: counted same-thread re-entry, and a second
+    thread blocks.
     """
     file_lock_cls, _ = _filelock_classes()
     with _registry_guard:
@@ -215,13 +193,10 @@ def lock_file_for(path: Path | str) -> Path:
 def path_lock(path: Path | str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> Generator[None]:
     """Hold this process's one lock pair for a filesystem path, across threads and processes.
 
-    Anything that guards the same path this backend guards has to acquire through here, or
-    the two hold separately constructed ``FileLock`` instances that do not exclude each
-    other's re-entry and block until the timeout. The parent directory must already exist:
-    the lock file lands beside the data file.
+    Anything that guards the same path this backend guards acquires through here. The parent
+    directory must already exist: the lock file lands beside the data file.
 
-    Raises ``filelock``'s own ``Timeout`` when the wait runs out, which is what the backend
-    turns into ``StoreBusy`` once it knows which key was contended.
+    Raises ``filelock``'s own ``Timeout`` when the wait runs out.
     """
     _, timeout_error = _filelock_classes()
     target = Path(path)
@@ -240,24 +215,14 @@ def path_lock(path: Path | str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) ->
 
 
 def database_file(root: str) -> Path:
-    """Where a root's database sits, whether or not one exists.
-
-    Both backends ask here: the database backend to open or build it, the file backend to find
-    out whether this root's records have already moved into one. Stating it once is what keeps
-    the file that must never be clobbered and the file that must never be written around from
-    being two different paths.
-    """
+    """Where a root's database sits, whether or not one exists."""
     return require_absolute_root(root) / ".tcip" / DATABASE_FILENAME
 
 
 @contextmanager
 def transition_lock(root: str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> Generator[None]:
-    """Hold the one lock that decides whether a root's records live in files or in a database.
-
-    Taken by whatever is about to publish a database (creation, adoption) and by a file-backend
-    record write on a root that already has a ``.tcip`` directory, so a publication in flight
-    and a write to the layout it is loading cannot interleave. Creating the directory is this
-    side's first act, which is what makes it exist for the writer to find.
+    """Hold the one lock that decides whether a root's records live in files or in a database;
+    creating the root's ``.tcip`` directory is its first act.
     """
     db_path = database_file(root)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -266,11 +231,7 @@ def transition_lock(root: str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> 
 
 
 def fsync_directory(directory: Path) -> None:
-    """Flush a directory entry, so a rename or a created directory survives a power loss.
-
-    POSIX only. Windows has no directory-fsync equivalent, which is why
-    ``FileBackend.capabilities().durable_replace`` is false there instead of overstated.
-    """
+    """Flush a directory entry so a rename or a created directory survives power loss; POSIX only."""
     if os.name == "nt":
         return
     fd = os.open(directory, os.O_RDONLY)
@@ -310,10 +271,9 @@ class FileBackend:
     def capabilities(self) -> Capabilities:
         """What this backend guarantees on the platform it is running on.
 
-        ``durable_replace`` needs the parent directory's entry flushed after the rename, and
-        Windows has no directory-fsync equivalent, so it is reported false there rather than
-        claimed. ``cross_machine_exclusion`` is false unconditionally: advisory locks are
-        unreliable on network mounts and this backend cannot detect the mount it is on.
+        ``durable_replace`` needs the parent directory's entry flushed after the rename, and is
+        false on Windows, which has no directory-fsync equivalent. ``cross_machine_exclusion`` is
+        false unconditionally: advisory locks are unreliable on network mounts.
         """
         return Capabilities(
             multi_key_atomic_commit=False,
@@ -369,20 +329,9 @@ class FileBackend:
 
     @contextmanager
     def _conform_rail(self, keys: Sequence[Key]) -> Generator[None]:
-        """The file backend's half of the conform rail: hold each root's transition lock and
-        refuse record and log writes to a conformed root, whose records live in its database.
-
-        A write here cannot bump a database's counters, so writing a record beside a database
-        that already holds it loses the write with nothing to detect it by. The check is under
-        the transition lock, which creation and adoption also hold, so a publication cannot
-        land between the check and the write. Blobs never reach here: they stay files under
-        every backend.
-
-        A root with no ``.tcip`` directory is passed over without taking anything: the lock
-        file lands inside that directory, and creating it here would put one in every split,
-        run and prediction directory the platform writes a record into. A publication creates
-        it as its own first step, so once any has begun the lock is taken and the answer is
-        under it.
+        """The file backend's half of the conform rail: hold each root's transition lock and refuse
+        record and log writes to a conformed root, whose records live in its database. A root with
+        no ``.tcip`` directory is passed over without taking the lock.
         """
         roots: list[str] = []
         for key in keys:
@@ -411,24 +360,14 @@ class FileBackend:
     def _blob_conform_rail(self, key: Key) -> Generator[None]:
         """Refuse a blob write onto a record's own path beside the database that owns it.
 
-        A blob write is not a record write, but a public path exists that writes a blob to a
-        location the caller names, so its bytes can land where a record store's file belongs,
-        beside a live database, in band. The target is matched against the claims in memory
-        first, with no lock and nothing read from disk, because the ordinary blob write is
-        imagery, labels and predictions and must not pay for this. Only a matching target
-        takes anything: it locks every root a match implies, in canonical path order so a
-        colliding writer and a database creation cannot deadlock, refuses when any of those
-        roots holds a database at all, and otherwise keeps the locks across its own publish,
-        so a creation racing it sees whichever landed first.
+        The target is matched against the claims in memory first, with no lock and nothing read
+        from disk. A matching target locks every root a match implies, in canonical path order,
+        refuses when any of those roots holds a database at all, and otherwise keeps the locks
+        across its own publish.
 
-        The refusal is unconditional rather than scoped to what the database currently holds.
-        A test against markers is defeatable in both directions: a cached connection can mint
-        a store's first markers without re-walking, and a reader can serve honest absence
-        while the file idles, and neither is reachable across processes. What it costs is
-        stated plainly: a caller-named document whose filename happens to match a claim (an
-        export named like a manifest) is refused beside any database even where no harm was
-        meant. The platform's own blob layouts match no anchored claim, so only caller-named
-        output pays, and renaming the output clears it.
+        The refusal is unconditional rather than scoped to what the database currently holds, so a
+        caller-named document whose filename matches a claim is refused beside any database;
+        renaming the output clears it.
         """
         # imported here rather than at module scope: the claims module is composed on this one
         from tcip_store.layout_claims import anchored_matches
@@ -506,13 +445,9 @@ class FileBackend:
         return temp
 
     def _apply_staged(self, temp: str, path: Path, *, durable: bool) -> None:
-        """Make one staged temp file the record, and make that rename durable.
-
-        The parent directory is flushed immediately after this rename, before the next one,
-        so a crash mid-apply leaves a prefix of the applied order durable rather than an
-        arbitrary subset of it. A rename that fails takes its staging file with it: the
-        directories this backend writes into are enumerated by their own readers, and a
-        stranded temp file accumulates there for every failed write.
+        """Make one staged temp file the record, and make that rename durable: the parent directory
+        is flushed immediately after this rename, before the next one. A rename that fails removes
+        its staging file.
         """
         try:
             retry_while_denied(lambda: os.replace(temp, path), self.lock_timeout_s)
@@ -641,12 +576,7 @@ class FileBackend:
                 self._fsync_dir(path.parent)
 
     def _repair_torn_tail(self, path: Path) -> None:
-        """Drop a partial trailing entry left by an appender that died mid-write.
-
-        The fragment's own append never returned, so nothing acknowledged is lost. Without
-        the repair the next append would weld itself onto the fragment and turn an in-flight
-        tail into interior corruption.
-        """
+        """Drop a partial trailing entry left by an appender that died mid-write."""
         try:
             with open(path, "r+b") as handle:
                 handle.seek(0, os.SEEK_END)
@@ -681,11 +611,7 @@ class FileBackend:
         return path.parent / f".{path.name}{_CLEAR_BASE_PENDING_SUFFIX}"
 
     def _read_clear_base(self, path: Path) -> int:
-        """The cumulative offset this log's cursor space starts from.
-
-        Zero for a log that was never cleared, which is why every cursor computed against it
-        below reduces to a plain byte offset for the overwhelming majority of logs.
-        """
+        """The cumulative offset this log's cursor space starts from; zero for a never-cleared log."""
         marker = self._clear_base_path(path)
         data = self._read_bytes(marker)
         return _parse_watermark(marker, data) if data else 0
@@ -698,11 +624,8 @@ class FileBackend:
         self._apply_staged(temp, pending, durable=durable)
 
     def _install_pending_clear_base(self, path: Path, *, durable: bool) -> None:
-        """Rename the staged watermark onto the marker, the clear's second and final commit.
-
-        Never removes its source on failure, unlike ``_apply_staged``: an exception here
-        leaves the pending file for the next writer to install rather than losing the
-        watermark it was staged to become.
+        """Rename the staged watermark onto the marker, the clear's second and final commit. Never
+        removes its source on failure.
         """
         pending = self._clear_base_pending_path(path)
         marker = self._clear_base_path(path)
@@ -734,20 +657,12 @@ class FileBackend:
     def read_log(self, key: Key, *, after: str | None = None) -> LogPage:
         """A log's entries from ``after`` onward, and the cursor to resume from next.
 
-        The clear-base marker and the log's own bytes are read under the same lock
-        ``clear_log`` holds while it moves them, so a reader never pairs a base that
-        already reflects a clear with bytes ``clear_log`` has not yet removed (or the
-        reverse): either read sees the whole pair from before the clear or the whole
-        pair from after it, never one half of each. The lock is exclusive, so a
-        file-backend read waits on any other holder of this key, another reader
-        included, and can raise ``StoreBusy`` if that holder keeps the key past the
-        timeout; the database backend's read waits on no writer at all.
+        The clear-base marker and the log's own bytes are read under the same lock ``clear_log``
+        holds while it moves them, so a read sees the whole pair from before a clear or the whole
+        pair from after it. The lock is exclusive and can raise ``StoreBusy``.
 
-        Settles nothing. A reader that lands between the unlink that commits a clear and the
-        watermark's own install onto the marker sees the marker unadvanced over an absent
-        file and answers with no records at the pre-clear cursor, which is correct at that
-        instant; deciding what a clear left behind is always the next writer's job, through
-        ``append`` or ``clear_log``, never a reader's.
+        Settles nothing: a reader between a clear's unlink and its watermark's install answers with
+        no records at the pre-clear cursor.
         """
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
@@ -788,36 +703,17 @@ class FileBackend:
     def clear_log(self, key: Key) -> int:
         """Remove a log file outright, returning how many entries it held.
 
-        Settles an earlier crash's pending clear first, before this call reads anything
-        else about the log. Repairs a torn tail next, so an appender's own in-flight
-        fragment is never counted as a whole entry. Deleting the file rather than
-        truncating it to zero bytes is what keeps an absent log and a never-appended one
-        the same "nothing here" ``read_log`` already reports for either; a log with
-        nothing left to clear returns 0. Settling may already have installed an earlier,
-        interrupted clear's watermark before this branch runs, so a 0 return says only
-        that this call's own base did not move, not that settling wrote nothing.
+        Settles an earlier crash's pending clear first, then repairs a torn tail, then deletes the
+        file; a log with nothing left to clear returns 0.
 
-        Two commits, not one: the unlink is the clear itself, since absence is the one
-        signal every reader of a log honors without being taught, and it runs first. The
-        watermark that keeps a cursor taken before the clear comparable to one taken after
-        it is staged to a pending file before the unlink and installed onto the marker
-        only once the unlink has committed. A crash between the two never leaves the
-        watermark ahead of a file that still holds the bytes it claims to be past, and it
-        never loses the watermark either: the pending file survives until the next
-        ``append`` or ``clear_log`` on this log installs it, so the base never advances
-        twice for one clear. An exception from staging the pending value or from the
-        unlink leaves the clear uncommitted, and the next writer discards the stale stage;
-        an exception after the unlink leaves the clear committed with its watermark
-        pending, and the next writer installs it before doing anything else. A pending
-        file beside an absent log that will not parse as a decimal integer refuses
-        settling with ``DecodeError`` naming it, so ``append`` and ``clear_log`` on that
-        log refuse until it is removed, while ``read_log`` keeps answering from the
-        marker regardless. A pending file beside a log that is still present is
-        discarded without being read: the clear it staged never committed, so its bytes
-        never held a watermark worth parsing. The rename that installs the watermark is
-        durable against a process crash on every
-        platform this backend runs on, and against power loss only where
-        ``capabilities().durable_replace`` is true, which is false on Windows.
+        Two commits: the unlink is the clear itself and runs first; the watermark that keeps a
+        cursor taken before the clear comparable to one taken after it is staged to a pending file
+        before the unlink and installed onto the marker only once the unlink has committed. The
+        pending file survives a crash until the next ``append`` or ``clear_log`` on this log
+        installs it. A pending file beside an absent log that will not parse as a decimal integer
+        makes ``append`` and ``clear_log`` refuse with ``DecodeError`` naming it; a pending file
+        beside a log that is still present is discarded unread. The install is durable against
+        power loss only where ``capabilities().durable_replace`` is true.
         """
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
@@ -897,12 +793,7 @@ class FileBackend:
         return self.path_for(key)
 
     def close(self) -> None:
-        """Release what this backend holds between calls, which is nothing.
-
-        Every file handle is opened and closed inside the operation that needs it, so this
-        exists to give both backends one lifecycle a binder can call rather than to free
-        anything here.
-        """
+        """Release nothing; the file backend holds no handles between calls."""
 
 
 class _FileTxn:
@@ -937,11 +828,8 @@ class _FileTxn:
         self._staged[key] = _Staged(removed=True)
 
     def apply(self) -> None:
-        """Encode and stage every write, then apply in the declared key order.
-
-        Every temp file is written before any rename, so the crash window is the rename
-        sequence rather than the whole body, and every record on disk stays individually
-        intact.
+        """Encode and stage every write, then apply in the declared key order; every temp file is
+        written before any rename.
         """
         pending = [(key, self._staged[key]) for key in self._keys if key in self._staged]
         try:
@@ -971,17 +859,8 @@ class _FileTxn:
 def _encode(descriptor: StoreDescriptor, key: Key, value: Any) -> bytes:
     """The value's bytes, or a refusal naming the entry and what would not encode.
 
-    Runs the same ``check_schema_version`` the read side runs, before a single byte is
-    produced: a caller's free-form document can carry a ``schema_version`` this store's own
-    reader would refuse, and writing it anyway would poison every later read of the entry,
-    including one passing ``default=``. The read-side message is kept inside this one,
-    since it already names the ceiling and the offending value; this one adds the store and
-    key a writer needs to find what it just tried to write.
-
-    ``json.dumps`` names neither the store nor the key, and the canonical codec refuses a
-    non-finite number and an unserializable object rather than fabricating a spelling for
-    either, so the message has to say which record and which type before a caller can act
-    on it.
+    Runs ``check_schema_version`` before encoding, and refuses a non-finite number or an
+    unserializable object, naming the store, the key and the type.
     """
     assert descriptor.codec is not None
     try:
@@ -1003,11 +882,8 @@ def _encode(descriptor: StoreDescriptor, key: Key, value: Any) -> bytes:
 
 
 def _decode(descriptor: StoreDescriptor, key: Key, data: bytes) -> Any:
-    """The record's decoded value, refusing an undecodable body or an unsupported version.
-
-    The one decode every backend and the transaction paths call: a version refusal raised here
-    is ``SchemaVersionRefused``, never ``DecodeError``, since the bytes decoded perfectly well
-    and a reader about to act on this document's content is the seam's hard-refusal point.
+    """The record's decoded value, refusing an undecodable body or an unsupported version
+    (``SchemaVersionRefused``, never ``DecodeError``).
     """
     assert descriptor.codec is not None
     try:
@@ -1043,9 +919,9 @@ def _deleted_in_transaction(key: Key) -> NotFound:
 
 
 def _parse_watermark(path: Path, data: bytes) -> int:
-    """A clear-base marker or pending file's value, or a refusal naming the file that failed
-    to parse: nothing this backend writes ever fails here, so a failure means bytes some
-    other writer produced."""
+    """A clear-base marker or pending file's value, or a refusal naming the file that failed to
+    parse.
+    """
     try:
         return int(data)
     except ValueError as exc:
@@ -1053,12 +929,7 @@ def _parse_watermark(path: Path, data: bytes) -> int:
 
 
 def _refuse_embedded_newline(key: Key, data: bytes) -> None:
-    """Refuse an encoded log entry that is more than one line, whatever stores the entry.
-
-    A log entry is one line: the file backend terminates it with a newline and an export
-    writes database-held entries back out the same way, so an embedded newline would split one
-    entry into two wherever the bytes land.
-    """
+    """Refuse an encoded log entry that is more than one line, whatever stores the entry."""
     if b"\n" in data:
         raise ValueError(
             f"log store {key.store!r} encoded an entry containing a newline: a log entry is "
@@ -1069,12 +940,8 @@ def _refuse_embedded_newline(key: Key, data: bytes) -> None:
 
 
 def _is_bookkeeping(name: str) -> bool:
-    """Whether a filename is a storage backend's own artifact rather than an entry.
-
-    Lock files outlive the writes that made them, a temp file is visible for the duration of a
-    write or a database build, and a database and its WAL sidecars sit inside the very root
-    whose entries are being enumerated; none of them may ever surface as a key. Anything else
-    that is not an entry is rejected by the store's own locator instead of by pattern matching.
+    """Whether a filename is a storage backend's own artifact rather than an entry: a lock file, a
+    temp file, a database or one of its WAL sidecars.
     """
     return (
         name in _DATABASE_ARTIFACTS
@@ -1093,18 +960,9 @@ def _remove_quietly(path: str) -> None:
 
 
 def retry_while_denied(action: Callable[[], Any], budget_s: float) -> Any:
-    """Run a filesystem action an atomic replace can transiently deny, then give up loudly.
-
-    On Windows both sides of a replace are exposed to this: the rename is denied while any
-    other handle is open on the destination, and another process opening the destination is
-    denied while the rename is in flight. A virus scanner or search indexer produces the
-    same denial with nothing else running. None of that is a torn read and none of it is
-    corruption, so it is retried rather than reported as either, and a denial that outlasts
-    the budget is raised rather than swallowed. On POSIX this never triggers.
-
-    The budget is the backend's own lock timeout: one number for how long this layer is
-    willing to wait on one key. The waits are jittered because a fixed delay lets a reader
-    and a writer settle into lockstep, each waking into the other's open window.
+    """Run a filesystem action an atomic replace can transiently deny (on Windows, a rename or open
+    racing another handle), retrying with jittered waits within the backend's own lock timeout,
+    then raising. Never triggers on POSIX.
     """
     deadline = time.monotonic() + budget_s
     while True:

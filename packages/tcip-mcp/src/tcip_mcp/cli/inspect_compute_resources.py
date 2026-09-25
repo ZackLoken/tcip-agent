@@ -1,17 +1,12 @@
-"""Report the host's current compute headroom.
+"""Report the host's current compute headroom: CPU, memory, GPU free bytes, and how many training
+runs this host already has active. Reports, never caps.
 
-A fact to reason with before launching another concurrent training/HPO run, not an enforced
-cap: the platform doesn't cap memory/CPU per run, it reports the real numbers (CPU, memory, GPU
-free bytes, and how many training runs this host already has active) and leaves the judgment
-call to whoever launches the next one. Wraps
-``tcip_mcp.tools.training_tools.inspect_compute_resources`` with no MCP tool registration; run
-it before ``launch_training``/``run_hyperparameter_search`` when compute headroom is the open question.
+Wraps ``tcip_mcp.tools.training_tools.inspect_compute_resources``.
 
     tcip inspect-compute-resources --project <project_root>
 
 ``--project`` (or an already-set ``$TCIP_STATE_ROOT``) names the project this run's active-run
-count and audit line resolve against; without it the answer resolves against the process cwd,
-which is wrong for a run count and silent about it.
+count and audit line resolve against; without it the answer resolves against the process cwd.
 """
 
 from __future__ import annotations

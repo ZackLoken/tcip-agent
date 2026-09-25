@@ -255,7 +255,7 @@ def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(tmp_path
     trained = build_model(config)
     assert _param_shapes(trained)["head.weight"] == (7, 6, 1, 1)  # the config's kwargs took effect
 
-    ctx = TrainContext(run=create_run(dict(config), str(tmp_path / "out"), id="auto-run-40"), train_loader=None)
+    ctx = TrainContext(run=create_run(dict(config), str(tmp_path / "out"), id="auto-run-40"), train_loader=None, task="detection")
     path = ctx.save_checkpoint({"model_state_dict": trained.state_dict()}, "model_best")
 
     loaded = torch.load(path, map_location="cpu", weights_only=False)
@@ -268,7 +268,7 @@ def test_a_saved_checkpoint_is_recognized_after_its_kind_stamp_is_dropped(tmp_pa
     writes, so it keeps working for a checkpoint whose kind was never stamped. Feeding it the real
     writer's output, rather than a hand-built dict, is what ties the two ends together."""
     config = _probe_config()
-    ctx = TrainContext(run=create_run(dict(config), str(tmp_path / "out"), id="auto-run-41"), train_loader=None)
+    ctx = TrainContext(run=create_run(dict(config), str(tmp_path / "out"), id="auto-run-41"), train_loader=None, task="detection")
     path = ctx.save_checkpoint(
         {"model_state_dict": build_model(config).state_dict()}, "model_best")
 

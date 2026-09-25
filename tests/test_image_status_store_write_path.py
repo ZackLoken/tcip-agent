@@ -19,7 +19,7 @@ from tcip_mcp.dataset_layout import (
     image_status_digest_key,
     image_status_key,
     image_status_path,
-    normalize_status_store,
+    status_tokens,
 )
 from tcip_web.app import app
 
@@ -50,13 +50,13 @@ def _bulk(client: TestClient, root: Path, statuses: dict[str, str], subject: str
 
 
 def _on_disk(root: Path) -> dict[str, dict[str, str]]:
-    return normalize_status_store(
+    return status_tokens(
         json.loads(image_status_path(root).read_text(encoding="utf-8")))
 
 
 def _stored(root: Path) -> dict[str, dict[str, str]]:
     """The store's content through the seam, wherever the selected backend actually keeps it."""
-    return normalize_status_store(tcip_store.read(image_status_key(root), default={}))
+    return status_tokens(tcip_store.read(image_status_key(root), default={}))
 
 
 def test_a_status_write_lands_at_the_shared_locator_and_creates_no_second_store(
@@ -107,7 +107,7 @@ def test_the_read_route_returns_the_bucket_the_write_routes_built(
     client: TestClient, tmp_path: Path
 ) -> None:
     """Reader and writer agree on which bucket a subject and date name, so a confirmation is read
-    back under the same scope it was recorded under and never under a neighbouring one."""
+    back under the same scope it was recorded under and never under a neighboring one."""
     _bulk(client, tmp_path, {"A.JPG": "complete", "B.JPG": "negative", "C.JPG": "partial"},
           "bud")
     _single(client, tmp_path, "D.JPG", "negative", "bush")
@@ -158,26 +158,6 @@ def test_a_status_with_no_actor_behind_it_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="recorded_by"):
         record_image_statuses(tmp_path, "bud", {"A.JPG": "negative"}, recorded_by="")
     assert not image_status_path(tmp_path).exists()
-
-
-def test_a_merge_refuses_rather_than_deleting_entries_it_cannot_read(tmp_path: Path) -> None:
-    """A merge rewrites the whole document, so entries the reader drops are entries it deletes.
-
-    The writer refuses instead, naming how many are at stake: a store written in some other shape
-    holds human statuses, and losing them to an unrelated confirmation is not a recoverable error.
-    """
-    from tcip_mcp.dataset_layout import record_image_statuses
-
-    tcip_store.replace(image_status_key(tmp_path),
-                       {"bud": {"OLD_A.JPG": "negative", "OLD_B.JPG": "complete"}},
-                       expect=tcip_store.Version.ABSENT)
-
-    with pytest.raises(ValueError, match="does not recognize"):
-        record_image_statuses(tmp_path, "bud", {"NEW.JPG": "negative"},
-                              recorded_by="user:breeder")
-
-    still_there = tcip_store.read(image_status_key(tmp_path))
-    assert still_there == {"bud": {"OLD_A.JPG": "negative", "OLD_B.JPG": "complete"}}
 
 
 def test_the_gui_route_records_the_person_whose_confirmation_it_is(

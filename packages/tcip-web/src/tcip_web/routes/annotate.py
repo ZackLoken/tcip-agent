@@ -1,8 +1,7 @@
 """Annotation label CRUD routes for the Annotate tab.
 
 Reads / writes the canonical per-image label file (one JSON per image, holding every subject's
-annotations by name) via :mod:`tcip_annotation.json_io`. The label path is supplied by the caller
-so the backend doesn't have to guess a dataset layout.
+annotations by name) via :mod:`tcip_annotation.json_io`, at the label path the caller supplies.
 """
 
 from __future__ import annotations
@@ -38,9 +37,8 @@ class AnnotationPayload(BaseModel):
     round-tripping, ``point`` for a placed prompt or keypoint, or none of them for an image-level
     label), its attribute values by name and its crowd flag.
 
-    Every field but the subject and the provenance is carried uninterpreted: its one reading is
-    :func:`~tcip_annotation.json_io.annotation_from_payload`, the conversion the save tool shares,
-    so a value that route refuses is never coerced into one here first.
+    Every field but the subject is carried uninterpreted: its one reading is
+    :func:`~tcip_annotation.json_io.annotation_from_payload`.
     """
 
     subject: str
@@ -52,11 +50,11 @@ class AnnotationPayload(BaseModel):
     iscrowd: Any = None
     # Keep-original-creator: a loaded shape's created_by, sign-off and rule marker round-trip
     # back on save, so a re-save never re-stamps existing labels; new shapes carry none of them.
-    created_by: Optional[str] = None
-    created_at: Optional[str] = None
-    accepted_by: Optional[str] = None
-    accepted_at: Optional[str] = None
-    accepted_by_rule: Optional[str] = None
+    created_by: Any = None
+    created_at: Any = None
+    accepted_by: Any = None
+    accepted_at: Any = None
+    accepted_by_rule: Any = None
 
 
 class SavePayload(BaseModel):
@@ -92,11 +90,7 @@ def _image_dims(path: str) -> tuple[int, int]:
 
 
 def _guard_label_path(path: Optional[str]) -> Optional[str]:
-    """Confine a client-supplied label path and hand back its resolved spelling, or None.
-
-    Label read/write paths are attacker-controlled and ``write_annotations`` would otherwise be
-    an arbitrary file write/delete primitive, so every read and write uses the path this returns.
-    """
+    """Confine a client-supplied label path and hand back its resolved spelling, or None."""
     if not path:
         return None
     try:
@@ -108,11 +102,9 @@ def _guard_label_path(path: Optional[str]) -> Optional[str]:
 def _guarded_audit_root(label_path: Optional[str]) -> Optional[str]:
     """The dataset root a label write is audited under, confined before anything is written.
 
-    Labels travel with their dataset, so their trail belongs beside them rather than in whichever
-    project happened to open the dataset. A label path outside a dataset tree names no such root,
-    so the write is recorded in the platform's own log instead (``_audit_gui_write``'s ``root``
-    widens to accept ``None`` for exactly this); a dataset root the allow-set does not admit
-    refuses the write before it happens.
+    A label path outside a dataset tree names no such root, so the write is recorded in the
+    platform's own log instead; a dataset root the allow-set does not admit refuses the write
+    before it happens.
     """
     from tcip_mcp.dataset_layout import dataset_root_of
 
@@ -126,10 +118,10 @@ def _guarded_audit_root(label_path: Optional[str]) -> Optional[str]:
 
 
 def annotation_dict(a: Annotation) -> dict:
-    """An :class:`Annotation` for the canvas, the one the Annotate and Review load routes share:
-    the library's client projection (:func:`~tcip_annotation.json_io.client_annotation`) plus this
-    response's own ``authorship``, derived through :func:`authorship_of`; the label document
-    itself carries no such field."""
+    """An :class:`Annotation` for the canvas: the library's client projection
+    (:func:`~tcip_annotation.json_io.client_annotation`) plus this response's own ``authorship``,
+    derived through :func:`authorship_of`; the label document itself carries no such field.
+    """
     return {**client_annotation(a), "authorship": authorship_of(a)}
 
 
@@ -181,16 +173,14 @@ def load_labels(image_path: str, label_path: Optional[str] = None) -> dict:
 def save_labels(payload: SavePayload) -> dict:
     """Write labels for an image to its single per-image JSON file.
 
-    An empty annotation list is written as ``{"annotations": []}`` (``keep_empty=True``) rather than
-    deleted, so clearing all annotations keeps the record instead of erasing it. That record is not a
-    negative on its own: it trains as one only once the breeder marks the image Complete
-    (``image_status.json``); until then it reads as unannotated (CLAUDE.md's negative invariant).
+    An empty annotation list is written as ``{"annotations": []}`` (``keep_empty=True``) rather
+    than deleted. That record trains as a negative only once the breeder marks the image Complete
+    (``image_status.json``); until then it reads as unannotated.
 
     A save under a dataset root records to that dataset's own audit log; a save under no dataset
-    root (a label path confined to an allowed workspace, project or image root but outside any
-    dataset tree) records to the platform's own log instead, which depends on the platform
-    state root being writable. Either way, a write that commits and cannot be recorded answers 409
-    with the marker and the response the write would have returned.
+    root records to the platform's own log instead, which depends on the platform state root being
+    writable. Either way, a write that commits and cannot be recorded answers 409 with the marker
+    and the response the write would have returned.
     """
     w, h = _image_dims(payload.image_path)
     label_path = _guard_label_path(payload.label_path)

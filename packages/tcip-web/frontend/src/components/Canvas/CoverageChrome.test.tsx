@@ -175,12 +175,12 @@ describe("CoverageChrome", () => {
     expect(onAttest).toHaveBeenCalledWith(true);
   });
 
-  it("arming and cancelling a confirmation is announced through a status region", () => {
+  it("arming and canceling a confirmation is announced through a status region", () => {
     render(<CoverageChrome {...baseProps()} otherLattice={{ count: 1, cols: 2, rows: 2 }} />);
     fireEvent.click(screen.getByRole("button", { name: "Attest A1 complete for fruit" }));
     expect(screen.getByRole("status").textContent).toMatch(/Confirmation armed/);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.getByRole("status").textContent).toMatch(/cancelled/);
+    expect(screen.getByRole("status").textContent).toMatch(/canceled/);
   });
 
   it("a confirmation armed for one cell does not carry over to the next", () => {

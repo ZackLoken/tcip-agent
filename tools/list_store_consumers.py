@@ -1,6 +1,6 @@
 """List every registered store's writers and readers, from the import graph plus a symbol scan.
 
-For every store the registry declares (``tcip_mcp.store_catalogue.bootstrapped_stores``,
+For every store the registry declares (``tcip_mcp.store_catalog.bootstrapped_stores``,
 descriptors from ``tcip_store.registry``): the store's name, its classification (kind, frozen)
 and version ceiling (``schema_version``), the module that declares its descriptor
 (``StoreDescriptor.declared_in``), and every other module that references the descriptor's own
@@ -169,7 +169,7 @@ def store_consumers(inventory: dict, repo_root: Path, store_name: str, declared_
 def build_listing(inventory: dict, repo_root: Path) -> list[dict]:
     """One row per registered store, from the live registry (importing it registers every
     store, the same way any other whole-registry sweep in this repository does)."""
-    from tcip_mcp.store_catalogue import bootstrapped_stores
+    from tcip_mcp.store_catalog import bootstrapped_stores
     from tcip_store import get_descriptor
 
     rows = []

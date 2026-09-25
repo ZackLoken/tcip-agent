@@ -125,7 +125,7 @@ _PLANT_PIXELS = [(10.0, 10.0), (10.0, 50.0), (50.0, 10.0), (50.0, 50.0)]
 
 
 def test_run_inference_raster_writes_bucket_with_explicit_tile_size(tmp_path, monkeypatch):
-    """An explicit tile_size clears the tile_size gate on its own (no acknowledgement needed);
+    """An explicit tile_size clears the tile_size gate on its own (no acknowledgment needed);
     the persisted bucket carries one prediction file for the whole raster plus a real
     operating_point.json sidecar in the same shape every other bucket writes."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
@@ -206,7 +206,7 @@ def test_a_same_path_orthomosaic_export_against_a_completed_experiment_refuses_o
     """The completed experiment's raster bucket already holds the first run's document: a
     second export into the same path refuses on the document predicate at resolution, before the
     pointer's own same-value conjunct is ever reached. Unlike the images regime, no raster
-    analogue of that conjunct's own admitting case is built here: a raster pass always writes a
+    analog of that conjunct's own admitting case is built here: a raster pass always writes a
     document, so there is no empty-enumeration construction for a raster path, and the conjunct
     itself is one predicate proven once, by the images-regime test."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
@@ -410,7 +410,7 @@ def test_deliver_orthomosaic_plant_counts_signature_carries_delivered_phenotype_
 
 def _run_bucket(tmp_path, monkeypatch, raster_path: Path) -> tuple[Path, str]:
     """A real bucket via run_inference's raster_path regime (explicit tile_size, so it
-    writes without acknowledgement); returns (bucket dir, prediction stem). Written under a
+    writes without acknowledgment); returns (bucket dir, prediction stem). Written under a
     canonical dataset layout so a caller can promote its conf claim afterward (verify_stamp_binding's
     covered-bucket check needs a real dataset root to key the bucket under)."""
     from tcip_mcp.tools.inference_tools import run_inference
@@ -463,7 +463,7 @@ def test_deliver_orthomosaic_plant_counts_refuses_unvalidated_then_delivers_once
     tmp_path, monkeypatch,
 ):
     """A bare unvalidated count refuses, naming the unvalidated dimension; passing an
-    acknowledgement raises TypeError rather than a quieter admission, since this door takes
+    acknowledgment raises TypeError rather than a quieter admission, since this door takes
     none; the same delivery ships once the bucket earns a real reference."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
@@ -719,7 +719,7 @@ def test_deliver_orthomosaic_plant_counts_floors_a_stamp_earned_for_a_different_
 def test_deliver_orthomosaic_plant_counts_sibling_tile_floor_despite_valid_conf(tmp_path, monkeypatch):
     """A per-plant delivery whose count operating point genuinely validated still refuses when a
     sibling gated dimension (tile_size here) has no real basis, since this door takes no
-    acknowledgement: the refusal names tile_size as the actual floorer, and separately reports the
+    acknowledgment: the refusal names tile_size as the actual floorer, and separately reports the
     operating_point dimension's own cleared reference rather than folding it into the floor."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
@@ -1003,7 +1003,7 @@ def test_deliver_orthomosaic_plant_counts_records_a_registry_disclosure_that_rea
     assert "dates_delivered" not in pm  # the walked-mapping form's own keys, never named here
     assert "record_sha256" not in pm
 
-    stated_tolerance = 5.0
+    stated_tolerance = grid_pitch_m(plants) / 12
     out_csv_stated = tmp_path / "counts_stated.csv"
     result_stated = deliver_orthomosaic_plant_counts(
         str(bucket_dir), str(raster_path), registry_name, str(out_csv_stated),
@@ -1114,7 +1114,7 @@ def test_deliver_orthomosaic_plant_counts_delivers_once_registry_csv_bytes_verif
     assert out_csv.exists()
 
 
-# ── nearest-neighbour path: the in-frame correction ───────────────────────
+# ── nearest-neighbor path: the in-frame correction ───────────────────────
 
 
 def _plants_csv_at(tmp_path: Path, raster_path: Path, rows: list[tuple[str, float, float]]) -> Path:
@@ -1139,7 +1139,7 @@ def test_deliver_orthomosaic_plant_counts_names_an_outside_raster_plant_and_leav
     """A registry plant outside the raster's own frame gets no row and is named
     (plants_outside_raster); a detection at the raster's edge, nearer to that outside plant than
     to any in-frame plant, stays unmapped rather than attributed to it: without the in-frame
-    guard, the outside plant would have been the nearest candidate and well inside the fallback
+    guard, the outside plant would have been the nearest candidate and well inside the stated
     tolerance, mapping the edge detection to a plant this raster never pictures."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
@@ -1159,7 +1159,7 @@ def test_deliver_orthomosaic_plant_counts_names_an_outside_raster_plant_and_leav
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
         str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
-        delivered_phenotype="stem_count")
+        delivered_phenotype="stem_count", nn_tolerance_m=10.0)
 
     assert "error" not in result, result
     assert result["n_unmapped"] == 1
@@ -1450,7 +1450,7 @@ def test_deliver_orthomosaic_plant_counts_canopy_subject_refuses_when_no_plant_w
 def test_deliver_orthomosaic_plant_counts_refuses_a_duplicate_plot_name_in_the_registry(
     tmp_path, monkeypatch,
 ):
-    """The nearest-neighbour regime refuses a duplicated plot_name by name too, through the same
+    """The nearest-neighbor regime refuses a duplicated plot_name by name too, through the same
     check the canopy regime already runs over its own registry (require_named_plants): two rows
     sharing one identity would otherwise merge two trees' detections into one aggregation row."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))

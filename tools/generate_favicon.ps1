@@ -3,7 +3,7 @@
     Render the browser-tab favicon from the Savanna Institute circle logo.
 
 .DESCRIPTION
-    Crops the source logo's transparent margins (measured per side, so the mark ends up centred
+    Crops the source logo's transparent margins (measured per side, so the mark ends up centered
     without being stretched), resizes the square that remains to 512x512, and writes it to the
     frontend's public assets. A 32x32 copy is written beside it so tab-size legibility can be
     checked by eye.

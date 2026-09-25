@@ -3,23 +3,20 @@
 GUI-free:
 
   * Operates on :class:`tcip_annotation.state.Annotation` records (a prediction is an annotation
-    whose ``score`` is set); a class is named by its ``subject``, never an integer id.
+  whose ``score`` is set); a class is named by its ``subject``, never an integer id.
   * Consumes the dict-based match format produced by
-    :func:`tcip_annotation.matching.compute_matches` (a dict, not a tuple).
-  * Per-image state (image dims, GT/pred lists) is supplied via
-    :class:`ReviewContext` on each call, rather than embedded in a global
-    AppState. This makes the engine safe to reuse across images and
-    concurrent sessions.
+  :func:`tcip_annotation.matching.compute_matches`.
+  * Per-image state (image dims, GT/pred lists) is supplied via :class:`ReviewContext` on each
+  call.
 
-The only state the engine holds between calls is the persisted review log, one JSON
-shard per (prediction bucket, image) under ``<state_dir>/review/`` (a verdict rewrites only its
-own shard, not the whole cross-image log), and a small spatial-hash cache for fast lookups.
+The only state the engine holds between calls is the persisted review log, one JSON shard per
+(prediction bucket, image) under ``<state_dir>/review/``, and a small spatial-hash cache for fast
+lookups.
 
-A verdict is recorded against the prediction bucket the reviewer was looking at, so two dates of
-a camera that reuses filenames keep separate verdicts. The bucket is a caller-supplied key this
-package stores verbatim and never derives: it resolves no layout of its own (the platform spells
-one bucket key, ``tcip_mcp.prediction_buckets.bucket_key_of``). ``NO_BUCKET`` (``"."``) is the
-key for a review carrying no prediction bucket at all, which is a ground-truth-only review.
+A verdict is recorded against the prediction bucket the reviewer was looking at, so two dates of a
+camera that reuses filenames keep separate verdicts. The bucket is a caller-supplied key this
+package stores verbatim and never derives. ``NO_BUCKET`` (``"."``) is the key for a review carrying
+no prediction bucket at all, which is a ground-truth-only review.
 """
 
 from __future__ import annotations
@@ -38,7 +35,9 @@ from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation.json_io import LABEL_SUFFIX, write_annotations
 from tcip_annotation.state import Annotation, bbox_of, box_derivable
-from tcip_annotation.verdicts import VERDICT_ACTIONS, VerdictAction, decode_verdict
+from tcip_annotation.verdicts import (
+    GT_BOX_KEY, PRED_BOX_KEY, VERDICT_ACTIONS, VerdictAction, decode_verdict,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,13 +110,9 @@ def shard_filename(img_name: str) -> str:
 
 
 def bucket_dirname(bucket: str) -> str:
-    """The single directory name one bucket's shards are stored under.
-
-    A bucket key is a relative path whose separators are part of the key, and it is folded into
-    one directory name rather than mirrored as a tree: one sanitizing rule then covers image keys
-    and bucket keys alike, and the shard path stays short enough for the platforms this runs on.
-    :data:`NO_BUCKET` names no directory, so a review carrying no prediction bucket keeps its
-    shard directly under ``review/``.
+    """The single directory name one bucket's shards are stored under: the bucket key, separators
+    included, folded into one sanitized directory name. :data:`NO_BUCKET` names no directory, so a
+    review carrying no prediction bucket keeps its shard directly under ``review/``.
     """
     return _sanitized(bucket)
 
@@ -127,8 +122,8 @@ class _ShardLocator:
     """Places one (bucket, image) verdict shard, carrying the sanitizing the layout needs.
 
     The recoverable key from a path is the sanitized bucket directory and filename, which place
-    that same file. A key that had to be sanitized is not recoverable from the path and does not
-    need to be: the true keys are stored inside the payload, which is what reload reads them from.
+    that same file. A key that had to be sanitized is not recoverable from the path: the true keys
+    are stored inside the payload.
     """
 
     def relative_path(self, scope: str, parts: tuple[str, ...]) -> PurePosixPath:
@@ -150,11 +145,8 @@ class _ShardLocator:
 def true_verdict_parts(entry: bytes) -> tuple[str, ...] | None:
     """The (bucket, image) a shard's own payload states, or None when it states neither.
 
-    The shard filename is sanitized, so a key carrying a separator is not recoverable from the
-    path. It is recoverable from the payload, which is where the writer puts it, and that is
-    the identity enumeration answers with on every backend. Bytes that will not decode state
-    no key: that shard still enumerates under the parts its path spells, so reading it reports
-    the corruption rather than enumeration hiding the entry.
+    Bytes that will not decode state no key: that shard still enumerates under the parts its path
+    spells, and reading it reports the corruption.
     """
     try:
         payload = RECORD_JSON.decode(entry)
@@ -188,12 +180,8 @@ register_store(
 def review_verdict_key(state_dir: str | Path, bucket: str, img_name: str) -> Key:
     """One image's review verdicts under one prediction bucket.
 
-    Keyed by the bucket as well as the image, so a filename a camera reuses across two dates
-    holds one set of verdicts per bucket instead of one shared set.
-
-    ``cas``: a shard is rewritten from an engine's cached aggregate state, and a second
-    engine on the same state dir holds its own copy, so an unconditional write drops the
-    verdicts the other one recorded.
+    Keyed by the bucket as well as the image, so a filename a camera reuses across two dates holds
+    one set of verdicts per bucket. ``cas``.
     """
     return Key(REVIEW_VERDICTS_STORE, str(state_dir), (bucket, img_name))
 
@@ -212,23 +200,16 @@ register_store(
 
 
 def label_baseline_key(label_dir: str | Path, stem: str) -> Key:
-    """One label file's pristine copy, beside the directory the original lives in.
-
-    The generic placement, because the directory is whatever the caller was handed (a dataset's
-    ``annotations/<date>/``, a curated dataset's ``labels/``) and this package resolves no
-    layout of its own.
-    """
+    """One label file's pristine copy, beside the directory the original lives in."""
     return Key(LABEL_BASELINES_STORE, str(Path(label_dir).absolute()), (str(stem),))
 
 
 def capture_label_baseline(label_path: str | Path) -> bool:
     """Capture one label file's current bytes as its pristine baseline, if none is held yet.
 
-    Create-only: a baseline already on record is left alone rather than overwritten by this
-    call's read, so a capture that lands in between two callers is never clobbered by the
-    later one. Returns ``True`` if this call captured a new baseline, ``False`` if one was
-    already held. The caller is responsible for confirming ``label_path`` names an existing
-    file first; this function only performs the capture.
+    Create-only: a baseline already on record is left alone. Returns ``True`` if this call captured
+    a new baseline, ``False`` if one was already held. The caller confirms ``label_path`` names an
+    existing file first.
     """
     src = Path(label_path)
     try:
@@ -311,10 +292,7 @@ class ReviewEngine:
         """Persist only this (bucket, image)'s shard: O(detections on that image), not
         O(all-reviewed).
 
-        Compare-and-set against the version this engine last saw. A refusal is raised, never
-        logged and dropped: this engine rewrites the shard whole from its own cached aggregate,
-        so a shard that moved underneath it would otherwise have another reviewer's verdicts
-        silently overwritten, and a contended shard would be reported to the reviewer as saved.
+        Compare-and-set against the version this engine last saw; a conflict raises.
         """
         img_data = self._verdicts().get((bucket, img_name))
         if img_data is None:
@@ -328,9 +306,7 @@ class ReviewEngine:
         )
 
     def save_review_state(self) -> None:
-        """Flush every shard. The per-verdict callers use :meth:`_save_image`
-        instead, to touch only the image that changed; this is for migration / tests
-        that want the whole in-memory state written out."""
+        """Flush every shard."""
         for bucket, img_name in list(self._verdicts()):
             self._save_image(bucket, img_name)
 
@@ -340,11 +316,7 @@ class ReviewEngine:
         return self._review_state
 
     def reviewed_buckets(self) -> list[str]:
-        """Every prediction bucket this store holds verdicts or completions for, sorted.
-
-        The explicit enumeration for a consumer that legitimately spans buckets, so it asks which
-        buckets exist rather than reading one bucket's entries as if they were the whole store.
-        """
+        """Every prediction bucket this store holds verdicts or completions for, sorted."""
         return sorted({bucket for bucket, _ in self._verdicts()})
 
     def image_states(self, bucket: str) -> dict[str, dict]:
@@ -359,22 +331,16 @@ class ReviewEngine:
         """Mark ``img_name`` fully reviewed under ``bucket`` (e.g. a confirmed negative /
         bulk-accept).
 
-        ``producer_identity``: the resolved producing-bucket fact (``checkpoint_sha256``/
-        ``experiment_id``), a plain dict the caller resolves (this package never looks one up
-        itself, see the module docstring). A confirmed negative carries zero verdict entries, so
-        it has nowhere else to record which model it was reviewed against; this stamps that fact at
-        the image level instead. ``None`` (the default) leaves any existing stamp untouched.
+        ``producer_identity``: the resolved producing-bucket fact
+            (``checkpoint_sha256``/``experiment_id``), a plain dict the caller resolves, stamped at
+            the image level. ``None`` (the default) leaves any existing stamp untouched.
 
         ``adjudication_covered``: a map from subject name (``"*"`` for a subject-less Complete, a
-        claim about every subject) to whether this zero-verdict completion is a genuine negative
-        the caller has already confirmed for it (the prediction bucket held zero detections
-        resolving to that subject on this image, so Complete is itself the confirming act), never
-        inferred by this package. A bulk-accept of an image the bucket did predict on, completed
-        with no individual verdicts, must pass ``False`` for its subject (or omit the call
-        entirely): stamping every zero-verdict Complete as covered would let an unreviewed
-        bulk-accept dilute a real reference's statistics. Merged into any existing map rather than
-        replacing it, so a second Complete under another subject adds its own entry without
-        touching the first. ``None`` (the default) leaves any existing map untouched.
+            claim about every subject) to whether this zero-verdict completion is a genuine
+            negative the caller has already confirmed for it (the prediction bucket held zero
+            detections resolving to that subject on this image). A bulk-accept of an image the
+            bucket did predict on passes ``False`` for its subject. Merged into any existing map
+            rather than replacing it. ``None`` (the default) leaves any existing map untouched.
         """
         verdicts = self._review_state.setdefault("verdicts", {})
         img_data = verdicts.setdefault(
@@ -419,9 +385,8 @@ class ReviewEngine:
     def verdict_count_for_images(self, bucket: str, names: Iterable[str]) -> int:
         """Total recorded verdicts (accept/reject/edit detection entries) on ``bucket`` across
         ``names``, matched by image stem so a prediction bucket's ``<stem>.json`` files line up
-        with the review log's image-name keys. Backs prediction-bucket immutability: a bucket
-        whose images carry verdicts must not be silently overwritten by a re-run. Scoped to the
-        one bucket, so a namesake image reviewed under another bucket never freezes this one."""
+        with the review log's image-name keys. Scoped to the one bucket.
+        """
         wanted = {Path(n).stem for n in names}
         if not wanted:
             return 0
@@ -433,10 +398,9 @@ class ReviewEngine:
 
     def get_all_image_statuses(self) -> dict[str, str]:
         """Review status for every image the engine has state for, across every bucket (untouched
-        images are absent, the caller defaults them to ``"not_started"``). Backs the image-level
-        Reviewed/Unreviewed navigation filter, batch-fetched once per dataset, which asks whether
-        an image has review progress at all rather than progress under one bucket. An image
-        reviewed under several buckets reports the furthest status any of them reached."""
+        images are absent, the caller defaults them to ``"not_started"``). An image reviewed under
+        several buckets reports the furthest status any of them reached.
+        """
         rank = {"not_started": 0, "started": 1, "completed": 2}
         statuses: dict[str, str] = {}
         for (_bucket, name), data in self._verdicts().items():
@@ -455,11 +419,8 @@ class ReviewEngine:
 
     @staticmethod
     def _box_of(record: Optional[Annotation]):
-        """``record``'s image-coord box, or ``None`` when there is no record or no box to read.
-
-        A :class:`~tcip_annotation.state.Point` reads as ``None``, like a geometry-less label: a
-        verdict's box is what the reviewer looked at and what the entry is keyed by, and a fabricated
-        zero-area box at the point would key a real verdict to a shape nobody drew.
+        """``record``'s image-coord box, or ``None`` when there is no record or no box to read. A
+        :class:`~tcip_annotation.state.Point` reads as ``None``, like a geometry-less label.
         """
         geom = record.geometry if record is not None else None
         if not box_derivable(geom):
@@ -490,9 +451,9 @@ class ReviewEngine:
         y2 = max(b[3] for b in bboxes)
         return (x1, y1, x2, y2)
 
-    def _normalised_bbox(self, ctx: ReviewContext,
+    def _normalized_bbox(self, ctx: ReviewContext,
                          record: Optional[Annotation]) -> Optional[list[float]]:
-        """``record``'s box as ``[cx, cy, w, h]`` normalised to the image, or ``None`` with no box."""
+        """``record``'s box as ``[cx, cy, w, h]`` normalized to the image, or ``None`` with no box."""
         img_w = max(ctx.img_width, 1)
         img_h = max(ctx.img_height, 1)
         b = self._box_of(record)
@@ -512,8 +473,8 @@ class ReviewEngine:
         self._reviewed_lookup = ((NO_BUCKET, ""), {}, {})
 
     def _build_reviewed_lookup(self, bucket: str, img_name: str) -> None:
-        """Index this image's entries by the centre of each box its decoded verdict carries,
-        holding the centre beside the entry so a lookup never reads the entry again."""
+        """Index this image's entries by the center of each box its decoded verdict carries,
+        holding the center beside the entry so a lookup never reads the entry again."""
         img_data = self._verdicts().get((bucket, img_name)) or {}
         pred_map: dict = {}
         gt_map: dict = {}
@@ -529,7 +490,7 @@ class ReviewEngine:
         self, bucket: str, det: ReviewDetection, ctx: ReviewContext
     ) -> Optional[dict]:
         """Return the reviewed-entry dict for ``det`` on this image under ``bucket``, if any: the
-        entry whose predicted box (a TP or FP) or ground-truth box (an FN) shares its centre."""
+        entry whose predicted box (a TP or FP) or ground-truth box (an FN) shares its center."""
         if not ctx.img_name:
             return None
         if self._reviewed_lookup[0] != (bucket, ctx.img_name):
@@ -537,9 +498,9 @@ class ReviewEngine:
         _, pred_map, gt_map = self._reviewed_lookup
 
         if det.det_type in ("tp", "fp"):
-            box, index = self._normalised_bbox(ctx, self._annotation_at(ctx.preds, det.pred_idx)), pred_map
+            box, index = self._normalized_bbox(ctx, self._annotation_at(ctx.preds, det.pred_idx)), pred_map
         else:  # fn
-            box, index = self._normalised_bbox(ctx, self._annotation_at(ctx.gt, det.gt_idx)), gt_map
+            box, index = self._normalized_bbox(ctx, self._annotation_at(ctx.gt, det.gt_idx)), gt_map
         if not box:
             return None
         cx, cy = box[0], box[1]
@@ -563,11 +524,10 @@ class ReviewEngine:
     ) -> list[ReviewDetection]:
         """Produce the filtered, walkable list of detections for the Review UI.
 
-        ``filter_class`` is a class name (an annotation's ``subject``) or ``"all"``. Review status is
-        never hidden here: within an image every matching detection is walkable regardless of whether
-        it has been reviewed (the Reviewed/Unreviewed filter is image-level navigation, not
-        per-detection visibility). Reviewed/unreviewed state rides on each detection via
-        :meth:`find_reviewed_entry` for the caller to decorate."""
+        ``filter_class`` is a class name (an annotation's ``subject``) or ``"all"``. Within an
+        image every matching detection is walkable regardless of whether it has been reviewed;
+        reviewed/unreviewed state rides on each detection via :meth:`find_reviewed_entry`.
+        """
 
         def _class_ok(cname: str) -> bool:
             return filter_class == "all" or cname == filter_class
@@ -638,58 +598,39 @@ class ReviewEngine:
     ) -> None:
         """Log an accept / reject / edit / sweep action for a detection, against ``bucket``.
 
-        ``action`` is typed to :data:`VerdictAction`, but a caller can still reach this method with
-        a plain string outside that vocabulary; the write boundary checks against
-        :data:`VERDICT_ACTIONS` and refuses with a ``ValueError`` rather than storing it.
-        ``"swept"`` is an explicit "checked this image for missed objects, found none" attestation:
-        it is recorded like any other verdict but never mutates ground truth.
+        ``action`` outside :data:`VERDICT_ACTIONS` refuses with a ``ValueError``. ``"swept"`` is an
+        explicit "checked this image for missed objects, found none" attestation: it is recorded
+        like any other verdict but never mutates ground truth.
 
         ``bucket``: the prediction bucket key the reviewer was looking at (:data:`NO_BUCKET` when
-        the review carries no predictions), stored verbatim; it scopes the verdict, so a filename
-        two dates share keeps one set of verdicts per bucket.
+            the review carries no predictions), stored verbatim.
 
-        ``norm_det``/``norm_ctx`` override the geometry the entry is stored under. An
-        edited verdict rewrites the GT bbox, so the entry must be keyed to the post-edit
-        geometry (what the next reload's lookup sees) while any prior entry for this
-        detection is still found via the pre-edit geometry of ``det``/``ctx``.
+        ``norm_det``/``norm_ctx`` override the geometry the entry is stored under. An edited
+        verdict rewrites the GT bbox, so the entry is keyed to the post-edit geometry while any
+        prior entry for this detection is still found via the pre-edit geometry of ``det``/``ctx``.
 
-        ``producer_identity``: the resolved producing-bucket fact (``checkpoint_sha256``/
-        ``experiment_id``, plus ``bucket_dir`` for human legibility) this verdict was recorded
-        against: a plain dict the caller resolves (``tcip-web``, which can read a bucket's
-        ``operating_point.json`` sidecar); this package stores it verbatim and never resolves one
-        itself, keeping it free of any dependency on ``tcip-mcp``/``tcip-web``. Persisted on the
-        verdict entry so a later validation pass can scope verdicts to the same producing model,
-        not a directory-name comparison.
+        ``producer_identity``: the resolved producing-bucket fact
+            (``checkpoint_sha256``/``experiment_id``, plus ``bucket_dir`` for human legibility)
+            this verdict was recorded against, a plain dict the caller resolves and this package
+            stores verbatim.
 
         ``conf_threshold``: the review session's confidence-display threshold in effect when this
-        verdict was recorded, persisted so the review-confirmed reference can reconstruct the
-        effective floor the reviewed predictions were shown at.
+            verdict was recorded.
 
         ``class_id``: the 0-indexed class identity ``det.class_name`` resolves to under the
-        producing bucket's own recorded name->id map (the same shape as ``producer_identity``), a
-        plain fact the caller resolves (``tcip-web``, via the bucket's ``operating_point.json``
-        ``id_map``) and this package stores verbatim, never re-derives. ``None`` when the caller
-        could not resolve one (no recorded map, or ``class_name`` isn't one of its keys), an honest
-        "unresolvable" fact, not a guessed default; a consumer building a class-aware reference from
-        this verdict (``review_calibration.review_to_records``) must refuse rather than assume 0.
-        Every entry also carries the crowd flag of the ground-truth record its box is read from.
+            producing bucket's own recorded name->id map, a plain fact the caller resolves and this
+            package stores verbatim. ``None`` when the caller could not resolve one (no recorded
+            map, or ``class_name`` isn't one of its keys). Every entry also carries the crowd flag
+            of the ground-truth record its box is read from.
 
         On the first verdict recorded for this image, stamps ``gt_preexisting = bool(ctx.gt)`` onto
-        the image-level record: the pristine, pre-mutation GT the caller already holds at that
-        point, a recorded fact (never inferred later) for whether this image had ground truth before
-        the review session touched it.
+        the image-level record: whether this image had ground truth before the review session
+        touched it.
 
         Every entry also stamps ``missed_object_attested``: ``True`` only when both ``det.gt_idx``
-        and ``det.pred_idx`` are ``None`` at the moment of this call, the shape both the "mark
-        missed object" tool (a verdict with no existing GT or prediction to key off of, see
-        ``ReviewTab.tsx``'s ``recordMissedObject``) and the sweep attestation produce; a paired
-        false positive/negative under a classified trait review carries an index on at least one
-        side and never satisfies it. Recorded here, from the caller's
-        own intent, rather than reconstructed later from the entry's persisted
-        ``gt_bbox_norm``/``pred_bbox_norm`` shape: a rejected or accepted FN (an existing,
-        already-indexed GT box being corrected or confirmed) ends up with the identical
-        ``pred_bbox_norm=None, gt_bbox_norm=<box>`` shape once written, so geometry alone cannot tell
-        "a genuinely new missed object was attested" apart from "a pre-existing FN was adjudicated".
+        and ``det.pred_idx`` are ``None`` at the moment of this call, the shape the "mark missed
+        object" action and the sweep attestation produce; a paired false positive/negative under a
+        classified trait review carries an index on at least one side and never satisfies it.
         """
         if action not in VERDICT_ACTIONS:
             raise ValueError(
@@ -708,14 +649,11 @@ class ReviewEngine:
         # The record the entry's ground-truth box is read from, read for its crowd flag too.
         gt_record = self._annotation_at(nc.gt, nd.gt_idx)
         entry = {
-            "match_type": det.det_type.upper(),
-            "det_status": "reviewed",
             "action": action,
             "reviewed_by": self.current_user,
             "class_name": det.class_name,
-            "gt_bbox_norm": self._normalised_bbox(nc, gt_record),
-            "pred_bbox_norm": self._normalised_bbox(nc, self._annotation_at(nc.preds, nd.pred_idx)),
-            "iou": round(det.iou, 4) if det.iou is not None else None,
+            GT_BOX_KEY: self._normalized_bbox(nc, gt_record),
+            PRED_BOX_KEY: self._normalized_bbox(nc, self._annotation_at(nc.preds, nd.pred_idx)),
             "conf": round(det.conf, 4) if det.conf is not None else None,
             "producer_identity": producer_identity,
             "conf_threshold": conf_threshold,
@@ -741,25 +679,15 @@ class ReviewEngine:
     def review_progress(
         self, bucket: str, ctx: ReviewContext, dets: list[ReviewDetection]
     ) -> tuple[int, int]:
-        """``(reviewed, total)`` over ``dets``: how many distinct stored entries the detections in
-        it find, by the same lookup the per-detection ticks use (:meth:`find_reviewed_entry`), and
-        how many detections there are in total. ``dets`` is the caller's own
-        :meth:`build_detection_list` result, built once and shared rather than rebuilt here, since a
-        caller with an unfiltered list already in hand (:meth:`check_image_review_complete`, the
-        status-bar wheel) would otherwise pay for the same scan twice.
+        """``(reviewed, total)`` over ``dets`` (the caller's own :meth:`build_detection_list`
+        result): how many distinct stored entries the detections in it find, by the lookup the
+        per-detection ticks use (:meth:`find_reviewed_entry`), and how many detections there are in
+        total.
 
-        One rule shared by the ticks, the status-bar wheel and :meth:`check_image_review_complete`:
-        reviewed never means "a stored entry exists somewhere in the shard", only "a stored entry
-        exists for a detection still in this current match set". A confidence threshold raised since
-        an entry was recorded drops that prediction out of the current set, so it stops being
-        counted here even though the shard still holds its entry. Two current detections whose
-        centres alias to the same stored entry count as one reviewed of two, not two of two: the
-        count is of distinct entries found, not of detections that find one, since only one of the
-        two ever carries a verdict of its own under a centre-only lookup. A coverage-only sweep
-        attestation (the whole image marked "checked, nothing more found", carrying neither
-        ``gt_bbox_norm`` nor ``pred_bbox_norm``, see :meth:`record_detection_action`) walks no
-        detection in ``dets`` and so counts toward nothing here, since :meth:`_build_reviewed_lookup`
-        indexes only entries carrying one of those two keys.
+        Reviewed means a stored entry exists for a detection still in this current match set. Two
+        current detections whose centers alias to the same stored entry count as one reviewed of
+        two. A coverage-only sweep attestation (carrying neither ``gt_bbox_norm`` nor
+        ``pred_bbox_norm``) counts toward nothing here.
         """
         reviewed_entries = {
             id(entry) for d in dets if (entry := self.find_reviewed_entry(bucket, d, ctx)) is not None
@@ -793,12 +721,8 @@ class ReviewEngine:
     def backup_original_labels(self, *label_dirs: Path | str) -> int:
         """Ensure every label file in each dir has a pristine copy in ``<dir>/.original/``.
 
-        Per-file and idempotent: a file is captured the first time it is seen and never
-        overwritten afterwards, so labels added after the first backup still get their
-        baseline before the platform first mutates them. Create-only in one call rather than
-        an existence check and a copy after it, so a baseline written in between is kept
-        instead of being overwritten by this call's read of an already-mutated original.
-        Returns the number of files newly captured by this call.
+        Per-file, idempotent and create-only: a file is captured the first time it is seen and
+        never overwritten afterwards. Returns the number of files newly captured by this call.
         """
         captured = 0
         for label_dir in label_dirs:

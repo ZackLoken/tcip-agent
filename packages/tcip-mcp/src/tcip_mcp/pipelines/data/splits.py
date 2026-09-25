@@ -1,24 +1,6 @@
-"""Group-aware, annotation-stratified train/val/calibration splitting.
-
-Pure standard library, intentionally imports no torch and no ``datasets`` so it
-can be used from ``tcip_mcp.tools.data_tools`` (which is in the server's
-always-load group and must stay torch-free).
-
-Ported from the chestnut-burr ``burr_detection/dataset.py`` ``_group_balanced_split``
-with three deliberate deviations needed for the MCP tool / auto-val use:
-
-1. Operates on stems + an ``annotation_counts`` dict (not image paths + a
-   labels dir), so callers that already scanned the folder don't re-glob.
-2. No-foreground fallback: when ``annotation_counts`` is ``None`` or all
-   zero, every group is treated as foreground weighted by its tile count, so
-   label-less tasks (semantic_seg / classification) can reuse the same code.
-   The reference raises; we only raise when ``require_foreground=True``.
-3. Fraction-gated min-foreground: the minimum-foreground guarantee is
-   applied only to splits whose fraction is > 0, so ``splits=(0.8, 0.2, 0.0)``
-   yields a clean two-way split (auto-val needs this).
-
-The split is group-coherent (sibling tiles of one source never straddle two
-splits), annotation-balanced, and deterministic in ``seed``.
+"""Group-aware, annotation-stratified train/val/calibration splitting: group-coherent (sibling
+tiles of one source never straddle two splits), annotation-balanced, deterministic in seed.
+Torch-free.
 """
 
 from __future__ import annotations
@@ -26,7 +8,6 @@ from __future__ import annotations
 import bisect
 import hashlib
 import logging
-import os
 import random
 import re
 from collections import defaultdict
@@ -40,9 +21,12 @@ from tcip_store import (
     DecodeError,
     Key,
     StoreDescriptor,
+    canonical_path,
     register_store,
     store,
 )
+
+from tcip_mcp.pipelines.data.selection import SIDES
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
@@ -56,7 +40,13 @@ logger = logging.getLogger(__name__)
 # the full stem.
 _TILE_GROUP_RE = re.compile(r"^(.*)_\d+_\d+$")
 
-SPLIT_NAMES = ("train", "val", "calibration")
+# The draw defaults every split door applies when its config states none.
+DEFAULT_GROUP_BY = "tile_prefix"
+DEFAULT_SEED = 42
+DEFAULT_VAL_RATIO = 0.2
+DEFAULT_HOLDOUT_RATIO = 0.5
+DEFAULT_CAL_SEED = 0
+"""The holdout share and seed a first cal/holdout lock draws at when its caller states neither."""
 
 
 def default_group_key(stem: str) -> str:
@@ -74,41 +64,18 @@ GROUP_KEY_FNS: dict[str, Callable[[str], str]] = {
 }
 
 
-def count_lines(label_path: str | Path) -> int:
-    """Count non-empty lines in a label file. Missing file -> 0."""
-    p = Path(label_path)
-    if not p.is_file():
-        return 0
-    try:
-        return sum(1 for line in p.read_text().splitlines() if line.strip())
-    except OSError:
-        return 0
-
-
 def count_label_lines(
     label_path: str | Path, *, subject: str | None = None, attribute: str | None = None,
 ) -> int:
-    """Annotation count for one per-image label document, by its own path.
+    """Annotation count for one per-image label document, by its own path, a foreground-density
+    proxy for stratified splitting.
 
-    Drives stratified splitting, a foreground-density proxy. With ``subject`` omitted, every
-    record in the file counts regardless of subject (the whole-tree proxy a stats-only draw
-    still uses); given ``subject``, only that subject's records count, further narrowed to those
-    already assessed for ``attribute`` when one is given (an instance never assessed for it is
-    not yet a foreground fact for this scope). A selection's draw is subject-scoped, so it always
-    states its own ``subject`` here: an unscoped count would read a group's annotations of some
-    other subject sharing the file as this draw's own foreground. An empty ``subject`` or
-    ``attribute`` reads as unset, so a caller passing a checkpoint's stamped ``attribute=""``
-    counts against every record assessed or not (its real meaning, "no attribute") rather than
-    scoring zero against a key no record ever carries.
-
-    The document is named by the path the caller holds, never by a directory and a name it would
-    be recomposed from: a caller holding an admitted sample already knows which file answered for
-    it, and one enumerating a directory composes the path once at its own site
-    (:func:`~tcip_mcp.dataset_layout.label_filename`).
+    With ``subject`` omitted, every record in the file counts regardless of subject; given
+    ``subject``, only that subject's records count, further narrowed to those already assessed for
+    ``attribute`` when one is given. An empty ``subject`` or ``attribute`` reads as unset.
 
     A missing file scores 0 foreground; a present, unreadable one raises
-    :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than scoring 0, since a
-    corrupt document is not the same fact as an empty one.
+    :class:`~tcip_annotation.json_io.UnreadableLabelDocument`.
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import instances
@@ -121,25 +88,14 @@ def count_label_lines(
     records = instances(json_io.read_annotations(str(jp)))
     if subject is None:
         return len(records)
-    return sum(
-        1 for a in records
-        if a.subject == subject and (attribute is None or a.attributes.get(attribute) is not None)
-    )
+    return sum(1 for a in records if json_io.assessed_key(a, subject, attribute) is not None)
 
 
 def label_document_extent(label_path: str | Path) -> tuple[int, int] | None:
-    """``(width, height)`` one per-image label JSON records, or ``None`` when the file is missing
-    or carries no positive width/height.
-
-    The label file already carries the frame its boxes were authored against (the json_io
-    schema's top-level ``width``/``height``), so a caller that needs an image's pixel extent for
-    split geometry reads it here rather than decoding the image. This is the same field
-    :class:`~tcip_mcp.pipelines.data.datasets.TiledDetectionDataset` treats as authoritative for
-    its own authored-vs-decoded frame check, so a split derived from this extent and a tiled
-    dataset later built over the same sample agree on the frame by construction. A present,
-    unreadable file raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than
-    reading ``None``, the same distinction between "no extent" and "unreadable" every other reader
-    keeps.
+    """``(width, height)`` one per-image label JSON records (the json_io schema's top-level
+    ``width``/``height``, the frame its boxes were authored against), or ``None`` when the file is
+    missing or carries no positive width/height. A present, unreadable file raises
+    :class:`~tcip_annotation.json_io.UnreadableLabelDocument`.
     """
     from tcip_annotation.json_io import load_label_document
 
@@ -156,7 +112,7 @@ def group_balanced_split(
     annotation_counts: dict[str, int] | None = None,
     group_key_fn: Callable[[str], str] | None = None,
     splits: tuple[float, float, float] = (0.7, 0.2, 0.1),
-    seed: int = 42,
+    seed: int = DEFAULT_SEED,
     require_foreground: bool = False,
     min_foreground_groups: dict[str, int] | None = None,
     foreground_counts: dict[str, int] | None = None,
@@ -168,8 +124,8 @@ def group_balanced_split(
     stems:
         Image stems to partition.
     annotation_counts:
-        Optional ``{stem: annotation_line_count}``. When omitted or all-zero,
-        the no-foreground fallback weights groups purely by tile count.
+        Optional ``{stem: annotation_line_count}``. When omitted or all-zero, the no-foreground
+        fallback weights groups purely by tile count.
     group_key_fn:
         Maps a stem to its group key (default: strip ``_<x>_<y>`` tile offset).
     splits:
@@ -180,33 +136,26 @@ def group_balanced_split(
         Raise ``ValueError`` when there is no foreground signal at all.
     min_foreground_groups:
         Per-side minimum count of foreground groups the balancing pass guarantees before it runs
-        its ordinary largest-first assignment, met first with the smallest foreground groups so
-        the dense ones remain for balancing. Omitted, every active side gets a minimum of one,
-        the floor :func:`cal_holdout_split` and a stats-only draw resolve to; a side
+        its ordinary largest-first assignment, met first with the smallest foreground groups so the
+        dense ones remain for balancing. Omitted, every active side gets a minimum of one; a side
         named here with no active fraction is ignored. A tree with fewer foreground groups than a
-        minimum asks for simply gets fewer than that side's floor met, this function never raises
-        on it (a caller wanting a hard floor calls :func:`refuse_insufficient_foreground_groups`
-        first, before any write).
+        minimum asks for gets fewer than that side's floor met; this function never raises on it
+        (:func:`refuse_insufficient_foreground_groups` is the hard floor).
     foreground_counts:
-        The minimum pass's own foreground signal, independent of ``annotation_counts`` (which
-        stays the balancing pass's signal, gated by whatever a caller's own stratification flag
-        does before this function is ever called). Omitted, the minimum pass draws from whatever
-        ``annotation_counts`` produced; given, a group counts toward a side's
-        minimum only when its ``foreground_counts`` sum is positive, even when
-        ``annotation_counts`` is ``None`` and the balancing pass is running its no-foreground,
-        every-group-is-foreground fallback. A selection's draw passes its subject-scoped
-        foreground count here on every draw, so the calibration side's floor is met with real
-        foreground regardless of whether balancing itself is stratified.
+        The minimum pass's own foreground signal, independent of ``annotation_counts`` (the
+        balancing pass's signal). Omitted, the minimum pass draws from ``annotation_counts``;
+        given, a group counts toward a side's minimum only when its ``foreground_counts`` sum is
+        positive, even when ``annotation_counts`` is ``None``.
 
     Returns
     -------
     ``{"train": [...], "val": [...], "calibration": [...]}``, a partition of ``stems``.
     """
     if group_key_fn is None:
-        group_key_fn = GROUP_KEY_FNS["tile_prefix"]
+        group_key_fn = GROUP_KEY_FNS[DEFAULT_GROUP_BY]
     stems = list(stems)
-    fracs = dict(zip(SPLIT_NAMES, splits))
-    active = [n for n in SPLIT_NAMES if fracs.get(n, 0.0) > 0]
+    fracs = dict(zip(SIDES, splits))
+    active = [n for n in SIDES if fracs.get(n, 0.0) > 0]
 
     # Group stems and tally tiles + annotations per group.
     groups: dict[str, list[str]] = defaultdict(list)
@@ -229,7 +178,7 @@ def group_balanced_split(
         fg_groups = list(groups.keys())
         bg_groups = []
 
-    result: dict[str, list[str]] = {n: [] for n in SPLIT_NAMES}
+    result: dict[str, list[str]] = {n: [] for n in SIDES}
     if not fg_groups or not active:
         # Nothing to stratify on; dump everything into the first active split.
         target = active[0] if active else "train"
@@ -238,11 +187,11 @@ def group_balanced_split(
 
     total_ann = sum(group_ann[gk] for gk in fg_groups) or 1
     total_fg_tiles = sum(group_tiles[gk] for gk in fg_groups) or 1
-    targets_ann = {n: fracs[n] * total_ann for n in SPLIT_NAMES}
-    targets_tiles = {n: fracs[n] * total_fg_tiles for n in SPLIT_NAMES}
+    targets_ann = {n: fracs[n] * total_ann for n in SIDES}
+    targets_tiles = {n: fracs[n] * total_fg_tiles for n in SIDES}
 
-    state_ann = {n: 0 for n in SPLIT_NAMES}
-    state_tiles = {n: 0 for n in SPLIT_NAMES}
+    state_ann = {n: 0 for n in SIDES}
+    state_tiles = {n: 0 for n in SIDES}
     assignment: dict[str, str] = {}
     used: set[str] = set()
 
@@ -298,7 +247,7 @@ def group_balanced_split(
 
     # Background groups -> active split with the largest overall tile deficit.
     total_all_tiles = sum(group_tiles.values()) or 1
-    tile_target_all = {n: fracs[n] * total_all_tiles for n in SPLIT_NAMES}
+    tile_target_all = {n: fracs[n] * total_all_tiles for n in SIDES}
     for gk in sorted(bg_groups, key=lambda g: group_tiles[g], reverse=True):
         best_split = max(active, key=lambda n: tile_target_all[n] - state_tiles[n])
         assignment[gk] = best_split
@@ -306,17 +255,14 @@ def group_balanced_split(
 
     for gk, gs in groups.items():
         result[assignment.get(gk, active[0])].extend(gs)
-    return {n: sorted(result[n]) for n in SPLIT_NAMES}
+    return {n: sorted(result[n]) for n in SIDES}
 
 
 def foreground_group_count(
     members: Iterable[str], counts: Mapping[str, int], group_of: Callable[[str], str],
 ) -> int:
-    """How many distinct groups among ``members`` carry foreground.
-
-    The one reading of "carries foreground" every floor below is measured against, so a draw over
-    a whole tree, a bound run's calibration universe and a preflight all count groups the same
-    way. ``counts`` is each member's own foreground count under the caller's own key for it
+    """How many distinct groups among ``members`` carry foreground. ``counts`` is each member's own
+    foreground count under the caller's own key for it
     (:func:`~tcip_mcp.pipelines.data.label_queries.foreground_counts`); a member the map does not
     name carries none.
     """
@@ -326,17 +272,9 @@ def foreground_group_count(
 def refuse_insufficient_foreground_groups(
     foreground_groups: int, minimums: dict[str, int], *, remedy: str,
 ) -> None:
-    """Refuses, before any write, a draw whose tree holds fewer foreground groups than the sum
-    of the per-side minimums a caller states.
-
-    :func:`~tcip_mcp.tools.data_tools.draw_splits` calls this once, over the whole tree, ahead of
-    drawing a selection, over the three sides a selection always draws (a draw refuses a zero
-    ratio on any of them, so every side named here is always requested);
-    :func:`selection_calibration_universe` calls it for its one held-out side in place of its own
-    inline count. Names every requested side and its minimum, the foreground groups actually
-    found, and ``remedy``, the caller's own sentence saying what to add: what counts as a
-    foreground group differs by the ground truth a draw reads, so the remedy is stated by the
-    caller that knows which it read rather than assumed here.
+    """Refuses, before any write, a draw whose tree holds fewer foreground groups than the sum of
+    the per-side minimums a caller states, naming every requested side and its minimum, the
+    foreground groups found, and ``remedy``, the caller's own sentence saying what to add.
     """
     needed = sum(minimums.values())
     if foreground_groups >= needed:
@@ -350,26 +288,23 @@ def refuse_insufficient_foreground_groups(
 
 def member_identity(date: str | None, stem: str) -> str:
     """A draw's member identity for one image: ``<date>/<stem>``, or the bare ``stem`` under a
-    flat, dateless tree.
-
-    A stem is unique only within one capture date (cameras reuse names across dates), so a draw
-    spanning more than one date needs this to keep two same-named images from two dates apart.
-    :func:`~tcip_mcp.tools.data_tools.draw_splits` and ``tcip plant-aware-group-splits`` both key
-    their members this way, through this one function, so an agent-supplied ``group_key_map``
-    lands on the keys the draw looks up.
+    flat, dateless tree. A stem is unique only within one capture date, so a draw spanning more
+    than one date keys members this way, and so must an agent-supplied ``group_key_map``.
     """
     return f"{date}/{stem}" if date else stem
+
+
+def recorded_group_by(group_by: str, group_key_map: Mapping[str, str] | None) -> str:
+    """The grouping policy a draw records: ``"explicit_map"`` when a group key map overrides
+    ``group_by``, else ``group_by`` itself."""
+    return "explicit_map" if group_key_map else group_by
 
 
 def resolve_group_key_fn(
     group_by: str, stems: Sequence[str], *, group_key_map: dict[str, str] | None = None,
 ) -> Callable[[str], str]:
-    """Resolve a grouping policy to a callable, raising loudly rather than silently degrading.
-
-    The one resolution every call site goes through: an unrecognized ``group_by`` string, or a
-    ``group_key_map`` missing coverage for some of ``stems``, is a policy error the caller must
-    see immediately, not a silent fallback to the tile-prefix default that could mis-group a
-    dataset without anyone noticing.
+    """Resolve a grouping policy to a callable. An unrecognized ``group_by`` string, or a
+    ``group_key_map`` missing coverage for some of ``stems``, raises.
     """
     if group_key_map is not None:
         missing = sorted(s for s in stems if s not in group_key_map)
@@ -390,24 +325,13 @@ def recorded_group_key_fn(
     group_by: str, *, date: str | None, stems: Sequence[str] = (),
     group_key_map: dict[str, str] | None = None,
 ) -> Callable[[str], str]:
-    """The group key a draw records for a bare stem admitted out of one capture date's directory.
-
-    The one derivation of that key: the stem becomes its member identity
-    (:func:`member_identity`, so two dates' same-named images are two groups rather than one) and
-    the policy is resolved against those identities (:func:`resolve_group_key_fn`, so an
-    agent-supplied ``group_key_map`` is keyed the way ``draw_splits`` already keys one). Every
-    producer of a recorded group key goes through this, and so does the leak check that has to
-    reproduce a key for a stem a recorded map does not cover; a producer and a reader spelling
-    one key two ways is a leak that reads as no leak.
+    """The group key a draw records for a bare stem admitted out of one capture date's directory:
+    the stem becomes its member identity (:func:`member_identity`) and the policy is resolved
+    against those identities (:func:`resolve_group_key_fn`).
 
     ``stems`` and ``group_key_map`` are the producer's own: the map is checked for coverage of
-    those stems' identities before any key is handed out. A reader passes neither, since with no
-    map to check there is nothing to cover and the named policy alone answers.
-
-    :func:`~tcip_mcp.tools.data_tools.draw_splits` does not call this: it already holds member
-    identities, because it draws across several capture dates at once, so what it needs is this
-    function's middle step, :func:`resolve_group_key_fn` over those identities. This is that same
-    resolution plus the stem-to-identity adapter a producer working under one directory needs.
+    those stems' identities before any key is handed out. A reader passes neither, and the named
+    policy alone answers.
     """
     identities = [member_identity(date, stem) for stem in stems]
     key_fn = resolve_group_key_fn(group_by, identities, group_key_map=group_key_map)
@@ -418,13 +342,8 @@ def draw_train_val(
     stems: Sequence[str], *, annotation_counts: dict[str, int] | None,
     group_key_fn: Callable[[str], str], val_ratio: float, seed: int,
 ) -> tuple[list[str], list[str]]:
-    """``(train, val)`` for ``stems``: one call to :func:`group_balanced_split` at
-    ``(1 - val_ratio, val_ratio, 0.0)``, the assembly the drawn path (``auto_train_val``'s
-    group-aware split) and a bound run's redraw (``data.split.redraw_within_selection``) both
-    wrap, so the two agree on how a train/val split is actually drawn from a group-keyed stem
-    list. Neither retries nor degrades on a starved side here; each caller decides what a
-    starved side means for it (the drawn path's own stem-level retry and its degrade to no
-    validation, the redraw's own refusal).
+    """``(train, val)`` for ``stems``: one :func:`group_balanced_split` at ``(1 - val_ratio,
+    val_ratio, 0.0)``; never retries or degrades on a starved side.
     """
     parts = group_balanced_split(
         list(stems), annotation_counts=annotation_counts, group_key_fn=group_key_fn,
@@ -433,38 +352,35 @@ def draw_train_val(
     return parts["train"], parts["val"]
 
 
+def redraw_pool(selection: "Selection") -> tuple[dict[str, str], dict[str, int]]:
+    """A redraw's pool: each train-plus-val sample's recorded group key and foreground count, by
+    sample identity."""
+    from tcip_mcp.pipelines.data.label_queries import foreground_counts
+
+    pool = selection.trainable()
+    return ({s.identity: s.group for s in pool},
+            foreground_counts({s.identity: s for s in pool}, selection.scope))
+
+
 def redraw_starved_issue(
-    selection: "Selection", *, selection_dir: str | None, seed: int | None,
+    group_of: dict[str, str], counts: dict[str, int], *, selection_dir: str | None,
+    seed: int | None,
 ) -> str | None:
-    """Whether a selection's train-plus-val members resolve to too few *foreground* groups for a
+    """Whether a selection's train-plus-val members resolve to too few foreground groups for a
     redraw to populate both a train and a val side.
 
     :func:`group_balanced_split`'s own per-side minimum needs one foreground group for each active
-    side, met first from the smallest foreground groups; a background-only group (zero foreground
-    signal, e.g. a confirmed negative) is placed afterwards by tile deficit and can concentrate
-    entirely onto the side that already met its minimum, leaving the other side genuinely empty.
-    Counting every distinct group regardless of foreground signal misses exactly that case: two
-    groups, one of them entirely background, reads as enough groups when only one of them can ever
-    satisfy a side's minimum. Checked before any run starts
-    (:func:`~tcip_mcp.tools.training_tools.preflight_config`, and ``run_hyperparameter_search``'s
-    own pre-mint check for ``split_draws``), ahead of the redraw's own refusal once it has actually
-    drawn a starved side for real.
+    side; a background-only group (zero foreground signal, e.g. a confirmed negative) is placed
+    afterwards by tile deficit and can concentrate entirely onto one side, so only foreground
+    groups count here.
 
-    The members are the selection's own train-plus-val samples, grouped by the keys its draw
-    recorded on them and counted under the scope it drew with
-    (:func:`~tcip_mcp.pipelines.data.label_queries.foreground_counts`), never re-derived from a
-    grouping policy here.
+    ``group_of`` and ``counts`` are the selection's :func:`redraw_pool`.
 
     ``None`` when at least two foreground groups are available; the refusal otherwise, naming the
     selection, the seed and the two counts, with the two remedies: drop the redraw to bind the
-    selection's recorded partition instead, or draw a selection with at least two foreground
-    groups across train and val.
+    selection's recorded partition instead, or draw a selection with at least two foreground groups
+    across train and val.
     """
-    from tcip_mcp.pipelines.data.label_queries import foreground_counts
-
-    pool = selection.on("train") + selection.on("val")
-    group_of = {s.identity: s.group for s in pool}
-    counts = foreground_counts({s.identity: s for s in pool}, selection.scope)
     distinct = set(group_of.values())
     foreground = foreground_group_count(group_of, counts, group_of.__getitem__)
     if foreground >= 2:
@@ -481,22 +397,13 @@ def redraw_starved_issue(
 
 
 def same_directory(a: str | Path | None, b: str | Path | None) -> bool:
-    """Whether ``a`` and ``b`` name the identical on-disk directory, by filesystem identity
-    (``os.path.samefile``) rather than a bare string comparison, so a trailing separator,
-    forward slashes or a relative spelling of the same directory reads as the same path.
-
-    ``False`` whenever either side is empty or does not exist as a directory: there is nothing
-    to compare a missing path against, and a caller distinguishing "same" from "cannot tell" gets
-    the honest "not the same" rather than a crash. The one comparison every caller checking a
-    recorded directory against a caller-stated one shares (the bound-checkpoint selection
-    comparison in ``calibration.py``, the project-root checks in ``experiments.py``, the image-root
-    checks the results route and the phenology tools make), never a second re-derivation of it.
+    """Whether ``a`` and ``b`` name one path, compared through ``tcip_store.canonical_path`` so
+    a trailing separator, forward slashes, a relative spelling, a link or a case variant reads as
+    the same path. ``False`` when either side is empty.
     """
     if not a or not b:
         return False
-    a_path, b_path = Path(a), Path(b)
-    return (a_path.is_dir() and b_path.is_dir()
-            and os.path.samefile(a_path.resolve(), b_path.resolve()))
+    return canonical_path(a) == canonical_path(b)
 
 
 # -- spatial (within-image) strip split ---------------------------------------
@@ -525,37 +432,26 @@ def stem_of_spatial_identity(identity: str) -> str:
 
 @dataclass(frozen=True)
 class SpatialStripSplit:
-    """A within-image train/val(/test) split: the image partitioned into contiguous
-    pixel-space strips along one axis, each strip assigned whole to one side, with a buffer
-    band excluded at every boundary between differently-assigned strips.
+    """A within-image train/val(/test) split: the image partitioned into contiguous pixel-space
+    strips along one axis, each strip assigned whole to one side, with a buffer band excluded at
+    every boundary between differently-assigned strips.
 
-    A square block grid couples how finely a ratio can be hit to how much boundary a buffer
-    removes: fewer, larger blocks minimize discard but leave too little assignment
-    granularity to land near a requested split, while enough blocks for precision multiplies
-    boundary count (and therefore discard) with it. Striping along one axis decouples the
-    two, and at ``stripes_per_split=1`` (the default) each side is exactly one contiguous
-    region: the fewest possible boundaries, so discard is minimized and concentrates at the
-    internal cuts between sides rather than scattering through the interior. Regions are
-    ordered largest-share-first from the axis center outward, so a small side faces at most
-    one differently-assigned neighbor rather than being sandwiched between two; each boundary
-    is shrunk from one side only (enough on its own to guarantee ``>= buffer`` separation), so
-    the image-edge-facing side of the outermost two regions is never shrunk at all. Raising
-    ``stripes_per_split`` asks for that many separate pieces per side, but the fixed
-    center-out order does not scatter every side equally: the largest share's pieces sort
-    adjacent under that order and merge back into one contiguous region, so it is the smaller
-    sides that actually end up split into pieces flanking it. Three names of distinct shares,
-    each cut into three pieces at ``stripes_per_split=3``, land in the order ``C, B, B, A, A, A, B, C, C`` (``A`` the largest
-    share, ``C`` the smallest), five merged regions once adjacent same-name pieces combine:
-    ``A`` stays whole, ``B`` and ``C`` each split into two pieces on either side of it.
-    ``discard_ceiling`` caps how many pieces actually get used regardless of how many were
-    asked for, since boundary cost scales with piece count, not with how finely the tile
-    lattice itself could be subdivided.
+    At ``stripes_per_split=1`` (the default) each side is exactly one contiguous region. Regions
+    are ordered largest-share-first from the axis center outward (:func:`_center_out_order`), and
+    each boundary is shrunk from one side only (enough on its own to guarantee ``>= buffer``
+    separation), so the image-edge-facing side of the outermost two regions is never shrunk.
+    Raising ``stripes_per_split`` asks for that many pieces per side, but the largest share's
+    pieces sort adjacent and merge back into one region, so it is the smaller sides that end up
+    split into pieces flanking it: three names of distinct shares, each cut into three pieces at
+    ``stripes_per_split=3``, land in the order ``C, B, B, A, A, A, B, C, C`` (``A`` the largest
+    share, ``C`` the smallest), five merged regions once adjacent same-name pieces combine.
+    ``discard_ceiling`` caps how many pieces actually get used.
 
-    ``regions`` maps each split name to its list of half-open pixel rects (already merged
-    where two same-split strips landed adjacent, and buffer-shrunk on any side bordering a
-    different-split neighbor): :class:`TiledDetectionDataset`'s ``keep_regions`` consumes
-    these directly. ``realized_fractions`` is each side's kept tile count over the total kept
-    across every side (post-buffer), not the requested fractions.
+    ``regions`` maps each split name to its list of half-open pixel rects (already merged where two
+    same-split strips landed adjacent, and buffer-shrunk on any side bordering a different-split
+    neighbor): :class:`TiledDetectionDataset`'s ``keep_regions`` consumes these directly.
+    ``realized_fractions`` is each side's kept tile count over the total kept across every side
+    (post-buffer), not the requested fractions.
     """
 
     width: int
@@ -579,10 +475,10 @@ class SpatialStripSplit:
     realized_discard_fraction: float
 
     def _region_index_for(self, tile_x: int, tile_y: int) -> int | None:
-        """Index into ``region_bounds`` for a kept tile at ``(tile_x, tile_y)``, or ``None``
-        when this position falls in a dropped gap (buffer band or past-extent) rather than
-        fully inside any region. The one containment lookup every split-membership query
-        (identity, split name) shares."""
+        """Index into ``region_bounds`` for a kept tile at ``(tile_x, tile_y)``, or ``None`` when
+        this position falls in a dropped gap (buffer band or past-extent) rather than fully inside
+        any region.
+        """
         pos = tile_x if self.axis == "x" else tile_y
         starts = [start for _, start, _ in self.region_bounds]
         idx = bisect.bisect_right(starts, pos) - 1
@@ -609,15 +505,9 @@ class SpatialStripSplit:
 
 def _center_out_order(slots: list[tuple[str, float]]) -> list[tuple[str, float]]:
     """Order slots by descending share, largest first, then placed axis-center-out: each next
-    (smaller) slot alternately extends the left or right end of the growing arrangement.
-
-    A share sandwiched between two differently-assigned neighbors needs buffer margin on both
-    sides at once, so the slot least likely to survive that is the smallest one, exactly the
-    one placed last. Center-out puts the largest share (the most likely to have enough raw
-    lattice positions to absorb a two-sided margin) in the middle and tapers outward, so every
-    other slot faces at most one differently-assigned neighbor. A tie among equal shares
-    resolves in the order the slots were given, so which cardinal side a tied slot lands on is
-    fixed by the caller's declared order and never by a seed.
+    (smaller) slot alternately extends the left or right end of the growing arrangement, so every
+    slot but the largest faces at most one differently-assigned neighbor. A tie among equal shares
+    resolves in the order the slots were given, never by a seed.
     """
     indexed = list(enumerate(slots))
     indexed.sort(key=lambda p: (-p[1][1], p[0]))
@@ -634,24 +524,15 @@ def _strip_regions(
     split_names: tuple[str, ...], fractions: tuple[float, ...],
     discard_ceiling: float, stripes_per_split: int,
 ) -> list[tuple[str, int, int]]:
-    """Merged, buffer-shrunk ``(name, start, end)`` pixel regions along one axis, in axis
-    order, cut and shrunk in the discrete tile-origin lattice rather than continuous pixel
-    space: a region with positive pixel width could otherwise miss the stride-spaced lattice
-    entirely and contain zero real tile origins.
+    """Merged, buffer-shrunk ``(name, start, end)`` pixel regions along one axis, in axis order,
+    cut and shrunk in the discrete tile-origin lattice rather than continuous pixel space: a region
+    with positive pixel width could otherwise miss the stride-spaced lattice entirely and contain
+    zero real tile origins.
 
-    Two independent knobs: ``stripes_per_split`` sets how many separate pieces a side is cut
-    into before adjacent same-name pieces merge (capped by ``discard_ceiling``, the maximum share of the axis a buffer band
-    between differing sides may consume, so asking for more pieces never buys precision at
-    unbounded discard cost); the fraction each side targets sets its total share of the axis
-    directly. At the default of one piece per side, every side is one contiguous region, the
-    fewest possible boundaries (``len(split_names) - 1``), and only the *outermost* two
-    regions' image-edge-facing sides go unshrunk, so discard concentrates at the internal
-    boundaries between sides rather than scattering through the interior; more pieces trade
-    some of that back, but not evenly across sides: the fixed center-out order
-    (:func:`_center_out_order`) sorts the largest share's own pieces adjacent, so they merge
-    back into one contiguous region regardless of ``stripes_per_split``, while the smaller
-    sides are the ones that actually end up scattered into pieces flanking it (see
-    :class:`SpatialStripSplit`'s docstring for the worked example), a choice left to the caller.
+    ``stripes_per_split`` sets how many pieces a side is cut into before adjacent same-name pieces
+    merge (capped by ``discard_ceiling``, the maximum share of the axis a buffer band between
+    differing sides may consume); the fraction each side targets sets its total share of the axis.
+    The piece order is :func:`_center_out_order`'s; see :class:`SpatialStripSplit`.
     """
     n = len(positions)
     axis_span = positions[-1] + tile_size - positions[0]
@@ -700,37 +581,26 @@ def spatial_strip_split(
     split_names: tuple[str, ...] = ("train", "val", "test"),
     buffer: int | None = None, discard_ceiling: float = 0.05, stripes_per_split: int = 1,
 ) -> SpatialStripSplit:
-    """Split one image's own tile lattice into disjoint pixel-space strips, one side per name.
-
-    Unlike :func:`group_balanced_split` (which partitions whole source images), this
-    partitions the tiles *of a single image*, for the case where there are too few source
-    images to hold one out whole: a strip is train, val, or test instead of a stem.
+    """Split one image's own tile lattice into disjoint pixel-space strips, one side per name, for
+    the case where there are too few source images to hold one out whole: a strip is train, val, or
+    test instead of a stem.
 
     The tile lattice comes from :func:`~tcip_mcp.pipelines.data.tiling.tile_positions` at the
-    training stride (never re-derived), so the regions this returns tile the same grid a
-    :class:`TiledDetectionDataset` built at this ``tile_size``/``overlap`` will actually
-    index. The split runs along whichever axis (width or height) offers more distinct tile
-    positions, for the finest achievable ratio precision; at the default
-    ``stripes_per_split=1`` each requested split is one contiguous region, minimizing discard
-    and concentrating it at the internal cuts between sides. A higher ``stripes_per_split``
-    (capped by ``discard_ceiling``, see :class:`SpatialStripSplit`) places more pieces per
-    side by the same fixed center-out order, but that order sorts the largest share's own
-    pieces adjacent, so they merge back into one region regardless of the count asked for; it
-    is the smaller sides that actually end up scattered into pieces flanking it, trading their
-    own discard for a guard against those sides correlating with a spatial gradient in the
-    field.
+    training stride, so the regions this returns tile the same grid a
+    :class:`TiledDetectionDataset` built at this ``tile_size``/``overlap`` will index. The split
+    runs along whichever axis (width or height) offers more distinct tile positions. Piece count
+    and order follow :class:`SpatialStripSplit` (``stripes_per_split``, capped by
+    ``discard_ceiling``).
 
     ``buffer`` (pixels) is the minimum gap kept around every boundary between two
-    differently-assigned strips: an explicit value below ``tile_size`` is refused, since a
-    smaller gap cannot guarantee a kept tile on one side never shares pixels or immediate
-    context with a kept tile on another, including under ``overlap > 0``. Omitted, it
+    differently-assigned strips: an explicit value below ``tile_size`` is refused. Omitted, it
     defaults to ``tile_size``.
 
-    ``fractions`` must be non-negative and sum to 1.0, matching ``split_names`` in length; a
-    zero fraction drops that name from the split entirely (fewer than two non-zero fractions
-    is refused, nothing to split). Raises ``ValueError`` when no tile fits fully inside the
-    image extent at this ``tile_size``, or when the derived strip layout leaves any requested,
-    non-zero-fraction side with zero kept tiles.
+    ``fractions`` must be non-negative and sum to 1.0, matching ``split_names`` in length; a zero
+    fraction drops that name from the split entirely (fewer than two non-zero fractions is
+    refused). Raises ``ValueError`` when no tile fits fully inside the image extent at this
+    ``tile_size``, or when the derived strip layout leaves any requested, non-zero-fraction side
+    with zero kept tiles.
     """
     from tcip_mcp.pipelines.data.tiling import compute_stride, tile_positions, tile_within_extent
 
@@ -837,8 +707,8 @@ def cal_holdout_split(
     stems: Sequence[str],
     annotation_counts: dict[str, int] | None = None,
     group_key_fn: Callable[[str], str] | None = None,
-    holdout_ratio: float = 0.5,
-    seed: int = 0,
+    holdout_ratio: float = DEFAULT_HOLDOUT_RATIO,
+    seed: int = DEFAULT_CAL_SEED,
 ) -> dict[str, list[str]]:
     """A disjoint, group-coherent, annotation-balanced calibration/holdout split.
 
@@ -860,11 +730,7 @@ _LOCK_STEM = "cal_holdout_split_"
 
 @dataclass(frozen=True)
 class _CalHoldoutLockLocator:
-    """One locked split per dataset identity, named for the identity it locks.
-
-    The identity is in the filename rather than in a directory of its own, which is the
-    convention the operating-point sweep artifact beside it already uses.
-    """
+    """One locked split per dataset identity, named for the identity it locks."""
 
     def relative_path(self, scope: str, parts: tuple[str, ...]) -> "PurePosixPath":
         (identity_hash,) = parts
@@ -898,16 +764,8 @@ register_store(
 def cal_holdout_lock_key(identity_hash: str, *, scope_root: str | Path) -> Key:
     """A dataset identity's locked calibration/holdout split, under the root it was drawn over.
 
-    ``scope_root`` is required and has no default. The lock is evidence about one dataset (which
-    of its images were held back), so it travels with that data. A root this function resolved for
-    itself would be the process-wide platform root, which adopting a project repins mid-life: a
-    lock drawn before the adoption and read after resolves under a different scope, reads as
-    absent, and is redrawn, which is the silent re-cut this lock exists to prevent.
-
-    ``last_writer_wins`` rather than compare-and-set: a redraw is the only write that reads
-    first, and it is also the deliberate recovery for a lock whose bytes do not decode, which
-    is a state no version token can be read from. The redraw is an audited admin call on one
-    dataset identity, so the write it stakes is single-shot in practice.
+    ``scope_root`` is required: the lock travels with the dataset whose images it held back.
+    ``last_writer_wins``.
     """
     if PureWindowsPath(identity_hash).name != identity_hash or identity_hash == "..":
         raise BadKey(
@@ -918,24 +776,16 @@ def cal_holdout_lock_key(identity_hash: str, *, scope_root: str | Path) -> Key:
 
 
 def cal_holdout_lock_path(identity_hash: str, *, scope_root: str | Path) -> Path:
-    """Where a dataset identity's locked cal/holdout split lives on disk under ``scope_root``.
-
-    Placed by the store's own locator under the key's own scope, never by a second reconstruction
-    of either, so this answers the path the seam reads and writes rather than a parallel one.
+    """Where a dataset identity's locked cal/holdout split lives on disk under ``scope_root``,
+    placed by the store's own locator.
     """
     key = cal_holdout_lock_key(identity_hash, scope_root=scope_root)
     return Path(key.root, *_CalHoldoutLockLocator().relative_path(key.root, key.parts).parts)
 
 
 def cal_holdout_scope_root(labels_dir: str | Path) -> Path:
-    """The root a labeled directory's locked cal/holdout split is scoped to.
-
-    The dataset root the labels live under, so the lock travels with the data the split was drawn
-    over. A directory the dataset layout cannot place is its own anchor, the answer
-    ``prediction_buckets.bucket_key_of`` already gives a bucket under no dataset root, so a
-    calibration over a loose labeled directory still gets a scope that survives a project adoption.
-    The calibration door and the redraw tool both resolve the scope through this, so a redraw
-    addresses the lock the calibration wrote instead of drawing one nothing reads.
+    """The root a labeled directory's locked cal/holdout split is scoped to: the dataset root the
+    labels live under, or, for a directory the dataset layout cannot place, the directory itself.
     """
     from tcip_mcp.dataset_layout import dataset_root_of
 
@@ -946,26 +796,14 @@ def cal_holdout_scope_root(labels_dir: str | Path) -> Path:
 def label_image_stems(
     labels_dir: str | Path, images_dir: str | Path | None = None,
 ) -> tuple[list[str], dict[str, "Path | BandGroupRef"]]:
-    """Stems with a readable per-image label file, one scan shared by every caller.
-
-    ``calibrate_operating_point`` and ``redraw_calibration_holdout`` both call this rather
-    than scanning independently, so they agree on what "the dataset's stems" are: a caller
-    passing ``images_dir`` gets the stronger labels-intersect-images stem universe, one that
-    only globs labels gets the weaker (and possibly stale, if an image was deleted/renamed)
-    labels-only universe.
+    """Stems with a readable per-image label file, over a whole labeled directory.
 
     With ``images_dir`` omitted, returns every stem with a label file (``stem_to_image`` empty),
-    the label-only universe, for a caller (e.g. a redraw with no images to check) that has no
-    images directory to intersect against. With ``images_dir`` given, only stems that also have a
-    matching logical image (a plain file, or a ``.bandgroup``-grouped capture) survive, so a stem
-    in the labels dir with no image left (deleted/renamed) never enters the split universe.
-    ``labels_dir`` may itself be a prediction bucket (a calibration/holdout split of one), so its
-    own provenance sidecars are excluded through :func:`~tcip_annotation.json_io.prediction_documents`
-    rather than named as if they were image stems.
-
-    This is the whole-directory universe, for a door measuring over a whole labelled directory. A
-    door restricted to a selection reads :func:`selection_calibration_universe` instead, which
-    answers from the selection's own recorded samples and scans nothing.
+    the label-only universe. With ``images_dir`` given, only stems that also have a matching
+    logical image (a plain file, or a ``.bandgroup``-grouped capture) survive. ``labels_dir`` may
+    itself be a prediction bucket, so its own provenance sidecars are excluded through
+    :func:`~tcip_annotation.json_io.prediction_documents`. A selection-restricted door reads
+    :func:`selection_calibration_universe` instead.
     """
     from tcip_annotation.json_io import prediction_documents
 
@@ -983,70 +821,44 @@ def label_image_stems(
 def selection_calibration_universe(
     selection: "Selection", labels_dir: str | Path,
     *, min_foreground_groups: dict[str, int] | None = None,
-) -> tuple[list[str], str, dict[str, str], dict[str, list[str]], dict[str, "Sample"]]:
-    """The calibration universe a selection gives one caller restricting a read to ``labels_dir``.
+) -> tuple[list[str], str, dict[str, str], dict[str, list[str]], dict[str, int],
+           dict[str, "Sample"]]:
+    """The calibration universe a selection gives one caller restricting a read to ``labels_dir``:
+    the selection's ``calibration`` samples whose own recorded ground truth lives in
+    ``labels_dir``, whatever shape that ground truth is. Nothing is intersected against a directory
+    listing.
 
-    The selection's ``calibration`` samples whose own ground truth lives in ``labels_dir``, so a
-    read measures on exactly the side the draw held out for it, never the side the shipped
-    checkpoint was chosen on (a disjointness check catches a leak onto that side separately,
-    against the checkpoint's own selection). The narrowing is by the ground-truth scope each
-    sample records, never by a capture date compared against a directory: a selection spans dates,
-    and a door that names one date's ground truth reads that date's held-out samples out of it.
+    The floor counts only the groups that carry foreground, through
+    :func:`~tcip_mcp.pipelines.data.label_queries.foreground_counts` under the selection's own
+    class space. ``min_foreground_groups`` is forwarded to
+    :func:`refuse_insufficient_foreground_groups`; omitted, it defaults to ``{"calibration": 2}``,
+    since a locked cal/holdout draw halves the universe into two non-empty parts.
 
-    The selection is the whole membership authority here: nothing is intersected against a
-    directory listing, and whether each member's ground truth still admits is the one re-admission
-    over recorded samples
-    (:func:`~tcip_mcp.pipelines.data.label_queries.refuse_inadmissible_samples`), which the door
-    building a loader over these samples runs. Whatever shape that ground truth is, this universe
-    returns it: a door refuses only what its own measurement cannot do, never a shape on this
-    function's behalf.
-
-    The floor below counts only the groups that actually carry foreground, read through the one
-    per-sample counter
-    (:func:`~tcip_mcp.pipelines.data.label_queries.foreground_counts`) under the selection's own
-    class space, so a universe of background-only groups cannot pass it and every door that names
-    a selection counts the same way the draw did.
-
-    ``min_foreground_groups`` is the caller's own floor, forwarded to
-    :func:`refuse_insufficient_foreground_groups` verbatim; omitted, it defaults to
-    ``{"calibration": 2}``, the shape a locked cal/holdout draw needs since it halves the universe
-    into two non-empty parts. A caller that draws no lock and halves nothing (``evaluate_model``)
-    states its own floor of one instead, so a legitimate single-foreground-group universe is not
-    refused for a halving this caller never performs.
-
-    Returns ``(stems, group_by, group_key_map, excluded, samples)``:
-    ``stems`` is the calibration side's bare member names under ``labels_dir``; ``group_key_map``
-    is each one's recorded group key, with ``group_by="explicit_map"``, so the locked draw groups
-    by exactly the keys the selection drew with rather than re-resolving a policy; ``excluded``
-    names what the selection put elsewhere under this scope, its recorded train members
-    (``excluded_training_stems``) and its recorded val members (``excluded_validation_stems``);
-    ``samples`` is each universe member's own recorded sample, so a caller measures on the pixels
-    the draw held out rather than on whatever a directory listing of the same names happens to
-    hold today. The class space the foreground was counted under is the selection's own
-    (``Selection.scope``), which the caller already holds.
+    Returns ``(stems, group_by, group_key_map, excluded, counts, samples)``: ``stems`` is the calibration
+    side's bare member names under ``labels_dir``; ``group_key_map`` is each one's recorded group
+    key, with ``group_by="explicit_map"``; ``excluded`` names the selection's recorded train
+    members (``excluded_training_stems``) and val members (``excluded_validation_stems``) under
+    this scope; ``counts`` is each member's foreground count, the one the floor read;
+    ``samples`` is each universe member's own recorded sample.
 
     Refuses a calibration sample naming a pixel rect
-    (:func:`~tcip_mcp.pipelines.data.selection.refuse_unreadable_samples`), the same refusal the
-    loaders apply, so no door measures a region over its whole source instead. Refuses, naming the
-    count, the labels directory and the caller's own floor, when the resulting universe would hold
-    fewer foreground (when known) groups than that floor states.
+    (:func:`~tcip_mcp.pipelines.data.selection.refuse_unreadable_samples`), and, naming the count,
+    the labels directory and the floor, a universe holding fewer foreground groups than the floor
+    states.
     """
     from tcip_mcp.pipelines.data.label_queries import foreground_counts
     from tcip_mcp.pipelines.data.selection import refuse_unreadable_samples
 
     scope = selection.scope
-    here = Path(labels_dir).resolve()
-
     # Through the sample's own recorded scope, never the parent of its ground-truth path: a table
     # scope is the table itself, which no sample's parent directory equals.
-    in_scope = [s for s in selection.samples
-                if Path(s.ground_truth_scope).resolve() == here]
-    by_side: dict[str, dict[str, str]] = {name: {} for name in SPLIT_NAMES}
+    in_scope = [s for s in selection.samples if same_directory(s.ground_truth_scope, labels_dir)]
+    by_side: dict[str, dict[str, str]] = {name: {} for name in SIDES}
     universe_samples: dict[str, "Sample"] = {}
     for sample in in_scope:
-        by_side[sample.side][sample.member_stem] = sample.group
+        by_side[sample.side][sample.member] = sample.group
         if sample.side == "calibration":
-            universe_samples[sample.member_stem] = sample
+            universe_samples[sample.member] = sample
     refuse_unreadable_samples(universe_samples.values())
 
     stems = sorted(universe_samples)
@@ -1070,7 +882,7 @@ def selection_calibration_universe(
             "selection again with a larger calibration_ratio or more foreground groups under "
             "this ground truth."
         ) from exc
-    return stems, "explicit_map", group_key_map, excluded, universe_samples
+    return stems, "explicit_map", group_key_map, excluded, counts, universe_samples
 
 
 def _split_content_hash(parts: dict[str, list[str]] | None) -> str | None:
@@ -1086,16 +898,27 @@ def _split_content_hash(parts: dict[str, list[str]] | None) -> str | None:
     return h.hexdigest()[:16]
 
 
+def selection_policy_conflict(selection_dir: str | Path | None, group_by: str | None,
+                              group_key_map: dict[str, str] | None) -> str | None:
+    """Why a grouping policy cannot be stated beside ``selection_dir`` for a locked draw, or
+    ``None`` when nothing conflicts."""
+    if selection_dir is None or (group_by is None and group_key_map is None):
+        return None
+    return (f"selection_dir={str(selection_dir)!r} conflicts with group_by/group_key_map: the "
+            "group keys the selection recorded on its own samples govern the locked draw; pass "
+            "neither beside it.")
+
+
 def resolve_locked_cal_holdout_split(
     stems: Sequence[str] | None,
     *,
     identity_hash: str,
     scope_root: str | Path,
     annotation_counts: dict[str, int] | None = None,
-    group_by: str = "tile_prefix",
+    group_by: str | None = None,
     group_key_map: dict[str, str] | None = None,
-    holdout_ratio: float = 0.5,
-    seed: int = 0,
+    holdout_ratio: float = DEFAULT_HOLDOUT_RATIO,
+    seed: int = DEFAULT_CAL_SEED,
     force_redraw: bool = False,
     timestamp: str | None = None,
     selection_dir: str | None = None,
@@ -1103,69 +926,42 @@ def resolve_locked_cal_holdout_split(
 ) -> dict:
     """Resolve (and lock) the calibration/holdout split for one dataset identity.
 
-    A held-out reference that is not actually held out can happen when the split is a
-    deterministic lexicographic cut, redrawn fresh on every call with no train-disjointness check
-    and no record of what was drawn, so a "held-out validation" gate could pass on data that
-    wasn't actually held out. This locks the split on its first draw for a given
-    ``identity_hash``: every later call for the same identity returns the identical split, never a
-    silent re-cut, unless the caller explicitly passes ``force_redraw=True`` (the audited admin
-    path, see the ``redraw_calibration_holdout`` MCP tool; never wired to a default kwarg on a
-    high-traffic tool).
+    The split locks on its first draw for a given ``identity_hash``: every later call for the same
+    identity returns the identical split unless the caller passes ``force_redraw=True`` (the
+    ``redraw_calibration_holdout`` MCP tool). The grouping policy is resolved via
+    :func:`resolve_group_key_fn` first, so a malformed ``group_by``/``group_key_map`` raises; an
+    unstated ``group_by`` is :data:`DEFAULT_GROUP_BY`.
 
-    The grouping policy is resolved via :func:`resolve_group_key_fn` first, so a malformed
-    ``group_by``/``group_key_map`` raises loudly here rather than silently degrading.
+    If a lock already exists and the caller's declared policy
+    (``group_by``/``group_key_map``/``seed``/``holdout_ratio``/``selection_dir``) differs from what
+    is recorded in it, the divergence is logged as a warning and returned under
+    ``"policy_divergence"`` (``{"requested": ..., "locked": ...}``) and the locked split is
+    returned unchanged. Stems the caller has that the lock doesn't cover are returned under
+    ``"unlocked_stems"``.
 
-    If a lock already exists and the caller's declared policy (``group_by``/``group_key_map``/
-    ``seed``/``holdout_ratio``/``selection_dir``) differs from what is recorded in it, the
-    divergence is logged as a warning and returned under ``"policy_divergence"``
-    (``{"requested": ..., "locked": ...}``), the locked split is still returned unchanged, never
-    silently redrawn, so a caller can see the mismatch on the result rather than in a server
-    log. Stems the caller has that the lock doesn't cover are similarly surfaced under
-    ``"unlocked_stems"`` rather than silently dropped, the lock stays authoritative for what it
-    already covers.
+    ``selection_dir`` names the selection a caller drew ``stems`` from (``None`` for a
+    whole-directory draw); it is recorded in the lock and in every ``redraw_history`` entry, never
+    resolved or compared here.
 
-    ``selection_dir`` names the selection a caller drawing ``stems`` from one restricted it to
-    (``None`` for a whole-directory draw, the record's key set stays the same either way); it is
-    written into the lock and into every ``redraw_history`` entry alongside the rest of the
-    declared policy, never resolved or compared here, that is the caller's own job
-    (:func:`selection_calibration_universe`, which each door calls before it ever draws a universe
-    to lock).
-
-    ``stems`` ``None`` names the existing lock's own members as the universe, for a caller holding
-    an identity and no labels to re-scan (``redraw_calibration_holdout``); with no lock to read
+    ``stems`` ``None`` names the existing lock's own members as the universe; with no lock to read
     them from it raises ``ValueError``.
 
-    A locked stem with no corresponding entry in the caller's current ``stems`` (its image/label
-    was deleted or renamed since the split was locked) raises ``ValueError`` rather than silently
-    returning stale membership for a caller to crash on later; this mirrors
-    ``resolve_group_key_fn``'s already-loud policy-error convention, which this function already
-    lets propagate unmodified. A lock file that exists but fails to parse (corrupt, not merely
-    absent) raises for the same reason when ``force_redraw=False`` or when ``stems`` is ``None``,
-    "unreadable" must never silently become "no lock exists yet, draw a fresh one", which would
-    violate this function's own never-a-silent-re-cut guarantee. ``force_redraw=True`` over stems
-    the caller holds (the audited admin path) proceeds past a corrupt lock file rather than also
-    being blocked by it; redraw history just can't be recovered from what couldn't be read.
+    A locked stem with no corresponding entry in the caller's current ``stems`` raises
+    ``ValueError``. A lock file that exists but fails to parse raises when ``force_redraw=False``
+    or when ``stems`` is ``None``; ``force_redraw=True`` over stems the caller holds proceeds past
+    it, without the unreadable redraw history.
 
-    ``scope_root`` is required and has no default: it is the root the lock is stored under, the
-    dataset root of the labels or records the split was drawn over. See
-    :func:`cal_holdout_lock_key` for why a root this layer resolved for itself would make the
-    never-a-silent-re-cut guarantee above violable, and :func:`cal_holdout_scope_root` for the
-    derivation a caller holding a labeled directory uses.
-
-    ``timestamp`` is threaded in from the caller (this pipeline layer does not call
-    ``datetime.now()`` itself, matching the rest of the codebase's tool-boundary convention) and
-    is only meaningful when a new draw actually happens (first draw, or ``force_redraw=True``).
+    ``scope_root`` is required: the root the lock is stored under (:func:`cal_holdout_scope_root`).
+    ``timestamp`` is the caller's, and only meaningful when a new draw happens.
 
     Every draw that writes a lock, a first draw or a forced redraw, leaves its one audit line,
     ``calibration_holdout_drawn``, naming the policy, the membership before and after and the
-    caller's ``reason`` (a redraw states one); returning an existing lock writes nothing and leaves
-    none. The draw's line is this act's alone: whatever else the triggering door writes (a
-    calibrate door's stamp, for one) is recorded by the library that writes it, never here.
+    caller's ``reason``; returning an existing lock writes nothing and leaves none.
 
     Returns the full locked-split dict: ``{identity_hash, calibration, holdout, group_by,
     group_key_map, seed, holdout_ratio, selection_dir, redraw_history}``, plus the optional
-    ``policy_divergence`` / ``unlocked_stems`` report fields above when a lock already existed,
-    or, on a draw, the ``old_membership`` it replaced (``None`` for a first draw).
+    ``policy_divergence`` / ``unlocked_stems`` report fields above when a lock already existed, or,
+    on a draw, the ``old_membership`` it replaced (``None`` for a first draw).
     """
     lock_key = cal_holdout_lock_key(identity_hash, scope_root=scope_root)
     try:
@@ -1190,6 +986,7 @@ def resolve_locked_cal_holdout_split(
             raise ValueError(f"no lock exists for identity_hash={identity_hash!r} to take the "
                              "redraw's stems from; name the labels its stems come from.")
         stems = sorted(set(existing["calibration"]) | set(existing["holdout"]))
+    group_by = group_by or DEFAULT_GROUP_BY
     group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
     declared_policy = {
         "group_by": group_by, "group_key_map": group_key_map,

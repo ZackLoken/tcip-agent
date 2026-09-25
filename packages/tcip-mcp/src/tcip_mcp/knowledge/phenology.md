@@ -26,7 +26,7 @@ Milestones, per plant, from that plant's elongated-fraction time series:
 | `catkin_50per_date` | date the elongated fraction crosses 50% |
 | `catkin_95per_date` | date the elongated fraction crosses 95% |
 
-Crossings interpolate linearly between the two neighbouring capture dates. Pistillate
+Crossings interpolate linearly between the two neighboring capture dates. Pistillate
 milestones (`pistillate_05/50/95per_date`) are the identical pattern on the pistillate-
 flower elongation/receptivity call.
 
@@ -34,12 +34,12 @@ flower elongation/receptivity call.
 > immutable authority ("Date when most catkins have elongated"). The implementation computes
 > `catkin_elongation_date` as the 95% majority crossing (= `catkin_95per_date`), the
 > current best-guess reading of that text, recorded on the trait spec as `majority_milestone`
-> and flagged crossing-unconfirmed via `majority_provisional`. That confirmation path is not
+> and flagged crossing-unconfirmed via `crossing_unconfirmed`. That confirmation path is not
 > `state_trait_operationalization`, which confirms `state_crossing_dates`' own fields
 > (`positive_value`, `milestone_on`, `milestone_fractions`) and does not touch this
 > mapping; a disagreement over which crossing the majority date means is corrected on the
 > trait spec itself, through `revise_trait_spec` (or set at authoring time via
-> `author_trait_spec`), not this file. Since `majority_milestone` and `majority_provisional`
+> `author_trait_spec`), not this file. Since `majority_milestone` and `crossing_unconfirmed`
 > are authored fields, that correction restates the trait spec's own authoring statement for
 > the breeder's re-confirmation. `positive_onset_date`
 > (first date any elongation appears) remains a separate helper, not the delivered trait.
@@ -51,7 +51,7 @@ separately-named trait and get the definition in writing first.
 
 This bans the *quantity*, not an estimator. The crossing is defined on the positive
 fraction; how you estimate the date at which that fraction reaches a level (the canonical
-implementation interpolates linearly between neighbouring capture dates) is a method
+implementation interpolates linearly between neighboring capture dates) is a method
 question, and a sparse or irregular capture cadence is exactly the case where it deserves
 thought rather than a default.
 
@@ -123,11 +123,11 @@ library call) with plant-GPS mapping; they are unrelated.
 ## Plant mapping: why the sequence-anchored matcher
 
 Image GPS (iPhone/handheld EXIF) carries ~5 m error while the plant grid is ~2.8 m between
-adjacent plots, so nearest-neighbour GPS alone is ambiguous. The RTK-collected,
+adjacent plots, so nearest-neighbor GPS alone is ambiguous. The RTK-collected,
 GIS-rectified plant grid is accurate; the *image* GPS is the fuzzy side. `plant_mapping.py`
 resolves this by ordering each date's images by EXIF capture time (the walker's sequence),
 splitting into row runs on large GPS jumps, and assigning along the row. Each assignment
-records its `source` (`sequence` / `nearest_neighbour` / `unmapped`) and `distance_m`:
+records its `source` (`sequence` / `nearest_neighbor` / `unmapped`) and `distance_m`:
 interpretable signals. It records no 0–1 "confidence" value.
 
 ## Delivery checklist

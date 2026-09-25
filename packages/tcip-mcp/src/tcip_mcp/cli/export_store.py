@@ -1,8 +1,5 @@
-"""Write a root's database-held records and logs back out as files.
-
-Every tool that reads TCIP's state off disk rather than through the storage seam (the
-data-state doctor, an archive, an auditor tailing ``.tcip/audit.jsonl``) reads what this
-produces. Run it for a root, or for a whole project's roots at once:
+"""Write a root's database-held records and logs back out as files, for a root or for a whole
+project's roots at once:
 
     tcip export-store <root> [<root> ...]
     tcip export-store --project <project_root>
@@ -18,7 +15,7 @@ import os
 import sys
 from pathlib import Path
 
-from tcip_mcp.store_catalogue import project_roots
+from tcip_mcp.store_catalog import project_roots
 
 from tcip_store.errors import StoreError
 from tcip_store.export import export_root

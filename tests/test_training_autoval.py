@@ -156,14 +156,14 @@ def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(tmp_path: Path):
     assert val_ds is not None
     assert train_ds.num_samples + val_ds.num_samples == 4
     # Each side reads the rows its own samples name, keyed by their own sources.
-    assert set(train_ds._stems).isdisjoint(val_ds._stems)
+    assert set(train_ds.stems).isdisjoint(val_ds.stems)
     assert recorded_side(partition, "train") and recorded_side(partition, "val")
     assert sorted(recorded_side(partition, "train") + recorded_side(partition, "val")) == \
         [f"img{i}" for i in range(4)]
     assert sorted(partition) == [str(csv_path)]
     by_row = dict(rows)
-    for key, rank in zip(train_ds._stems, train_ds._ranks):
-        assert rank == by_row[train_ds.member_stem_of(key)]
+    for key, rank in zip(train_ds.stems, train_ds._ranks):
+        assert rank == by_row[train_ds.member_of(key)]
 
 
 def test_auto_train_val_tiny_dataset_guard(tmp_path: Path):
@@ -488,7 +488,7 @@ def test_a_stated_band_count_reads_every_source_at_it_and_probes_none(tmp_path: 
     images_dir, labels_dir = tmp_path / "ds" / "images", tmp_path / "ds" / "labels"
     images_dir.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
-    for stem, mode in (("grey", "L"), ("colour", "RGB")):
+    for stem, mode in (("gray", "L"), ("color", "RGB")):
         Image.new(mode, (40, 24)).save(images_dir / f"{stem}.png")
         json_io.write_annotations(
             str(labels_dir / f"{stem}.json"),
@@ -618,7 +618,7 @@ def test_reserve_calibration_fraction_raises_on_unresolvable_extent(tmp_path: Pa
     admitted = admit_over(images_dir, labels_dir, subject="bud")
     with pytest.raises(ValueError, match="reserve_calibration_fraction"):
         spatial_single_source_split(
-            admitted.one_sample(), admitted.scope, tiling, split_cfg, None,
+            admitted.every_sample()[0], admitted.scope, tiling, split_cfg, None,
             resolve_sizes("detection", {}, admitted.every_sample()))
 
 

@@ -94,7 +94,7 @@ pattern stays visible on review.
 `run_inference` and `deliver_per_image_counts` (whose live regime forwards it to the shared
 verified pass), `redraw_calibration_holdout` and `evaluate_model` all take `selection_dir`: draw
 the calibration universe from a selection's `calibration` samples under the labels directory the
-call names, instead of every labelled stem with an image, a side `draw_splits` drew held out from
+call names, instead of every labeled stem with an image, a side `draw_splits` drew held out from
 both training and checkpoint selection (see the `training` skill's Dataset Selections section).
 `evaluate_model` is the one whose purpose is a held-out score: without `selection_dir` it scores
 the whole directory; with it, the loader's own admitted count is recorded as

@@ -1,12 +1,9 @@
-"""Validate a training configuration before launching, from the command line.
+r"""Validate a training configuration before launching, from the command line.
 
-The demoted twin of ``training_tools.preflight_config``: structural checks and a builder import
-always run; ``--smoke`` also builds the model and runs ``check_model_contract`` (a train+eval
-forward at the resolved in_chans/num_classes/img_size), a guaranteed real-run failure otherwise;
-``--overfit`` (with ``--smoke``) additionally runs the voluntary ``overfit_check`` diagnostic,
-reported but never gating. This is the door for a harness with no MCP tool for it, or an
-operator validating a config outside any agent session, before ``launch_training`` runs the
-identical check itself.
+Wraps ``training_tools.preflight_config``: structural checks and a builder import always run;
+``--smoke`` also builds the model and runs ``check_model_contract`` (a train+eval forward at the
+resolved in_chans/num_classes/img_size); ``--overfit`` (with ``--smoke``) additionally runs the
+voluntary ``overfit_check`` diagnostic, reported but never gating.
 
 Usage:
     tcip preflight-config --config <path.json> --project <platform_root> \

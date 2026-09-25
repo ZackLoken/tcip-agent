@@ -12,17 +12,17 @@ export interface BandSelection {
   stretch: Stretch;
 }
 
-/** The band interpretations an ordinary colour frame carries, in order. */
+/** The band interpretations an ordinary color frame carries, in order. */
 const RGBA_INTERPRETATIONS = "red,green,blue,alpha";
 
 /** Whether a source's four bands are an ordinary 8-bit RGBA frame rather than four captured
  *  spectral bands.
  *
  *  Such a frame has no band choice to make: its fourth band is alpha, and the three that remain
- *  are the colours themselves, so it displays as its own pixels instead of through a stretch a
+ *  are the colors themselves, so it displays as its own pixels instead of through a stretch a
  *  viewer picks bands for. Decided on what the server read from the file (`interpretation`), never
  *  on the band count, which an equally four-band multispectral capture shares. */
-export function isPlainColourFrame(bandsInfo: ImageBandsResponse): boolean {
+export function isPlainColorFrame(bandsInfo: ImageBandsResponse): boolean {
   return (
     bandsInfo.bands.length === 4 &&
     bandsInfo.bands.every((b) => b.dtype === "uint8") &&
@@ -46,7 +46,7 @@ function selectionMatchesBands(bandsInfo: ImageBandsResponse, selection: BandSel
 
 /** The `bands`/`stretch` an image request carries for the current selection, or neither when the
  *  source has no band picker (a plain RGB dataset serves its own pixels), the frame is an ordinary
- *  colour photo, or the selection names bands this metadata doesn't actually carry.
+ *  color photo, or the selection names bands this metadata doesn't actually carry.
  *
  *  One expression of that, shared by everything that requests an image for the same view: the
  *  canvas and the prefetcher would otherwise warm and read two different renders of one image. */
@@ -55,11 +55,11 @@ export function compositeParams(
   selection: BandSelection | null,
 ): { bands?: string; stretch?: Stretch } {
   if (!bandsInfo || bandsInfo.band_count <= 3 || !selection) return {};
-  if (isPlainColourFrame(bandsInfo) || !selectionMatchesBands(bandsInfo, selection)) return {};
+  if (isPlainColorFrame(bandsInfo) || !selectionMatchesBands(bandsInfo, selection)) return {};
   return { bands: `${selection.r},${selection.g},${selection.b}`, stretch: selection.stretch };
 }
 
-/** Whether a band picker may show for this frame and selection: multispectral, not a plain colour
+/** Whether a band picker may show for this frame and selection: multispectral, not a plain color
  *  photo, and a selection whose names this metadata actually declares. The one gate every render of
  *  the picker (Annotate's toolbar, Review's own) shares, so neither shows one for the other's stale
  *  metadata mid-switch. */
@@ -68,7 +68,7 @@ export function showsBandPicker(
   selection: BandSelection | null | undefined,
 ): boolean {
   if (!bandsInfo || bandsInfo.band_count <= 3 || !selection) return false;
-  return !isPlainColourFrame(bandsInfo) && selectionMatchesBands(bandsInfo, selection);
+  return !isPlainColorFrame(bandsInfo) && selectionMatchesBands(bandsInfo, selection);
 }
 
 /** First three declared bands as the initial R/G/B assignment (falling back to the first band

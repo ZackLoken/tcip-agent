@@ -357,7 +357,7 @@ def test_tune_search_normalizes_search_alg_case_before_deciding_grid(tmp_path, m
             objective_fn=lambda config, report: None,
             param_space={"bs": {"type": "categorical", "choices": [2, 4]}},
             search_alg="Grid",
-            storage_path=str(tmp_path),
+            storage_path=str(tmp_path), seed=0
         )
 
     assert captured["grid"] is True
@@ -380,12 +380,64 @@ def test_build_scheduler_aliases():
     assert build_scheduler("none") is None
 
 
-def test_build_search_alg_native_and_backend():
+def _first_sampled_lr(searcher, storage_path) -> float:
+    """The ``lr`` of the first trial ``searcher`` samples from a one-axis continuous space."""
+    from ray import tune
+    from ray.tune.experiment import Experiment
+
+    searcher.add_configurations(Experiment(
+        name="seed_probe", run=lambda config: None,
+        config={"lr": tune.loguniform(1e-5, 1e-2)}, num_samples=1, storage_path=str(storage_path)))
+    return searcher.next_trial().config["lr"]
+
+
+def test_the_native_sampler_draws_the_sweep_seed_s_points(tmp_path):
     pytest.importorskip("ray")
     from tcip_mcp.pipelines.training.hpo import build_search_alg
-    # Native random/grid need no searcher (BasicVariantGenerator handles them).
-    assert build_search_alg("random") is None
-    assert build_search_alg("grid") is None
+
+    first = _first_sampled_lr(build_search_alg("random", seed=7), tmp_path / "a")
+    again = _first_sampled_lr(build_search_alg("random", seed=7), tmp_path / "b")
+    other = _first_sampled_lr(build_search_alg("grid", seed=8), tmp_path / "c")
+    assert first == again
+    assert first != other
+
+
+def test_every_backend_searcher_retains_the_sweep_seed():
+    """Each real backend searcher holds the stated seed where its own sampler reads it: optuna's
+    ``_seed``, hyperopt's ``rstate`` (a ``RandomState`` drawing what one seeded with the same
+    value draws), bayesopt's ``_random_state``."""
+    pytest.importorskip("ray")
+    import numpy as np
+
+    from tcip_mcp.pipelines.training.hpo import build_search_alg
+
+    points = [{"lr": 1e-3}]
+    optuna = build_search_alg("optuna", seed=713, points_to_evaluate=points)
+    hyperopt = build_search_alg("hyperopt", seed=713, points_to_evaluate=points)
+    bayesopt = build_search_alg("bayesopt", seed=713, points_to_evaluate=points)
+
+    assert optuna._seed == 713
+    assert hyperopt.rstate.randint(2**31 - 1) == np.random.RandomState(713).randint(2**31 - 1)
+    assert bayesopt._random_state == 713
+
+
+@pytest.mark.parametrize("name", ["nevergrad", "ax"])
+def test_a_searcher_this_platform_cannot_seed_or_run_is_refused_by_name(name):
+    pytest.importorskip("ray")
+    from tcip_mcp.pipelines.training.hpo import build_search_alg
+
+    with pytest.raises(ValueError, match=f"'{name}' is not offered"):
+        build_search_alg(name, seed=0)
+
+
+def test_build_search_alg_native_and_backend():
+    pytest.importorskip("ray")
+    from ray.tune.search.basic_variant import BasicVariantGenerator
+
+    from tcip_mcp.pipelines.training.hpo import build_search_alg
+
+    assert isinstance(build_search_alg("random", seed=0), BasicVariantGenerator)
+    assert isinstance(build_search_alg("grid", seed=0), BasicVariantGenerator)
     # A backend the agent picks that isn't installed raises clearly (never silently swapped).
     # Absence is simulated rather than relying on a package that happens to be missing: every
     # offered backend now installs by default, so nothing real is left to stand in for one.
@@ -393,7 +445,7 @@ def test_build_search_alg_native_and_backend():
 
     with mock.patch.object(hpo_mod, "find_spec", return_value=None):
         with pytest.raises(ValueError, match="not installed"):
-            build_search_alg("optuna")
+            build_search_alg("optuna", seed=0)
 
 
 def test_available_search_algs_lists_natives_and_installed_backends():
@@ -421,7 +473,7 @@ def test_tune_search_warm_start_and_optimizes(tmp_path):
         metric="objective", mode="min", num_samples=6,
         search_alg="random", scheduler="none",
         warm_start=True, baseline_params={"x": 2.0},
-        storage_path=str(tmp_path),
+        storage_path=str(tmp_path), seed=0
     )
     assert result["warm_start"] is True
     assert result["n_trials"] == 6

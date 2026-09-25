@@ -19,9 +19,7 @@ Public API:
     column_label(index) / column_index(label)
 
 The prompted predictors return polygon rings (a mask with two disjoint regions is two rings),
-via the shared :func:`tcip_annotation.mask_contours.mask_to_polygon_rings`, the same extractor the
-model-prediction export path uses, so SAM-assisted GT and a model's prediction describe an
-occlusion-split object identically.
+via :func:`tcip_annotation.mask_contours.mask_to_polygon_rings`.
 
 `model_type` values: "hiera_t", "hiera_s", "hiera_b+", "hiera_l".
 """
@@ -67,9 +65,9 @@ _MODEL_MAP = {
 }
 
 def checkpoint_path(model_type: str = "hiera_b+") -> Path:
-    """The local checkpoint path ``_get_predictor`` loads for ``model_type``: the single source of
-    truth for the filename/location, so callers (and tests that gate on availability) never drift.
-    ``Path.home()`` is read at call time (not cached at import) so a test that redirects it works."""
+    """The local checkpoint path ``_get_predictor`` loads for ``model_type``, under ``Path.home()``
+    read at call time.
+    """
     if model_type not in _MODEL_MAP:
         raise ValueError(f"Unknown model_type '{model_type}'. Valid: {sorted(_MODEL_MAP)}")
     return Path.home() / ".cache" / "tcip" / "sam2" / _MODEL_MAP[model_type][1]
@@ -284,12 +282,8 @@ def auto_mask(
 
 
 def column_label(index: int) -> str:
-    """Spreadsheet-style label for 0-based column ``index``: A-Z, then AA, AB, ...
-
-    Bijective base-26, the scheme the grid overlay renders with; :func:`column_index` is the
-    inverse. A single ``chr`` past 'Z' walks into punctuation and then lowercase letters, and
-    case-insensitive parsing folds lowercase back onto columns 0-25, so labels beyond 26
-    columns must widen instead.
+    """Spreadsheet-style label for 0-based column ``index``: A-Z, then AA, AB, ... Bijective
+    base-26; :func:`column_index` is the inverse.
     """
     if index < 0:
         raise ValueError(f"Column index must be non-negative, got {index}")
@@ -312,12 +306,8 @@ def column_index(label: str) -> int:
 
 
 def cell_fields(cell: Any) -> tuple[str, float, float, float, float]:
-    """``(name, x0, y0, x1, y1)`` from one grid cell, however the caller shipped it.
-
-    The cell shape both packages exchange: a mapping (what a JSON route serves) or an
-    object with attributes (tcip-mcp's ``reference_grid.Cell``), carrying ``name`` plus
-    the half-open native-pixel rect ``x0, y0, x1, y1``. One accessor so the renderer and
-    the name lookup can never read the shape differently.
+    """``(name, x0, y0, x1, y1)`` from one grid cell: a mapping or an object with attributes,
+    carrying ``name`` plus the half-open native-pixel rect ``x0, y0, x1, y1``.
     """
     if isinstance(cell, dict):
         return (str(cell["name"]), float(cell["x0"]), float(cell["y0"]),
@@ -330,12 +320,9 @@ def grid_to_rect(cell: str, cells: "list[Any]") -> tuple[float, float, float, fl
     """Resolve a grid cell reference (e.g. 'B3') to the named cell's half-open native-pixel rect
     ``(x0, y0, x1, y1)``.
 
-    The one cell-name lookup: every consumer of a cell name resolves through this, whether it
-    wants the cell's center (:func:`grid_to_pixel`, for a point prompt) or its rect (a region a
-    caller crops or bounds). ``cells`` is the caller's own cell list (see :func:`cell_fields` for
-    the accepted shapes), the same list the overlay was rendered with: a cell name means nothing
-    without the grid that produced it. Matching is case-insensitive and whitespace-stripped. A
-    reference that is not a cell name at all raises ValueError naming the expected format; one
+    ``cells`` is the caller's own cell list (see :func:`cell_fields` for the accepted shapes), the
+    same list the overlay was rendered with. Matching is case-insensitive and whitespace-stripped.
+    A reference that is not a cell name at all raises ValueError naming the expected format; one
     that names no cell in this grid raises ValueError naming the grid's valid range.
     """
     wanted = cell.strip().upper()

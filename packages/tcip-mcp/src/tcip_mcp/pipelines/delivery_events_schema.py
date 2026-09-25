@@ -1,25 +1,16 @@
-"""The ``delivery_events`` record's declared shape, so its writer (``resolution.py``'s
-``record_delivery_binding_event``) and its reader (``tcip_web``'s ``list_delivery_events`` route)
-agree on one shape rather than each independently tolerating whatever the other happens to have
-written.
+"""The ``delivery_events`` record's declared shape.
 
-A sibling module to ``resolution.py`` rather than a class inside it, the same split
-``pipelines/schemas.py`` already draws for its own pydantic models: ``resolution.py`` states its
-own dependency surface as storage-seam-and-stdlib only, and a pydantic import belongs with the
-other schema-only module instead of widening that statement.
-
-``DeliveryEventRecord.plant_mapping`` carries one of three disclosure shapes, or ``None``: a
-walked capture mapping's :class:`PlantMappingDisclosure` (the phenology doors, and
-``deliver_per_plant_csv`` when its caller verified one), a whole-raster frame's
-:class:`PlantRegistryDisclosure` (``deliver_orthomosaic_plant_counts``'s nearest-neighbour
-regime, which has no walked mapping build to name), or that same door's canopy-segment regime's
+``DeliveryEventRecord.plant_mapping`` carries one of three disclosure shapes, or ``None``: a walked
+capture mapping's :class:`PlantMappingDisclosure`, a whole-raster frame's
+:class:`PlantRegistryDisclosure` (the nearest-neighbor regime of
+``deliver_orthomosaic_plant_counts``), or that door's canopy-segment regime's
 :class:`CanopySegmentDisclosure`. No two of the three declare the same required key set (the
 registry form has ``nn_tolerance_m``, the canopy form ``canopy_segments``, the mapping form
-``name``), so with an extra key forbidden on every one a stored dict validates against at most
-one: pydantic resolves it with no discriminator field added to any of them.
+``name``), so with an extra key forbidden on every one a stored dict validates against at most one,
+with no discriminator field.
 
-Every model forbids an undeclared key, so a stored record or disclosure carrying one is refused
-by name rather than silently accepted and later misread.
+Every model forbids an undeclared key, so a stored record or disclosure carrying one is refused by
+name.
 """
 
 from __future__ import annotations
@@ -29,16 +20,31 @@ from typing import Literal, Mapping, Optional, TypeGuard, Union
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 
+class MatchTolerance(BaseModel):
+    """A plant mapping's resolved match radius (meters) and the branch of
+    ``plant_mapping.resolve_nn_tolerance_m`` that produced it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    value: float
+    source: str
+
+
+class PlantRegistryReference(BaseModel):
+    """The registered plant registry a delivery read, by name and content digest."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    digest: str
+
+
 class PlantMappingDisclosure(BaseModel):
-    """The ``plant_mapping`` a phenology delivery attributed detections through, exactly as
+    """The ``plant_mapping`` a phenology delivery attributed detections through, as
     :meth:`tcip_mcp.pipelines.postprocessing.plant_mapping.MappingBuild.delivery_disclosure`
     composes it: the mapping's own identity, ``verify_mapping_inputs``'s two unverified
     disclosures, and this delivery's own unattributed-capture count scoped to its delivered dates.
-
-    Every key is required: none of ``dates_delivered``, ``images_unattributed`` or
-    ``plant_attribution`` can be reconstructed from a record that lacks it, since none was ever
-    computed for that delivery, so a record missing one is refused rather than read as if the gap
-    meant something.
+    Every key is required.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -49,7 +55,7 @@ class PlantMappingDisclosure(BaseModel):
     dataset_root: str
     built_at: str
     record_sha256: str
-    nn_tolerance_m: dict
+    nn_tolerance_m: MatchTolerance
     capture_identity: dict[str, str]
     captures_unverified: list[str]
     plant_csvs_unverified: list[str]
@@ -60,25 +66,19 @@ class PlantMappingDisclosure(BaseModel):
 
 
 class PlantRegistryDisclosure(BaseModel):
-    """The ``plant_mapping`` an orthomosaic delivery's nearest-neighbour regime attributed
-    detections through, exactly as ``deliver_orthomosaic_plant_counts`` (``orthomosaic_tools.py``)
-    composes it.
-
-    A whole-mosaic frame carries no walked capture sequence to build a
-    :class:`MappingBuild`-shaped mapping from, so this names only what that door verifies or
-    computes itself: the plant registry it read, the raster identity every count in the delivery
+    """The ``plant_mapping`` an orthomosaic delivery's nearest-neighbor regime attributed
+    detections through: the plant registry it read, the raster identity every count in the delivery
     is attributed through, the tolerance it matched detections under, this delivery's own
-    unattributed-detection count, and the registry plants the raster's own frame does not
-    picture at all, by name. Every key is required, the same reasoning
-    :class:`PlantMappingDisclosure` states: none is reconstructable from a record that lacks it.
+    unattributed-detection count, and the registry plants the raster's own frame does not picture
+    at all, by name. Every key is required.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    plant_registry: dict
+    plant_registry: PlantRegistryReference
     project_root: str
     raster_identity: dict
-    nn_tolerance_m: dict
+    nn_tolerance_m: MatchTolerance
     detections_unattributed: int
     detections_unattributed_scope: Literal["delivered_raster"]
     plant_attribution: str
@@ -129,22 +129,20 @@ class UnattributedDetectionsBySource(BaseModel):
 
 
 class CanopySegmentDisclosure(BaseModel):
-    """The ``plant_mapping`` an orthomosaic delivery's canopy-segment regime attributed
-    detections through, exactly as ``deliver_orthomosaic_plant_counts``'s ``canopy_subject``
-    argument composes it.
+    """The ``plant_mapping`` an orthomosaic delivery's canopy-segment regime attributed detections
+    through.
 
-    Names the registry and raster identity the same way :class:`PlantRegistryDisclosure` does,
-    plus the canopy document this delivery read its boundaries from, the resolved segment-to-plant
-    ties, and every plant this delivery's own rows do not cover, by name and by reason: outside
-    the raster's frame, inside no segment, or inside a segment whose own detection was ambiguous
+    Names the registry and raster identity the same way :class:`PlantRegistryDisclosure` does, plus
+    the canopy document this delivery read its boundaries from, the resolved segment-to-plant ties,
+    and every plant this delivery's own rows do not cover, by name and by reason: outside the
+    raster's frame, inside no segment, or inside a segment whose own detection was ambiguous
     (:data:`~tcip_mcp.pipelines.postprocessing.segment_attribution.SegmentAssignment`'s
-    ``"overlapping_segments"`` source). Every key is required, the same reasoning
-    :class:`PlantMappingDisclosure` states: none is reconstructable from a record that lacks it.
+    ``"overlapping_segments"`` source). Every key is required.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    plant_registry: dict
+    plant_registry: PlantRegistryReference
     project_root: str
     raster_identity: dict
     canopy_segments: CanopySegmentsDocument
@@ -161,11 +159,9 @@ class CanopySegmentDisclosure(BaseModel):
 
 def is_mapping_disclosure(pm: object) -> TypeGuard[dict]:
     """Whether ``pm`` is a walked-mapping :class:`PlantMappingDisclosure` dict rather than one of
-    the two whole-raster shapes (:class:`PlantRegistryDisclosure`, :class:`CanopySegmentDisclosure`)
-    or neither: the one key test every reader that needs to tell the mapping disclosure apart from
-    the others (``list_delivery_events``, :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.
-    _citing_delivery_event_ids`) calls, rather than each restating
-    ``"name" in pm and "record_sha256" in pm`` on its own."""
+    the two whole-raster shapes (:class:`PlantRegistryDisclosure`,
+    :class:`CanopySegmentDisclosure`) or neither.
+    """
     return isinstance(pm, dict) and "name" in pm and "record_sha256" in pm
 
 
@@ -186,15 +182,14 @@ class DocumentBinding(BaseModel):
 
 
 class ReconciledDocument(BaseModel):
-    """One sidecar document's reconciled validity, exactly as
-    :func:`tcip_mcp.pipelines.resolution._reconcile_validity` returns it (the shared body behind
-    ``reconcile_operating_point_validity`` and ``reconcile_classifier_validity``) and
-    ``record_delivery_binding_event`` stores it keyed by the document name.
+    """One sidecar document's reconciled validity, as
+    :func:`tcip_mcp.pipelines.resolution._reconcile_validity` returns it, keyed by the document
+    name.
 
     ``bound_validated`` and ``delivery_note`` are set only on the classifier entry: the
     delivery-level state ``bind_classifier_validity`` returned (the one the gate actually used),
-    kept beside the reconciler's own ``validated`` above since the two differ when the binding
-    floors a validated stamp.
+    kept beside the reconciler's own ``validated`` since the two differ when the binding floors a
+    validated stamp.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -229,9 +224,8 @@ class ReconciledDimension(BaseModel):
 
 
 class DeliveryEventRecord(BaseModel):
-    """The stored per-delivery record, as ``record_delivery_binding_event`` writes it and
-    ``list_delivery_events`` serves it back: what shipped, under which trait and kind, and the
-    real per-bucket verification evidence the delivering door reconciled at the time."""
+    """The stored per-delivery record: what shipped, under which trait and kind, and the real
+    per-bucket verification evidence the delivering door reconciled at the time."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -241,19 +235,17 @@ class DeliveryEventRecord(BaseModel):
     door: str
     output_path: Optional[str]
     output_sha256: Optional[str]
-    measurement_documents: list[str]
-    scale_document: Optional[str]
     # Who acknowledged this delivery unvalidated, and why: null on both when nothing was
     # acknowledged, the same pair DeliveryGateResult carries.
     acknowledged_by: Optional[str]
-    acknowledgement_reason: Optional[str]
+    acknowledgment_reason: Optional[str]
     plant_mapping: Optional[
         Union[PlantMappingDisclosure, PlantRegistryDisclosure, CanopySegmentDisclosure]
     ]
     documents: dict[str, DocumentBinding]
-    # Keyed by the reconciler the delivering door's gate ran; None when the record carries none.
-    document_reconciliations: Optional[dict[str, ReconciledDocument]] = None
-    dimension_reconciliations: Optional[dict[str, ReconciledDimension]] = None
+    # Keyed by the reconciler the delivering door's gate ran.
+    document_reconciliations: dict[str, ReconciledDocument]
+    dimension_reconciliations: dict[str, ReconciledDimension]
     produced_at: str
 
 
@@ -275,17 +267,11 @@ class DeliverySupersessionRecord(BaseModel):
 def with_supersessions(
     events: list[dict], supersessions: Mapping[str, dict]
 ) -> list[dict]:
-    """Every one of ``events`` (as ``list_delivery_events`` reads them back) with its own
-    supersession attached under ``superseded``: the record ``supersede_delivery`` filed against
-    that event's id, or ``None`` when nothing supersedes it.
+    """Every one of ``events`` with its own supersession attached under ``superseded``: the record
+    ``supersede_delivery`` filed against that event's id, or ``None`` when nothing supersedes it.
 
     ``supersessions`` maps a superseded event's id to its own stored ``delivery_supersessions``
-    record (:func:`tcip_mcp.pipelines.resolution.load_delivery_supersessions`'s own shape), read
-    once by the caller rather than once per event. The one join a delivery-events reader composes
-    through; the Results tab's delivery-events route is its caller, and a second reader
-    joins here rather than reconstructing the pairing, so no two readers can disagree about which
-    record answers for which event. ``read_audit_log`` reads the audit log itself and performs no
-    such join.
+    record (:func:`tcip_mcp.pipelines.resolution.load_delivery_supersessions`'s own shape).
     """
     def _superseded(event: dict) -> dict | None:
         event_id = event.get("event_id")
@@ -296,9 +282,7 @@ def with_supersessions(
 
 
 def validation_error_detail(exc: ValidationError) -> str:
-    """``exc``'s errors rendered as one line, the one rendering ``resolution.py``'s own refusal
-    uses, so a record's shape error never breaks its one-line-per-outcome rendering with
-    pydantic's own multi-line dump."""
+    """``exc``'s errors rendered as one line."""
     return "; ".join(
         f"{'.'.join(str(p) for p in error['loc']) or 'record'}: {error['msg']}"
         for error in exc.errors()

@@ -452,9 +452,9 @@ class TestSharedWebStateDeclarations:
         for store in (web_client.CANVAS_META_STORE, web_client.CANVAS_GEOMETRY_STORE):
             assert ts.get_descriptor(store).declared_in == web_client.__name__
 
-    def test_the_web_only_stores_are_declared_where_the_catalogue_reaches_them(self) -> None:
+    def test_the_web_only_stores_are_declared_where_the_catalog_reaches_them(self) -> None:
         """The three stores only the web package reads are declared beside the shared ones, so
-        the catalogue names them without importing the web package, and each web-side reader
+        the catalog names them without importing the web package, and each web-side reader
         addresses the same declaration rather than one of its own."""
         import tcip_store as ts
         from tcip_mcp import web_client
@@ -606,7 +606,7 @@ class TestInferenceToolOutputSchema:
         """
         import tcip_mcp.model_registry as model_registry_mod
         import tcip_mcp.tools.inference_tools as itools
-        from tests._binding_fixtures import calibrated_run_fields
+        from tests._binding_fixtures import calibrated_run_fields, run_result
         from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
         def _boxes(n: int) -> list[list[float]]:
@@ -621,11 +621,9 @@ class TestInferenceToolOutputSchema:
         ckpt = tmp_path / "m.pt"
         ckpt.write_bytes(b"x")
         sha = "0f1e2d3c4b5a"
-        monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: {
-            "results": results, "image_count": len(results),
-            "total_detections": sum(counts.values()), "id_map": None,
-            "checkpoint_sha256": sha, "produced_at": "2026-01-01T00:00:00Z",
-            **calibrated_run_fields(labels_dir=tmp_path, tiled=False, checkpoint_sha256=sha)})
+        monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: run_result(
+            results=results,
+            **calibrated_run_fields(labels_dir=tmp_path, tiled=False, checkpoint_sha256=sha)))
         monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
                             lambda *a, **kw: stub_verified_checkpoint(str(ckpt)))
 
@@ -645,24 +643,23 @@ class TestInferenceToolOutputSchema:
         self, tmp_path: Path, monkeypatch,
     ) -> None:
         """A live pass with no ``predictions_dir`` has no bucket a reviewer could re-open, and this
-        door takes no acknowledgement for the CSV itself, so it always refuses; the refusal still
+        door takes no acknowledgment for the CSV itself, so it always refuses; the refusal still
         names the count measured for each image and the run's own narrowed conf reference,
         distinct from the CSV-facing column, which floors false with nothing on disk behind it.
         """
         import tcip_mcp.model_registry as model_registry_mod
         import tcip_mcp.tools.inference_tools as itools
         from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT
+        from tests._binding_fixtures import run_result
         from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
         counts = {"row3_plant07.jpg": 2, "row3_plant11.jpg": 0, "row9_plant02.jpg": 17}
         ckpt = tmp_path / "m.pt"
         ckpt.write_bytes(b"x")
-        monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: {
-            "results": [{"image": name, "count": n, "scores": [0.9] * n}
-                        for name, n in counts.items()],
-            "image_count": len(counts), "total_detections": sum(counts.values()),
-            "operating_point": {"conf": {"value": 0.6, "validated_against": VALIDATED_HELD_OUT}},
-            "validated": True, "conf_source": "calibration"})
+        monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: run_result(
+            {"conf": {"value": 0.6, "validated_against": VALIDATED_HELD_OUT}},
+            [{"image": name, "count": n, "scores": [0.9] * n} for name, n in counts.items()],
+            validated=True, conf_source="calibration"))
         monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
                             lambda *a, **kw: stub_verified_checkpoint(str(ckpt)))
 

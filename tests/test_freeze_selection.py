@@ -72,7 +72,6 @@ def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
     assert "calibration" in result["note"] and "refuse" in result["note"]
 
     frozen = read_selection(selection_dir)
-    assert frozen.origin["experiment_id"] == "exp-src"
     assert frozen.counts()["calibration"] == 0
     assert frozen.counts()["train"] and frozen.counts()["val"]
     assert {Path(s.ground_truth).stem for s in frozen.samples} <= set("abcdef")
@@ -166,16 +165,16 @@ def test_freeze_selection_keeps_two_scopes_same_named_members_apart(tmp_path: Pa
         images_dir, labels_dir = root / "images" / date, root / "annotations" / date
         stems = sorted(p.stem for p in labels_dir.glob("*.json"))[:2]
         for index, stem in enumerate(stems):
-            sample = Sample(source=str(images_dir / f"{stem}.jpg"),
+            sample = Sample(member=stem, source=str(images_dir / f"{stem}.jpg"),
                             ground_truth=str(labels_dir / f"{stem}.json"), group=stem,
                             side="train" if index == 0 else "val",
                             confirmation_bucket=status_bucket(SUBJECT, date))
             (train if index == 0 else val).append(sample)
-    assert {s.member_stem for s in train} == {s.member_stem for s in train[:1]}, (
+    assert {s.member for s in train} == {s.member for s in train[:1]}, (
         "both dates must contribute the same member name for this to bite")
 
     data_cfg = {"subject": SUBJECT, "id_map": {SUBJECT: 0},
-                "split": {"resolved_group_by": "stem"}}
+                "split": {"resolved_group_by": "stem", "resolved_seed": 0}}
     create_experiment("exp-two-scope", {"data": data_cfg})
     persist_run_partition("exp-two-scope", data_cfg,
                           partition=_recorded_partition(train, val, train + val))
@@ -250,33 +249,38 @@ def _bound_run(root: Path, tmp_path: Path, experiment_id: str, **split_extra) ->
     _reg, id_map = resolve_registry_id_map(str(labels_dir), SUBJECT, None)
     create_experiment(experiment_id, {
         "model_source": {"builder": BUILDER, "task": "detection"},
-        "data": {**data_cfg, "id_map": id_map},
+        "data": {**data_cfg, "subject": SUBJECT, "id_map": id_map},
     })
     train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
     persist_run_partition(experiment_id, data_cfg, partition=partition)
 
 
-def test_freeze_selection_refuses_a_bound_run(tmp_path: Path):
+@pytest.mark.parametrize("split_extra", [{}, {"redraw_within_selection": True, "seed": 11}],
+                         ids=["bound", "redrawn"])
+def test_a_bound_run_freezes_and_a_later_run_rebinds_to_its_membership(
+    tmp_path: Path, split_extra: dict,
+):
+    from tcip_mcp.experiments import read_run_partition_checked
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _bound_run(root, tmp_path, "exp-bound")
+    _bound_run(root, tmp_path, "exp-bound", **split_extra)
+    frozen = freeze_selection("exp-bound", output_path=str(tmp_path / "frozen"))
+    assert "error" not in frozen, frozen
 
-    result = freeze_selection("exp-bound")
-    assert "error" in result and "bound" in result["error"]
+    rebound_cfg = {"split": {"selection_dir": frozen["selection_dir"]}}
+    _train_ds, _val_ds, rebound = auto_train_val("detection", rebound_cfg, None)
+    bound, _error = read_run_partition_checked("exp-bound")
 
+    def _sides(block_owner):
+        return {side: sorted(m for b in block_owner["members"].values() for m in b[side])
+                for side in ("train", "val")}
 
-def test_freeze_selection_refuses_a_redrawn_bound_run_naming_the_reproduction(tmp_path: Path):
-    from tcip_mcp.tools.data_tools import freeze_selection
-
-    root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _bound_run(root, tmp_path, "exp-redrawn-bound",
-               redraw_within_selection=True, seed=11)
-
-    result = freeze_selection("exp-redrawn-bound")
-    assert "error" in result
-    assert "redrew" in result["error"]
-    assert "redraw_within_selection" in result["error"]
+    create_experiment("exp-rebound", {"model_source": {"builder": BUILDER, "task": "detection"},
+                                        "data": rebound_cfg})
+    persist_run_partition("exp-rebound", rebound_cfg, partition=rebound)
+    rebound_record, _error = read_run_partition_checked("exp-rebound")
+    assert _sides(rebound_record) == _sides(bound)
 
 
 def test_freeze_selection_refuses_a_spatial_split(tmp_path: Path):
@@ -296,42 +300,6 @@ def test_freeze_selection_refuses_a_spatial_split(tmp_path: Path):
 
     result = freeze_selection("exp-spatial")
     assert "error" in result and "spatial" in result["error"]
-
-
-def test_freeze_selection_refuses_no_group_by(tmp_path: Path):
-    """A split record with no group_by at all: freeze_selection never defaults it to 'stem'."""
-    import tcip_store as ts
-    from tcip_mcp.experiments import split_key
-    from tcip_mcp.tools.data_tools import freeze_selection
-
-    root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _real_drawn_experiment(root, "exp-no-group-by")
-
-    split = ts.read(split_key("exp-no-group-by"))
-    ts.replace(split_key("exp-no-group-by"), {**split, "group_by": None})
-
-    result = freeze_selection("exp-no-group-by")
-    assert "error" in result and "group_by" in result["error"]
-
-
-def test_freeze_selection_refuses_a_scope_with_no_recorded_member_digests(tmp_path: Path):
-    """A split record whose scope carries no label_digests block: freeze_selection cannot say
-    which file each member's ground truth was, nor that it has not moved, so it refuses rather
-    than skipping the check."""
-    import tcip_store as ts
-    from tcip_mcp.experiments import split_key
-    from tcip_mcp.tools.data_tools import freeze_selection
-
-    root = _two_subject_two_date_dataset(tmp_path / "ds")
-    data_cfg = _real_drawn_experiment(root, "exp-no-digests")
-
-    split = ts.read(split_key("exp-no-digests"))
-    scope = data_cfg["labels_dir"]
-    members = {**split["members"], scope: {**split["members"][scope], "label_digests": {}}}
-    ts.replace(split_key("exp-no-digests"), {**split, "members": members})
-
-    result = freeze_selection("exp-no-digests")
-    assert "error" in result and "no ground-truth path, digest" in result["error"]
 
 
 def test_freeze_selection_refuses_a_member_whose_ground_truth_moved(tmp_path: Path):
@@ -393,33 +361,6 @@ def test_freeze_selection_accepts_a_labels_dir_spelled_with_forward_slashes(tmp_
     result = freeze_selection("exp-slashes", str(tmp_path / "frozen-slashes"))
     assert "error" not in result, result
     assert result["train"] and result["val"]
-
-
-def test_freeze_selection_refuses_a_record_with_no_per_scope_membership(tmp_path: Path):
-    """A run recorded before the per-scope members block existed leaves flat train and val lists
-    and one labels directory. Freezing would then name every member under that directory, so an
-    older explicit-validation run's validation members would be composed from labels they never
-    validated on and a later bind would read different ground truth. The absence of the evidence
-    is not evidence of one scope, so it refuses; the same record as produced still freezes."""
-    import tcip_store as ts
-
-    from tcip_mcp.experiments import split_key
-    from tcip_mcp.tools.data_tools import freeze_selection
-
-    root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _real_drawn_experiment(root, "exp-unscoped")
-
-    # Admits valid work: as produced, the record freezes.
-    assert "error" not in freeze_selection("exp-unscoped", str(tmp_path / "frozen-scoped"))
-
-    recorded = ts.read(split_key("exp-unscoped"))
-    ts.replace(split_key("exp-unscoped"),
-               {k: v for k, v in recorded.items() if k != "members"})
-
-    result = freeze_selection("exp-unscoped", str(tmp_path / "frozen-unscoped"))
-    assert "error" in result
-    assert "per-scope membership" in result["error"]
-    assert "draw_splits" in result["error"]
 
 
 def test_freeze_selection_refuses_an_empty_val_side(tmp_path: Path):

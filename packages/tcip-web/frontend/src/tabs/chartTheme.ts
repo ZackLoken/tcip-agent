@@ -1,5 +1,5 @@
 /**
- * Recharts takes literal colour strings (not Tailwind classes), so the field-station tokens
+ * Recharts takes literal color strings (not Tailwind classes), so the field-station tokens
  * are mirrored here as hex. Shared by the Training + Results charts so they read as one
  * instrument rather than two ad-hoc palettes. Keep in sync with tailwind.config.ts.
  */

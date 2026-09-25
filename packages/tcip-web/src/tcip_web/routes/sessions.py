@@ -30,7 +30,6 @@ A per-image annotation timer + session aggregate at
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime
 from typing import Any, Optional
 
@@ -41,8 +40,6 @@ import tcip_store
 from tcip_store import Key
 
 from tcip_mcp.web_client import annotation_stats_key
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -67,12 +64,6 @@ def _guarded_dataset_root(dataset_root: str) -> str:
         raise HTTPException(403, str(exc)) from exc
 
 
-def _normalized(data: Any) -> dict[str, Any]:
-    if not isinstance(data, dict):
-        return {"sessions": []}
-    return data
-
-
 # ── Per-image session telemetry ─────────────────────────────────────────
 
 
@@ -92,19 +83,16 @@ class ImageEventPayload(BaseModel):
 
 @router.post("/image_event")
 def image_event(payload: ImageEventPayload) -> dict:
-    """Record per-image session activity. Idempotent and additive.
-
-    Called by the GUI on image-leave (Prev/Next/tab-switch/save).
-    """
+    """Record per-image session activity, adding this call's deltas to the image's totals."""
     key = _guarded_stats_key(payload.project_root)
     dataset_root = _guarded_dataset_root(payload.dataset_root) if payload.dataset_root else None
     with tcip_store.transaction(key) as txn:
-        data = _normalized(txn.read(key, default=None))
-        sessions: list[dict[str, Any]] = data.setdefault("sessions", [])
+        data = txn.read(key, default={"sessions": []})
+        sessions: list[dict[str, Any]] = data["sessions"]
         if not sessions:
             sessions.insert(0, _new_session_entry())
         s = sessions[0]
-        images: dict[str, Any] = s.setdefault("images", {})
+        images: dict[str, Any] = s["images"]
         img = images.setdefault(
             payload.image_name,
             {
@@ -121,12 +109,8 @@ def image_event(payload: ImageEventPayload) -> dict:
             img["date"] = payload.date
 
         img["session_seconds"] = round(
-            float(img.get("session_seconds", 0.0)) + max(0.0, payload.session_seconds_delta),
-            2,
-        )
-        img["annotations_added"] = int(img.get("annotations_added", 0)) + max(
-            0, payload.annotations_added_delta
-        )
+            img["session_seconds"] + max(0.0, payload.session_seconds_delta), 2)
+        img["annotations_added"] += max(0, payload.annotations_added_delta)
         img["final_annotation_count"] = int(payload.final_annotation_count)
 
         if img["annotations_added"] > 0:
@@ -159,13 +143,12 @@ class StartSessionPayload(BaseModel):
 
 @router.post("/start")
 def start_session(payload: StartSessionPayload) -> dict:
-    """Insert a new session row. The GUI calls this when the user opens a
-    project (or on load if no session is currently open)."""
+    """Insert a new session row."""
     key = _guarded_stats_key(payload.project_root)
     with tcip_store.transaction(key) as txn:
-        data = _normalized(txn.read(key, default=None))
-        sessions: list[dict[str, Any]] = data.setdefault("sessions", [])
-        if sessions and not sessions[0].get("ended"):
+        data = txn.read(key, default={"sessions": []})
+        sessions: list[dict[str, Any]] = data["sessions"]
+        if sessions and not sessions[0]["ended"]:
             # Already an open session, keep it.
             return {"status": "ok", "session": sessions[0]}
         entry = _new_session_entry(user=payload.user)
@@ -183,8 +166,8 @@ def end_session(payload: EndSessionPayload) -> dict:
     """Mark the latest session as ended and roll up totals."""
     key = _guarded_stats_key(payload.project_root)
     with tcip_store.transaction(key) as txn:
-        data = _normalized(txn.read(key, default=None))
-        sessions = data.setdefault("sessions", [])
+        data = txn.read(key, default={"sessions": []})
+        sessions = data["sessions"]
         if not sessions:
             return {"status": "noop"}
         s = sessions[0]
@@ -196,8 +179,8 @@ def end_session(payload: EndSessionPayload) -> dict:
 
 @router.get("/load")
 def load_sessions(project_root: str) -> dict:
-    data = _normalized(tcip_store.read(_guarded_stats_key(project_root), default=None))
-    for s in data.get("sessions", []):
+    data = tcip_store.read(_guarded_stats_key(project_root), default={"sessions": []})
+    for s in data["sessions"]:
         s.update(_classify_session_seconds(s))
     return data
 
@@ -223,11 +206,11 @@ def _refresh_session_aggregate(s: dict[str, Any]) -> None:
     # review included, not just images that gained a new annotation; avg_seconds_per_annotation
     # keeps its own narrower time sum so it stays a per-new-annotation figure, not diluted by time
     # that produced no new annotation.
-    images = s.get("images", {})
-    images_with_adds = [v for v in images.values() if v.get("annotations_added", 0) > 0]
-    total_seconds = round(sum(v.get("session_seconds", 0.0) for v in images.values()), 2)
-    annotation_seconds = sum(v.get("session_seconds", 0.0) for v in images_with_adds)
-    total_adds = sum(int(v.get("annotations_added", 0)) for v in images.values())
+    images = s["images"]
+    images_with_adds = [v for v in images.values() if v["annotations_added"] > 0]
+    total_seconds = round(sum(v["session_seconds"] for v in images.values()), 2)
+    annotation_seconds = sum(v["session_seconds"] for v in images_with_adds)
+    total_adds = sum(v["annotations_added"] for v in images.values())
     s["images_annotated"] = len(images_with_adds)
     s["total_annotations"] = total_adds
     s["total_time_seconds"] = total_seconds
@@ -238,49 +221,42 @@ def _refresh_session_aggregate(s: dict[str, Any]) -> None:
 
 def _status_bucket_for(cache: dict[str, dict[str, str]], dataset_root: str,
                        subject: str | None, date: str | None) -> dict[str, str]:
-    """One (dataset_root, subject, date) bucket of image_name -> status, read at most once per
-    call to :func:`_classify_session_seconds` regardless of how many images in a session share it.
+    """One (dataset_root, subject, date) bucket of image_name -> status, read at most once per call
+    to :func:`_classify_session_seconds` regardless of how many images in a session share it.
 
-    A dataset with no confirmations yet has no bucket, which is an empty one. A store that will
-    not decode, or a persisted root the allow-set no longer admits, is named in the log and read
-    as holding no confirmation for these images, so their time is reported as review rather than
-    silently as confirmed negatives, and nothing outside the allowed roots is read.
+    A dataset with no confirmations yet has no bucket, which is an empty one. A recorded root the
+    allow-set does not admit is refused with a 403 naming it, nothing outside the allowed roots
+    read; a store that will not decode raises ``tcip_store.DecodeError``.
     """
-    from tcip_mcp.dataset_layout import image_status_key, normalize_status_store, status_bucket
+    from tcip_mcp.dataset_layout import image_status_key, status_tokens, status_bucket
     from tcip_web.paths import assert_path_allowed
 
     key = f"{dataset_root}\0{subject or ''}\0{date or ''}"
     if key not in cache:
         try:
-            raw = tcip_store.read(image_status_key(assert_path_allowed(dataset_root)), default={})
-        except ValueError:
-            logger.warning("the recorded dataset root %s is outside the allowed roots; session "
-                           "time on its images is reported as review", dataset_root)
-            raw = {}
-        except tcip_store.DecodeError:
-            logger.warning("the image status store under %s does not decode; session time on "
-                           "its images is reported as review", dataset_root, exc_info=True)
-            raw = {}
-        cache[key] = normalize_status_store(raw).get(status_bucket(subject or "", date), {})
+            allowed = assert_path_allowed(dataset_root)
+        except ValueError as exc:
+            raise HTTPException(403, f"a session records time on images under {dataset_root}, "
+                                     f"which this server may not read, so that time cannot be "
+                                     f"classified: {exc}") from exc
+        raw = tcip_store.read(image_status_key(allowed), default={})
+        cache[key] = status_tokens(raw).get(status_bucket(subject or "", date), {})
     return cache[key]
 
 
 def _classify_session_seconds(s: dict[str, Any]) -> dict[str, float]:
     """This session's time, split into new-annotation / review / negative-confirmation seconds,
-    read fresh against image_status.json's current state rather than frozen at image_event time:
-    a breeder often confirms a negative as a separate, later action from just leaving the image, so
-    a write-time snapshot would misclassify time on an image not yet marked negative when the event
-    fired. An image with no dataset_root recorded (an older entry, or a caller with none to give)
-    falls back to review time, unclassifiable further.
+    read against image_status.json's current state. An image with no dataset_root recorded counts
+    as review time.
     """
     from tcip_mcp.dataset_layout import is_confirmed_negative
 
-    images = s.get("images", {})
+    images = s["images"]
     cache: dict[str, dict[str, str]] = {}
     negative_seconds = review_seconds = annotation_seconds = 0.0
     for name, img in images.items():
-        seconds = img.get("session_seconds", 0.0)
-        if img.get("annotations_added", 0) > 0:
+        seconds = img["session_seconds"]
+        if img["annotations_added"] > 0:
             annotation_seconds += seconds
             continue
         dataset_root = img.get("dataset_root")

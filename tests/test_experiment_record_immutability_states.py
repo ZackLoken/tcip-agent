@@ -4,7 +4,7 @@ Both terminal outcomes are locked, the run that completed and the run that faile
 be re-opened to a non-terminal state, gain new epochs, have a recorded artifact pointer or a
 populated lineage edge rewritten, and a refusal, which changes nothing, leaves no audit line. The lock
 stays additive, so a still-empty artifact name or lineage field takes its first write even after
-the run finished. A cancelled run is the separate case the lock deliberately leaves out: its
+the run finished. A canceled run is the separate case the lock deliberately leaves out: its
 record stays writable and re-openable.
 """
 
@@ -223,8 +223,8 @@ def test_update_status_refusal_needs_no_audit_log(tmp_path, monkeypatch):
     assert update_status(eid, "failed")["state"] == "completed"
 
 
-def test_cancelled_run_record_stays_writable_and_reopenable(tmp_path):
-    """A cancelled run is not locked the way a completed or failed one is: it stopped on request
+def test_canceled_run_record_stays_writable_and_reopenable(tmp_path):
+    """A canceled run is not locked the way a completed or failed one is: it stopped on request
     rather than finishing, so its record must still take the epochs and the state a resumed run
     records against it."""
     from tcip_mcp.experiments import create_experiment, log_metrics, update_status
@@ -233,7 +233,7 @@ def test_cancelled_run_record_stays_writable_and_reopenable(tmp_path):
     create_experiment(eid, {"model_source": {"builder": "my_models:raceme_det"}})
     update_status(eid, "running")
     log_metrics(eid, 6, {"val_map50": 0.52})
-    update_status(eid, "cancelled")
+    update_status(eid, "canceled")
 
     appended = log_metrics(eid, 7, {"val_map50": 0.58})
     assert "error" not in appended

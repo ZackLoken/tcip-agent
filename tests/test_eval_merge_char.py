@@ -34,14 +34,12 @@ GOLDEN_DETECTIONS = {
     "img_h": 480,
     "detections": [
         {"subject": "bud", "attributes": {}, "iscrowd": False,
-         "bbox": [288.0, 216.0, 352.0, 264.0], "score": 0.9, "tag": "tp", "class_name": "bud",
-         "iou": 1.0, "confidence": 0.9, "gt_idx": 0, "pred_idx": 0},
+         "bbox": [288.0, 216.0, 352.0, 264.0], "score": 0.9, "tag": "tp",
+         "iou": 1.0, "gt_idx": 0, "pred_idx": 0},
         {"subject": "bud", "attributes": {}, "iscrowd": False,
-         "bbox": [496.0, 372.0, 528.0, 396.0], "score": 0.7, "tag": "fp", "class_name": "bud",
-         "confidence": 0.7, "pred_idx": 1},
+         "bbox": [496.0, 372.0, 528.0, 396.0], "score": 0.7, "tag": "fp", "pred_idx": 1},
         {"subject": "bud", "attributes": {}, "iscrowd": False,
-         "bbox": [176.0, 132.0, 208.0, 156.0], "tag": "fn", "class_name": "bud",
-         "confidence": 0, "gt_idx": 1},
+         "bbox": [176.0, 132.0, 208.0, 156.0], "tag": "fn", "gt_idx": 1},
     ],
 }
 

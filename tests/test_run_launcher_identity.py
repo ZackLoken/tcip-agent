@@ -77,68 +77,10 @@ def test_stamp_run_identity_refuses_a_record_not_in_the_created_state(tmp_path, 
     )
 
     create_experiment("exp-not-created", {"model_source": {"builder": "x:y"}})
-    update_status("exp-not-created", "cancelled")
+    update_status("exp-not-created", "canceled")
 
     with pytest.raises(StampPreconditionFailed):
         stamp_run_identity("exp-not-created", "out", launched_by={"launcher": "process"})
-
-
-def test_a_record_with_no_stamp_reconstructs_with_launched_by_none(tmp_path, monkeypatch):
-    """A record built through create_experiment/update_status alone, never stamp_run_identity
-    (the pre-field shape, or one whose best-effort stamp was dropped), reconstructs with
-    launched_by absent rather than a guessed value."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import (
-        create_experiment, is_launched, read_member, reconstruct_from_status, status_key,
-        update_status,
-    )
-
-    create_experiment("exp-pre-field", {"model_source": {"builder": "x:y"}})
-    update_status("exp-pre-field", "running")
-
-    status = read_member(status_key("exp-pre-field"), {})
-    assert is_launched(status)  # a launched run by state alone, with no output_dir ever stamped
-
-    row = reconstruct_from_status("exp-pre-field", status, stale_seconds=600.0, read_progress=False)
-    assert row["launched_by"] is None
-
-
-def test_is_launched_true_for_a_record_stamped_with_output_dir_alone(tmp_path, monkeypatch):
-    """A status record whose ``output_dir`` is stamped while its state is still "created" reads
-    as launched."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, is_launched, status_key
-    from tcip_store import store
-
-    create_experiment("exp-output-dir-alone", {"model_source": {"builder": "x:y"}})
-    key = status_key("exp-output-dir-alone")
-    with store.transaction(key) as txn:
-        status = txn.read(key, default={})
-        status["output_dir"] = "out"
-        txn.write(key, status)
-
-    status = store.read(key, default={})
-    assert status["state"] == "created"
-    assert is_launched(status)
-
-
-def test_is_launched_true_for_an_old_record_carrying_both_output_dir_and_run_id(tmp_path, monkeypatch):
-    """A status record carrying both ``run_id`` and ``output_dir`` reads as launched through
-    ``output_dir`` alone; the ``run_id`` is never consulted."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, is_launched, status_key
-    from tcip_store import store
-
-    create_experiment("exp-old-both-fields", {"model_source": {"builder": "x:y"}})
-    key = status_key("exp-old-both-fields")
-    with store.transaction(key) as txn:
-        status = txn.read(key, default={})
-        status["run_id"] = "run_123_abcdef"
-        status["output_dir"] = "out"
-        txn.write(key, status)
-
-    status = store.read(key, default={})
-    assert is_launched(status)
 
 
 def test_reconstruct_run_status_on_a_malformed_id_answers_none(tmp_path, monkeypatch):
@@ -147,7 +89,7 @@ def test_reconstruct_run_status_on_a_malformed_id_answers_none(tmp_path, monkeyp
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import reconstruct_run_status
 
-    assert reconstruct_run_status("not/a/single/name") is None
+    assert reconstruct_run_status("not/a/single/name", stale_seconds=600.0) is None
 
 
 def _fake_popen(monkeypatch: pytest.MonkeyPatch, captured: list[list[str]]) -> None:

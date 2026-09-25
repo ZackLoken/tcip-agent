@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 
-/** Per-browser subject colour overrides: a subject name -> hex, never written to the registry
- *  (`subjects.json` stores no colour; see `api/subjects.ts`'s `subjectColor`). Shaped after
+/** Per-browser subject color overrides: a subject name -> hex, never written to the registry
+ *  (`subjects.json` stores no color; see `api/subjects.ts`'s `subjectColor`). Shaped after
  *  `lib/reviewColors.ts`'s persisted palette: a `localStorage` map plus a same-tab event, so a
- *  recolour reaches every consumer of `subjectColor` without a page reload. */
+ *  recolor reaches every consumer of `subjectColor` without a page reload. */
 export type SubjectColorOverrides = Record<string, string>;
 
 const SUBJECT_COLORS_KEY = "tcip.annotate.subjectColors";
@@ -30,7 +30,7 @@ function saveSubjectColorOverrides(overrides: SubjectColorOverrides): void {
   );
 }
 
-/** This browser's colour override for one subject, or null when none is set (the caller falls
+/** This browser's color override for one subject, or null when none is set (the caller falls
  *  back to the derived hash). */
 export function subjectColorOverride(name: string): string | null {
   return loadSubjectColorOverrides()[name] ?? null;
@@ -40,17 +40,17 @@ export function setSubjectColorOverride(name: string, hex: string): void {
   saveSubjectColorOverrides({ ...loadSubjectColorOverrides(), [name]: hex });
 }
 
-/** Reverts one subject to its derived colour (removes the override, never writes a colour). */
+/** Reverts one subject to its derived color (removes the override, never writes a color). */
 export function resetSubjectColorOverride(name: string): void {
   const next = { ...loadSubjectColorOverrides() };
   delete next[name];
   saveSubjectColorOverrides(next);
 }
 
-/** Re-renders the calling component whenever any subject's colour override changes in this
+/** Re-renders the calling component whenever any subject's color override changes in this
  *  browser (a same-tab custom event, since a `storage` event never fires in the tab that wrote
  *  it). Returns a tick a memo can depend on, so a derived value that calls `subjectColor` recomputes
- *  rather than reading a stale render's colour. */
+ *  rather than reading a stale render's color. */
 export function useSubjectColors(): number {
   const [tick, setTick] = useState(0);
   useEffect(() => {

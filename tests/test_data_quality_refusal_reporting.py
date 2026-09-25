@@ -33,7 +33,7 @@ def _write_image(path: Path, width: int, height: int) -> None:
 
 def _check(root: Path) -> list[tuple[str, str]]:
     findings: list[tuple[str, str]] = []
-    doctor.check_data_quality(root, findings)
+    doctor.check_data_quality(root, findings, census=doctor._census(root, findings, set()))
     return findings
 
 
@@ -59,7 +59,7 @@ def test_an_unreadable_label_store_is_an_error_per_file(tmp_path: Path):
     assert all(level == "error" and "label file will not read" in msg
                for level, msg in findings)
 
-    bare = tmp_path / "unlabelled"
+    bare = tmp_path / "unlabeled"
     for stem in ("plotA_0_0", "plotA_0_1"):
         _write_image(bare / "images" / DATE / f"{stem}.jpg", 96, 64)
 

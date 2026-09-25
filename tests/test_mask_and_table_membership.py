@@ -30,7 +30,7 @@ STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
 
 def _mask_dataset(root: Path) -> tuple[Path, Path]:
     """A dataset whose ground truth is one ``<stem>.png`` mask per image, each carrying a distinct
-    foreground block so a mask read back can be told from its neighbour's."""
+    foreground block so a mask read back can be told from its neighbor's."""
     images_dir, masks_dir = root / "images", root / "masks"
     images_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
@@ -83,7 +83,7 @@ def test_a_bound_semantic_seg_run_trains_over_exactly_its_selections_samples(tmp
     assert sorted(val_ds.stems) == sorted(s.identity for s in drawn.on("val"))
     held_out = {s.identity for s in drawn.on("calibration")}
     assert held_out and not held_out & set(train_ds.stems + val_ds.stems)
-    assert _side(partition, "train") == sorted(s.member_stem for s in drawn.on("train"))
+    assert _side(partition, "train") == sorted(s.member for s in drawn.on("train"))
 
 
 def test_a_bound_classification_run_trains_over_exactly_its_selections_samples(tmp_path: Path):
@@ -96,10 +96,10 @@ def test_a_bound_classification_run_trains_over_exactly_its_selections_samples(t
     data_cfg = {"split": {"selection_dir": str(out)}}
     train_ds, val_ds, partition = auto_train_val("classification", data_cfg, None)
 
-    assert sorted(train_ds._stems) == sorted(s.identity for s in drawn.on("train"))
-    assert sorted(val_ds._stems) == sorted(s.identity for s in drawn.on("val"))
+    assert sorted(train_ds.stems) == sorted(s.identity for s in drawn.on("train"))
+    assert sorted(val_ds.stems) == sorted(s.identity for s in drawn.on("val"))
     held_out = {s.identity for s in drawn.on("calibration")}
-    assert held_out and not held_out & set(train_ds._stems + val_ds._stems)
+    assert held_out and not held_out & set(train_ds.stems + val_ds.stems)
     assert sorted(partition) == [str(csv_path)]
 
 
@@ -142,10 +142,10 @@ def test_a_mask_sample_reaches_its_own_mask(tmp_path: Path):
     by_identity = {s.identity: s for s in drawn.samples}
     for index, key in enumerate(train_ds.stems):
         sample = by_identity[key]
-        expected = STEMS.index(sample.member_stem) + 1
+        expected = STEMS.index(sample.member) + 1
         _image, target = train_ds[index]
         assert int(target["masks"].sum()) == expected * expected
-        assert Path(sample.ground_truth) == masks_dir / f"{sample.member_stem}.png"
+        assert Path(sample.ground_truth) == masks_dir / f"{sample.member}.png"
 
 
 def test_a_row_key_sample_reaches_the_row_it_names(tmp_path: Path):
@@ -161,9 +161,9 @@ def test_a_row_key_sample_reaches_the_row_it_names(tmp_path: Path):
         "classification", {"split": {"selection_dir": str(out)}}, None)
 
     by_identity = {s.identity: s for s in drawn.samples}
-    for index, key in enumerate(train_ds._stems):
+    for index, key in enumerate(train_ds.stems):
         sample = by_identity[key]
-        assert sample.row_key == sample.member_stem
+        assert sample.row_key == sample.member
         assert Path(sample.ground_truth) == csv_path
         _image, target = train_ds[index]
         assert target["labels"] == STEMS.index(sample.row_key) % 3
@@ -183,7 +183,7 @@ def test_an_unbound_semantic_seg_run_reads_its_membership_off_its_own_samples(tm
     train_ds, val_ds, partition = auto_train_val("semantic_seg", data_cfg, None)
 
     assert val_ds is not None
-    members = {ds: {ds.member_stem_of(key) for key in ds.stems} for ds in (train_ds, val_ds)}
+    members = {ds: {ds.member_of(key) for key in ds.stems} for ds in (train_ds, val_ds)}
     assert members[train_ds].isdisjoint(members[val_ds])
     assert members[train_ds] | members[val_ds] == set(STEMS)
     assert _side(partition, "train") == sorted(members[train_ds])
@@ -192,13 +192,13 @@ def test_an_unbound_semantic_seg_run_reads_its_membership_off_its_own_samples(tm
     # own source identities and holds that sample's own source, ground truth and member name.
     for ds in (train_ds, val_ds):
         assert ds.sample_sources is not None and ds.sample_ground_truth is not None
-        assert ds.sample_member_stems is not None
+        assert ds.sample_members is not None
         assert set(ds.stems) == set(ds.sample_sources) == set(ds.sample_ground_truth)
         for key in ds.stems:
             assert ds.sample_sources[key] == key, "a sample is indexed by its own source"
-            assert Path(ds.sample_sources[key]) == images_dir / f"{ds.sample_member_stems[key]}.png"
+            assert Path(ds.sample_sources[key]) == images_dir / f"{ds.sample_members[key]}.png"
             assert Path(ds.sample_ground_truth[key]) == masks_dir / \
-                f"{ds.sample_member_stems[key]}.png"
+                f"{ds.sample_members[key]}.png"
 
 
 def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(tmp_path: Path):
@@ -212,20 +212,20 @@ def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(tmp_
     train_ds, val_ds, partition = auto_train_val("regression", data_cfg, None)
 
     assert val_ds is not None
-    members = {ds: {ds.member_stem_of(key) for key in ds._stems} for ds in (train_ds, val_ds)}
+    members = {ds: {ds.member_of(key) for key in ds.stems} for ds in (train_ds, val_ds)}
     assert members[train_ds].isdisjoint(members[val_ds])
     assert members[train_ds] | members[val_ds] == set(STEMS)
     assert _side(partition, "train") == sorted(members[train_ds])
     assert partition[str(csv_path)]["val"] == sorted(members[val_ds])
-    # The maps themselves, not what ``member_stem_of``'s fallback could answer for a bare key.
+    # The maps themselves, not what ``member_of``'s fallback could answer for a bare key.
     for ds in (train_ds, val_ds):
         assert ds.sample_sources is not None and ds.sample_ground_truth is not None
-        assert ds.sample_member_stems is not None
-        assert set(ds._stems) == set(ds.sample_sources) == set(ds.sample_member_stems)
-        for key in ds._stems:
+        assert ds.sample_members is not None
+        assert set(ds.stems) == set(ds.sample_sources) == set(ds.sample_members)
+        for key in ds.stems:
             assert ds.sample_sources[key] == key, "a sample is indexed by its own source"
             assert Path(ds.sample_ground_truth[key]) == csv_path
-            assert Path(key) == images_dir / f"{ds.sample_member_stems[key]}.png"
+            assert Path(key) == images_dir / f"{ds.sample_members[key]}.png"
 
 
 # -- a member's name is its row key, dots and all ------------------------------
@@ -320,7 +320,7 @@ def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
     assert sorted(train_ds.stems) == sorted(s.identity for s in frozen.on("train"))
     assert val_ds is not None
     assert result["train"] == len(frozen.on("train"))
-    assert _side(partition, "train") == sorted(s.member_stem for s in frozen.on("train"))
+    assert _side(partition, "train") == sorted(s.member for s in frozen.on("train"))
 
 
 def test_a_table_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
@@ -340,7 +340,7 @@ def test_a_table_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
 
     train_ds, val_ds, _partition = auto_train_val(
         "classification", {"split": {"selection_dir": result["selection_dir"]}}, None)
-    assert sorted(train_ds._stems) == sorted(s.identity for s in frozen.on("train"))
+    assert sorted(train_ds.stems) == sorted(s.identity for s in frozen.on("train"))
     assert val_ds is not None
 
 
@@ -393,7 +393,7 @@ def test_an_unchanged_table_reports_no_member_as_moved(tmp_path: Path):
     persist_run_partition("exp-table-movement", data_cfg, partition=partition)
     record = read_run_partition("exp-table-movement")
 
-    held_out = {s.member_stem for s in drawn.on("calibration")}
+    held_out = {s.member for s in drawn.on("calibration")}
     movement = _resolve_label_movement(
         record["members"][str(csv_path)]["label_digests"], held_out, str(csv_path), None,
         record["selection_binding"]["selection_sha256"])
@@ -423,7 +423,7 @@ def test_an_edited_table_reports_its_members_as_moved(tmp_path: Path):
     with open(csv_path, "a", newline="") as handle:
         csv.writer(handle).writerow(("later", 2))
 
-    held_out = sorted(s.member_stem for s in drawn.on("calibration"))
+    held_out = sorted(s.member for s in drawn.on("calibration"))
     movement = _resolve_label_movement(
         record["members"][str(csv_path)]["label_digests"], set(held_out), str(csv_path),
         None, record["selection_binding"]["selection_sha256"])
@@ -494,7 +494,7 @@ def test_a_scalar_calibration_names_the_table_scope_its_run_recorded(tmp_path, m
     selection_check = sidecar["gate_evidence"]["selection_disjointness"]
     assert selection_check["applicable"] is True, selection_check
     # The calibration draws over every row, so the run's own validation rows are in it and named.
-    assert selection_check["leaked_groups"] == sorted(s.member_stem for s in drawn.on("val"))
+    assert selection_check["leaked_groups"] == sorted(s.member for s in drawn.on("val"))
 
 
 def test_a_table_calibration_universe_holds_the_rows_the_draw_held_out(tmp_path: Path):
@@ -509,16 +509,16 @@ def test_a_table_calibration_universe_holds_the_rows_the_draw_held_out(tmp_path:
     out = tmp_path / "m"
     drawn = _drawn(root, csv_path, out)
 
-    stems, group_by, group_key_map, excluded, samples = \
+    stems, group_by, group_key_map, excluded, _counts, samples = \
         selection_calibration_universe(drawn, str(csv_path), min_foreground_groups={})
 
-    held_out = sorted(s.member_stem for s in drawn.on("calibration"))
+    held_out = sorted(s.member for s in drawn.on("calibration"))
     assert stems == held_out and sorted(samples) == held_out
     assert group_by == "explicit_map"
     assert sorted(group_key_map) == held_out
     assert drawn.scope.subject is None and drawn.scope.attribute is None
     assert excluded["excluded_training_stems"] == sorted(
-        s.member_stem for s in drawn.on("train"))
+        s.member for s in drawn.on("train"))
     assert all(Path(samples[stem].ground_truth) == csv_path for stem in stems)
     assert all(samples[stem].row_key == stem for stem in stems)
 
@@ -665,8 +665,6 @@ def test_a_mask_run_records_no_class_space_over_a_stale_config_one(tmp_path: Pat
     """A mask raster carries its own classes and no registry scopes it, so the run records no
     subject and no map: a stale scope a relaunched config carried would otherwise be stamped onto
     the checkpoint as the vocabulary this run trained in."""
-    from tcip_mcp.pipelines.training.subprocess_worker import _admitted_class_space
-
     images_dir, masks_dir = _mask_dataset(tmp_path / "ds")
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir), "num_classes": 2,
                 "subject": "leaf", "attribute": "condition", "id_map": {"leaf": 0},
@@ -676,7 +674,6 @@ def test_a_mask_run_records_no_class_space_over_a_stale_config_one(tmp_path: Pat
 
     assert data_cfg["subject"] is None and data_cfg["attribute"] is None
     assert data_cfg["id_map"] is None
-    assert _admitted_class_space(data_cfg) is None
 
 
 def test_a_mask_selections_held_out_side_redraws_without_a_subject(tmp_path: Path):
@@ -696,7 +693,7 @@ def test_a_mask_selections_held_out_side_redraws_without_a_subject(tmp_path: Pat
     )
 
     assert "error" not in result, result
-    held_out = {s.member_stem for s in drawn.on("calibration")}
+    held_out = {s.member for s in drawn.on("calibration")}
     assert set(result["new_membership"]["calibration"]) | set(
         result["new_membership"]["holdout"]) == held_out
 
@@ -778,9 +775,9 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(tmp_p
         train_ds, val_ds, partition = auto_train_val(task, data_cfg, None)
         create_experiment(experiment_id, {"data": data_cfg})
         persist_run_partition(experiment_id, data_cfg, partition=partition)
-        served_truth = {ds.sample_member_stems[key]: ds.sample_ground_truth[key]
+        served_truth = {ds.sample_members[key]: ds.sample_ground_truth[key]
                         for ds in (train_ds, val_ds) for key in ds.sample_ground_truth}
-        served_sources = {ds.sample_member_stems[key]: ds.sample_sources[key]
+        served_sources = {ds.sample_members[key]: ds.sample_sources[key]
                           for ds in (train_ds, val_ds) for key in ds.sample_sources}
         return read_run_partition(experiment_id), served_truth, served_sources
 

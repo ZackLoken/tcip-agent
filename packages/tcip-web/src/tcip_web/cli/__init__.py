@@ -1,14 +1,10 @@
 """``tcip``: the operator console command, dispatching to one subcommand per operator command.
 
-Declared as the ``tcip`` console script in this package's own ``pyproject.toml``, the top of the
-stack whose install guarantees every command's imports. Each subcommand's own module lives in
-the package that owns it (``tcip_mcp.cli.<name>`` for all but
-one; ``distill-learnings`` in this package, since its own imports need nothing tcip_mcp adds) and
-exposes ``main(argv)``, returning the exit code the command's own ``main`` returned. A command
-module owns its argparse interface and behavior; the dispatcher only routes.
+Each subcommand's module (``tcip_mcp.cli.<name>``, or ``distill-learnings`` in this package)
+exposes ``main(argv)``, returning the exit code; the dispatcher only routes.
 
-Run as ``python -m tcip_web.cli <command> [args...]`` (what a test spawns, so it holds without a
-reinstall) or, once installed, as ``tcip <command> [args...]``.
+Run as ``python -m tcip_web.cli <command> [args...]`` or, once installed, as ``tcip <command>
+[args...]``.
 """
 
 from __future__ import annotations
@@ -27,7 +23,6 @@ COMMANDS: dict[str, str] = {
     "calibrate-operating-point": "tcip_mcp.cli.calibrate_operating_point",
     "check-dataset-identity": "tcip_mcp.cli.check_dataset_identity",
     "write-project-site": "tcip_mcp.cli.write_project_site",
-    "repair-classified-predictions": "tcip_mcp.cli.repair_classified_predictions",
     "distill-learnings": "tcip_web.cli.distill_learnings",
     "scan-dataset": "tcip_mcp.cli.scan_dataset",
     "score-predictions": "tcip_mcp.cli.score_predictions",

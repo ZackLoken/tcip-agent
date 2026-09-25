@@ -1,5 +1,4 @@
-"""The region-completeness store's pure pieces: the locators, the shape-guarding normalizer,
-and the per-cell content digest that detects a stale attestation (an annotation edited or
+"""The region-completeness store's pure pieces: the locators and the per-cell content digest that detects a stale attestation (an annotation edited or
 deleted inside an already-attested cell)."""
 
 from __future__ import annotations
@@ -12,7 +11,6 @@ from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import (
     region_completeness_digest_path,
     region_completeness_path,
-    normalize_region_completeness_store,
 )
 from tcip_mcp.pipelines.reference_grid import reference_cells
 from tcip_mcp.pipelines.region_completeness import (
@@ -20,6 +18,7 @@ from tcip_mcp.pipelines.region_completeness import (
     annotations_by_cell,
     cell_annotation_digest,
     cell_annotation_digests,
+    record_annotations,
     stale_cells,
 )
 
@@ -32,42 +31,6 @@ def test_region_completeness_path_locator(tmp_path):
 def test_region_completeness_digest_path_locator(tmp_path):
     assert region_completeness_digest_path(tmp_path) == (
         tmp_path / ".tcip" / "state" / "region_completeness_digest.json")
-
-
-class TestNormalizeRegionCompletenessStore:
-    def test_valid_records_pass_through(self):
-        raw = {"bud/mosaic": {"grid": {"width": 100}, "cells_complete": ["A1", "B2"],
-                                 "attested_by": "user:z", "attested_at": "t", "stem": "mosaic",
-                                 "date": None, "subject": "bud"}}
-        assert normalize_region_completeness_store(raw) == raw
-
-    def test_non_dict_input_yields_empty(self):
-        assert normalize_region_completeness_store(None) == {}
-        assert normalize_region_completeness_store([1, 2]) == {}
-
-    def test_entry_missing_grid_is_dropped(self):
-        raw = {"bud/mosaic": {"cells_complete": ["A1"]}}
-        assert normalize_region_completeness_store(raw) == {}
-
-    def test_entry_with_non_dict_grid_is_dropped(self):
-        raw = {"bud/mosaic": {"grid": "not-a-dict", "cells_complete": []}}
-        assert normalize_region_completeness_store(raw) == {}
-
-    def test_entry_with_non_list_cells_complete_is_dropped(self):
-        raw = {"bud/mosaic": {"grid": {}, "cells_complete": "A1"}}
-        assert normalize_region_completeness_store(raw) == {}
-
-    def test_entry_with_non_string_cell_names_is_dropped(self):
-        raw = {"bud/mosaic": {"grid": {}, "cells_complete": ["A1", 2]}}
-        assert normalize_region_completeness_store(raw) == {}
-
-    def test_one_bad_entry_does_not_drop_a_good_sibling(self):
-        raw = {
-            "bud/mosaic": {"grid": {}, "cells_complete": ["A1"]},
-            "bush/other": {"cells_complete": ["A1"]},  # missing grid
-        }
-        got = normalize_region_completeness_store(raw)
-        assert list(got) == ["bud/mosaic"]
 
 
 class TestCellAnnotationDigest:
@@ -243,7 +206,7 @@ class TestStaleCells:
         self._write_label(tmp_path / "annotations", "mosaic",
                           [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))])
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
-        assert stale_cells(tmp_path, record, {}, "bud") == ["A1"]
+        assert stale_cells(record, record_annotations(tmp_path, record),{}, "bud") == ["A1"]
 
     def test_matching_stamp_is_not_stale(self, tmp_path):
         grid, cells = self._grid_and_cells()
@@ -252,7 +215,7 @@ class TestStaleCells:
         a1 = next(c for c in cells if c.name == "A1")
         digest = self._digest_as_stamped(tmp_path / "annotations", "mosaic", "bud", a1)
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
-        assert stale_cells(tmp_path, record, {"A1": digest}, "bud") == []
+        assert stale_cells(record, record_annotations(tmp_path, record),{"A1": digest}, "bud") == []
 
     def test_an_edit_inside_an_attested_cell_is_detected(self, tmp_path):
         grid, cells = self._grid_and_cells()
@@ -264,7 +227,7 @@ class TestStaleCells:
         edited = [Annotation(subject="bud", geometry=BBox(1, 1, 30, 30))]
         self._write_label(tmp_path / "annotations", "mosaic", edited)
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
-        assert stale_cells(tmp_path, record, {"A1": digest}, "bud") == ["A1"]
+        assert stale_cells(record, record_annotations(tmp_path, record),{"A1": digest}, "bud") == ["A1"]
 
     def test_a_deletion_inside_an_attested_cell_is_detected(self, tmp_path):
         grid, cells = self._grid_and_cells()
@@ -274,7 +237,7 @@ class TestStaleCells:
         digest = self._digest_as_stamped(tmp_path / "annotations", "mosaic", "bud", a1)
         self._write_label(tmp_path / "annotations", "mosaic", [], keep_empty=True)
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
-        assert stale_cells(tmp_path, record, {"A1": digest}, "bud") == ["A1"]
+        assert stale_cells(record, record_annotations(tmp_path, record),{"A1": digest}, "bud") == ["A1"]
 
     def test_an_edit_outside_the_attested_cell_does_not_flag_it(self, tmp_path):
         grid, cells = self._grid_and_cells()
@@ -287,4 +250,4 @@ class TestStaleCells:
         edited = original + [Annotation(subject="bud", geometry=BBox(70, 70, 80, 80))]
         self._write_label(tmp_path / "annotations", "mosaic", edited)
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
-        assert stale_cells(tmp_path, record, {"A1": digest}, "bud") == []
+        assert stale_cells(record, record_annotations(tmp_path, record),{"A1": digest}, "bud") == []

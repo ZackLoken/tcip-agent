@@ -18,7 +18,7 @@ from tcip_mcp.tools.data_tools import scan_dataset, draw_splits
 
 def _quality_findings(root) -> list[tuple[str, str]]:
     findings: list[tuple[str, str]] = []
-    doctor.check_data_quality(Path(root), findings)
+    doctor.check_data_quality(Path(root), findings, census=doctor._census(Path(root), findings, set()))
     return findings
 
 
@@ -27,7 +27,7 @@ def test_scan_dataset(data_dir: Path):
     assert result["image_count"] == 3
     assert result["labels_count"] == 3
     assert result["paired_images"] == 3
-    assert result["unlabelled_images"] == 0
+    assert result["unlabeled_images"] == 0
 
 
 def test_scan_dataset_not_found():
@@ -70,7 +70,7 @@ def test_scan_dataset_reports_a_reserved_stem_the_census_still_counted(tmp_path:
 
 def test_scan_dataset_reports_a_reserved_stem_image_with_no_label(tmp_path: Path):
     """An image whose own stem is reserved for a bucket's own provenance stamp must be named,
-    not folded into unlabelled_images with no signal that its label can never be read through
+    not folded into unlabeled_images with no signal that its label can never be read through
     any bucket walk."""
     root = tmp_path / "ds"
     images_dir = root / "images" / "2-11-26"
@@ -82,7 +82,7 @@ def test_scan_dataset_reports_a_reserved_stem_image_with_no_label(tmp_path: Path
     scan_result = scan_dataset(str(root))
 
     assert scan_result["reserved_name_images"] == [reserved_image]
-    assert scan_result["unlabelled_images"] == 2
+    assert scan_result["unlabeled_images"] == 2
 
 
 def test_scan_dataset_drops_a_cleared_bucket_from_the_prediction_count(tmp_path: Path):
@@ -1090,8 +1090,8 @@ def test_doctor_check_data_quality_admits_a_confirmed_negative_under_dated_label
 def _one_sample_selection(source: str = "images/a.jpg", label: str = "annotations/a.json",
                           group: str = "a", side: str = "train") -> Selection:
     return Selection(
-        samples=(Sample(source=source, ground_truth=label, group=group, side=side,
-                        confirmation_bucket="leaf/2-11-26"),),
+        samples=(Sample(member=Path(label).stem, source=source, ground_truth=label, group=group,
+                        side=side, confirmation_bucket="leaf/2-11-26"),),
         subject="leaf", id_map={"leaf": 0}, seed=1, group_by="stem",
     )
 
@@ -1160,7 +1160,8 @@ def test_read_selection_refuses_one_source_on_two_sides(tmp_path: Path):
     write_selection(out, _one_sample_selection())
     document = ts.read(selection_key(out))
     document["samples"].append(
-        {"source": "images/a.jpg", "ground_truth": "annotations/a.json", "group": "b",
+        {"member": "a", "source": "images/a.jpg", "ground_truth": "annotations/a.json",
+         "group": "b",
          "side": "calibration", "confirmation_bucket": "leaf/2-11-26"})
     ts.replace(selection_key(out), document)
 
@@ -1175,7 +1176,8 @@ def test_read_selection_refuses_one_group_on_two_sides(tmp_path: Path):
     write_selection(out, _one_sample_selection())
     document = ts.read(selection_key(out))
     document["samples"].append(
-        {"source": "images/a_0_1.jpg", "ground_truth": "annotations/a_0_1.json", "group": "a",
+        {"member": "a_0_1", "source": "images/a_0_1.jpg",
+         "ground_truth": "annotations/a_0_1.json", "group": "a",
          "side": "val", "confirmation_bucket": "leaf/2-11-26"})
     ts.replace(selection_key(out), document)
 

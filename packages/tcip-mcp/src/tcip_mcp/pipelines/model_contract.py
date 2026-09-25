@@ -1,19 +1,15 @@
 """The one model-side contract: the measurement boundary, as a behavioral check, not a mold.
 
-TCIP Agent owns architecture and the training loop; the platform does not dictate a model's
-internals. The single thing a model must honor is that it *trains* and its *inference output is
-something the library scorers can measure*:
+A model must train, and its inference output must be something the library scorers can measure:
 
 * ``TCIPModel``: a ``runtime_checkable`` Protocol naming the minimal surface (any ``nn.Module``
-  satisfies it). It is a duck-type marker, not an architecture requirement; no ``freeze_backbone``
-  / ``head0_*`` here (those are optional conveniences the default trainer uses if present).
+satisfies it). It is a duck-type marker, not an architecture requirement; no ``freeze_backbone`` /
+``head0_*`` here (those are optional conveniences the default trainer uses if present).
 * ``check_model_contract(model, task)``: a behavioral smoke: a train-mode forward yields a finite
-  loss with a gradient, and an eval-mode forward yields the documented shape for the task
-  (``list[dict]`` per image for detection/instance_seg, a ``dict`` of tensors otherwise).
-* ``overfit_check(model, task, steps)``: the cheap proof a from-scratch model actually learns:
-  a few optimizer steps on one fixed tiny batch (seeded, CPU) must drive the loss down.
-
-All torch use is lazy (inside the functions) so importing this module stays cheap.
+loss with a gradient, and an eval-mode forward yields the documented shape for the task
+(``list[dict]`` per image for detection/instance_seg, a ``dict`` of tensors otherwise).
+* ``overfit_check(model, task, steps)``: a few optimizer steps on one fixed tiny batch (seeded,
+CPU) must drive the loss down.
 """
 
 from __future__ import annotations
@@ -56,8 +52,7 @@ class TCIPModel(Protocol):
 
 
 def no_batch_reason(task: str, dims: "Mapping[str, int] | None", sample_batch: Any) -> str | None:
-    """Why this call can smoke nothing, or ``None`` when it can: one statement, so the contract,
-    the overfit check and a caller deciding what to hand them say the same thing about one call."""
+    """Why this call can smoke nothing, or ``None`` when it can."""
     if sample_batch is not None:
         return None
     if task not in _SYNTHESIZABLE_TASKS:
@@ -76,15 +71,11 @@ def no_batch_reason(task: str, dims: "Mapping[str, int] | None", sample_batch: A
 
 def _synth_batch(task: str, *, in_chans: int, img_size: int, device: Any,
                  num_classes: int | None = None):
-    """A minimal batch in the exact shape ``generic_trainer`` feeds ``model.forward`` for ``task``.
+    """A minimal batch in the exact shape ``generic_trainer`` feeds ``model.forward`` for ``task``:
+    per-sample ``(image, target)`` items shaped like a dataset's ``__getitem__``, collated with the
+    trainer's own ``task_collate``.
 
-    Synthesizes per-sample ``(image, target)`` items shaped like a dataset's ``__getitem__``, then
-    collates them with the trainer's own ``task_collate``. The batch a model is smoked against is
-    therefore assembled by the same function the DataLoader assembles the training batch with, and
-    it carries the per-sample target keys the datasets emit rather than a separate list of them.
-
-    ``num_classes`` is the run's own count, which only a ``_COUNTED_TASKS`` target reads. Every
-    caller asks :func:`no_batch_reason` first, which is where an unshapeable call is named.
+    ``num_classes`` is the run's own count, which only a ``_COUNTED_TASKS`` target reads.
     """
     import torch
 
@@ -129,8 +120,8 @@ def _synth_batch(task: str, *, in_chans: int, img_size: int, device: Any,
 def _driving_batch(task: str, dims: "Mapping[str, int] | None", sample_batch: Any,
                    device: Any) -> tuple[Any, Any]:
     """The ``(images, targets)`` a model is driven with, as the trainer hands it: ``sample_batch``
-    when given, else synthesized; a detection task's targets through ``instance_targets``, the one
-    call the trainer makes, so a crowd row the run withholds from the heads is withheld here too."""
+    when given, else synthesized; a detection task's targets through ``instance_targets``.
+    """
     from tcip_mcp.pipelines.data.datasets import instance_targets
 
     images, targets = (sample_batch if sample_batch is not None else
@@ -185,12 +176,10 @@ def check_model_contract(
     "operating_point_knobs": list[str]|None}``. ``operating_point_knobs`` is which of
     score_thresh/nms_thresh/detections_per_img the model exposes wherever it holds them
     (:func:`~tcip_mcp.pipelines.operating_point.detector_operating_point_holder`), for a detection
-    or instance segmentation task; ``None`` for every other task, which has no such knobs.
+    or instance segmentation task; ``None`` for every other task.
 
-    ``sample_batch`` is an ``(images, targets)`` pair from this run's own dataset. It is required
-    for a task outside ``_SYNTHESIZABLE_TASKS``: the contract will not invent a target shape for a
-    task it does not know, because a green report earned against a guessed shape proves nothing
-    about the model that will actually train.
+    ``sample_batch`` is an ``(images, targets)`` pair from this run's own dataset, required for a
+    task outside ``_SYNTHESIZABLE_TASKS``.
     """
     import torch
 

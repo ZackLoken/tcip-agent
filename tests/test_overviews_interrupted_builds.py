@@ -1,5 +1,5 @@
 """Overview pyramids that were never finished: sidecars whose tiles are only partly written,
-the progress fraction a watcher reads while a build runs, and the cleanup a cancelled build owes.
+the progress fraction a watcher reads while a build runs, and the cleanup a canceled build owes.
 
 A pyramid is structurally complete long before its pixels are, so these cover the states a build
 that stopped early leaves behind, where a wrong answer is a silent one: a reduced-resolution read
@@ -152,27 +152,27 @@ def test_reported_progress_never_overstates_how_much_of_the_sidecar_is_written(
             f"reported {fraction} with {size} of {finished} sidecar bytes written")
 
 
-def test_cancelling_a_build_that_has_started_writing_deletes_the_sidecar(
+def test_canceling_a_build_that_has_started_writing_deletes_the_sidecar(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Cancelling once tiles are on disk must take the half-written sidecar with it. Left behind,
+    """Canceling once tiles are on disk must take the half-written sidecar with it. Left behind,
     it opens as a structurally complete pyramid whose unreached tiles read back as zeros, and the
     next open serves those zeros instead of rebuilding."""
     monkeypatch.setattr(overviews_module, "_BUILD_POLL_SECONDS", 0.01)
     path = _growing_raster(tmp_path)
     sidecar = overview_sidecar(path)
-    cancelled_at: list[int] = []
+    canceled_at: list[int] = []
 
     def cancel_once_started(_fraction: float) -> bool:
         size = sidecar.stat().st_size if sidecar.exists() else 0
         if size < 1_000_000:
             return True
-        cancelled_at.append(size)
+        canceled_at.append(size)
         return False
 
-    with pytest.raises(RuntimeError, match="cancelled"):
+    with pytest.raises(RuntimeError, match="canceled"):
         build_overviews(path, progress_cb=cancel_once_started)
 
-    assert cancelled_at, "the build was never cancelled while its sidecar held written tiles"
+    assert canceled_at, "the build was never canceled while its sidecar held written tiles"
     assert not sidecar.exists()
     assert not has_overviews(path)
 

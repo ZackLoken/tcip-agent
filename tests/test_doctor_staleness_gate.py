@@ -61,11 +61,8 @@ def test_a_status_store_written_and_not_exported_makes_the_status_tokens_check_i
     is the state of the last export, and a status recorded since then is invisible to it."""
     root = _project(tmp_path)
     with bound(SqliteBackend()):
-        ts.replace(
-            dataset_layout.image_status_key(root),
-            {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}},
-            expect=ts.Version.ABSENT,
-        )
+        dataset_layout.record_image_statuses(root, "bud/2026-03-04", {"a_1.jpg": "negative"},
+                                             recorded_by="user:ü")
 
     invalid = doctor.staleness_findings(root)
 
@@ -80,11 +77,8 @@ def test_the_gate_clears_once_the_files_have_been_written_out(tmp_path):
     doctor would be permanently invalid on every project that uses a database."""
     root = _project(tmp_path)
     with bound(SqliteBackend()):
-        ts.replace(
-            dataset_layout.image_status_key(root),
-            {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}},
-            expect=ts.Version.ABSENT,
-        )
+        dataset_layout.record_image_statuses(root, "bud/2026-03-04", {"a_1.jpg": "negative"},
+                                             recorded_by="user:ü")
         export_files(root)
 
     assert doctor.staleness_findings(root) == {}
@@ -109,11 +103,8 @@ def test_a_stale_check_is_reported_as_an_error_naming_the_export_script(tmp_path
     what to do about it, rather than printing a clean line for state it never read."""
     root = _project(tmp_path)
     with bound(SqliteBackend()):
-        ts.replace(
-            dataset_layout.image_status_key(root),
-            {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}},
-            expect=ts.Version.ABSENT,
-        )
+        dataset_layout.record_image_statuses(root, "bud/2026-03-04", {"a_1.jpg": "negative"},
+                                             recorded_by="user:ü")
 
     with bound(FileBackend()):
         findings: list[tuple[str, str]] = []
@@ -123,7 +114,7 @@ def test_a_stale_check_is_reported_as_an_error_naming_the_export_script(tmp_path
             if reason:
                 findings.append(("error", reason))
             else:
-                check(root, findings)
+                check(root, findings, census=doctor._census(root, findings, set()))
 
     assert findings and findings[0][0] == "error"
     assert "image_status" in findings[0][1]
@@ -153,11 +144,8 @@ def test_the_doctor_run_reports_the_invalid_check_and_exits_nonzero(tmp_path, mo
     """End to end through the script the operating posture tells everyone to run."""
     root = _project(tmp_path)
     with bound(SqliteBackend()):
-        ts.replace(
-            dataset_layout.image_status_key(root),
-            {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}},
-            expect=ts.Version.ABSENT,
-        )
+        dataset_layout.record_image_statuses(root, "bud/2026-03-04", {"a_1.jpg": "negative"},
+                                             recorded_by="user:ü")
     monkeypatch.setattr("sys.argv", ["doctor.py", str(root)])
 
     code = doctor.main()
@@ -188,11 +176,11 @@ def test_check_negatives_still_runs_and_reports_behind_a_stale_export(tmp_path):
         assert "check_data_quality" not in doctor.staleness_findings(root)
 
         findings: list[tuple[str, str]] = []
-        doctor.check_negatives(root, findings)
+        doctor.check_negatives(root, findings, census=doctor._census(root, findings, set()))
         assert not any("not a confirmed negative" in msg for _, msg in findings)
 
         quality_findings: list[tuple[str, str]] = []
-        doctor.check_data_quality(root, quality_findings)
+        doctor.check_data_quality(root, quality_findings, census=doctor._census(root, quality_findings, set()))
         assert quality_findings == []
 
 

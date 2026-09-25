@@ -302,10 +302,9 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     assert broken_entry["reason"] is not None
 
 
-def test_list_split_choices_offers_a_frozen_manifest_with_its_origin(tmp_path: Path):
+def test_list_split_choices_offers_a_frozen_manifest(tmp_path: Path):
     """A selection freeze_selection wrote one level under the dataset's own splits directory is
-    offered the identical checked-then-compatibility way as any other candidate, with its origin
-    carried on the row."""
+    offered the identical checked-then-compatibility way as any other candidate."""
     from tcip_mcp.experiments import create_experiment
     from tcip_mcp.tools.data_tools import freeze_selection
     from tcip_mcp.tools.training_tools import list_split_choices
@@ -325,7 +324,6 @@ def test_list_split_choices_offers_a_frozen_manifest_with_its_origin(tmp_path: P
 
     entry = by_dir[frozen["selection_dir"]]
     assert entry["enabled"] is True
-    assert entry["origin"]["experiment_id"] == "exp-src"
 
 
 def test_list_split_choices_offers_two_frozen_manifests_under_one_splits_directory(tmp_path: Path):
@@ -355,9 +353,7 @@ def test_list_split_choices_offers_two_frozen_manifests_under_one_splits_directo
     by_dir = {m["selection_dir"]: m for m in result["selections"]}
 
     assert by_dir[first["selection_dir"]]["enabled"] is True
-    assert by_dir[first["selection_dir"]]["origin"]["experiment_id"] == "exp-first"
     assert by_dir[second["selection_dir"]]["enabled"] is True
-    assert by_dir[second["selection_dir"]]["origin"]["experiment_id"] == "exp-second"
 
 
 def test_list_split_choices_as_recorded_reports_moved_directories_like_preflight(
@@ -747,7 +743,7 @@ def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_director
 ) -> None:
     """The picker's own dedupe offers one spelling of a symlinked directory; the relaunch route
     must still admit the other spelling of the identical directory, not just the one string it
-    happened to list. split_dir_identity is the one comparison both sides now share, so a
+    happened to list. tcip_store.canonical_path is the one comparison both sides share, so a
     symlinked or differently cased spelling of an offered directory is accepted."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))

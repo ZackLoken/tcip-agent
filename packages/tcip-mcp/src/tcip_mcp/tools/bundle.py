@@ -1,22 +1,14 @@
-"""What a project bundle holds: the one membership accounting both doors compose from.
-
-``archive_project`` composes its bundle from this accounting's record/log and blob classes;
-``import_project`` classifies every extracted member by it and refuses on anything bookkeeping,
-cross-root-collided or unaccounted; ``tcip_mcp.stray_state`` reads the same accounting's
-``unaccounted`` class, narrowed to the state root, to name a stray file under ``.tcip/state``.
-One implementation, so the three readers cannot silently drift onto different notions of
-"what a bundle holds".
+"""What a project bundle holds: the membership accounting ``archive_project``, ``import_project``
+and ``tcip_mcp.stray_state`` compose from.
 
 Roots are derived from the tree's own structure plus the anchored documents the platform's own
-writers place (``selection.json``, ``curated_manifest.json``); an anchor found somewhere
-the derivation constraints exclude (the tree root, under ``.tcip``, under a blob home, or under
-or above another derived root) raises :class:`AnchorMisplaced` naming the file, since a
-mislabelled anchor would recruit a directory that is something else. One nesting is admitted
-rather than excluded: a splits root sitting under a curated root, the shape ``draw_splits``
-produces when it partitions a ``materialize_review_dataset`` output in place. Classification of
-one file is by precedence, not disjointness: bookkeeping first, then a record or log claimed by
-exactly one derived root's own layout (two derived roots claiming the same file raises
-:class:`CrossRootCollision`), then a recognized blob home, then everything else, unaccounted.
+writers place (``selection.json``, ``curated_manifest.json``); an anchor found somewhere the
+derivation constraints exclude (the tree root, under ``.tcip``, under a blob home, or under or
+above another derived root) raises :class:`AnchorMisplaced` naming the file. One nesting is
+admitted: a splits root sitting under a curated root. Classification of one file is by precedence:
+bookkeeping first, then a record or log claimed by exactly one derived root's own layout (two
+derived roots claiming the same file raises :class:`CrossRootCollision`), then a recognized blob
+home, then everything else, unaccounted.
 """
 
 from __future__ import annotations
@@ -56,17 +48,14 @@ class DerivedRoot:
 class BundleAccounting:
     """Every member of one project tree, classified.
 
-    ``plans`` is one :class:`~tcip_store.adoption.AdoptionPlan` per derived root (the record and
-    log accounting, entries already de-duplicated within their own root by
-    :func:`~tcip_store.adoption.plan_root`); ``blobs`` is every file under a recognized blob
-    home that no plan already adopts; ``bookkeeping`` and ``unaccounted`` are class 1 and class 4
-    respectively, over every other file the tree holds; ``collisions`` names any file two
-    different derived roots both adopted, which no shipped claim table can produce on its own.
+    ``plans`` is one :class:`~tcip_store.adoption.AdoptionPlan` per derived root (entries already
+    de-duplicated within their own root by :func:`~tcip_store.adoption.plan_root`); ``blobs`` is
+    every file under a recognized blob home that no plan already adopts; ``bookkeeping`` and
+    ``unaccounted`` are class 1 and class 4 respectively, over every other file the tree holds;
+    ``collisions`` names any file two different derived roots both adopted.
     ``registered_checkpoints`` is the subset of ``blobs`` :func:`blob_home` calls
     ``BLOB_CHECKPOINTS`` on the strength of a model registry entry rather than sitting under
-    ``.tcip/models``; computed once here, while ``tree`` still holds its own registry index, so
-    a caller classifying blobs after moving or deleting the tree (``import_project``, once it has
-    renamed staging onto the destination) still has it to pass back in.
+    ``.tcip/models``, computed while ``tree`` still holds its own registry index.
     """
 
     tree: Path
@@ -109,11 +98,9 @@ def _anchored_dirs(tree: Path, filename: str) -> tuple[Path, ...]:
 
 
 def derive_roots(tree: str | Path) -> tuple[DerivedRoot, ...]:
-    """Every root ``tree`` is, or holds, per the platform's own writers and anchors.
-
-    Raises :class:`AnchorMisplaced` naming the file when a split or curated manifest sits
-    somewhere the constraints exclude, rather than silently recruiting a directory that is
-    something else.
+    """Every root ``tree`` is, or holds, per the platform's own writers and anchors. Raises
+    :class:`AnchorMisplaced` naming the file when a split or curated manifest sits somewhere the
+    constraints exclude.
     """
     from tcip_mcp.dataset_layout import annotation_root as _annotation_root
     from tcip_mcp.dataset_layout import image_root as _image_root
@@ -151,15 +138,11 @@ def derive_roots(tree: str | Path) -> tuple[DerivedRoot, ...]:
 
 
 def _resolve_checkpoint_entry(tree: Path, raw: str) -> Path | None:
-    """The absolute, existing-under-``tree`` path a registry's ``checkpoint_path`` entry
-    (``raw``, exactly as stored) resolves to, or ``None`` when it does not: an external entry
-    naming a different tree entirely (the exporting root, read back from a staged or destination
-    copy of its registry), a relative one with nothing at it any more, or a value this reader
-    cannot resolve at all (empty, or carrying a ``..`` segment).
-
-    One resolver, :func:`~tcip_mcp.registry_paths.resolved_registry_path`, everywhere a
-    registry's stored string becomes a path; this keeps the at-or-under and existence checks
-    that are this function's own.
+    """The absolute, existing-under-``tree`` path a registry's ``checkpoint_path`` entry (``raw``,
+    exactly as stored) resolves to through :func:`~tcip_mcp.registry_paths.resolved_registry_path`,
+    or ``None`` when it does not: an external entry naming a different tree entirely, a relative
+    one with nothing at it any more, or a value this reader cannot resolve at all (empty, or
+    carrying a ``..`` segment).
     """
     from tcip_mcp.registry_paths import RegistryPathEmpty, RegistryPathTraversal, resolved_registry_path
 
@@ -170,21 +153,13 @@ def _resolve_checkpoint_entry(tree: Path, raw: str) -> Path | None:
     return resolved if resolved.is_file() and _is_at_or_under(resolved, tree) else None
 
 
-def _registered_checkpoint_paths(tree: Path) -> frozenset[Path]:
-    """Every checkpoint a model registry entry under ``tree`` points at, resolved, restricted to
-    ones actually inside ``tree``.
+def _stored_checkpoint_paths(tree: Path) -> list[str]:
+    """Every registry entry's ``checkpoint_path`` under ``tree``, exactly as stored.
 
-    ``register_model`` admits any checkpoint path an explicit-mode caller names, and
-    ``register_model_from_experiment`` registers wherever a run's own ``output_dir`` wrote its
-    weights (``.tcip/experiments/<experiment_id>/`` by ``launch_training``'s own default), so a
-    registered checkpoint is not confined to the ``.tcip/models/`` convenience location
-    :func:`_blob_files`'s own glob covers. Propagates
-    :class:`~tcip_mcp.model_registry.RegistryVersionRefused` and
-    :class:`tcip_store.SchemaVersionRefused`: an unconformed or above-ceiling registry is a
-    refusal for the caller to act on, never an empty answer. Every other
-    :class:`tcip_store.StoreError` (a genuinely absent index, one whose bytes will not decode, or
-    the conform rail's own refusal of a staging tree the caller has not adopted yet, when this
-    process is bound to the database backend) still reads as no checkpoints registered.
+    Propagates :class:`~tcip_mcp.model_registry.RegistryVersionRefused` and
+    :class:`tcip_store.SchemaVersionRefused`; every other :class:`tcip_store.StoreError` (an
+    absent index, undecodable bytes, or an unadopted staging tree under the database backend)
+    reads as none.
     """
     from tcip_store import SchemaVersionRefused, StoreError
 
@@ -195,83 +170,38 @@ def _registered_checkpoint_paths(tree: Path) -> frozenset[Path]:
     except SchemaVersionRefused:
         raise
     except StoreError:
-        return frozenset()
-    found: set[Path] = set()
-    for entry in entries if isinstance(entries, list) else []:
-        raw = entry.get("checkpoint_path") if isinstance(entry, dict) else None
-        if not raw:
-            continue
-        resolved = _resolve_checkpoint_entry(tree, raw)
-        if resolved is not None:
-            found.add(resolved)
-    return frozenset(found)
+        return []
+    return [entry["checkpoint_path"] for entry in entries]
+
+
+def _registered_checkpoint_paths(tree: Path) -> frozenset[Path]:
+    """Every checkpoint a model registry entry under ``tree`` points at, resolved, restricted to
+    ones inside ``tree``; refusals as :func:`_stored_checkpoint_paths`."""
+    found = (_resolve_checkpoint_entry(tree, raw) for raw in _stored_checkpoint_paths(tree))
+    return frozenset(path for path in found if path is not None)
 
 
 def unresolved_registered_checkpoints(tree: Path) -> tuple[str, ...]:
-    """Every registry ``checkpoint_path`` entry under ``tree`` that is expected to resolve under
-    it (not a designed-external claim, :func:`~tcip_mcp.registry_paths.is_external_form`) but
-    does not, named exactly as the registry itself carries it: the entries
-    :func:`_registered_checkpoint_paths` (the same reader, the same per-entry resolution) leaves
-    out. Version 2's own external entries are never counted here, however they resolve; see
-    :func:`external_registered_checkpoints` for those. A relative entry a moved tree carries,
-    one ``import_project``'s own rename left behind, that names no real file is
-    exactly the case this discloses, rather than the registry rewriting itself, which stays
-    no door's job here. Propagates :class:`~tcip_mcp.model_registry.RegistryVersionRefused` and
-    :class:`tcip_store.SchemaVersionRefused`: an unconformed or above-ceiling registry is a
-    refusal for the caller to act on, never an empty answer. Every other
-    :class:`tcip_store.StoreError` (a genuinely absent index, one whose bytes will not decode, or
-    the conform rail's own refusal of a staging tree the caller has not adopted yet, when this
-    process is bound to the database backend) still reads as no unresolved entries.
-    """
-    from tcip_store import SchemaVersionRefused, StoreError
-
-    from tcip_mcp.model_registry import read_registry_index
+    """Every registry ``checkpoint_path`` under ``tree`` that is not a designed-external claim
+    (:func:`~tcip_mcp.registry_paths.is_external_form`) and names no file under it, spelled as
+    stored; refusals as :func:`_stored_checkpoint_paths`."""
     from tcip_mcp.registry_paths import is_external_form
 
-    try:
-        entries = read_registry_index(tree)
-    except SchemaVersionRefused:
-        raise
-    except StoreError:
-        return ()
-    unresolved: list[str] = []
-    for entry in entries if isinstance(entries, list) else []:
-        raw = entry.get("checkpoint_path") if isinstance(entry, dict) else None
-        if not raw or is_external_form(str(raw)):
-            continue
-        if _resolve_checkpoint_entry(tree, raw) is None:
-            unresolved.append(str(raw))
-    return tuple(sorted(unresolved))
+    return tuple(sorted(
+        raw for raw in _stored_checkpoint_paths(tree)
+        if not is_external_form(raw) and _resolve_checkpoint_entry(tree, raw) is None
+    ))
 
 
 def external_registered_checkpoints(tree: Path) -> tuple[dict, ...]:
-    """Every registry ``checkpoint_path`` entry under ``tree`` that is a designed-external claim
-    (:func:`~tcip_mcp.registry_paths.is_external_form`), each as ``{"checkpoint_path", "exists"}``.
-
-    An external entry is never expected to resolve under ``tree``, so its existence is reported
-    per entry rather than folded into :func:`unresolved_registered_checkpoints`'s "should
-    resolve under the tree and does not" claim. Propagates
-    :class:`~tcip_mcp.model_registry.RegistryVersionRefused` and
-    :class:`tcip_store.SchemaVersionRefused`, the same as
-    :func:`unresolved_registered_checkpoints`; every other
-    :class:`tcip_store.StoreError` still reads as no external entries.
-    """
-    from tcip_store import SchemaVersionRefused, StoreError
-
-    from tcip_mcp.model_registry import read_registry_index
+    """Every registry ``checkpoint_path`` under ``tree`` that is a designed-external claim, each
+    as ``{"checkpoint_path", "exists"}``; refusals as :func:`_stored_checkpoint_paths`."""
     from tcip_mcp.registry_paths import is_external_form
 
-    try:
-        entries = read_registry_index(tree)
-    except SchemaVersionRefused:
-        raise
-    except StoreError:
-        return ()
-    found: list[dict] = []
-    for entry in entries if isinstance(entries, list) else []:
-        raw = entry.get("checkpoint_path") if isinstance(entry, dict) else None
-        if raw and is_external_form(str(raw)):
-            found.append({"checkpoint_path": str(raw), "exists": Path(raw).is_file()})
+    found = [
+        {"checkpoint_path": raw, "exists": Path(raw).is_file()}
+        for raw in _stored_checkpoint_paths(tree) if is_external_form(raw)
+    ]
     return tuple(sorted(found, key=lambda d: d["checkpoint_path"]))
 
 
@@ -279,14 +209,10 @@ def _blob_files(
     tree: Path, claimed: frozenset[str], registered_checkpoints: frozenset[Path],
 ) -> tuple[Path, ...]:
     """Every file under a recognized blob home that no record or log plan already adopts, each
-    named once even when more than one recognized home would otherwise find the same file (a
-    checkpoint sitting under ``.tcip/models`` and also registered, or an experiment-dir ``.pt``
-    that is also part of a ``model_src`` snapshot walk).
+    named once even when more than one recognized home would otherwise find the same file.
 
-    A ``.pt`` file anywhere under ``.tcip/experiments/`` is found by shape alone, in addition to
-    a registry-named path and the ``.tcip/models`` convenience location: a run's own checkpoint
-    (``launch_training``'s default ``output_dir``) is not confined to either, and a tree that has
-    moved away from where it was registered (a staged import) still has to find it.
+    A ``.pt`` file anywhere under ``.tcip/experiments/`` is found by shape alone, in addition to a
+    registry-named path and the ``.tcip/models`` location.
     """
     from tcip_mcp.dataset_layout import LABEL_SUFFIX
     from tcip_mcp.dataset_layout import annotation_root as _annotation_root
@@ -357,24 +283,14 @@ def blob_home(
     """Which recognized blob home ``path`` (already known to be one of ``account_for``'s blobs)
     belongs to, in the same terms :func:`_blob_files` found it by.
 
-    ``registered_checkpoints`` (``BundleAccounting.registered_checkpoints``, computed once by
-    :func:`account_for` while ``tree`` still holds its own registry index) names every checkpoint
+    ``registered_checkpoints`` (``BundleAccounting.registered_checkpoints``) names every checkpoint
     a registry entry points at outside ``.tcip/models``; pass it back in for a caller classifying
-    blobs after the tree has moved (``import_project``, past its own rename): the rename has
-    already carried the files this call's ``tree``/``path`` arguments still name away from where
-    they were accounted for, so a fresh registry read there would find nothing, whatever the
-    on-disk conform (:func:`~tcip_mcp.model_registry.conform_registry_paths_on_disk`, which runs
-    earlier, before accounting) already respelled it to. A ``.pt`` file under
-    ``.tcip/experiments/`` is recognized as a checkpoint by shape alone, whether or not any
-    registry names it, so the same
-    file classifies the same way on both sides of that move. Omitted, this still recognizes every
-    checkpoint physically under ``.tcip/models`` or shaped as one under ``.tcip/experiments/``.
+    blobs after the tree has moved. A ``.pt`` file under ``.tcip/experiments/`` is recognized as a
+    checkpoint by shape alone. Omitted, this still recognizes every checkpoint physically under
+    ``.tcip/models`` or shaped as one under ``.tcip/experiments/``.
 
-    A ``model_src`` snapshot is classified before either checkpoint clause is even consulted: a
-    bespoke run's snapshotted source travels with the archive regardless of ``include_models``
-    (``archive_project``'s stated invariant), so a checkpoint that happens to sit inside that
-    snapshot, or to share its own registry entry's path with one, must never be narrowed away as
-    a checkpoint instead.
+    A ``model_src`` snapshot is classified before either checkpoint clause is consulted, whatever
+    ``include_models`` says.
     """
     from tcip_mcp.dataset_layout import annotation_root as _annotation_root
     from tcip_mcp.dataset_layout import dataset_identity_path, subjects_path
@@ -420,24 +336,11 @@ def _walk_files(tree: Path) -> tuple[Path, ...]:
 def account_for(tree: str | Path) -> BundleAccounting:
     """Classify every file under ``tree`` into the four membership classes.
 
-    ``tcip_mcp.stray_state`` is this function's third reader, beside ``archive_project`` and
-    ``import_project``: it reads ``unaccounted`` alone, narrowed to files under the tree's own
-    ``.tcip/state``, to name a stray no store claims.
-
-    Passive: this raises only on :class:`AnchorMisplaced` (a structural fact about the tree
-    itself, true for either door); bookkeeping members and cross-root collisions are reported
-    on the result rather than raised, since ``archive_project`` treats a live tree's transient
-    bookkeeping (a lock file mid-write) as simply not bundled, while ``import_project`` is the
-    door that refuses on either.
-
-    Attributing a file to a store needs that store's descriptor, so this imports
-    ``tcip_mcp.store_catalogue`` first, the platform's one list of every module that registers
-    one: a running MCP server already has them all from its own tool imports, but a door called
-    on its own (a script, a focused test) must not silently see fewer stores than the server
-    does. Package-only, so this reaches the catalogue with no need for the repository's
-    ``scripts`` package, which exists only with the repo root on ``sys.path``.
+    Raises only :class:`AnchorMisplaced`; bookkeeping members and cross-root collisions are
+    reported on the result. Imports ``tcip_mcp.store_catalog`` first, the list of every module
+    that registers a store.
     """
-    import tcip_mcp.store_catalogue  # noqa: F401
+    import tcip_mcp.store_catalog  # noqa: F401
 
     root = Path(tree).resolve()
     derived = derive_roots(root)
@@ -465,24 +368,6 @@ def account_for(tree: str | Path) -> BundleAccounting:
     )
 
 
-def retired_registry_document(accounting: BundleAccounting) -> Path | None:
-    """The retired ``classes.json`` among ``accounting.unaccounted``, at the bundle's tree root
-    alone, or ``None``.
-
-    A bundle carries a registry at its tree root only (:func:`_blob_files` recognizes no other,
-    :func:`blob_home` the same); a derived root's own registry copy is never bundled by
-    ``archive_project`` under either name and stays unaccounted on import both before and after
-    the subject-registry rename, a scope this leaves as it was rather than widening. Named, not
-    merely counted, so ``archive_project`` and ``import_project`` can each refuse by path.
-    """
-    from tcip_mcp.dataset_layout import RETIRED_SUBJECTS_FILENAME
-
-    for path in accounting.unaccounted:
-        if path.parent == accounting.tree and path.name == RETIRED_SUBJECTS_FILENAME:
-            return path
-    return None
-
-
 __all__ = [
     "AnchorMisplaced",
     "BLOB_CHECKPOINTS",
@@ -500,6 +385,5 @@ __all__ = [
     "blob_home",
     "derive_roots",
     "external_registered_checkpoints",
-    "retired_registry_document",
     "unresolved_registered_checkpoints",
 ]

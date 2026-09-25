@@ -63,30 +63,27 @@ class RelaunchConfigPayload(BaseModel):
 
 @router.post("/runs")
 def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
-    """Start a run from a config already recorded in this project: no config, param space or
-    path is ever submitted by the browser. A pristine config launches as its own first run; a
-    run's config launches as a new experiment id with the picked one as parent.
+    """Start a run from a config already recorded in this project: no config, param space or path
+    is ever submitted by the browser. A pristine config launches as its own first run; a run's
+    config launches as a new experiment id with the picked one as parent.
 
-    An optional ``selection_dir`` names a partition the browser picked instead of the
-    snapshot's own "As recorded" data section: checked against this same config's own
+    An optional ``selection_dir`` names a partition the browser picked instead of the snapshot's
+    own "As recorded" data section: checked against this same config's own
     :func:`~tcip_mcp.tools.training_tools.list_split_choices` listing (an enabled offer or 409)
-    through :func:`~tcip_mcp.tools.training_tools.split_dir_identity`, so a symlinked or
-    differently cased spelling of an offered directory is admitted, not just an exact string
-    match; the path itself is never resolved as one the server follows. The launch config then
-    carries ``data.split`` replaced wholesale by ``{"selection_dir": chosen}``;
-    ``auto_train_val`` clears the previous binding's own stamps on its way to a fresh one.
+    through ``tcip_store.canonical_path``, so a symlinked or
+    differently cased spelling of an offered directory is admitted. The launch config then carries
+    ``data.split`` replaced wholesale by ``{"selection_dir": chosen}``; ``auto_train_val`` clears
+    the previous binding's own stamps on its way to a fresh one.
 
     The launch is wrapped in ``declare_launcher("gui")``, so the run's status record stamps
-    ``launched_by: {"launcher": "gui"}``: the fact this route started it, true of whatever client
-    actually posted here (a browser, a script, another agent), since nothing here tells them
-    apart; that distinction is a later authentication concern, not this route's.
+    ``launched_by: {"launcher": "gui"}``, whatever client posted here.
     """
     from tcip_mcp.experiments import config_key, read_member
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
     from tcip_mcp.tools.training_tools import (
         candidate_config_with_selection, declare_launcher, launch_training, list_split_choices,
-        split_dir_identity,
     )
+    from tcip_store import canonical_path
 
     config = read_member(config_key(payload.experiment_id), None)
     if not isinstance(config, dict) or not config.get(MODEL_SOURCE_KEY):
@@ -95,9 +92,9 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
     config = {**config, "experiment_id": payload.experiment_id}
     if payload.selection_dir:
         choices = list_split_choices(payload.experiment_id)
-        enabled = {split_dir_identity(s["selection_dir"])
+        enabled = {canonical_path(s["selection_dir"])
                    for s in choices.get("selections", []) if s.get("enabled")}
-        if split_dir_identity(payload.selection_dir) not in enabled:
+        if canonical_path(payload.selection_dir) not in enabled:
             raise HTTPException(
                 409, f"{payload.selection_dir!r} is not an offered partition for "
                      f"{payload.experiment_id}",
@@ -115,12 +112,8 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
 
 @router.get("/runs")
 def list_runs_route() -> dict:
-    """Every training run the platform can currently account for.
-
-    A pass-through to ``_all_training_runs``, which merges this process's live runs with every
-    launched run's own record on disk (surviving a restart with no second persistence file) and
-    excludes HPO trials (they stay in the Tuning view); the same rows
-    ``list_experiments(launched_only=True)`` returns to the agent.
+    """Every training run the platform can currently account for: this process's live runs merged
+    with every launched run's own record on disk, HPO trials excluded.
     """
     from tcip_mcp.tools.training_tools import _all_training_runs
 
@@ -136,23 +129,12 @@ def get_run(experiment_id: str) -> dict:
 
 @router.post("/runs/{experiment_id}/tensorboard")
 def launch_run_tensorboard(experiment_id: str, payload: EmptyBodyPayload) -> dict:
-    """Start (or reuse) a TensorBoard serving this run's log directory.
+    """Start (or reuse) a TensorBoard serving this run's log directory, keyed by that directory.
 
-    ``tensorboard_manager`` tracks its children in module-level process state, so a TensorBoard
-    started by the agent's own process is not one this process can hand the browser a URL for.
-    This route is how a TensorBoard exists from the GUI's side, whichever process trained the run.
-    Passes no key of its own, so it resolves to the same tracking entry the run's own launch (or
-    an earlier call here) keyed by the identical log directory, never a second TensorBoard on it.
-
-    A run with no recorded output directory (it failed before writing one) or whose output
-    directory's ``tensorboard`` subdirectory holds no event file (it crashed before
-    ``SummaryWriter`` ever wrote one) never had anything to log to; that refusal carries
-    ``no_logs: True`` so the GUI can say the run produced no logs instead of starting a
-    TensorBoard against a directory nothing populated and offering a retry that would do the
-    same. A run whose own status already carries an error is checked for events first rather
-    than refused on the error alone, so a crash that recorded a reason still reads as no-logs
-    (with that reason attached) when it produced none; an error paired with real event files
-    keeps the plain refusal, no retry warranted against a directory that has something to serve.
+    A run with no recorded output directory, or whose output directory's ``tensorboard``
+    subdirectory holds no event file, refuses with ``no_logs: True``. A run whose own status
+    already carries an error is checked for events first: with none it reads as no-logs (with that
+    reason attached); with real event files it keeps the plain refusal.
     """
     from pathlib import Path
 
@@ -182,7 +164,7 @@ def cancel_run_route(experiment_id: str, payload: EmptyBodyPayload) -> dict:
     """Request graceful cancellation of a running run (stops at the next batch boundary).
 
     Wraps the ``cancel_training`` MCP tool: the trainer still writes ``model_final.pt``
-    so partial progress is recoverable. Status flips to 'cancelled' asynchronously, unless the
+    so partial progress is recoverable. Status flips to 'canceled' asynchronously, unless the
     run's divergence verdict lands first, in which case it ends 'failed' instead.
     """
     from tcip_mcp.tools.training_tools import cancel_training
@@ -215,24 +197,15 @@ class CompareBestPayload(BaseModel):
 def compare_best_route(payload: CompareBestPayload) -> dict:
     """Rank the marked comparison's own registered checkpoints by one metric.
 
-    Wraps the platform's one best-model derivation (``rank_registered_models``), narrowed to the
-    marked experiments before anything is derived. Reads the registry index first so a project
-    with none never takes the tool's own directory-creating construction: only the reader's own
-    empty answer (no index at all) is a 404; a document that exists but will not decode
-    (``DecodeError``), that this reader does not recognize (``RegistryVersionRefused``), or whose
-    ``schema_version`` sits above the ceiling this store knows (``SchemaVersionRefused``, a
-    sibling of ``RegistryVersionRefused`` under ``StoreError``, not folded into it) is not
-    a project with no models, and answers 409 naming why, the same wording
-    ``compare_experiments``'s own ``registry_error`` carries. The tool's own error dicts (a
-    required metric, an undeclared direction, no carrier) map to 422 with the whole dict as
-    ``detail``, and the pre-``metrics_source`` refusal (a registry entry predating the field)
-    maps to 409 with the registry's own message. The answer is projected to name, experiment id,
-    stamped metrics, source, the direction used and its source, and the exclusions; no checkpoint
-    path, config or file size leaves this route.
+    Narrowed to the marked experiments. A project with no registry answers 404; a registry
+    that will not decode or is not the entries mapping answers 409 naming why. The tool's own
+    error dicts map to 422 with the whole dict as ``detail``. The answer is projected to name,
+    experiment id, stamped metrics, source, the direction used and its source, and the
+    exclusions.
     """
     from tcip_store.errors import DecodeError, SchemaVersionRefused
 
-    from tcip_mcp.model_registry import RegistryEntryPredatesMetricsSource, RegistryVersionRefused, read_registry_index
+    from tcip_mcp.model_registry import RegistryVersionRefused, read_registry_index
     from tcip_mcp.project_paths import platform_state_root
     from tcip_mcp.tools.model_tools import rank_registered_models
 
@@ -243,19 +216,16 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
     if not entries:
         raise HTTPException(404, "no model registry in this project")
 
-    try:
-        result = rank_registered_models(
-            metric=payload.metric, higher_is_better=payload.higher_is_better,
-            include_unverified=payload.include_unverified, experiment_ids=payload.experiment_ids,
-        )
-    except RegistryEntryPredatesMetricsSource as exc:
-        raise HTTPException(409, str(exc)) from exc
+    result = rank_registered_models(
+        metric=payload.metric, higher_is_better=payload.higher_is_better,
+        include_unverified=payload.include_unverified, experiment_ids=payload.experiment_ids,
+    )
     if "error" in result:
         raise HTTPException(422, detail=result)
 
     return {
         "name": result["name"],
-        "experiment_id": result.get("experiment_id"),
+        "experiment_id": result["experiment_id"],
         "metrics": result["metrics"],
         "metrics_source": result["metrics_source"],
         "higher_is_better": result["higher_is_better"],
@@ -266,9 +236,9 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
 
 @router.get("/metric-directions")
 def metric_directions_route() -> dict:
-    """Every metric name evaluation.py declares a ranking direction for, a plain read with no
-    audit line and no registry touch: the comparison's own metric chooser groups its stamped
-    keys by this table on mount, instead of eliciting it through the audited rank tool."""
+    """Every metric name evaluation.py declares a ranking direction for, a plain read with no audit
+    line and no registry touch.
+    """
     from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
 
     return {"higher_is_better": dict(HIGHER_IS_BETTER_BY_METRIC)}
@@ -300,12 +270,9 @@ async def _stream_metrics(
 ) -> None:
     """Push every row of an experiment's metrics log to the browser as it is appended.
 
-    The cursor is the log's own resume token, so each tick reads only what was appended
-    since the last one and an entry still being written is replayed once it is complete. The
-    record already exists and is stamped before the run starts, so the key is resolved
-    once, not re-resolved per tick. Both reads run off the event loop: a file-backend read can
-    wait on a training subprocess's own append, and that wait must stall this socket's own
-    coroutine rather than every request and socket the backend serves.
+    The cursor is the log's own resume token, so each tick reads only what was appended since the
+    last one and an entry still being written is replayed once it is complete. The key is resolved
+    once, not re-resolved per tick. Both reads run off the event loop.
     """
     from tcip_store import read_log
 
@@ -321,7 +288,7 @@ async def _stream_metrics(
             await ws.send_json(frame.model_dump())
 
         # Has the run finished (or gone away)? ``error`` with no ``status`` key => unknown run;
-        # a cancelled run never reaches completed/failed, so either case ends the stream.
+        # a canceled run never reaches completed/failed, so either case ends the stream.
         try:
             from tcip_mcp.tools.training_tools import monitor_training
             from tcip_web import jobstore

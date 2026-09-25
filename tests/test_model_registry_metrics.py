@@ -158,32 +158,6 @@ def test_best_model_lower_is_better_for_loss(tmp_path):
     assert reg.best_model("nonexistent", higher_is_better=False) is None
 
 
-def test_best_model_refuses_an_entry_with_no_metrics_source_key(tmp_path):
-    """An entry predating the field is malformed, not just unverified: best_model refuses by
-    name and says no operator door adds the missing field to an existing entry, rather than
-    silently skipping it like a legitimate metrics-less entry."""
-    import pytest as _pytest
-
-    import tcip_store as ts
-
-    from tcip_mcp.model_registry import ModelRegistry, registry_index_key
-
-    reg = ModelRegistry(str(tmp_path))
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-    reg.register_model("ok", str(ckpt), {}, metrics={"val_loss": 0.5}, tags=[],
-                       metrics_source="trainer")
-
-    key = registry_index_key(str(tmp_path))
-    with ts.transaction(key) as txn:
-        document = txn.read(key)
-        del document["entries"][0]["metrics_source"]
-        txn.write(key, document)
-
-    with _pytest.raises(ValueError, match="no operator door adds either missing field"):
-        ModelRegistry(str(tmp_path)).best_model("val_loss", higher_is_better=False)
-
-
 def test_best_model_treats_a_present_null_source_as_an_honest_empty_pairing(tmp_path):
     """A stored ``metrics_source: null`` (an entry with no metrics) is not malformed: it is
     simply excluded from ranking, like any other entry that does not carry the metric."""

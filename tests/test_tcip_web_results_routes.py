@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests._trait_fixtures import complete_spec_record
+
 import json
 from pathlib import Path
 
@@ -48,8 +50,8 @@ def test_list_traits_names_a_broken_spec_alongside_the_valid_one(
 
     specs_dir = tmp_path / ".tcip" / "state" / "trait_specs"
     tcip_store.replace(traits.trait_spec_key(specs_dir, "unicorn"),
-                       {"name": "unicorn", "delivers": ["unicorn_horn_length"],
-                        "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
+                       complete_spec_record({"name": "unicorn", "delivers": ["unicorn_horn_length"],
+                        "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}),
                        expect=tcip_store.Version.ABSENT)
 
     resp = client.get("/api/results/traits", params={"project_root": str(tmp_path)})
@@ -76,33 +78,6 @@ def test_plant_mapping_build_requires_a_registered_dataset(
     )
     assert resp.status_code == 400
     assert "is not a dataset" in resp.json()["detail"]
-
-
-def test_plant_mapping_build_answers_the_named_400_for_a_bare_registry_fingerprint(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A dataset registry entry carrying a bare pre-prefix fingerprint must answer the same
-    named 400 require_dataset_identity's own refusal gives a few lines later, not an unhandled
-    500, when the evidence-roots helper resolves the open project's own registered roots."""
-    from tcip_mcp.tools import project_tools
-
-    def bare(_root):
-        raise ValueError(
-            "dataset registry entry 'x' carries a fingerprint 'deadbeef' that names no formula "
-            "version; re-register it through register_dataset to bring it to the current shape")
-
-    monkeypatch.setattr(project_tools, "read_datasets", bare)
-    store.open_project(tmp_path.resolve())
-    resp = client.post(
-        "/api/results/plant_mapping/build",
-        json={
-            "name": "valley",
-            "images_root": str(tmp_path / "nope"),
-            "plant_registry": "unregistered",
-        },
-    )
-    assert resp.status_code == 400
-    assert "register_dataset" in resp.json()["detail"]
 
 
 def test_plant_mapping_load_missing_returns_empty(client: TestClient, tmp_path: Path) -> None:
@@ -145,7 +120,7 @@ def _phenology_fixture(
     """
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
-    from tests._binding_fixtures import record_producing_run, write_bound_sidecar
+    from tests._binding_fixtures import complete_stamp, record_producing_run, write_bound_sidecar
     from tests._operationalization_fixtures import seed_confirmed_crossing, write_spec
     from tests._trait_fixtures import BUD_OPENING
 
@@ -160,7 +135,7 @@ def _phenology_fixture(
     positive = "open" if "open" in id_map else None
     # A bare single-subject map is a detector bucket never assessed for any attribute.
     attribute = "opening" if positive else None
-    # A covered-bucket key is relative to a dataset root, recognised by its annotations/predictions segment.
+    # A covered-bucket key is relative to a dataset root, recognized by its annotations/predictions segment.
     root = tmp_path / "ds"
     mapping, preds = {}, {}
     for date_str, frac in zip(dates, fractions):
@@ -206,7 +181,7 @@ def _phenology_fixture(
                                 dataset_root=root, experiment_id=f"exp-cls-{date_str}",
                                 producing_experiment_id=producing_experiment_id, trait="bud_opening")
         else:
-            write_sidecar(bucket, sidecar, "operating_point")
+            write_sidecar(bucket, complete_stamp(sidecar), "operating_point")
         mapping[date_str] = assigns
         preds[date_str] = str(bucket)
     # The Results doors resolve the registry from the delivered buckets' own dataset root, not from
@@ -384,7 +359,7 @@ def test_show_unvalidated_reveals_provisional_numbers_on_screen_but_never_opens_
     client: TestClient, tmp_path: Path,
 ) -> None:
     # A breeder whose operating point is not yet calibrated can look at what they have, clearly
-    # marked (show_unvalidated, a display choice); only a real Acknowledgement (below) opens export.
+    # marked (show_unvalidated, a display choice); only a real Acknowledgment (below) opens export.
     body = _phenology_fixture(tmp_path, validated=False)
     for route in GATE_DOORS:
         resp = client.post(f"/api/results/{route}", json={**body, "show_unvalidated": True})
@@ -403,14 +378,14 @@ def test_export_ships_an_unvalidated_measurement_once_a_breeder_acknowledges_it(
     body = _phenology_fixture(tmp_path, validated=False)
     resp = _export(
         client, body, "milestones",
-        acknowledgement={"reason": "breeder needs a look before calibration finishes"},
+        acknowledgment={"reason": "breeder needs a look before calibration finishes"},
         user="user:tester",
     )
     assert resp.status_code == 200
     header = resp.text.splitlines()[0].split(",")
     cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
     assert cells["acknowledged_by"] == "user:tester"
-    assert cells["acknowledgement_reason"] == "breeder needs a look before calibration finishes"
+    assert cells["acknowledgment_reason"] == "breeder needs a look before calibration finishes"
     assert cells["operating_point_validated"] == "false"
 
     # The delivery event this export just wrote carries the same act, read back through the
@@ -420,25 +395,25 @@ def test_export_ships_an_unvalidated_measurement_once_a_breeder_acknowledges_it(
     ).json()["records"]
     event = next(r for r in events if r["door"] == "results.export_csv")
     assert event["acknowledged_by"] == "user:tester"
-    assert event["acknowledgement_reason"] == "breeder needs a look before calibration finishes"
+    assert event["acknowledgment_reason"] == "breeder needs a look before calibration finishes"
 
 
-def test_export_refuses_an_acknowledgement_with_no_user(client: TestClient, tmp_path: Path) -> None:
-    # A server identity is never written as a breeder's name: an acknowledgement naming no user
+def test_export_refuses_an_acknowledgment_with_no_user(client: TestClient, tmp_path: Path) -> None:
+    # A server identity is never written as a breeder's name: an acknowledgment naming no user
     # is refused before anything runs, rather than falling back to a process identity.
     body = _phenology_fixture(tmp_path, validated=False)
-    resp = _export(client, body, "milestones", acknowledgement={"reason": "needs a look"})
+    resp = _export(client, body, "milestones", acknowledgment={"reason": "needs a look"})
     assert resp.status_code == 400
     assert "server identity is never written as a breeder's name" in resp.json()["detail"]
 
 
-def test_export_refuses_a_whitespace_only_acknowledgement_reason(
+def test_export_refuses_a_whitespace_only_acknowledgment_reason(
     client: TestClient, tmp_path: Path,
 ) -> None:
     # min_length=1 admits a blank string of spaces; the route strips before it names why.
     body = _phenology_fixture(tmp_path, validated=False)
     resp = _export(
-        client, body, "milestones", acknowledgement={"reason": "   "}, user="user:tester",
+        client, body, "milestones", acknowledgment={"reason": "   "}, user="user:tester",
     )
     assert resp.status_code == 400
     assert "non-blank reason" in resp.json()["detail"]
@@ -458,7 +433,7 @@ def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_k
     record_delivery_binding_event(
         "deliver_orthomosaic_plant_counts", None, [],
         document_reconciliations={}, dimension_reconciliations={},
-        measurement_documents=["operating_point"], scale_document=None, acknowledgement=None,
+        measurement_documents=["operating_point"], acknowledgment=None,
         trait="stem_count", delivery_kind="per_plant_count_aggregate", project_root=tmp_path,
         plant_mapping={
             "plant_registry": {"name": "orchard-block", "digest": "0" * 64},
@@ -474,7 +449,7 @@ def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_k
     record_delivery_binding_event(
         "results.export_csv", None, [],
         document_reconciliations={}, dimension_reconciliations={},
-        measurement_documents=["operating_point"], scale_document=None, acknowledgement=None,
+        measurement_documents=["operating_point"], acknowledgment=None,
         trait="bud_opening", delivery_kind="state_crossing_dates", project_root=tmp_path,
         plant_mapping={
             "name": "valley", "project_root": str(tmp_path), "dataset_id": "ds-1",
@@ -673,7 +648,7 @@ def test_exported_milestone_csv_carries_the_canonical_schema_and_its_provenance(
     assert cells["validation_record"] == _expected_validation_record(body)
     # Legitimately blank here: nothing floored and nothing acknowledged on a fully-validated
     # delivery. What the mapping could not verify travels on the delivery event, never per row.
-    exempt = {"unvalidated_dimensions", "acknowledged_by", "acknowledgement_reason"}
+    exempt = {"unvalidated_dimensions", "acknowledged_by", "acknowledgment_reason"}
     assert [c for c, v in cells.items() if v == "" and c not in exempt] == []
     assert cells["unvalidated_dimensions"] == ""
     assert "captures_unverified" not in cells
@@ -926,7 +901,7 @@ def test_an_acknowledged_delivery_over_a_producing_run_mismatch_records_bound_va
     _rewrite_classifier_sidecars(body, trait="bud_opening", experiment_id="exp-OTHER")
 
     resp = _export(client, body, "milestones",
-                   acknowledgement={"reason": "shipping unvalidated for now"}, user="user:tester")
+                   acknowledgment={"reason": "shipping unvalidated for now"}, user="user:tester")
     assert resp.status_code == 200, resp.text[:300]
 
     records = [r for r in read_delivery_events(tmp_path) if r["door"] == "results.export_csv"]
@@ -1013,7 +988,7 @@ def test_export_csv_also_saves_the_delivery_into_the_projects_exports_dir(
 def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    # A curve is the same delivered phenology measurement, un-summarised, which is why it takes the
+    # A curve is the same delivered phenology measurement, un-summarized, which is why it takes the
     # identical gate. It must therefore carry the identical evidence: the milestone branch was
     # stamped while the curve branch wrote the bare aggregation, so half of what this door delivers
     # was unauditable.
@@ -1024,7 +999,7 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
                   "producer_model_sha256", "producing_experiment_id", "produced_at",
                   "validation_record", "plant_mapping_sha256",
                   "dates_delivered", "images_unattributed",
-                  "plant_attribution", "acknowledged_by", "acknowledgement_reason"]
+                  "plant_attribution", "acknowledged_by", "acknowledgment_reason"]
     body = _phenology_fixture(tmp_path, validated=True)
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "curves", "filename": "c.csv"})
@@ -1032,7 +1007,7 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
     header = resp.text.splitlines()[0].split(",")
     assert header[-len(provenance):] == provenance
     cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
-    blank_ok = ("unvalidated_dimensions", "acknowledged_by", "acknowledgement_reason")
+    blank_ok = ("unvalidated_dimensions", "acknowledged_by", "acknowledgment_reason")
     for col in provenance:
         if col in blank_ok:
             continue  # legitimately empty here: nothing to check, nothing floored, nothing acknowledged
@@ -1128,7 +1103,7 @@ def _count_bucket(
     documents plus a real (optionally validated) ``operating_point.json``."""
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
-    from tests._binding_fixtures import write_bound_sidecar
+    from tests._binding_fixtures import complete_stamp, write_bound_sidecar
 
     root = dataset_root if dataset_root is not None else tmp_path / "ds"
     bucket = root / "predictions" / "live" / "counts"
@@ -1150,7 +1125,7 @@ def _count_bucket(
         write_bound_sidecar(bucket, sidecar, dataset_root=root, experiment_id="exp-count-op",
                             trait=trait)
     else:
-        write_sidecar(bucket, sidecar, "operating_point")
+        write_sidecar(bucket, complete_stamp(sidecar), "operating_point")
     return bucket
 
 
@@ -1164,7 +1139,7 @@ def _export_count(client: TestClient, body: dict, **extra):
     return client.post("/api/results/export_count_csv", json={**body, **extra})
 
 
-def test_export_count_csv_per_image_refuses_unvalidated_with_no_acknowledgement(
+def test_export_count_csv_per_image_refuses_unvalidated_with_no_acknowledgment(
     client: TestClient, tmp_path: Path,
 ) -> None:
     _seed_count_meaning(tmp_path)
@@ -1183,7 +1158,7 @@ def test_export_count_csv_per_image_refuses_unvalidated_with_no_acknowledgement(
     assert detail["total_detections"] == 6
 
 
-def test_export_count_csv_per_image_delivers_under_acknowledgement(
+def test_export_count_csv_per_image_delivers_under_acknowledgment(
     client: TestClient, tmp_path: Path,
 ) -> None:
     _seed_count_meaning(tmp_path)
@@ -1194,7 +1169,7 @@ def test_export_count_csv_per_image_delivers_under_acknowledgement(
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
         "filename": "counts.csv",
         "user": "user:tester",
-        "acknowledgement": {"reason": "breeder needs a look before calibration finishes"},
+        "acknowledgment": {"reason": "breeder needs a look before calibration finishes"},
     })
     assert resp.status_code == 200
     assert resp.headers["X-TCIP-Unvalidated-Dimensions"] == "operating_point"
@@ -1203,7 +1178,7 @@ def test_export_count_csv_per_image_delivers_under_acknowledgement(
     header = resp.text.splitlines()[0].split(",")
     cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
     assert cells["acknowledged_by"] == "user:tester"
-    assert cells["acknowledgement_reason"] == "breeder needs a look before calibration finishes"
+    assert cells["acknowledgment_reason"] == "breeder needs a look before calibration finishes"
     assert cells["operating_point_validated"] == "false"
 
     events = client.get(
@@ -1297,17 +1272,17 @@ def test_export_count_csv_per_image_delivers_validated_with_blank_pair(
     header = resp.text.splitlines()[0].split(",")
     cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
     assert cells["acknowledged_by"] == ""
-    assert cells["acknowledgement_reason"] == ""
+    assert cells["acknowledgment_reason"] == ""
     assert cells["operating_point_validated"] == "held_out_annotations"
     # operating_point_conf carries the bucket's own numeric conf value, never the whole
     # {"value": ..., "validated_against": ...} provenance dict the sidecar stores it as.
     assert cells["operating_point_conf"] == "0.4"
 
 
-def test_export_count_csv_a_validated_bucket_posted_with_acknowledgement_discards_it(
+def test_export_count_csv_a_validated_bucket_posted_with_acknowledgment_discards_it(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    # check_delivery_gate discards an acknowledgement that cleared nothing: both cells stay blank.
+    # check_delivery_gate discards an acknowledgment that cleared nothing: both cells stay blank.
     _seed_count_meaning(tmp_path)
     bucket = _count_bucket(tmp_path, validated=True)
     store.open_project(tmp_path.resolve())
@@ -1316,16 +1291,16 @@ def test_export_count_csv_a_validated_bucket_posted_with_acknowledgement_discard
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
         "filename": "counts.csv",
         "user": "user:tester",
-        "acknowledgement": {"reason": "just in case"},
+        "acknowledgment": {"reason": "just in case"},
     })
     assert resp.status_code == 200
     header = resp.text.splitlines()[0].split(",")
     cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
     assert cells["acknowledged_by"] == ""
-    assert cells["acknowledgement_reason"] == ""
+    assert cells["acknowledgment_reason"] == ""
 
 
-def test_export_count_csv_refuses_a_nameless_acknowledgement(
+def test_export_count_csv_refuses_a_nameless_acknowledgment(
     client: TestClient, tmp_path: Path,
 ) -> None:
     _seed_count_meaning(tmp_path)
@@ -1335,7 +1310,7 @@ def test_export_count_csv_refuses_a_nameless_acknowledgement(
         "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
         "filename": "counts.csv",
-        "acknowledgement": {"reason": "no user given"},
+        "acknowledgment": {"reason": "no user given"},
     })
     assert resp.status_code == 400
     assert "requires a user" in resp.json()["detail"]
@@ -1352,7 +1327,7 @@ def test_export_count_csv_refuses_a_whitespace_only_reason(
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
         "filename": "counts.csv",
         "user": "user:tester",
-        "acknowledgement": {"reason": "   "},
+        "acknowledgment": {"reason": "   "},
     })
     assert resp.status_code == 400
     assert "non-blank reason" in resp.json()["detail"]
@@ -1633,7 +1608,7 @@ def _export_orthomosaic(
     return _export_count(client, body, **extra)
 
 
-def test_export_count_csv_orthomosaic_refuses_unvalidated_with_no_acknowledgement(
+def test_export_count_csv_orthomosaic_refuses_unvalidated_with_no_acknowledgment(
     client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
     pytest.importorskip("torch")
@@ -1651,7 +1626,7 @@ def test_export_count_csv_orthomosaic_refuses_unvalidated_with_no_acknowledgemen
     assert detail["n_unmapped"] == 0
 
 
-def test_export_count_csv_orthomosaic_delivers_under_acknowledgement(
+def test_export_count_csv_orthomosaic_delivers_under_acknowledgment(
     client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
     pytest.importorskip("torch")
@@ -1662,7 +1637,7 @@ def test_export_count_csv_orthomosaic_delivers_under_acknowledgement(
     resp = _export_orthomosaic(
         client, tmp_path, bucket_dir, raster_path, registry,
         user="user:tester",
-        acknowledgement={"reason": "breeder needs a look before calibration finishes"})
+        acknowledgment={"reason": "breeder needs a look before calibration finishes"})
     assert resp.status_code == 200
     assert resp.headers["X-TCIP-Unvalidated-Dimensions"] == "operating_point"
     assert resp.headers["X-TCIP-Acknowledged-By"] == "user%3Atester"
@@ -1672,7 +1647,7 @@ def test_export_count_csv_orthomosaic_delivers_under_acknowledgement(
     assert rows
     for row in rows:
         assert row["acknowledged_by"] == "user:tester"
-        assert row["acknowledgement_reason"] == "breeder needs a look before calibration finishes"
+        assert row["acknowledgment_reason"] == "breeder needs a look before calibration finishes"
         assert row["operating_point_validated"] == "false"
 
     events = client.get(
@@ -1699,7 +1674,7 @@ def test_export_count_csv_orthomosaic_delivers_validated_with_blank_pair(
     assert rows
     for row in rows:
         assert row["acknowledged_by"] == ""
-        assert row["acknowledgement_reason"] == ""
+        assert row["acknowledgment_reason"] == ""
 
 
 def test_export_count_csv_orthomosaic_split_root_event_lands_under_the_open_project(

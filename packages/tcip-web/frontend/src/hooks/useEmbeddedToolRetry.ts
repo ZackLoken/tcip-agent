@@ -35,17 +35,17 @@ export function useEmbeddedToolRetry(
   useEffect(() => {
     setOutcome({ url: null, error: null });
     if (!active) return;
-    let cancelled = false;
+    let canceled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = async () => {
       const result = await stepRef.current();
-      if (cancelled) return;
+      if (canceled) return;
       setOutcome({ url: result.url, error: result.error });
       if (!result.done) timer = setTimeout(() => void tick(), retryMs);
     };
     void tick();
     return () => {
-      cancelled = true;
+      canceled = true;
       if (timer) clearTimeout(timer);
     };
     // A key change (a direct switch from one run or sweep to another) resets and restarts too.

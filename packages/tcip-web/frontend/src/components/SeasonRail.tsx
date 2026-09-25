@@ -84,8 +84,8 @@ export function SeasonRail({ dates, active, className, showLabels }: SeasonRailP
         (undated ? `, plus ${undated} undated` : "")
       : `${undated} undated capture${undated === 1 ? "" : "s"}`;
 
-  // When labelled, pin the rail near the top of a taller strip and drop the date captions
-  // below it; otherwise keep the compact vertically-centred rail.
+  // When labeled, pin the rail near the top of a taller strip and drop the date captions
+  // below it; otherwise keep the compact vertically-centered rail.
   const railTop = showLabels ? "7px" : "50%";
   return (
     <div

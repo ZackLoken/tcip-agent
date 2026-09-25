@@ -92,7 +92,7 @@ def _stub_dense_pass(monkeypatch, cal_stems, hold_stems, cal_records, hold_recor
     def _records_over_loader(model, loader, device, task):
         # The stubbed factory hands the producer's own samples through as ``stems``; the door is
         # asked for a side by the members those samples name.
-        served = sorted(getattr(s, "member_stem", s) for s in loader.stems)
+        served = sorted(getattr(s, "member", s) for s in loader.stems)
         if served == sorted(cal_stems):
             return cal_records
         if served == sorted(hold_stems):

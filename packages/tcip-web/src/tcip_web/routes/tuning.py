@@ -1,11 +1,10 @@
 """HPO / Tuning routes: relaunch + cancel + list + per-trial visibility.
 
-Sweeps reach this surface two ways: launched here over HTTP (tracked in memory for as long
-as this process lives), or launched by the agent straight through the ``run_hyperparameter_search`` MCP tool,
-which this process never sees. The durable source for both is the ``manifest.json`` that
-``run_hyperparameter_search`` stamps under the sweep's own directory when the sweep starts, so the listing
-below reads disk and overlays the in-memory jobs, the same live-plus-historical merge the
-Training routes do for runs.
+Sweeps reach this surface two ways: launched here over HTTP (tracked in memory for as long as this
+process lives), or launched through the ``run_hyperparameter_search`` MCP tool, which this process
+never sees. The durable source for both is the ``manifest.json`` that ``run_hyperparameter_search``
+stamps under the sweep's own directory when the sweep starts, so the listing below reads disk and
+overlays the in-memory jobs.
 """
 
 from __future__ import annotations
@@ -16,12 +15,15 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from tcip_mcp.web_client import HPO_SWEEPS, current_root
+
+if TYPE_CHECKING:
+    from tcip_mcp.tools.training_tools import SeedAxisRefusal
 from tcip_web import jobstore
 from tcip_web.routes._body_common import EmptyBodyPayload
 from tcip_web.routes._metrics_common import metrics_response
@@ -31,9 +33,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tuning", tags=["tuning"])
 
 _TRIAL_DIR_PREFIX = "trial_"
-
-HPO_REGISTRY = HPO_SWEEPS
-"""The job registry this module persists its sweeps to."""
 
 
 def _current_root() -> str:
@@ -53,88 +52,49 @@ class HPOJob:
 
 
 def _manifest_fields(manifest: dict) -> dict:
-    """The config-picker projection of a sweep manifest: search shape, relaunchability,
-    whether a cancel has been requested, and which sweep (if any) it was relaunched from.
-    Shared by :func:`_manifest_summary` (a disk-only sweep's own manifest) and :func:`_summary`
-    (a live sweep's row, read from the manifest under its own launch root), so a sweep reads
-    the same fields whichever way it is listed.
+    """The config-picker projection of a sweep manifest: search shape, relaunchability, whether a
+    cancel has been requested, and which sweep (if any) it was relaunched from.
 
-    ``relaunchable`` and ``reason`` are :func:`_relaunch_refusal`'s own absence and presence: the
-    same function :func:`relaunch_sweep` calls for its own 409, so the marker and the route can
-    never name different conditions, or the same conditions in a different order, for the same
-    manifest. ``_relaunch_refusal`` answers a ``reason``/``remedy`` pair for a failing condition;
-    ``reason`` here is that pair's own ``reason`` alone, never joined with its ``remedy``, since
-    the row caption is a sentence a breeder can act on and the remedy is Ray mechanics addressed
-    to the tool's own caller. Any failure among them is reported with a reason rather than a
-    reconstructed config. ``cancel_requested`` is the manifest's own field, set by
-    ``cancel_hyperparameter_search`` and never derived from a side file this route cannot see across roots.
-    ``relaunched_from`` projects as ``None`` for a manifest predating the field, the same as
-    for one that genuinely was not a relaunch: a relaunch of an older sweep must still work
-    (see :func:`_missing_relaunch_fields`, which does not require this key). ``split_draws``
-    projects through :func:`training_tools.coerce_split_draws`, the int it names or ``None`` for
-    a manifest predating it (read as 1, no draws, by ``run_hyperparameter_search``'s own default)
-    or one whose value is not a draw count at all: the header line only renders it above 1. The
-    raw value is never handed to the response: a non-finite one (a hand-written ``Infinity``)
-    happens to render as JSON ``null`` through this route's own ``-> dict`` response handling
-    rather than raising, but nothing here should depend on that route-specific accident, and the
-    unread raw value left ``relaunchable`` true for a manifest the coercion, computed straight
-    off it, could name invalid. ``redraws_within_selection``
-    reads the recorded ``base_config``'s own ``data.split.redraw_within_selection``, ``False``
-    for a manifest carrying none (a config that never set it): the header's draws line names the
-    bound selection as what each draw redraws inside only then.
+    ``relaunchable`` and ``reason`` are :func:`_relaunch_refusal`'s own absence and presence,
+    ``reason`` never joined with the refusal's ``remedy``. ``redraw_within_selection`` is the
+    recorded ``base_config``'s own ``data.split.redraw_within_selection``.
 
-    An empty ``manifest`` (no manifest exists yet, or one predating a caller's own launch) is
-    never relaunchable, but carries no reason either: the pre-manifest window and every refused
-    relaunch never mint one, and "this sweep's record holds no base config" would misname
-    absence itself as a recorded fact. A caller with words for that case has them in
-    ``job.error`` instead.
+    An empty ``manifest`` (no manifest exists yet) is never relaunchable and carries no reason.
     """
     if not manifest:
         return {
             "n_trials": None, "search_alg": None, "scheduler": None, "param_space_keys": [],
             "relaunchable": False, "reason": None, "cancel_requested": False,
-            "relaunched_from": None, "split_draws": None, "redraws_within_selection": False,
+            "relaunched_from": None, "split_draws": None, "redraw_within_selection": False,
         }
-    from tcip_mcp.tools.training_tools import coerce_split_draws
-
-    param_space = manifest.get("param_space")
-    if not isinstance(param_space, dict):
-        param_space = {}
     refusal = _relaunch_refusal(manifest)
-    relaunchable = refusal is None
-    reason = refusal.reason if refusal is not None else None
-    base_config = manifest.get("base_config") or {}
-    base_split = (base_config.get("data") or {}).get("split") or {}
+    base_split = manifest["base_config"].get("data", {}).get("split", {})
     return {
-        "n_trials": manifest.get("n_trials"),
-        "search_alg": manifest.get("search_alg"),
-        "scheduler": manifest.get("scheduler"),
-        "param_space_keys": sorted(param_space.keys()),
-        "relaunchable": relaunchable,
-        "reason": reason,
-        "cancel_requested": bool(manifest.get("cancel_requested")),
-        "relaunched_from": manifest.get("relaunched_from"),
-        "split_draws": coerce_split_draws(manifest["split_draws"]) if "split_draws" in manifest else None,
-        "redraws_within_selection": bool(base_split.get("redraw_within_selection")),
+        "n_trials": manifest["n_trials"],
+        "search_alg": manifest["search_alg"],
+        "scheduler": manifest["scheduler"],
+        "param_space_keys": sorted(manifest["param_space"] or {}),
+        "relaunchable": refusal is None,
+        "reason": refusal.reason if refusal is not None else None,
+        "cancel_requested": manifest["cancel_requested"],
+        "relaunched_from": manifest["relaunched_from"],
+        "split_draws": manifest["split_draws"],
+        "redraw_within_selection": bool(base_split.get("redraw_within_selection")),
     }
 
 
 def _persisted_summary(job: HPOJob) -> dict:
     """The registry's own persisted fields for one job, with no manifest read: what
-    :class:`~tcip_web.jobstore.JobRegistry` writes to ``.tcip/state/hpo_sweeps.json`` under its
-    own lock, and reads back on rehydrate. The manifest projection belongs to a listing row
-    (:func:`_summary`), never to the persisted document: a frozen record must not gain fields
-    over time, and a store read has no business running while the registry's lock is held.
+    :class:`~tcip_web.jobstore.JobRegistry` writes to ``.tcip/state/hpo_sweeps.json`` under its own
+    lock, and reads back on rehydrate.
     """
     return {"sweep_id": job.sweep_id, "status": job.status,
-            "error": job.error, "has_result": bool(job.result),
+            "error": job.error,
             "platform_root": job.platform_root}
 
 
 def _driver_live(sweep_id: str) -> bool:
-    """Whether this process's own worker thread for ``sweep_id`` is still running: the one
-    signal :func:`~tcip_mcp.tools.training_tools.sweep_state` trusts over the manifest's own
-    heartbeat, since a live thread proves the driver is running this instant."""
+    """Whether this process's own worker thread for ``sweep_id`` is still running."""
     with _lock:
         thread = _workers.get(sweep_id)
         return thread is not None and thread.is_alive()
@@ -142,37 +102,30 @@ def _driver_live(sweep_id: str) -> bool:
 
 def _job_sweep_state(job: HPOJob, manifest: dict) -> str:
     """A live-registry job's derived liveness. The registry's own record wins once ``job.status``
-    is itself a recorded done state, so a job the registry knows completed never reads
-    ``interrupted`` off a manifest whose terminal write ``run_hyperparameter_search`` tolerates failing;
-    otherwise the manifest is the source when one exists, else the registry's own record, the
-    only source of truth for a job that never got as far as writing a manifest (a relaunch
-    ``run_hyperparameter_search`` refused at preflight, or any job that failed before its first manifest write).
-    Either way the rule is :func:`~tcip_mcp.tools.training_tools.sweep_state`'s own: a recorded
-    done state is trusted, a live worker thread reads ``running``, anything else reads
-    ``interrupted``."""
+    is itself a recorded done state; otherwise the manifest is the source when one exists, else the
+    registry's own record. Either way the rule is
+    :func:`~tcip_mcp.tools.training_tools.sweep_state`'s own: a recorded done state is trusted, a
+    live worker thread reads ``running``, anything else reads ``interrupted``.
+    """
     from tcip_mcp.experiments import _RECORDED_AS_DONE
     from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS, sweep_state
 
     if job.status in _RECORDED_AS_DONE:
-        source = {"status": job.status}
+        source = {"status": job.status, "heartbeat": None}
     else:
-        source = manifest if manifest else {"status": job.status}
+        source = manifest if manifest else {"status": job.status, "heartbeat": None}
     return sweep_state(source, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS,
                        driver_live=_driver_live(job.sweep_id))
 
 
 def _summary(job: HPOJob) -> dict:
     """One live sweep's listing row: the registry's own persisted fields plus the manifest
-    projection, read fresh (outside the registry's own lock) for whichever caller is listing.
-    ``status`` is the derived liveness (:func:`_job_sweep_state`), never the registry's own
-    persisted ``job.status`` verbatim: the persisted document keeps that (see
-    :func:`_persisted_summary`), and gains nothing from this derivation.
+    projection, read fresh (outside the registry's own lock). ``status`` is the derived liveness
+    (:func:`_job_sweep_state`).
 
-    ``has_manifest`` reports whether ``run_hyperparameter_search`` has written this sweep's first manifest yet,
-    the fact a caller keys a pre-manifest render on rather than a 404 the relaunch route never
-    produces (it registers the job before it answers). ``relaunched_from`` falls back to the
-    job's own in-memory record (set at relaunch) only in that same pre-manifest window; once a
-    manifest exists, its own recorded field is authoritative and wins.
+    ``has_manifest`` reports whether ``run_hyperparameter_search`` has written this sweep's first
+    manifest yet. ``relaunched_from`` falls back to the job's own in-memory record (set at
+    relaunch) only before a manifest exists; once one exists, its own recorded field wins.
     """
     raw_manifest = _read_manifest(job.sweep_id, root=job.platform_root)
     manifest = raw_manifest or {}
@@ -184,15 +137,15 @@ def _summary(job: HPOJob) -> dict:
     return {**_persisted_summary(job), **fields, "status": status, "has_manifest": has_manifest}
 
 
-def _from_summary(s: dict, root: str) -> HPOJob:
+def _from_summary(s: dict) -> HPOJob:
     return HPOJob(
-        sweep_id=s["sweep_id"], status=jobstore.rehydrated_status(s), error=s.get("error"),
-        platform_root=jobstore.require_platform_root(s, name=HPO_REGISTRY, root=root),
+        sweep_id=s["sweep_id"], status=jobstore.rehydrated_status(s), error=s["error"],
+        platform_root=s["platform_root"],
     )
 
 
 _registry = jobstore.JobRegistry(
-    HPO_REGISTRY, to_summary=_persisted_summary, from_summary=_from_summary, id_field="sweep_id",
+    HPO_SWEEPS, to_summary=_persisted_summary, from_summary=_from_summary, id_field="sweep_id",
 )
 """The dict-plus-lock live registry for this route's own sweeps (see ``jobstore.JobRegistry``),
 the shared home review.py's priority queue and inference.py's jobs adopt too. ``_lock`` below is
@@ -208,11 +161,7 @@ sharing one mutex, not a stated invariant between them."""
 
 def wait_for_workers(*, timeout_s: float) -> tuple[str, ...]:
     """Join this module's sweep workers and return the sweeps still running when time ran out.
-
-    A worker writes through the process's storage backend for as long as it runs, so a caller
-    that is about to close that backend, or otherwise must not outrace a sweep, waits here
-    instead of sleeping. ``timeout_s`` is the caller's own bound and has no default: how long a
-    shutdown or a test may block is the caller's decision, not this module's.
+    ``timeout_s`` is required.
     """
     with _lock:
         pending = list(_workers.items())
@@ -235,7 +184,6 @@ def _manifest_summary(manifest: dict) -> dict:
     return {"sweep_id": manifest.get("study_name", ""),
             "status": sweep_state(manifest, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS, driver_live=False),
             "error": manifest.get("error"),
-            "has_result": bool(manifest.get("result")),
             "external": True,
             "has_manifest": True,
             **_manifest_fields(manifest)}
@@ -251,10 +199,9 @@ def _read_manifest(sweep_id: str, *, root: Path | str | None = None) -> dict | N
     """The sweep's manifest, or ``None`` if no sweep by that name is on disk under ``root``
     (default: the current platform root).
 
-    ``sweep_id`` is untrusted, and the store's own key constructor is what refuses one that
-    would address a record outside the HPO store. A manifest that will not decode is reported
-    and then answered as absent: the listing serves every other sweep rather than failing
-    whole, and the sweep with the unreadable manifest is not presented as running.
+    ``sweep_id`` is untrusted, and the store's own key constructor refuses one that would address a
+    record outside the HPO store. A manifest that will not decode is reported and then answered as
+    absent.
     """
     from tcip_store import BadKey, DecodeError, store
 
@@ -275,10 +222,8 @@ def _read_manifest(sweep_id: str, *, root: Path | str | None = None) -> dict | N
 def _terminal_response(job: HPOJob) -> dict:
     """The live-registry response for a job already in a terminal status.
 
-    A job this process ran to completion itself carries its full result in memory; a job a
-    restart rehydrated carries none (the live registry persists status, not trial results), so
-    its result is read off the disk manifest instead, exactly as the disk-only branch of
-    :func:`get_sweep` would serve it.
+    A job this process ran to completion itself carries its full result in memory; a job a restart
+    rehydrated carries none, so its result is read off the disk manifest instead.
     """
     result = job.result
     if not result:
@@ -289,29 +234,17 @@ def _terminal_response(job: HPOJob) -> dict:
 
 
 def _sweep_launch_root(sweep_id: str) -> Optional[str]:
-    """The root this sweep's own live registry entry says it launched under, or ``None`` when
-    the registry has forgotten it (never launched here, or launched before a restart), the
-    only case a bare disk listing can resolve under the current root instead.
-
-    The one lookup shared by everywhere a sweep's own files (its trial directory, its
-    TensorBoard link farm) must be addressed under the root the sweep actually belongs to.
+    """The root this sweep's own live registry entry says it launched under, or ``None`` when the
+    registry has forgotten it (never launched here, or launched before a restart).
     """
     job = _registry.get(sweep_id)
     return job.platform_root if job is not None else None
 
 
 def _sweep_root(sweep_id: str) -> Path:
-    """The directory a sweep's trials live in, once a manifest proves the sweep exists.
-
-    A sweep this process's own live registry still remembers is addressed under the root it
-    launched under (:func:`_sweep_launch_root`), so a running or finished sweep stays
-    reachable through the sweep detail, trial view and TensorBoard routes across a repin to
-    another project. A sweep the registry has forgotten (never launched here, or launched
-    before a restart) is addressed under the current root instead, the only root a bare disk
-    listing can mean.
-
-    The sweep's own resolved location is what this is, not a path recorded inside the
-    manifest: an absolute path in a file is not a path this process should follow.
+    """The directory a sweep's trials live in, once a manifest proves the sweep exists: under its
+    launch root when the live registry remembers it (:func:`_sweep_launch_root`), else under the
+    current root. Never a path recorded inside the manifest.
     """
     from tcip_mcp.tools.training_tools import sweep_dir
 
@@ -323,8 +256,8 @@ def _sweep_root(sweep_id: str) -> Path:
 
 def _disk_sweeps(exclude: frozenset[str] = frozenset()) -> list[dict]:
     """Every sweep with a manifest under the HPO root, in directory-name order, skipping a
-    directory named in ``exclude``: a live sweep's manifest is already read fresh by
-    :func:`_summary`, so a listing that also read it here would only discard the second read."""
+    directory named in ``exclude``.
+    """
     root = _sweeps_dir()
     if not root.is_dir():
         return []
@@ -339,25 +272,16 @@ def _disk_sweeps(exclude: frozenset[str] = frozenset()) -> list[dict]:
 
 
 def _persist() -> None:
-    """Write the live registry, grouped by each sweep's own launch root.
-
-    A sweep's summary carries the root it launched under, resolved once at launch, so this
-    reaches the right root's file even from a background worker after this process has since
-    adopted another project.
-    """
+    """Write the live registry, grouped by each sweep's own launch root."""
     _registry.persist()
 
 
 def rehydrate_for_current_root() -> None:
     """Merge this root's persisted sweeps, not already live, into memory via :func:`_from_summary`.
 
-    Called at startup and again after this process repins to another root. Worker threads
-    behind a persisted non-terminal sweep are gone, so it is surfaced as ``interrupted``.
-    Trial results aren't persisted, so a rehydrated sweep has no result. Merges by sweep id
-    rather than requiring an empty registry first, so it never displaces a sweep still live
-    from another root. Bounds the dict afterwards the same way launching a sweep does, so
-    adopting N roots without ever launching one here still keeps this process's memory
-    bounded rather than growing by ``MAX_JOBS`` for every root adopted.
+    A persisted non-terminal sweep is surfaced as ``interrupted``, with no result. Merges by sweep
+    id, so it never displaces a sweep still live from another root, and bounds the dict afterwards
+    the same way launching a sweep does.
     """
     _registry.rehydrate()
 
@@ -368,9 +292,9 @@ class RelaunchSweepPayload(BaseModel):
 
 @dataclass
 class _RelaunchSpec:
-    """Every ``run_hyperparameter_search`` argument a relaunchable manifest holds, read once so the worker
-    replays exactly what the manifest recorded rather than trusting untyped dict access at
-    the call site."""
+    """Every ``run_hyperparameter_search`` argument a manifest holds, read once so the worker
+    replays exactly what the manifest recorded.
+    """
 
     base_config: dict[str, Any]
     param_space: Optional[dict[str, Any]]
@@ -383,115 +307,23 @@ class _RelaunchSpec:
     warm_start: bool
     baseline_params: Optional[dict[str, Any]]
     resources_per_trial: Optional[dict[str, Any]]
-    split_draws: int = 1
-    split_draw_seeds: Optional[list[int]] = None
-    trial_budget: Optional[int] = None
+    split_draws: int
+    split_draw_seeds: Optional[list[int]]
+    search_seed: int
+    trial_budget: Optional[int]
 
 
-_RELAUNCH_FIELDS: tuple[str, ...] = (
-    "base_config", "param_space", "n_trials", "search_alg", "scheduler", "grace_period",
-    "reduction_factor", "max_concurrent", "warm_start", "baseline_params", "resources_per_trial",
-)
-"""Every ``run_hyperparameter_search`` argument a relaunch replays. ``run_hyperparameter_search`` writes every one of these as a
-key whenever it creates a manifest (a value of ``None`` is a recorded choice, not an absence),
-so only a manifest without the field, or one truncated some other way, names anything as
-missing here. ``split_draws``, ``split_draw_seeds`` and ``trial_budget`` are not in this tuple:
-each is read with ``run_hyperparameter_search``'s own default (:func:`_relaunch_spec`) rather than required, so a
-manifest predating any one of them still relaunches."""
-
-
-def _missing_relaunch_fields(manifest: dict) -> list[str]:
-    """Every field in :data:`_RELAUNCH_FIELDS` that ``manifest`` does not carry as a key."""
-    return sorted(f for f in _RELAUNCH_FIELDS if f not in manifest)
-
-
-_INVALID_SPLIT_DRAWS_REASON = "this sweep's record's split_draws is not a draw count"
-"""The one text naming :func:`_invalid_split_draws_field`'s refusal, composed with the
-missing-fields text's own ": cannot relaunch" suffix by :func:`_relaunch_refusal`, so the two
-siblings read alike wherever the relaunchable marker and the relaunch route's 409 surface either."""
-
-
-def _invalid_split_draws_field(manifest: dict) -> bool:
-    """Whether the manifest carries a ``"split_draws"`` key whose value is not a draw count
-    (:func:`training_tools.coerce_split_draws`). A manifest of unknown provenance (hand-written,
-    or written by an older build) can carry a value the worker's own comparison cannot order
-    against an int; caught here, before the worker starts, rather than inside it. A manifest
-    without the key at all is not invalid by this check (see :func:`_relaunch_spec`, which reads
-    the field with ``run_hyperparameter_search``'s own default)."""
-    from tcip_mcp.tools.training_tools import coerce_split_draws
-
-    if "split_draws" not in manifest:
-        return False
-    return coerce_split_draws(manifest["split_draws"]) is None
-
-
-class _RelaunchRefusal(NamedTuple):
-    """The text for one of a relaunch's own refused conditions, split the way
-    :class:`training_tools.SeedAxisRefusal` already splits the seed-axis case: ``reason`` is the
-    sentence the listing caption shows alone, ``remedy`` the extra text (``None`` for the three
-    conditions that name none) :func:`relaunch_sweep`'s 409 and :func:`_manifest_fields`'s own
-    ``reason`` field join to it with one space where a remedy exists, so the three surfaces carry
-    one text from one function."""
-
-    reason: str
-    remedy: str | None
-
-
-def _relaunch_refusal(manifest: dict) -> _RelaunchRefusal | None:
-    """The refusal for the first of a relaunch's own conditions ``manifest`` fails, checked in
-    this order: a missing ``base_config``, a relaunch field :func:`_missing_relaunch_fields`
-    names absent, an unreadable ``split_draws`` (:func:`_invalid_split_draws_field`), and a
-    caller-supplied ``data.split.seed`` axis at one draw
-    (:func:`training_tools.caller_split_seed_refusal`); ``None`` when every condition passes.
-    The first three carry no remedy of their own; the seed-axis case carries
-    ``caller_split_seed_refusal``'s own ``reason``/``remedy`` pair unchanged. Shared by
-    :func:`relaunch_sweep`, whose 409 detail joins ``reason`` and, when present, ``remedy`` with
-    one space, and :func:`_manifest_fields`, whose ``relaunchable``/``reason`` pair is this
-    function's own absence and this function's own ``reason`` alone, so the marker and the route
-    refuse a manifest the same way for the same reason and the row caption never carries the
-    remedy.
+def _relaunch_refusal(manifest: dict) -> SeedAxisRefusal | None:
+    """The refusal a relaunch of ``manifest`` meets, or ``None``: a caller-supplied
+    ``data.split.seed`` axis at one draw (:func:`training_tools.caller_split_seed_refusal`).
     """
     from tcip_mcp.tools.training_tools import caller_split_seed_refusal
 
-    if "base_config" not in manifest:
-        return _RelaunchRefusal(reason="this sweep's record holds no base config", remedy=None)
-    missing = _missing_relaunch_fields(manifest)
-    if missing:
-        return _RelaunchRefusal(
-            reason=f"this sweep's record is missing {missing}: cannot relaunch", remedy=None)
-    if _invalid_split_draws_field(manifest):
-        return _RelaunchRefusal(
-            reason=f"{_INVALID_SPLIT_DRAWS_REASON}: cannot relaunch", remedy=None)
-    seed_axis_refusal = caller_split_seed_refusal(manifest.get("param_space"), manifest.get("split_draws"))
-    if seed_axis_refusal is not None:
-        return _RelaunchRefusal(reason=seed_axis_refusal.reason, remedy=seed_axis_refusal.remedy)
-    return None
+    return caller_split_seed_refusal(manifest["param_space"], manifest["split_draws"])
 
 
 def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
-    """``manifest``'s own ``run_hyperparameter_search`` arguments, read directly rather than defaulted: a caller
-    checks :func:`_missing_relaunch_fields` first, so a key absent here would be a programming
-    error, never a silently substituted value that was never the sweep's own.
-
-    ``split_draws``, ``split_draw_seeds`` and ``trial_budget`` are the exception, read with
-    ``run_hyperparameter_search``'s own
-    defaults (1, ``None``, ``None``) rather than required: a manifest without one of these fields
-    carries neither key, and must still relaunch. ``split_draws`` is read through
-    :func:`training_tools.coerce_split_draws`, the same coercion :func:`caller_split_seed_refusal`
-    applies, so a manifest recording it as a numeric string still relaunches as the int it names
-    rather than crashing the worker's own comparison; a caller checks
-    :func:`_invalid_split_draws_field` first, so the coercion here is asserted to never read
-    ``None``: that obligation is the caller's, never a value this function substitutes.
-    ``trial_budget`` is read raw: a record with one is checked against it by the tool's own door
-    exactly as a launch is, and a record with none replays as recorded, admitted, with no bound
-    for the door to check."""
-    from tcip_mcp.tools.training_tools import coerce_split_draws
-
-    draws = coerce_split_draws(manifest.get("split_draws"))
-    assert draws is not None, (
-        "the caller must refuse an invalid split_draws via _invalid_split_draws_field before "
-        "calling _relaunch_spec"
-    )
+    """``manifest``'s own ``run_hyperparameter_search`` arguments, read as recorded."""
     return _RelaunchSpec(
         base_config=manifest["base_config"],
         param_space=manifest["param_space"],
@@ -504,24 +336,21 @@ def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
         warm_start=bool(manifest["warm_start"]),
         baseline_params=manifest["baseline_params"],
         resources_per_trial=manifest["resources_per_trial"],
-        split_draws=draws,
-        split_draw_seeds=manifest.get("split_draw_seeds"),
-        trial_budget=manifest.get("trial_budget"),
+        split_draws=manifest["split_draws"],
+        split_draw_seeds=manifest["split_draw_seeds"],
+        search_seed=manifest["search_seed"],
+        trial_budget=manifest["trial_budget"],
     )
 
 
 def _worker(job: HPOJob, spec: _RelaunchSpec, output_dir: str, relaunched_from: str) -> None:
     """Run one relaunched sweep to completion off the request thread.
 
-    ``job.platform_root``, resolved on the request thread at launch, is what
-    :func:`_persist` groups this sweep's summary under, so this thread's writes land under
-    the root that launch named rather than under whatever the environment names later. A
-    returned ``{"error", "issues"}`` (a relaunch whose data paths moved, say) is a failed job
-    carrying the issues, and a returned ``{"status": "cancelled", ...}`` a cancelled one,
-    rather than either reading as a completed job with no useful result. ``relaunched_from``
-    is the source study's own name, recorded on this sweep's manifest so a listing can show it.
-    Discards ``job.sweep_id``'s own pre-manifest launch mark on every exit, ``run_hyperparameter_search`` never
-    reached included, so a caller that failed before or inside that call leaves no mark behind.
+    ``job.platform_root``, resolved on the request thread at launch, is what :func:`_persist`
+    groups this sweep's summary under. A returned ``{"error", "issues"}`` is a failed job carrying
+    the issues, and a returned ``{"status": "canceled", ...}`` a canceled one.
+    ``relaunched_from`` is the source study's own name, recorded on this sweep's manifest. Discards
+    ``job.sweep_id``'s own pre-manifest launch mark on every exit.
     """
     from tcip_mcp.tools.training_tools import discard_sweep_launching
 
@@ -547,13 +376,14 @@ def _worker(job: HPOJob, spec: _RelaunchSpec, output_dir: str, relaunched_from: 
             auto_tensorboard=False,
             split_draws=spec.split_draws,
             split_draw_seeds=spec.split_draw_seeds,
+            search_seed=spec.search_seed,
             trial_budget=spec.trial_budget,
             relaunched_from=relaunched_from,
         )
-        if isinstance(res, dict) and res.get("status") == "cancelled":
-            # Checked before the "error" key below: a cancelled result carries its own reason
-            # under that same key, and must still read cancelled, not failed, because of it.
-            job.status = "cancelled"
+        if isinstance(res, dict) and res.get("status") == "canceled":
+            # Checked before the "error" key below: a canceled result carries its own reason
+            # under that same key, and must still read canceled, not failed, because of it.
+            job.status = "canceled"
             job.error = res.get("error")
             job.result = res
         elif isinstance(res, dict) and "error" in res:
@@ -574,17 +404,14 @@ def _worker(job: HPOJob, spec: _RelaunchSpec, output_dir: str, relaunched_from: 
 
 @router.post("/sweeps")
 def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
-    """Relaunch a sweep from its own recorded manifest: no config, param space or path is
-    ever submitted by the browser. The source manifest is read under this sweep's own launch
-    root (:func:`_sweep_launch_root`, the same resolution the cancel route uses), so a sweep
-    launched under a root this process has since repinned away from is still relaunchable.
-    ``output_dir`` is always this request thread's own ``hpo_root()``, never a path the
-    manifest carries (an absolute path in a file is not a path this process should follow).
-    ``relaunched_from`` is recorded from the source manifest's own ``study_name``, never the
-    request body's echoed string, so the two names it might resolve to the same record under
-    (case, say) never disagree on this sweep's manifest.
-    Marks the new sweep id as launching, on this request thread, before the worker starts, so
-    a cancel that arrives before ``run_hyperparameter_search`` writes its own first manifest still reaches it."""
+    """Relaunch a sweep from its own recorded manifest: no config, param space or path is ever
+    submitted by the browser. The source manifest is read under this sweep's own launch root
+    (:func:`_sweep_launch_root`). ``output_dir`` is always this request thread's own
+    ``hpo_root()``, never a path the manifest carries. ``relaunched_from`` is recorded from the
+    source manifest's own ``study_name``. Marks the new sweep id as launching, on this request
+    thread, before the worker starts, so a cancel that arrives before ``run_hyperparameter_search``
+    writes its own first manifest still reaches it.
+    """
     from tcip_mcp.tools.training_tools import hpo_root, mark_sweep_launching
 
     manifest = _read_manifest(payload.study_name, root=_sweep_launch_root(payload.study_name))
@@ -638,15 +465,15 @@ def list_sweeps() -> dict:
 
 @router.get("/sweeps/{sweep_id}")
 def get_sweep(sweep_id: str) -> dict:
-    """One sweep by id: a live entry (whichever root it launched under) wins, else its
-    manifest under the current root. ``status`` is the derived liveness in both branches (see
-    :func:`_job_sweep_state`/:func:`_manifest_summary`), not either source's own recorded
-    value; ``relaunched_from`` is a top-level field on both branches too, the manifest's own
-    when one exists, else (live branch only, pre-manifest) the job's own in-memory record.
-    ``has_manifest`` is always true on the disk branch (a disk sweep has one by definition) and
-    reflects whether ``run_hyperparameter_search`` has written one yet on the live branch. The
-    disk branch is :func:`training_tools.read_sweep_from_disk`'s own result, so it also carries
-    ``trials``, absent from the live branch (a different question, answered by the trials route)."""
+    """One sweep by id: a live entry (whichever root it launched under) wins, else its manifest
+    under the current root. ``status`` is the derived liveness in both branches (see
+    :func:`_job_sweep_state`/:func:`_manifest_summary`); ``relaunched_from`` is a top-level field
+    on both branches too, the manifest's own when one exists, else (live branch only, pre-manifest)
+    the job's own in-memory record. ``has_manifest`` is always true on the disk branch and reflects
+    whether ``run_hyperparameter_search`` has written one yet on the live branch. The disk branch
+    is :func:`training_tools.read_sweep_from_disk`'s own result, so it also carries ``trials``,
+    absent from the live branch.
+    """
     from tcip_store import BadKey
     from tcip_web import jobstore
     from tcip_mcp.tools.training_tools import enrich_with_study_result, read_sweep_from_disk
@@ -664,7 +491,7 @@ def get_sweep(sweep_id: str) -> dict:
         response["status"] = status
         response["has_manifest"] = has_manifest
         response["relaunched_from"] = (
-            manifest.get("relaunched_from") if has_manifest else j.relaunched_from
+            manifest["relaunched_from"] if has_manifest else j.relaunched_from
         )
         return enrich_with_study_result(response, sweep_id, root=j.platform_root)
     try:
@@ -679,12 +506,9 @@ def get_sweep(sweep_id: str) -> dict:
 
 @router.get("/sweeps/{sweep_id}/trials")
 def list_trials(sweep_id: str) -> dict:
-    """The trial directories a sweep has produced so far, from the shared disk reader (see
-    :func:`training_tools.read_sweep_from_disk`), under whichever root the sweep actually
-    launched under.
-
-    Ray names its own per-trial directories after the trainable, so only the
-    ``trial_<id>`` dirs the platform writes are listed here.
+    """The ``trial_<id>`` directories a sweep has produced so far, from the shared disk reader (see
+    :func:`training_tools.read_sweep_from_disk`), under whichever root the sweep actually launched
+    under.
     """
     from tcip_store import BadKey
     from tcip_mcp.tools.training_tools import read_sweep_from_disk
@@ -703,8 +527,8 @@ def get_trial_metrics(sweep_id: str, trial_id: str) -> dict:
     """Every metrics row one trial has written.
 
     ``exists`` reports whether the log holds anything: rows, an entry still being appended, or
-    bytes that will not decode. A trial that has logged nothing and a trial with no log at all
-    are the same answer to the caller, which is what the Tuning view asks.
+    bytes that will not decode. A trial that has logged nothing and a trial with no log at all are
+    the same answer.
     """
     from tcip_store import BadKey, read_log
 
@@ -727,11 +551,8 @@ def get_trial_metrics(sweep_id: str, trial_id: str) -> dict:
 
 @router.get("/ray-dashboard")
 def get_ray_dashboard() -> dict:
-    """The live Ray dashboard's URL, or ``null`` when no cluster is up.
-
-    Ray is one cluster per process and an agent-launched sweep initializes it inside the
-    MCP server, so the URL comes off the state file that process wrote, not from anything
-    in this one. Not scoped to a sweep for the same reason: there is one cluster, shared.
+    """The live Ray dashboard's URL, or ``null`` when no cluster is up, read off the state file the
+    MCP server process wrote; not scoped to a sweep.
     """
     from tcip_mcp.pipelines.training.hpo import read_ray_dashboard
 
@@ -745,11 +566,8 @@ def _trial_tb_key(sweep_id: str, trial_id: str) -> str:
 
 
 def _link_dir(link: Path, target: Path) -> None:
-    """Point ``link`` at ``target`` as a directory, however this machine allows it.
-
-    A symlink needs ``SeCreateSymbolicLinkPrivilege`` on Windows (developer mode, or admin) and
-    plenty of machines this platform runs on won't have either; a junction is the unprivileged
-    NTFS equivalent for directories and is the fallback everywhere ``os.symlink`` refuses.
+    """Link ``link`` to ``target`` as a directory: a symlink, else a junction where ``os.symlink``
+    refuses.
     """
     import os
     import subprocess
@@ -768,12 +586,8 @@ def _link_dir(link: Path, target: Path) -> None:
 
 
 def _trial_view_dir(sweep_id: str, *, root: Optional[str] = None) -> Path:
-    """Where this sweep's clean-named trial links live, apart from the real trial dirs.
-
-    ``root`` (the sweep's own launch root, from :func:`_sweep_launch_root`) wins when given,
-    so the link farm always lands beside the sweep's own trial directories rather than inside
-    whichever project this process is currently pinned to; omitted, this falls back to the
-    current platform root, which is where a sweep the registry cannot answer for resolves.
+    """Where this sweep's clean-named trial links live, apart from the real trial dirs: under
+    ``root`` (the sweep's own launch root) when given, else the current platform root.
     """
     from tcip_mcp.project_paths import resolve_state
 
@@ -784,14 +598,7 @@ def _trial_view_dir(sweep_id: str, *, root: Optional[str] = None) -> Path:
 
 def _ensure_trial_view(sweep_id: str, sweep_root: Path, *, root: Optional[str] = None) -> Path:
     """A directory where every trial with a tensorboard dir today is linked under its bare
-    ``trial_<id>`` name, so TensorBoard's own per-run picker shows that instead of
-    ``trial_<id>\\tensorboard``, the leaf-directory name TensorBoard would otherwise read off
-    ``sweep_root`` directly, since each trial nests its event files one level down.
-
-    Only adds links; never removes one, so a run open in a browser tab never has its link pulled
-    out from under it. Existing links are left alone (a trial's own tensorboard dir, once
-    created, is never moved), and TensorBoard's own ``--reload_interval`` picks up a link added
-    after it already started, the same as it would a new subdirectory.
+    ``trial_<id>`` name. Only adds links; never removes one.
     """
     view = _trial_view_dir(sweep_id, root=root)
     view.mkdir(parents=True, exist_ok=True)
@@ -813,13 +620,8 @@ def _ensure_trial_view(sweep_id: str, sweep_root: Path, *, root: Optional[str] =
 
 @router.post("/sweeps/{sweep_id}/tensorboard")
 def launch_sweep_tensorboard(sweep_id: str, payload: EmptyBodyPayload) -> dict:
-    """Start (or reuse) a TensorBoard over the whole sweep, one run per trial.
-
-    Rooted at a clean-named link farm (see ``_ensure_trial_view``) rather than the sweep
-    directory itself, so TensorBoard's own run picker reads ``trial_<id>`` instead of the
-    nested ``trial_<id>\\tensorboard`` its default directory-name-as-run-name behavior would
-    otherwise show, and a breeder can toggle trials on and off there rather than reading all of
-    them, which stops being legible somewhere well short of a hundred-trial sweep.
+    """Start (or reuse) a TensorBoard over the whole sweep, one run per trial, rooted at the
+    :func:`_ensure_trial_view` link farm.
     """
     from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
 
@@ -844,11 +646,7 @@ def launch_trial_tensorboard(sweep_id: str, trial_id: str, payload: EmptyBodyPay
 
 @router.post("/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop")
 def stop_trial_tensorboard(sweep_id: str, trial_id: str, payload: EmptyBodyPayload) -> dict:
-    """Stop the TensorBoard serving one trial.
-
-    TensorBoards share a bounded port range, so a session that opens one per trial and
-    closes none exhausts it; the GUI stops a trial's TensorBoard when it moves off it.
-    """
+    """Stop the TensorBoard serving one trial."""
     from tcip_mcp.pipelines.training.tensorboard_manager import stop_tensorboard
 
     return stop_tensorboard(key=_trial_tb_key(sweep_id, trial_id))

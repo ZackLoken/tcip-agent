@@ -139,9 +139,9 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
 def test_persisted_split_record_spatial_block_carries_no_seed_while_top_level_seed_stays(
         tmp_path):
     """The spatial-strip layout is governed by declared order alone, so the persisted
-    ``experiment_split`` record's ``spatial`` block carries no ``seed`` key; the record's own
-    top-level ``seed`` (the config's ``data.split.seed``, a different fact the drawn path reads
-    and this one does not) is unaffected and still lands on every run.
+    ``experiment_split`` record's ``spatial`` block carries no ``seed`` key and the record's own
+    top-level ``seed``, the seed the run's draw used, is ``None``: this route draws nothing,
+    whatever ``data.split.seed`` the config states.
     """
     import tcip_store as ts
     from tcip_mcp.experiments import create_experiment, split_key
@@ -160,5 +160,5 @@ def test_persisted_split_record_spatial_block_carries_no_seed_while_top_level_se
     persist_run_partition("exp_spatial_no_seed", data_cfg)
     record = ts.read(split_key("exp_spatial_no_seed"))
 
-    assert record["seed"] == 7
+    assert record["seed"] is None
     assert "seed" not in record["spatial"]

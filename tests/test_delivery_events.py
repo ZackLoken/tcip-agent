@@ -76,34 +76,6 @@ def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_
         assert doc["record_digest"] == audit_verified[bucket]["record"].split(":")[-1]
 
 
-def test_a_record_predating_the_reconciliation_fields_validates_and_reads_back_with_both_keys_absent(
-    tmp_path: Path,
-) -> None:
-    """A record written before document_reconciliations/dimension_reconciliations existed still
-    validates against today's model and reads back through read_delivery_events with both keys
-    absent, never as None: read_delivery_events returns the stored dict itself, so a key this
-    record never carried is missing from it rather than present and null."""
-    event_id = "pre-field-record"
-    key = resolution.delivery_event_key(resolution.delivery_events_scope(tmp_path), event_id)
-    ts.replace(
-        key,
-        {
-            "event_id": event_id, "trait": "astringency", "delivery_kind": "state_crossing_dates",
-            "door": "test_door", "output_path": None, "output_sha256": None,
-            "measurement_documents": ["operating_point"], "scale_document": None,
-            "acknowledged_by": None, "acknowledgement_reason": None, "plant_mapping": None,
-            "documents": {}, "produced_at": "2026-02-03T12:00:00+00:00",
-        },
-        expect=ts.Version.ABSENT,
-    )
-
-    records = resolution.read_delivery_events(tmp_path)
-    assert len(records) == 1, records
-    record = records[0]
-    assert "document_reconciliations" not in record
-    assert "dimension_reconciliations" not in record
-
-
 def test_a_completed_crossing_delivery_reads_back_through_read_delivery_events_with_its_reconciliations(
     tmp_path: Path,
 ) -> None:
@@ -239,8 +211,7 @@ def test_record_delivery_binding_event_reports_a_failed_store_write_without_rais
 
     recorded = resolution.record_delivery_binding_event(
         "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
-        measurement_documents=["operating_point"],
-        scale_document=None, acknowledgement=None, trait="astringency",
+        measurement_documents=["operating_point"], acknowledgment=None, trait="astringency",
         delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
     )
 
@@ -268,8 +239,7 @@ def test_record_delivery_binding_event_raises_and_writes_nothing_when_plant_mapp
     with pytest.raises(ValidationError):
         resolution.record_delivery_binding_event(
             "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
-            measurement_documents=["operating_point"],
-            scale_document=None, acknowledgement=None, trait="astringency",
+            measurement_documents=["operating_point"], acknowledgment=None, trait="astringency",
             delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=bad_mapping,
         )
 
@@ -288,7 +258,7 @@ def test_record_delivery_binding_event_refuses_when_the_declared_documents_entry
     with pytest.raises(ValueError, match="operating_point"):
         resolution.record_delivery_binding_event(
             "test_door", None, [d], document_reconciliations={}, dimension_reconciliations={},
-            measurement_documents=["operating_point"], scale_document=None, acknowledgement=None,
+            measurement_documents=["operating_point"], acknowledgment=None,
             trait="astringency", delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path,
             plant_mapping=None,
         )
@@ -322,8 +292,7 @@ def test_record_delivery_binding_event_refuses_naming_the_classifier_document_wh
         resolution.record_delivery_binding_event(
             "test_door", None, [d], document_reconciliations={"operating_point": recon},
             dimension_reconciliations={},
-            measurement_documents=["operating_point", "classifier_operating_point"],
-            scale_document=None, acknowledgement=None, trait="astringency",
+            measurement_documents=["operating_point", "classifier_operating_point"], acknowledgment=None, trait="astringency",
             delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
         )
 
@@ -353,8 +322,7 @@ def test_record_delivery_binding_event_refuses_a_document_entry_missing_a_key_th
     with pytest.raises(KeyError, match="per_bucket"):
         resolution.record_delivery_binding_event(
             "test_door", None, [d], document_reconciliations={"operating_point": recon},
-            dimension_reconciliations={}, measurement_documents=["operating_point"],
-            scale_document=None, acknowledgement=None, trait="astringency",
+            dimension_reconciliations={}, measurement_documents=["operating_point"], acknowledgment=None, trait="astringency",
             delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
         )
 
@@ -383,8 +351,8 @@ def test_record_delivery_binding_event_refuses_a_dimension_entry_missing_a_key_t
         resolution.record_delivery_binding_event(
             "test_door", None, [d], document_reconciliations={"operating_point": recon},
             dimension_reconciliations={"tile_size": tile},
-            measurement_documents=["operating_point"], scale_document=None,
-            acknowledgement=None, trait="astringency", delivery_kind=STATE_CROSSING_DATES,
+            measurement_documents=["operating_point"],
+            acknowledgment=None, trait="astringency", delivery_kind=STATE_CROSSING_DATES,
             project_root=tmp_path, plant_mapping=None,
         )
 
@@ -434,9 +402,10 @@ def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(tmp_path: 
     def _resolved(pm: dict) -> object:
         record = {
             "event_id": "e", "trait": None, "delivery_kind": None, "door": "d",
-            "output_path": None, "output_sha256": None, "measurement_documents": [],
-            "scale_document": None, "acknowledged_by": None, "acknowledgement_reason": None,
-            "plant_mapping": pm, "documents": {}, "produced_at": "t",
+            "output_path": None, "output_sha256": None,
+            "acknowledged_by": None, "acknowledgment_reason": None,
+            "plant_mapping": pm, "documents": {}, "document_reconciliations": {},
+            "dimension_reconciliations": {}, "produced_at": "t",
         }
         return DeliveryEventRecord.model_validate(record).plant_mapping
 

@@ -1333,7 +1333,7 @@ describe("ReviewTab symbology", () => {
 
   it("draws the matched prediction next to the ground truth of the matched detection under review", async () => {
     // A matched detection's verdict judges how far the predicted shape sits from the true one, so
-    // drawing the ground truth alone asks for that judgement with nothing to compare against.
+    // drawing the ground truth alone asks for that judgment with nothing to compare against.
     matchesSpy.mockResolvedValue(
       matchesRes([det({ det_type: "tp", gt_idx: 0, pred_idx: 0, bbox: [12, 20, 48, 66] })], {
         gt: [{ subject: "leaf", iscrowd: false, bbox: [12, 20, 48, 66], attributes: {} }],
@@ -1516,7 +1516,7 @@ describe("ReviewTab confirm-admitted", () => {
     await waitFor(() => expect(screen.getByText("1 / 3")).toBeInTheDocument());
 
     // The admitted mark is its own Rect with a white outline, distinct from an outcome box's own
-    // stroke colour; only the fp scored at or above the rule's own conf gets one.
+    // stroke color; only the fp scored at or above the rule's own conf gets one.
     const marks = screen
       .getAllByTestId("k-rect")
       .filter((r) => r.getAttribute("data-stroke") === "#ffffff");
@@ -2500,7 +2500,7 @@ describe("ReviewTab canvas-push binding-presence gate", () => {
   });
 });
 
-describe("ReviewTab subject colours", () => {
+describe("ReviewTab subject colors", () => {
   afterEach(() => {
     try {
       localStorage.removeItem("tcip.annotate.subjectColors");
@@ -2509,7 +2509,7 @@ describe("ReviewTab subject colours", () => {
     }
   });
 
-  it("a per-browser recolour reaches the pushed canvas_meta swatch", async () => {
+  it("a per-browser recolor reaches the pushed canvas_meta swatch", async () => {
     useStore.getState().setRegistry({ subject_a: {} });
     useStore.setState({ bindingGeneration: 1 });
     const pushSpy = vi

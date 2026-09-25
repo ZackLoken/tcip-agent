@@ -63,7 +63,7 @@ def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
 
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gating-max-dets-le-100")
 
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="bud",
+    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), subject="bud",
                    use_tiled_inference=True, max_dets=50)
     assert captured["max_dets"] == 50  # honored verbatim, not bumped to 1000
 
@@ -86,7 +86,7 @@ def test_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch)
 
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gating-max-dets-default")
 
-    r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="bud",
+    r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir), subject="bud",
                        use_tiled_inference=True, tiling={"tile_size": 128, "overlap": 0.0})
     assert "error" not in r, r
     on_disk = ts.read(evaluation_results_key(Path(ckpt).parent))
@@ -103,7 +103,7 @@ def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypat
 
     captured: dict = {}
 
-    def _fake(ckpt, model, loader, device, task, output_dir, **kw):
+    def _fake(ckpt, model, loader, device, output_dir, **kw):
         captured.update(kw)
         return {"tiled": False, "eval_regime": "tile-level"}
 
@@ -114,7 +114,7 @@ def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypat
 
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="diagnostic-max-dets-default")
 
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="bud")
+    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), subject="bud")
     assert captured["max_dets"] == 100
 
 
@@ -124,7 +124,7 @@ def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
 
     captured: dict = {}
 
-    def _fake(ckpt, model, loader, device, task, output_dir, **kw):
+    def _fake(ckpt, model, loader, device, output_dir, **kw):
         captured.update(kw)
         return {"tiled": False, "eval_regime": "tile-level"}
 
@@ -135,7 +135,7 @@ def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
 
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="diagnostic-max-dets-explicit")
 
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="bud",
+    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), subject="bud",
                    max_dets=7)
     assert captured["max_dets"] == 7
 
@@ -158,14 +158,15 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(tmp_path
     images_dir, labels_dir = _det_dataset(tmp_path)
     ckpt = tmp_path / "model.pt"
     torch.save({"config": {"data": {"tiling": {"tile_size": 384, "overlap": 0.15},
-                                    "subject": "bud", "attribute": None}}}, ckpt)
+                                    "subject": "bud", "attribute": None}},
+                "model_source": {"task": "detection"}}, ckpt)
     from tcip_mcp.tools.model_tools import register_model
 
     result = register_model(name="bare-ckpt-stamped-tiling", checkpoint_path=str(ckpt), config={},
                             project_path=str(tmp_path))
     assert "error" not in result, result
 
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
+    evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
                    use_tiled_inference=True)
     # subject wasn't passed explicitly; it resolves from the checkpoint's own stamped config, the
     # same reuse a run id already gets, not silently None for a bare checkpoint path.
@@ -191,7 +192,7 @@ def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
 
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gate-geometry-refusal")
 
-    r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
+    r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
                        subject="bud", use_tiled_inference=True)
     assert "error" in r
     assert "tiling=" in r["error"]
@@ -214,7 +215,7 @@ def test_gate_translates_unreadable_label_to_error_dict(tmp_path, monkeypatch):
 
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gate-unreadable-label")
 
-    r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
+    r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
                        subject="bud", use_tiled_inference=True)
     assert "error" in r
     assert "IMG_0001.json" in r["error"]
@@ -240,6 +241,7 @@ def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
                               [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 200, 200)
 
     class _ManyDetectionsStub:
+        task = "detection"
         train_tile_size = 100
         train_overlap = 0.2
         in_chans = 3
@@ -287,6 +289,7 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(tmp_path):
                               [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
 
     class _OneBandStub:
+        task = "detection"
         train_tile_size = 100
         train_overlap = 0.2
         in_chans = 1
@@ -321,6 +324,7 @@ def test_run_full_frame_evaluation_records_merge_and_operating_point(tmp_path):
     from tcip_annotation.state import Annotation, BBox
 
     class _EmptyStub:
+        task = "detection"
         train_tile_size = 100
         train_overlap = 0.2
         in_chans = 3
@@ -389,6 +393,7 @@ def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(tmp_pa
             [Annotation(subject="bud", geometry=Point(20.0, 30.0))], 128, 128)
 
     class _EmptyStub:
+        task = "detection"
         train_tile_size = 100
         train_overlap = 0.2
         in_chans = 3
@@ -433,6 +438,7 @@ def test_the_gate_refuses_an_images_tree_with_no_ground_truth(tmp_path):
     Image.new("RGB", (128, 128)).save(images_dir / "a.png")
 
     class _EmptyStub:
+        task = "detection"
         train_tile_size = 100
         train_overlap = 0.2
         in_chans = 3

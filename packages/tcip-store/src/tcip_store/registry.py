@@ -1,9 +1,4 @@
-"""The store catalogue: what each store is, how its values encode, and how it may be written.
-
-A store is declared once, by the module that owns it, next to that store's key constructor.
-Importing that module is what registers the store, so an ``UnknownStore`` is answered by an
-import rather than by a configuration file.
-"""
+"""The store catalog: what each store is, how its values encode, and how it may be written."""
 
 from __future__ import annotations
 
@@ -27,10 +22,8 @@ Concurrency = Literal["cas", "last_writer_wins"]
 class Codec(Protocol):
     """How one store's values become bytes and come back.
 
-    JSON stores do not choose a spelling. Every record encodes through ``RECORD_JSON`` and
-    every log through ``LOG_JSON``, and ``register_store`` refuses anything else unless the
-    descriptor names its exemption, so a bespoke spelling is a decision someone wrote down
-    rather than a knob someone reached for.
+    Every JSON record encodes through ``RECORD_JSON`` and every JSON log through ``LOG_JSON``;
+    ``register_store`` refuses anything else unless the descriptor names its exemption.
     """
 
     def encode(self, value: Any) -> bytes: ...
@@ -42,54 +35,40 @@ class Codec(Protocol):
 class StoreDescriptor:
     """Everything the seam knows about one store, declared by the module that owns it.
 
-    ``kind`` decides which operations apply: a record is replaced, a log is appended to, a
-    blob is streamed. ``key_fields`` names the parts of the key's identity, coarse to fine,
-    and fixes its arity. ``codec`` is required for records and logs and unused for blobs.
+    ``kind`` decides which operations apply: a record is replaced, a log is appended to, a blob is
+    streamed. ``key_fields`` names the parts of the key's identity, coarse to fine, and fixes its
+    arity. ``codec`` is required for records and logs and unused for blobs.
 
-    ``concurrency`` is required for records and rejected for the other kinds. A ``cas``
-    store is one more than one writer read-modify-writes, so the unconditional write form
-    is refused there and only the compare-and-set and transactional forms remain. A
-    ``last_writer_wins`` store is written single-shot, so the unconditional form is legal.
+    ``concurrency`` is required for records and rejected for the other kinds. A ``cas`` store is
+    one more than one writer read-modify-writes, so the unconditional write form is refused there
+    and only the compare-and-set and transactional forms remain. A ``last_writer_wins`` store is
+    written single-shot, so the unconditional form is legal.
 
-    ``durable`` decides whether a write flushes before returning. It never affects locking:
-    there is no way to declare a store unlocked. ``enumerable`` decides whether ``keys``
-    answers or refuses. ``path_readable`` decides whether a blob store will hand out a real
-    filesystem path for a library that cannot take a file object.
+    ``durable`` decides whether a write flushes before returning; it never affects locking.
+    ``enumerable`` decides whether ``keys`` answers or refuses. ``path_readable`` decides whether a
+    blob store will hand out a real filesystem path for a library that cannot take a file object.
 
-    ``locator`` is the file backend's identity map for this store, required of a record or a
-    log and unused by a blob. Another backend keys on (store, root, parts) and does not
-    consult it to read or write, but the file layout it names is what a record held anywhere
-    else is written back out as, so a store without one could only ever be half exported.
+    ``locator`` is the file backend's identity map for this store, required of a record or a log
+    and unused by a blob; the file layout it names is what a record held anywhere else is exported
+    as.
 
-    ``codec_exemption`` is why this store does not encode through the canonical JSON codec.
-    It is required of any record or log carrying some other JSON spelling, and reading it is
-    how a reviewer finds every store that opted out.
+    ``codec_exemption`` is why this store does not encode through the canonical JSON codec,
+    required of any record or log carrying some other JSON spelling.
 
-    ``true_parts_from_entry`` recovers a key's real parts from one entry's own bytes, for a
-    store whose file layout cannot spell every key it holds: a locator that sanitizes a
-    separator out of a filename places the file correctly but cannot invert it, so enumeration
-    would otherwise answer with a name nothing can read back. Declaring it is what keeps
-    ``keys`` returning the same identities on every backend. It returns None for an entry
-    whose bytes do not state a key, and a store whose layout is already invertible declares
-    nothing.
+    ``true_parts_from_entry`` recovers a key's real parts from one entry's own bytes, for a store
+    whose file layout cannot spell every key it holds (a locator that sanitizes a separator out of
+    a filename). It returns None for an entry whose bytes do not state a key.
 
-    ``claim`` states which files under which kind of root belong to this store, for a record
-    or log store the platform's own claim table does not already speak for. Without it the
-    conform rail cannot tell this store's leftover files from anything else under a root, so
-    every database operation on the store refuses. A store already in the platform table
-    declares nothing here: one home per store.
+    ``claim`` states which files under which kind of root belong to this store, for a record or log
+    store the platform's own claim table does not already speak for; without one, every database
+    operation on the store refuses.
 
-    ``frozen`` states whether this store's format is stable at first release: every check that
-    needs the frozen set derives it from the registry rather than from a hand-kept list. Every
-    store the platform itself registers states it explicitly; the default is ``False``
-    (conservative: an undeclared store's format is presumed still moving, never wrongly claimed
-    stable) so a store a test registers for some other reason (a locator refusal, a codec
-    exemption) does not have to take a position on freezing. ``schema_version`` is the ceiling
-    this reader knows for a frozen store's documents, the highest version the seam accepts; it
-    stays 1 until this store's own first bump. ``cannot_carry_field`` is set only for a frozen
-    store whose documents have no place to hold a version field at all (raw bytes, a single text
+    ``frozen`` states whether this store's format is stable at first release; the default is
+    ``False``. ``schema_version`` is the ceiling this reader knows for a frozen store's documents,
+    the highest version the seam accepts. ``cannot_carry_field`` is set only for a frozen store
+    whose documents have no place to hold a version field at all (raw bytes, a single text
     primitive, a markdown document parsed by heading alone) and names what the document holds
-    instead, so a version check that cannot apply says why rather than being quietly skipped.
+    instead.
     """
 
     name: str
@@ -115,29 +94,19 @@ _claim_generation = 0
 
 
 def claim_generation() -> int:
-    """How many declared claims have joined this process's catalogue.
-
-    The conform rail derives freshness from the claim set in force at the moment it answers,
-    never from anything it persisted, so a reader holding an open database compares this
-    integer to the one its last check ran under and re-checks when it has moved.
+    """How many declared claims have joined this process's catalog; a reader re-checks when it
+    has moved.
     """
     return _claim_generation
 
 
 def register_store(descriptor: StoreDescriptor) -> StoreDescriptor:
-    """Add one store to the catalogue and return the registered descriptor.
+    """Add one store to the catalog and return the registered descriptor.
 
-    Refuses a name that is already registered: two declarations of one name are two stores
-    wearing the same identity, and whichever imported second would silently win. Refuses a
-    record with no concurrency policy, and a log or blob that declares one, because the
-    policy is a statement about read-modify-write that only a record can make. Refuses a
-    record or log that declares no locator, which is the store's own statement of the file it
-    owns and the only thing that can put its bytes back on disk in the layout the tools
-    reading that layout expect. Refuses a JSON spelling that is not the canonical one for the
-    kind, unless the descriptor states why in ``codec_exemption``, so a module nothing has
-    imported cannot quietly hold a bespoke codec that no test enumerating the registry would
-    ever see. Refuses a claim declared by a store the platform table already speaks for, since
-    two statements of where one store's files live are two answers the rail could get.
+    Refuses: a name that is already registered; a record with no concurrency policy, and a log or
+        blob that declares one; a record or log that declares no locator; a JSON spelling that is
+        not the canonical one for the kind, unless the descriptor states why in
+        ``codec_exemption``; a claim declared by a store the platform table already speaks for.
     """
     if descriptor.name in _registry:
         owner = _registry[descriptor.name].declared_in
@@ -197,7 +166,7 @@ def register_store(descriptor: StoreDescriptor) -> StoreDescriptor:
 
 def _check_claim(descriptor: StoreDescriptor) -> None:
     """Refuse a second statement of where a store the platform table already places lives."""
-    # imported here rather than at module scope: the claims module reads this catalogue
+    # imported here rather than at module scope: the claims module reads this catalog
     from tcip_store.layout_claims import platform_claim_stores
 
     if descriptor.claim is None:
@@ -216,12 +185,9 @@ def _check_claim(descriptor: StoreDescriptor) -> None:
 
 
 def _check_canonical_codec(descriptor: StoreDescriptor) -> None:
-    """Refuse a record or log whose codec is neither canonical nor a stated exemption.
-
-    Text stores are exempt by kind rather than by declaration: a text codec has no spelling
-    to choose, since its only knobs are the encoding and a trailing newline, both of which
-    are the stored value itself. Everything else that is not ``RECORD_JSON`` or ``LOG_JSON``
-    must say why in ``codec_exemption``.
+    """Refuse a record or log whose codec is neither canonical nor a stated exemption. Text stores
+    are exempt by kind; everything else that is not ``RECORD_JSON`` or ``LOG_JSON`` states
+    ``codec_exemption``.
     """
     if descriptor.kind == "blob":
         if descriptor.codec_exemption:
@@ -267,8 +233,7 @@ def registered_stores() -> tuple[str, ...]:
 
 
 def frozen_stores() -> tuple[str, ...]:
-    """Every store declared ``frozen=True``, sorted, derived from the registry rather than a
-    hand-kept list so a store nothing has classified cannot be missing from it."""
+    """Every store declared ``frozen=True``, sorted."""
     return tuple(sorted(name for name, d in _registry.items() if d.frozen))
 
 
@@ -372,12 +337,7 @@ newline. ``sort_keys=False`` keeps the authored field order a human tailing the 
 
 @dataclass(frozen=True)
 class _TextCodec:
-    """A codec for a store whose value is the text itself.
-
-    ``encode`` refuses anything but ``str``: calling ``str()`` on an arbitrary object here
-    would fabricate a value out of a repr exactly the way a JSON ``default`` does. A caller
-    holding a number formats it before it reaches the store.
-    """
+    """A codec for a store whose value is the text itself. ``encode`` refuses anything but ``str``."""
 
     encoding: str
     trailing_newline: bool

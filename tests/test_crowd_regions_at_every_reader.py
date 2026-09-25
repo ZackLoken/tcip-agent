@@ -44,7 +44,7 @@ def build_recording_detector(*, in_chans: int = 3) -> RecordingDetector:
     return RecordingDetector(in_chans=in_chans)
 
 
-def _labelled(root: Path, stems=("c0", "c1"), crowd=True) -> tuple[Path, Path]:
+def _labeled(root: Path, stems=("c0", "c1"), crowd=True) -> tuple[Path, Path]:
     """Frames each holding one bur and, when ``crowd``, one region of unseparated burs."""
     images, labels = root / "images", root / "annotations"
     images.mkdir(parents=True, exist_ok=True)
@@ -61,7 +61,7 @@ def _labelled(root: Path, stems=("c0", "c1"), crowd=True) -> tuple[Path, Path]:
 def _detection_loader(root: Path, task: str = "detection"):
     from tests._producer_fixtures import dataset_over
 
-    images, labels = _labelled(root)
+    images, labels = _labeled(root)
     return dataset_over(task, images, labels, subject=SUBJECT)
 
 
@@ -323,7 +323,7 @@ def test_the_governing_center_count_is_the_count_statistics_own(tmp_path: Path):
     from tcip_mcp.pipelines.training.evaluation import _count_stats_at_conf, governing_counts
 
     records = _center_records(tmp_path)
-    # A detection whose centre sits 6.4 px from the object's: outside the tolerance, a miss.
+    # A detection whose center sits 6.4 px from the object's: outside the tolerance, a miss.
     records.append(records[-1] | {"dt": [{"category_id": 1, "bbox": [12.0, 12.0, 15.0, 15.0],
                                          "score": 0.9}]})
     stats = _count_stats_at_conf(records, tolerance=5.0, conf=0.5, class_id=None)

@@ -1,13 +1,5 @@
-"""Meta-loop routes: surface Claude's friction reports and retrospectives.
-
-Read-only views over the friction reports (written by the ``report_friction`` MCP tool) and the
-retrospectives (written by ``write_retrospective``). Both corpora are enumerated, ordered and
-decoded by the module that owns their stores, so the panel and the agent's own memory tool
-cannot present the same project in two different orders. These close the loop on the
-meta-tools: the agent writes friction/retrospectives, the human can read them in the GUI.
-
-Endpoints are intentionally on-demand reads (not part of the live GUI state /
-WebSocket broadcast): this data is occasional and long-form.
+"""Meta-loop routes: read-only, on-demand views over the friction reports and retrospectives,
+enumerated, ordered and decoded by the module that owns their stores.
 """
 
 from __future__ import annotations

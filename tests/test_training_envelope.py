@@ -255,7 +255,6 @@ def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
     assert run.status == "completed"
     env = ts.read(env_key("expH"))
     assert env["resumed_from"] == str(ckpt)
-    assert env["rng_state_restored"] is True
 
 
 # --------------------------------------------------------------------------
@@ -266,14 +265,14 @@ def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
 def test_report_objective_calls_trial_report_when_attached(tmp_path):
     run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"), id="auto-run-82")
     reported: list = []
-    ctx = TrainContext(run=run, train_loader=None, trial_report=reported.append)
+    ctx = TrainContext(run=run, train_loader=None, trial_report=reported.append, task="detection")
     ctx.report_objective(3.14)
     assert reported == [3.14]
 
 
 def test_report_objective_is_noop_outside_hpo(tmp_path):
     run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"), id="auto-run-83")
-    ctx = TrainContext(run=run, train_loader=None)  # no trial_report, not an HPO trial
+    ctx = TrainContext(run=run, train_loader=None, task="detection")  # no trial_report, not an HPO trial
     ctx.report_objective(3.14)  # must not raise
 
 

@@ -1,17 +1,13 @@
 """Named reference grid over a raster's native pixel frame.
 
-One geometry implementation for every consumer of a cell name: the agent's pointing
-overlay (``overlay_reference_grid`` / ``segment_prompt``), the GUI's view-coverage
-lattice, and any renderer drawing cell boundaries. Consumers exchange the serializable
-geometry dict (:func:`grid_geometry`) and recompute cells deterministically from it via
-:func:`reference_cells`; cell lists are never shipped between agent tool calls.
+Consumers exchange the serializable geometry dict (:func:`grid_geometry`) and recompute cells
+deterministically from it via :func:`reference_cells`; cell lists are never shipped between agent
+tool calls.
 
-Cell names are spreadsheet-style: a bijective base-26 column letter plus a 1-based row
-number ("B3"). The letter scheme is ``tcip_annotation.sam_wrapper``'s ``column_label`` /
-``column_index``, imported rather than duplicated (tcip-mcp may depend on
-tcip-annotation, never the reverse). Resolving a name back against a cell list is that
-module's ``grid_to_rect`` (``grid_to_pixel`` for the cell's center): this module builds
-the cells, that one lookup reads them, and every consumer of a cell name goes through it.
+Cell names are spreadsheet-style: a bijective base-26 column letter plus a 1-based row number
+("B3"). The letter scheme is ``tcip_annotation.sam_wrapper``'s ``column_label`` / ``column_index``.
+Resolving a name back against a cell list is that module's ``grid_to_rect`` (``grid_to_pixel`` for
+the cell's center).
 """
 
 from __future__ import annotations
@@ -98,16 +94,14 @@ def reference_cells(
 
 
 def derive_serving_tile_size(width: int, height: int) -> int:
-    """Cell edge for region serving: the coarsest near-uniform square grid whose every cell,
-    served at native resolution, fits one display-bounded serve.
+    """Cell edge for region serving: the coarsest near-uniform square grid whose every cell, served
+    at native resolution, fits one display-bounded serve.
 
-    ``n = ceil(long_edge / DISPLAY_MAX_EDGE)`` cells along the long edge, so the returned
-    edge is ``ceil(long_edge / n) <= DISPLAY_MAX_EDGE``; an image inside the display bound
-    derives one cell spanning it. Deterministic in the image dims and the platform display
-    bound (``display_bounds.DISPLAY_MAX_EDGE``), nothing else. This tiling serves region
-    fetches and the completeness read's saved-annotation counts; it does not size the coverage
-    lattice a breeder inspects against (see :func:`derive_lattice_tile_size`), which the two
-    routes that use it keep entirely separate.
+    ``n = ceil(long_edge / DISPLAY_MAX_EDGE)`` cells along the long edge, so the returned edge is
+    ``ceil(long_edge / n) <= DISPLAY_MAX_EDGE``; an image inside the display bound derives one cell
+    spanning it. Deterministic in the image dims and the platform display bound
+    (``display_bounds.DISPLAY_MAX_EDGE``). Not the coverage lattice's size
+    (:func:`derive_lattice_tile_size`).
     """
     long_edge = max(width, height)
     n = math.ceil(long_edge / DISPLAY_MAX_EDGE)
@@ -150,15 +144,13 @@ def derive_pointing_tile_size(width: int, height: int) -> int:
 
 
 def grid_geometry(width: int, height: int, tile_size: int, overlap: float = 0.0) -> dict:
-    """The serializable parameter tuple every consumer echoes: ``{width, height,
-    tile_size, overlap, cols, rows}``.
+    """The serializable parameter tuple every consumer echoes: ``{width, height, tile_size,
+    overlap, cols, rows}``.
 
-    Cells are recomputed from this dict via :func:`reference_cells` (clamped or not, the
-    caller's choice), never shipped between agent tool calls. ``tile_size`` is explicit: three
-    derivations exist (:func:`derive_serving_tile_size` for region serving,
-    :func:`derive_lattice_tile_size` for the coverage lattice at a breeder's set zoom,
-    :func:`derive_pointing_tile_size` for the agent overlay), so a caller that has not chosen
-    one has not chosen a grid, and a cell name means nothing without its grid.
+    Cells are recomputed from this dict via :func:`reference_cells` (clamped or not, the caller's
+    choice). ``tile_size`` is required: :func:`derive_serving_tile_size`,
+    :func:`derive_lattice_tile_size` and :func:`derive_pointing_tile_size` each derive one for
+    their own grid.
     """
     cells = reference_cells(width, height, tile_size, overlap)
     return {

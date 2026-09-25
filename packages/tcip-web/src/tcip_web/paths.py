@@ -1,24 +1,17 @@
-"""Path confinement for client-supplied paths.
+r"""Path confinement for client-supplied paths.
 
-Every route that reads or writes a path a client supplied resolves it through
-:func:`assert_path_allowed` and uses the path it returns. The allow-set is derived from what the
-platform manages and is always non-empty: the workspace root, every workspace project's registered
-dataset roots, and the additive ``TCIP_IMAGE_ROOTS`` list for a legitimate root the platform does
-not know about. There is no switch that empties it. Containment is decided by filesystem identity
-(the same device and file as an allowed root, walking the candidate's resolved ancestors), never by
-comparing spellings, so a case variant, a substituted or mapped drive, a junction, or an extended
-``\\\\?\\`` prefix neither admits an outside path nor refuses an inside one. Any error while
-resolving or comparing refuses.
+:func:`assert_path_allowed` resolves a client-supplied path and returns it. The allow-set is always
+non-empty: the workspace root, every workspace project's registered dataset roots, and the additive
+``TCIP_IMAGE_ROOTS`` list. Containment is decided by filesystem identity (the same device and file
+as an allowed root, walking the candidate's resolved ancestors), never by comparing spellings, so a
+case variant, a substituted or mapped drive, a junction, or an extended ``\\\\?\\`` prefix neither
+admits an outside path nor refuses an inside one. Any error while resolving or comparing refuses.
 
-Two directory names are excluded regardless of containment, by name rather than by identity, so
-neither needs its own root: ``.imports`` (the import door's private staging tree) and
-``.removed`` (the workspace's holding directory a removed project moves into). Both share the
-same over-breadth the ``.imports`` rule always carried: a registered dataset or a
-``TCIP_IMAGE_ROOTS`` entry that happens to sit under a directory of either name is refused too.
-A workspace project pending removal or pending rename is excluded by identity instead, since its
-own directory name carries no marker: :func:`allowed_roots` reports it back to
-:func:`assert_path_allowed` as an excluded root, still admitted by :mod:`tcip_web.routes.fs`'s
-listing.
+Two directory names are excluded regardless of containment, by name: ``.imports`` (the import
+door's private staging tree) and ``.removed`` (the workspace's holding directory a removed project
+moves into); a registered dataset or a ``TCIP_IMAGE_ROOTS`` entry under a directory of either name
+is refused too. A workspace project pending removal or pending rename is excluded by identity
+(:func:`allowed_roots`).
 """
 
 from __future__ import annotations
@@ -57,24 +50,15 @@ def allowed_roots() -> tuple[list[Path], list[Path]]:
     """Every root a client-supplied path may resolve under, and every root refused by identity
     despite sitting inside one, derived at call time.
 
-    The roots: the workspace root, then each workspace project's registered dataset roots (a
-    dataset registered from outside the project tree is platform-managed data and must stay
-    reachable with no operator action), then ``TCIP_IMAGE_ROOTS``. The platform-state root
-    (``TCIP_STATE_ROOT``) is not a member on its own: it is the server's own state, and the
-    routes that write under it derive it server-side rather than taking it from a client.
+    The roots: the workspace root, then each workspace project's registered dataset roots, then
+    ``TCIP_IMAGE_ROOTS``. The platform-state root (``TCIP_STATE_ROOT``) is not a member on its own.
 
-    The excluded roots: the resolved root of every workspace project carrying a pending-removal
-    or pending-rename marker (``tcip_mcp.workspace.pending_marker_or_none``, presence alone;
-    which kind is irrelevant here). The workspace root itself admits
-    every child by containment, so excluding a pending project by name would exclude nothing
-    its own directory does not already carry; :func:`assert_path_allowed` refuses it by
-    identity instead, which also catches a dependent's dataset nested under its tree. A pending
-    project's own root, and its registered datasets, still belong to the roots list above, so
-    :mod:`tcip_web.routes.fs`'s listing still shows its directory by name; only opening it is
-    refused.
+    The excluded roots: the resolved root of every workspace project carrying a pending-removal or
+    pending-rename marker (``tcip_mcp.workspace.pending_marker_or_none``). A pending project's own
+    root, and its registered datasets, still belong to the roots list above; only opening a path
+    under it is refused.
 
-    A project whose dataset registry will not decode raises rather than contributing nothing: an
-    empty answer would strand that project's external data silently.
+    A project whose dataset registry will not decode raises.
     """
     from tcip_mcp import workspace as _workspace
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
@@ -98,12 +82,7 @@ def allowed_roots() -> tuple[list[Path], list[Path]]:
                 f"the dataset registry of project {project} will not decode, so its registered "
                 f"roots cannot be admitted: {exc}"
             ) from exc
-        except ValueError as exc:
-            raise RuntimeError(
-                f"the dataset registry of project {project} names a fingerprint with no formula "
-                f"version, so its registered roots cannot be admitted: {exc}"
-            ) from exc
-        roots.extend(dataset_entry_path(project, e) for e in entries if e.get("path"))
+        roots.extend(dataset_entry_path(project, e) for e in entries)
     roots.extend(allowed_image_roots())
     seen: set[str] = set()
     unique: list[Path] = []
@@ -118,8 +97,7 @@ def allowed_roots() -> tuple[list[Path], list[Path]]:
 def _existing_anchor(resolved: Path) -> Path | None:
     """The candidate itself when it exists, else its nearest existing ancestor.
 
-    Only a missing segment is climbed past; any other error while examining a candidate
-    propagates, so a path that cannot be examined is refused rather than judged by an ancestor.
+    Only a missing segment is climbed past; any other error while examining a candidate propagates.
     """
     for candidate in (resolved, *resolved.parents):
         try:
@@ -154,30 +132,19 @@ def within(resolved: Path, root: Path) -> bool:
 
 
 def _excluded_by_name(resolved: Path) -> bool:
-    """Whether ``resolved``'s ancestry passes through ``.imports`` or ``.removed``.
-
-    Both directories sit directly under a directory that is itself an allowed root (ordinarily
-    the workspace), so excluding either by name from the roots list would exclude nothing: the
-    parent it sits under is already admitted. This is the name-based negative check that closes
-    that gap, so a half-extracted import or an archived project waiting to be moved is never
-    resolvable through a guarded route while it sits there.
-    """
+    """Whether ``resolved``'s ancestry passes through ``.imports`` or ``.removed``."""
     return ".imports" in resolved.parts or ".removed" in resolved.parts
 
 
 def assert_path_allowed(path: str | Path) -> Path:
     """Resolve ``path`` and ensure it sits under an allowed root; return the resolved path.
 
-    Callers use the returned path for every later read, write and audit, never the string they
-    were given: re-resolving the raw string reopens the window between check and use. A path that
-    does not exist yet (a file about to be written) is judged by its nearest existing ancestor.
-    An ``.imports`` or ``.removed`` staging tree is never admitted, by name, however it compares
-    to the roots below (:func:`_excluded_by_name`); a path under a workspace project pending
-    removal or pending rename is refused by identity instead (:func:`allowed_roots`' excluded
-    roots), ahead of the ordinary containment check, so a project the archive has already left,
-    or one about to move onto a new name, is unreachable through every guarded route from the
-    moment its marker lands. Raises :class:`ValueError` naming the roots checked on refusal, and
-    on any resolution or comparison error, which is a refusal rather than a guess.
+    A path that does not exist yet (a file about to be written) is judged by its nearest existing
+    ancestor. An ``.imports`` or ``.removed`` staging tree is never admitted, by name
+    (:func:`_excluded_by_name`); a path under a workspace project pending removal or pending rename
+    is refused by identity (:func:`allowed_roots`' excluded roots), ahead of the ordinary
+    containment check. Raises :class:`ValueError` naming the roots checked on refusal, and on any
+    resolution or comparison error.
     """
     try:
         resolved = Path(path).resolve()
@@ -213,15 +180,8 @@ def assert_path_allowed(path: str | Path) -> Path:
 
 
 def assert_project_root_allowed(project_root: str | Path) -> Path:
-    """Confine a client-supplied ``project_root`` to the allowed roots.
-
-    A route that derives a ``.tcip/state``, ``.tcip/reports``, or ``.tcip/audit.jsonl``
-    path from a request's ``project_root`` calls this before touching disk, so the same
-    allow-set that confines image reads also confines these project-scoped state
-    readers/writers. Thin wrapper over :func:`assert_path_allowed` kept as its own name so
-    call sites read as "guarding a project root" and share one place to diverge the policy
-    later if needed. Raises :class:`ValueError`; callers convert to ``HTTPException(403)``
-    as elsewhere in this codebase.
+    """Confine a client-supplied ``project_root`` through :func:`assert_path_allowed`; raises
+    :class:`ValueError` on refusal.
     """
     return assert_path_allowed(project_root)
 
@@ -232,7 +192,7 @@ def safe_join(root: Path | str, *parts: str) -> Path:
     Raises :class:`ValueError` if the resolved path escapes ``root``.
     """
     base = Path(root).resolve()
-    # Accept forward slashes on Windows by normalising via PurePosixPath first
+    # Accept forward slashes on Windows by normalizing via PurePosixPath first
     rel_parts: list[str] = []
     for part in parts:
         if not part:

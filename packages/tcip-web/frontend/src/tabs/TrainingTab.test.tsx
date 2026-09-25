@@ -232,7 +232,7 @@ describe("TrainingTab run list", () => {
     const button = await screen.findByRole("button", { name: "Cancel train-cancel-flight" });
     fireEvent.click(button);
 
-    expect(await screen.findByText("Cancelling…")).toBeInTheDocument();
+    expect(await screen.findByText("Canceling…")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel train-cancel-flight" })).toBeDisabled();
 
     resolveCancel({

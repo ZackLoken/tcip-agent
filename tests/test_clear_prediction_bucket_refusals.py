@@ -88,38 +88,6 @@ def test_undecodable_operating_point_stamp_refuses_as_unreadable(tmp_path, monke
     assert "unreadable" in result["error"]
 
 
-def test_unstated_scope_refuses_naming_the_conform_script(tmp_path, monkeypatch):
-    """A stamp written straight to the store (bypassing operating_point_stamp's own rail) with no
-    subject/attribute pair raises StampScopeUnstated, named as the conform script's own case."""
-    import tcip_store as ts
-    from tcip_mcp.dataset_layout import prediction_dir
-    from tcip_mcp.experiments import create_experiment, update_lineage, update_status
-    from tcip_mcp.pipelines.resolution import sidecar_key
-    from tcip_mcp.tools.inference_tools import clear_prediction_bucket
-
-    dataset_root = tmp_path / "ds"
-    bucket = prediction_dir(dataset_root, "m", "2026-03-02")
-    from tcip_annotation.json_io import write_annotations
-    write_annotations(bucket / "img.json", [], 100, 100)
-
-    exp_id = "expUnstatedScope"
-    create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
-    update_status(exp_id, "running")
-    update_lineage(exp_id, predictions=str(bucket))
-    update_status(exp_id, "completed")
-
-    ts.replace(
-        sidecar_key(bucket, "operating_point"),
-        {"conf": {"value": 0.5, "validated": False, "validated_against": None},
-         "experiment_id": exp_id, "checkpoint_sha256": "abc"},
-        expect=ts.Version.ABSENT,
-    )
-
-    result = clear_prediction_bucket(str(bucket), "should refuse: unstated scope")
-    assert "error" in result
-    assert "tcip repair-classified-predictions" in result["error"]
-
-
 def test_undecodable_secondary_stamp_refuses(tmp_path, monkeypatch):
     import tcip_store as ts
     from tcip_mcp.pipelines.resolution import sidecar_key

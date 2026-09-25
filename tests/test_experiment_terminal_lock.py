@@ -1,7 +1,7 @@
 """The terminal lock protects an experiment's provenance writers, not just its own members.
 
-subprocess_worker's two config.json patches and persist_run_partition's split.json write share
-experiments.refuse_if_terminal with log_metrics and record_artifact, so a run whose experiment
+subprocess_worker's config.json mirror and persist_run_partition's split.json write share
+experiments.rewrite_live_member's terminal refusal with log_metrics and record_artifact, so a run whose experiment
 record turned terminal mid-flight (the wall-clock watchdog marking it failed while the child was
 still building its dataset) cannot have those writes land anyway. A refusal there raises
 ExperimentTerminal rather than degrading to a logged warning, so the worker exits non-zero with
@@ -14,7 +14,6 @@ import pytest
 import tcip_store as ts
 from tcip_mcp import experiments as exp
 from tcip_mcp.audit import audit_log_key
-from tcip_mcp.pipelines.data.selection import ClassScope
 
 
 def _refusals(root):
@@ -33,8 +32,6 @@ def test_split_write_refused_against_a_watchdog_failed_record_leaves_it_failed(t
     from tcip_mcp.experiments import ExperimentTerminal, create_experiment, update_status
     from tcip_mcp.pipelines.data.split_construction import persist_run_partition
 
-    import pytest
-
     eid = "exp-020-currant-bud-det"
     create_experiment(eid, {"model_source": {"builder": "my_models:bud_det"}})
     update_status(eid, "running")
@@ -45,7 +42,7 @@ def test_split_write_refused_against_a_watchdog_failed_record_leaves_it_failed(t
     with pytest.raises(ExperimentTerminal):
         persist_run_partition(
             eid,
-            {"labels_dir": ""},
+            {"labels_dir": "", "split": {"resolved_seed": 0, "resolved_group_by": "stem"}},
         )
 
     status = ts.read(exp.status_key(eid, root=tmp_path))
@@ -102,7 +99,7 @@ def test_split_write_still_lands_against_a_running_record(tmp_path):
     labels_dir = tmp_path / "annotations"
 
     def _sample(stem: str, side: str) -> Sample:
-        return Sample(source=str(tmp_path / "images" / f"{stem}.png"),
+        return Sample(member=stem, source=str(tmp_path / "images" / f"{stem}.png"),
                       ground_truth=str(labels_dir / f"{stem}.json"), group=stem, side=side,
                       confirmation_bucket=status_bucket("burr", None))
 
@@ -110,7 +107,8 @@ def test_split_write_still_lands_against_a_running_record(tmp_path):
     val = [_sample("img_002", "val")]
     persist_run_partition(
         eid,
-        {"labels_dir": str(labels_dir)},
+        {"labels_dir": str(labels_dir),
+         "split": {"resolved_seed": 0, "resolved_group_by": "stem"}},
         partition=_recorded_partition(train, val, train + val),
     )
 
@@ -120,92 +118,35 @@ def test_split_write_still_lands_against_a_running_record(tmp_path):
     assert _refusals(tmp_path) == []
 
 
-def test_tiling_patch_refused_against_a_terminal_record_raises(tmp_path):
+def test_the_data_mirror_refused_against_a_terminal_record_raises(tmp_path):
     from tcip_mcp.experiments import ExperimentTerminal, create_experiment, update_status
+    from tcip_mcp.pipelines.training.subprocess_worker import _mirror_data_section
 
-    import pytest
-
-    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_tiling
-
-    eid = "exp-022-currant-cluster-det"
+    eid = "exp-022-quince-cluster-det"
     create_experiment(eid, {"model_source": {"builder": "my_models:cluster_det"}})
     update_status(eid, "running")
     update_status(eid, "completed")
     config_before = ts.read(exp.config_key(eid, root=tmp_path))
 
     with pytest.raises(ExperimentTerminal):
-        _patch_experiment_config_tiling(eid, {"tile_size": 224})
+        _mirror_data_section(eid, {"tiling": {"tile_size": 224}})
 
     assert ts.read(exp.config_key(eid, root=tmp_path)) == config_before  # untouched
     assert _refusals(tmp_path) == []
 
 
-def test_tiling_patch_still_lands_against_a_running_record(tmp_path):
+def test_the_data_mirror_lands_against_a_running_record(tmp_path):
     from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_tiling
+    from tcip_mcp.pipelines.training.subprocess_worker import _mirror_data_section
 
-    eid = "exp-023-elderberry-umbel-det"
+    eid = "exp-023-quince-umbel-det"
     create_experiment(eid, {"model_source": {"builder": "my_models:umbel_det"}, "data": {}})
     update_status(eid, "running")
 
-    _patch_experiment_config_tiling(eid, {"tile_size": 224})
+    _mirror_data_section(eid, {"tiling": {"tile_size": 224}})
 
     config = ts.read(exp.config_key(eid, root=tmp_path))
     assert config["data"]["tiling"]["tile_size"] == 224
-
-
-def test_scope_patch_refused_against_a_terminal_record(tmp_path):
-    from tcip_mcp.experiments import ExperimentTerminal, create_experiment, update_status
-
-    import pytest
-
-    from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_scope
-
-    eid = "exp-024-persimmon-fruit-det"
-    create_experiment(eid, {"model_source": {"builder": "my_models:fruit_det"}})
-    update_status(eid, "running")
-    update_status(eid, "failed", error="dataloader raised")
-
-    with pytest.raises(ExperimentTerminal):
-        _patch_experiment_config_scope(eid, ClassScope("bud", None, {"bud": 0}))
-
-    assert _refusals(tmp_path) == []
-
-
-@pytest.mark.parametrize(
-    ("caller_name", "kwargs", "op"),
-    [
-        ("_patch_experiment_config_tiling", {"tiling_cfg": {"tile_size": 224}},
-         "patch_experiment_config_tiling"),
-        ("_patch_experiment_config_scope",
-         {"scope": ClassScope("bud", None, {"bud": 0})},
-         "patch_experiment_config_scope"),
-        ("_patch_experiment_config_split",
-         {"split_cfg": {"selection_binding": {"date": "2024-01-01"}}},
-         "patch_experiment_config_split"),
-    ],
-    ids=["tiling", "scope", "split"],
-)
-def test_shared_patch_procedure_refuses_a_terminal_record_for_every_caller(
-        tmp_path, caller_name, kwargs, op):
-    """The three thin mutators all route through the one shared _patch_experiment_config
-    procedure; its terminal refusal, not a per-mutator copy of it, is what protects each."""
-    import tcip_mcp.pipelines.training.subprocess_worker as worker
-    from tcip_mcp.experiments import ExperimentTerminal, create_experiment, update_status
-
-    eid = f"exp-030-quince-{op}"
-    create_experiment(eid, {"model_source": {"builder": "my_models:quince_det"}, "data": {}})
-    update_status(eid, "running")
-    update_status(eid, "completed")
-    config_before = ts.read(exp.config_key(eid, root=tmp_path))
-
-    patch_fn = getattr(worker, caller_name)
-    with pytest.raises(ExperimentTerminal):
-        patch_fn(eid, **kwargs)
-
-    assert ts.read(exp.config_key(eid, root=tmp_path)) == config_before  # untouched
-    assert _refusals(tmp_path) == []
 
 
 def test_overwrite_config_if_pristine_still_succeeds_over_a_pristine_experiment(tmp_path):

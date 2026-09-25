@@ -962,13 +962,13 @@ class TestCoverageRecord:
         assert resp.status_code == 422
         assert any("viewing" in str(err.get("loc")) for err in resp.json()["detail"])
 
-    def _seed_old_shape_record(self, root, bucket: str, image_name: str, grid: dict) -> None:
+    def _seed_malformed_record(self, root, bucket: str, image_name: str, grid: dict) -> None:
         import tcip_store as ts
         from tcip_mcp.dataset_layout import view_coverage_key
 
         normalized_grid = {k: grid[k] for k in
                            ("width", "height", "tile_size", "overlap", "cols", "rows")}
-        old_record = {
+        malformed = {
             "grid": normalized_grid,
             "cells_served_at_native": ["A1"],
             "cells_swept": [],
@@ -976,40 +976,40 @@ class TestCoverageRecord:
                         "base_served_size": "100x80"},
             "updated_at": "2026-01-01T00:00:00+00:00",
         }
-        ts.replace(view_coverage_key(root), {bucket: {image_name: old_record}},
+        ts.replace(view_coverage_key(root), {bucket: {image_name: malformed}},
                   expect=ts.Version.ABSENT)
 
-    def test_get_coverage_refuses_an_old_shape_stored_record_stating_the_fact(
+    def test_get_coverage_refuses_a_stored_record_that_does_not_validate(
         self, client, dated_dataset,
     ):
         root, path = dated_dataset
         grid = _grid(client, path, tile_size=64)
-        self._seed_old_shape_record(root, "bush/2026-03-01", "plot.tif", grid)
+        self._seed_malformed_record(root, "bush/2026-03-01", "plot.tif", grid)
 
         resp = client.get("/api/coverage", params={
             "path": path, "subject": "bush", "date": "2026-03-01"})
         assert resp.status_code == 400
-        assert "no operator door rewrites an existing view-coverage record" in resp.json()["detail"]
+        assert "does not validate against the current shape" in resp.json()["detail"]
 
-    def test_post_coverage_merge_path_refuses_an_old_shape_stored_record(
+    def test_post_coverage_merge_path_refuses_a_stored_record_that_does_not_validate(
         self, client, dated_dataset,
     ):
         root, path = dated_dataset
         grid = _grid(client, path, tile_size=64)
-        self._seed_old_shape_record(root, "bush/2026-03-01", "plot.tif", grid)
+        self._seed_malformed_record(root, "bush/2026-03-01", "plot.tif", grid)
 
         resp = client.post("/api/coverage", json=_post_body(path, ["B1"], grid))
         assert resp.status_code == 400
-        assert "no operator door rewrites an existing view-coverage record" in resp.json()["detail"]
+        assert "does not validate against the current shape" in resp.json()["detail"]
 
-    def test_post_coverage_replace_path_over_an_old_shape_record_succeeds(
+    def test_post_coverage_replace_path_over_a_malformed_record_succeeds(
         self, client, dated_dataset,
     ):
         """A confirmed replace overwrites the record wholesale, with nothing to merge into, so
-        an old-shape stored record does not block it."""
+        a stored record that does not validate does not block it."""
         root, path = dated_dataset
         grid64 = _grid(client, path, tile_size=64)
-        self._seed_old_shape_record(root, "bush/2026-03-01", "plot.tif", grid64)
+        self._seed_malformed_record(root, "bush/2026-03-01", "plot.tif", grid64)
         grid100 = _grid(client, path, tile_size=100)
 
         resp = client.post("/api/coverage",
@@ -1318,46 +1318,12 @@ class TestCompletenessRoute:
             "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["bud"]
         assert record["grid"]["tile_size"] == 100
 
-    def test_get_completeness_refuses_a_record_lacking_the_cells_attested_view_key(
-        self, client, dated_dataset,
-    ):
-        """A record from before this field existed (no ``cells_attested_view`` key at all)
-        refuses by name rather than being served or merged into: no operator door stamps the
-        missing key onto an existing record, so this dataset's record must be corrected to the
-        current shape before it is usable again."""
-        import tcip_store as ts
-
-        from tcip_mcp.dataset_layout import region_completeness_key
-
-        root, path = dated_dataset
-        grid = _grid(client, path, tile_size=64)
-        old_record = {
-            "grid": _grid_only(grid),
-            "cells_complete": ["A1"],
-            "attested_by": "user:z",
-            "attested_at": "2026-01-01T00:00:00+00:00",
-            "stem": Path(path).stem,
-            "date": "2026-03-01",
-            "subject": "bud",
-        }
-        bucket = f"bud/{Path(path).stem}"
-        ts.replace(region_completeness_key(root), {bucket: old_record}, expect=ts.Version.ABSENT)
-
-        got = client.get("/api/coverage/completeness", params={"path": path})
-        assert got.status_code == 400
-        assert "no operator door stamps the missing key onto an existing record" in got.json()["detail"]
-
-        resp = self._toggle(client, path, grid, "B2", view_scale=0.5)
-        assert resp.status_code == 400
-        assert "no operator door stamps the missing key onto an existing record" in resp.json()["detail"]
-
-    def test_get_completeness_serves_a_conformed_record_with_an_empty_attested_view(
+    def test_get_completeness_serves_a_record_with_an_empty_attested_view(
         self, client, dated_dataset,
     ):
         """A record whose ``cells_attested_view`` is present but empty (the shape an unattest
-        leaves it in, and the shape the conform script write-forwards onto a pre-field record)
-        reads and attests normally. Built through the route's own ``_toggle`` producer (attest,
-        unattest, attest again) rather than a hand-built record."""
+        leaves it in) reads and attests normally. Built through the route's own ``_toggle``
+        producer (attest, unattest, attest again) rather than a hand-built record."""
         root, path = dated_dataset
         grid = _grid(client, path, tile_size=64)
         self._toggle(client, path, grid, "A1", view_scale=0.5)
@@ -1377,38 +1343,6 @@ class TestCompletenessRoute:
             "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["bud"]
         assert set(record["cells_complete"]) == {"B1", "B2"}
         assert "B2" in record["cells_attested_view"]
-
-    def test_get_completeness_refuses_a_record_whose_cells_attested_view_is_null(
-        self, client, dated_dataset,
-    ):
-        """A record carrying the key with a null value (not a map) must not read the same as an
-        absent key does: ``dict(None)`` in the merge would 500 rather than refuse by name."""
-        import tcip_store as ts
-
-        from tcip_mcp.dataset_layout import region_completeness_key
-
-        root, path = dated_dataset
-        grid = _grid(client, path, tile_size=64)
-        old_record = {
-            "grid": _grid_only(grid),
-            "cells_complete": ["A1"],
-            "attested_by": "user:z",
-            "attested_at": "2026-01-01T00:00:00+00:00",
-            "stem": Path(path).stem,
-            "date": "2026-03-01",
-            "subject": "bud",
-            "cells_attested_view": None,
-        }
-        bucket = f"bud/{Path(path).stem}"
-        ts.replace(region_completeness_key(root), {bucket: old_record}, expect=ts.Version.ABSENT)
-
-        got = client.get("/api/coverage/completeness", params={"path": path})
-        assert got.status_code == 400
-        assert "no operator door stamps the missing key onto an existing record" in got.json()["detail"]
-
-        resp = self._toggle(client, path, grid, "B2", view_scale=0.5)
-        assert resp.status_code == 400
-        assert "no operator door stamps the missing key onto an existing record" in resp.json()["detail"]
 
     def test_attest_on_a_new_lattice_returns_and_audits_the_replaced_cells(
         self, client, dated_dataset,
@@ -1440,44 +1374,6 @@ class TestCompletenessRoute:
         resp = self._toggle(client, path, grid, "B2")
         assert resp.status_code == 200, resp.text
         assert resp.json()["replaced"] is None
-
-    def test_toggle_refuses_when_the_store_holds_an_unrecognized_entry(self, client, dated_dataset):
-        """An entry the normalizer cannot read must not be silently dropped by a write into an
-        unrelated bucket; the write refuses, naming it, and the entry is still in the store
-        afterwards."""
-        import tcip_store as ts
-        from tcip_mcp.dataset_layout import region_completeness_key
-
-        root, path = dated_dataset
-        stray_bucket = "orchard/2026-02-01"
-        ts.replace(region_completeness_key(root), {stray_bucket: {"cells_complete": ["A1"]}},
-                  expect=ts.Version.ABSENT)
-
-        grid = _grid(client, path, tile_size=64)
-        resp = self._toggle(client, path, grid, "A1")
-        assert resp.status_code == 400
-        assert stray_bucket in resp.json()["detail"]
-
-        store = ts.read(region_completeness_key(root))
-        assert store[stray_bucket] == {"cells_complete": ["A1"]}
-
-    def test_toggle_refuses_over_a_non_dict_stored_document(self, client, dated_dataset):
-        """A list- or string-shaped stored document is not something the per-bucket unreadable
-        check names (it has no buckets to enumerate); the write must still refuse rather than
-        read it as an empty store and replace it wholesale."""
-        import tcip_store as ts
-        from tcip_mcp.dataset_layout import region_completeness_key
-
-        root, path = dated_dataset
-        ts.replace(region_completeness_key(root), ["not", "a", "dict"], expect=ts.Version.ABSENT)
-
-        grid = _grid(client, path, tile_size=64)
-        resp = self._toggle(client, path, grid, "A1")
-        assert resp.status_code == 400
-        assert "list" in resp.json()["detail"]
-
-        store = ts.read(region_completeness_key(root))
-        assert store == ["not", "a", "dict"]
 
     def test_a_stale_attestation_is_detected_on_read(self, client, dated_dataset):
         """A cell is attested complete, then an annotation is added inside it: the stamped
@@ -1646,59 +1542,6 @@ class TestCompletenessRoute:
         record = client.get(
             "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["bud"]
         assert record["cells_attested_view"]["A1"]["working_scale_at_write"] is None
-
-    def test_get_completeness_refuses_a_record_with_the_old_working_scale_key(
-        self, client, dated_dataset,
-    ):
-        import tcip_store as ts
-
-        from tcip_mcp.dataset_layout import region_completeness_key
-
-        root, path = dated_dataset
-        grid = _grid(client, path, tile_size=64)
-        old_record = {
-            "grid": _grid_only(grid), "cells_complete": ["A1"], "attested_by": "user:z",
-            "attested_at": "2026-01-01T00:00:00+00:00", "stem": Path(path).stem,
-            "date": "2026-03-01", "subject": "bud",
-            "cells_attested_view": {"A1": {
-                "view_scale": 0.5,
-                "working_scale_bar_at_write": {
-                    "value": 4.6, "median_extent_native_px": 10.0, "annotation_count": 1,
-                    "judged_span_px": 46, "source": "s"},
-                "seen_on_record": {"at_scale": None, "grid_matched": False},
-            }},
-        }
-        ts.replace(region_completeness_key(root), {f"bud/{Path(path).stem}": old_record},
-                  expect=ts.Version.ABSENT)
-
-        got = client.get("/api/coverage/completeness", params={"path": path})
-        assert got.status_code == 400
-        assert "no operator door renames the stale key on an existing record" in got.json()["detail"]
-
-    def test_post_completeness_refuses_merging_into_a_record_with_the_old_key(
-        self, client, dated_dataset,
-    ):
-        import tcip_store as ts
-
-        from tcip_mcp.dataset_layout import region_completeness_key
-
-        root, path = dated_dataset
-        grid = _grid(client, path, tile_size=64)
-        old_record = {
-            "grid": _grid_only(grid), "cells_complete": ["A1"], "attested_by": "user:z",
-            "attested_at": "2026-01-01T00:00:00+00:00", "stem": Path(path).stem,
-            "date": "2026-03-01", "subject": "bud",
-            "cells_attested_view": {"A1": {
-                "view_scale": 0.5, "working_scale_bar_at_write": None,
-                "seen_on_record": {"at_scale": None, "grid_matched": False},
-            }},
-        }
-        ts.replace(region_completeness_key(root), {f"bud/{Path(path).stem}": old_record},
-                  expect=ts.Version.ABSENT)
-
-        resp = self._toggle(client, path, grid, "B1")
-        assert resp.status_code == 400
-        assert "no operator door renames the stale key on an existing record" in resp.json()["detail"]
 
     def test_attesting_reads_seen_on_record_from_the_matching_coverage_bucket(
         self, client, dated_dataset,

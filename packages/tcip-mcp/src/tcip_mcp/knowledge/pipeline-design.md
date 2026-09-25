@@ -46,7 +46,7 @@ Not buildable now (no loader, no task type, no scaffolding carried):
 - Non-imagery spectral readings (a bare NIR / hyperspectral sample, not a raster). The dataset
   layer reads 2D imagery; there is no loader for a spectrum.
 - A *learned* contextual-ranking task: a model that scores a plant relative to its plot or
-  block neighbours. No task type or loader exists for it. Ranking plants by a measurement you
+  block neighbors. No task type or loader exists for it. Ranking plants by a measurement you
   already produced is ordinary postprocessing over the per-plant table, and is available now.
 
 ## Conditions in this domain's imagery
@@ -60,7 +60,7 @@ them costs you depends on what you are measuring and how; that part is yours to 
   of the trait.
 - Objects of interest are often a few pixels across, near the resolution floor, and tiling cuts
   them at seams.
-- Labelled examples are scarce, and scarcest where labelling one costs a judgment call rather than
+- Labeled examples are scarce, and scarcest where labeling one costs a judgment call rather than
   a box.
 - Capture cadence is irregular and dates go missing within a season.
 - Wind moves the subject between captures of the same plant.
@@ -221,7 +221,7 @@ image_results = [
 ]
 
 # The final CSV is a phenotype delivery door: without pred_dirs it floors to unvalidated
-# regardless of any asserted string, and this call passes no acknowledgement, so it still refuses.
+# regardless of any asserted string, and this call passes no acknowledgment, so it still refuses.
 summaries = aggregate_per_plant(image_results, plant_id_fn=plant_id_fn)
 export_aggregated_csv(summaries, "phenotype_csv", delivered_phenotype="<phenotype>", pred_dirs=["stage_b_preds"])
 ```

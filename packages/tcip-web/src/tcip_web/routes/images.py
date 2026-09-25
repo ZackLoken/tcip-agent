@@ -1,15 +1,12 @@
 """Image serving: the one path pixels reach the browser through.
 
 Every response here decodes through ``raster_source.open_raster``, so a photographic frame, a
-grouped multi-band capture and a raster far too large to decode whole are all read the same way:
-a rectangle at a requested resolution. A request with no ``bands`` selection serves the file's own
+grouped multi-band capture and a raster far too large to decode whole are all read the same way: a
+rectangle at a requested resolution. A request with no ``bands`` selection serves the file's own
 pixels as plain RGB; a selection (or a source with more bands than an RGB reading covers)
-composites three of them through the shared display primitives in ``band_stats``, never through a
-second stretch implementation here.
+composites three of them through the shared display primitives in ``band_stats``.
 
-The browser must receive pixels in the same frame the annotations were authored against, so a
-photographic frame is EXIF-oriented on the way out (``PhotographicSource``, which
-``get_image_dimensions`` measures the same way).
+A photographic frame is EXIF-oriented on the way out (``PhotographicSource``).
 """
 
 from __future__ import annotations
@@ -68,9 +65,9 @@ _cache_budget_bytes: "int | None" = None
 
 
 def _cache_byte_budget(cache_dir: Path) -> int:
-    """The cache's byte budget: free space on the cache volume over
-    :data:`_CACHE_BUDGET_DIVISOR`, read once per process so eviction pressure cannot
-    ratchet the budget down as the cache itself consumes space."""
+    """The cache's byte budget: free space on the cache volume over :data:`_CACHE_BUDGET_DIVISOR`,
+    read once per process.
+    """
     global _cache_budget_bytes
     if _cache_budget_bytes is None:
         import shutil
@@ -124,17 +121,15 @@ only stops a long session over many rasters from growing it without limit."""
 
 @dataclass(frozen=True)
 class _RasterStats:
-    """One raster's display bounds, read once and reused by every region request against it, so
-    two regions of one raster are never stretched differently.
+    """One raster's display bounds, read once and reused by every region request against it, so two
+    regions of one raster are never stretched differently.
 
     ``ranges`` and ``clip_bounds`` are per band, in band order. They come from one of two reads,
     and exactly one of these describes which: ``pixel_fraction`` is the share of the raster's
     pixels a seeded window sample covered (1.0 when the budget covered all of them, where the
     bounds are that raster's own exact bounds), and ``overview_scale`` is the served/native
-    resolution ratio a single reduced read of the whole frame was taken at. Overview pixels are
-    averages of native ones, so bounds read from them are narrower than the raster's own: they
-    describe what a viewer sees at display scale, which is all a display stretch asks of them, and
-    nothing else may be derived from them.
+    resolution ratio a single reduced read of the whole frame was taken at. Overview bounds are
+    narrower than the raster's own and describe display scale only.
 
     ``interpretations`` names what each band holds where the backend knows (a GDAL raster's color
     interpretations: ``red``, ``alpha`` and the rest), and is ``None`` where nothing does, which is
@@ -260,13 +255,7 @@ def _band_index(token: str, declared_names: "list[str] | None", total_bands: int
 
 def _sidecar_identity(source) -> "tuple[int, int] | None":
     """The overview sidecar's ``(mtime_ns, size)`` for a GDAL-readable raster, or ``None`` when it
-    has none.
-
-    Part of the render key: overview-served pixels are not the pixels a native read resamples to
-    the same size, so a build that completes between two requests has to invalidate what the first
-    one cached. Read for every GDAL container rather than only for the reads that turn out to be
-    scaled, since which reads those are is not known before the raster is open; the cost of the
-    wider rule is a re-render of a native read after a build, never a stale one.
+    has none. Part of the render key.
     """
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.overviews import overview_sidecar
@@ -283,10 +272,8 @@ def _sidecar_identity(source) -> "tuple[int, int] | None":
 
 
 def _overviews_required(path: str, detail: str) -> HTTPException:
-    """The one refusal for a read that needs a raster's overview pyramid and has none.
-
-    Carries the condition as a header because a DOM ``Image`` sees only that a load failed, and
-    names the endpoint that builds the pyramid in the detail for whoever reads that instead.
+    """The one refusal for a read that needs a raster's overview pyramid and has none, carrying the
+    condition as a header and naming the endpoint that builds the pyramid in the detail.
     """
     return HTTPException(400, detail, headers={IMAGE_ERROR_HEADER: OVERVIEWS_REQUIRED})
 
@@ -295,11 +282,9 @@ def _reduced_reads_available(raster) -> bool:
     """Whether ``raster`` can serve a reduced-resolution read off an overview level instead of by
     decoding native pixels.
 
-    Read from headers, never by reading pixels: GDAL reports the overview levels it can see on
-    open (``overviews.has_overviews``), and an external sidecar whose tiles were never written is
-    one of those levels while reading back as silent zeros, so it counts only once
-    ``overviews.sidecar_valid`` has confirmed it. Only a GDAL-backed raster has such levels; every
-    other backend decodes native pixels whatever resolution is asked of it.
+    Read from headers, never by reading pixels: an overview level counts once it is reported on
+    open (``overviews.has_overviews``) and, for an external sidecar, ``overviews.sidecar_valid``
+    has confirmed it. Only a GDAL-backed raster has such levels.
     """
     from tcip_mcp.pipelines.overviews import has_overviews, overview_sidecar, sidecar_valid
     from tcip_mcp.pipelines.raster_source import GdalSource
@@ -341,20 +326,15 @@ def _source_identity(source, num_channels: int) -> tuple:
 
 
 def _raster_stats(source, num_channels: int, key: tuple) -> _RasterStats:
-    """``source``'s per-band display bounds, cached under ``key``.
+    """``source``'s per-band display bounds, cached under ``key``: the bounds a region stretch uses
+    and ``/api/images/bands`` reports.
 
-    The one computation behind both the region stretch bounds and what ``/api/images/bands``
-    reports, so the numbers a viewer's picker shows are the numbers their region renders through.
+    At or under :data:`_STATS_SAMPLE_BUDGET` the seeded window sample reads native pixels (covering
+    all of them, and so exact, for anything the budget's grid fits), and past it a single reduced
+    read of the whole frame comes off an overview level. A GDAL-backed raster over the budget with
+    no overview levels is refused; every other backend keeps reading native windows.
 
-    Which read produces them is the raster's size: at or under :data:`_STATS_SAMPLE_BUDGET` the
-    seeded window sample reads native pixels (covering all of them, and so exact, for anything the
-    budget's grid fits), and past it a single reduced read of the whole frame comes off an overview
-    level. A GDAL-backed raster over the budget with no overview levels is refused rather than
-    described by a window sample that would decode most of the file to read a thousandth of it;
-    every other backend keeps reading native windows, since no pyramid would serve it.
-
-    A concurrent miss on the same raster computes twice and stores the same numbers (both reads are
-    deterministic), which is cheaper than holding the lock across the read.
+    A concurrent miss on the same raster computes twice and stores the same numbers.
     """
     with _stats_lock:
         hit = _stats_cache.get(key)
@@ -443,9 +423,8 @@ def _fit_output(rect_w: int, rect_h: int, max_width: int, whole_view: bool) -> t
     """The ``(width, height)`` a region is served at: ``max_width`` wide at most, never upscaled,
     and never more than :data:`DISPLAY_MAX_PIXELS` of output.
 
-    A whole-view request scales to fit that area whatever it asked for, so an image of any shape
-    still renders. An explicit region is refused instead: a caller that named the pixels it wants
-    is told the request is over the cap rather than handed fewer pixels than it asked for.
+    A whole-view request scales to fit that area whatever it asked for. An explicit region over the
+    cap is refused.
     """
     out_w = min(rect_w, max_width)
     out_h = max(1, round(rect_h * out_w / rect_w))
@@ -472,12 +451,10 @@ def _plain_rgb(pixels, dtype, bounds: "tuple[float, float] | None"):
     replicated, a fourth band dropped, and no data-range stretch applied.
 
     A non-``uint8`` raster is scaled by ``band_stats.full_scale_denominator`` (the ``none``
-    stretch), one denominator for the whole array rather than one per band, so a plain serve never
-    shifts the colors the file holds. ``bounds`` carries the sampled ``(minimum, maximum)`` a
-    float raster's denominator comes from when the pixels in hand are one region of it. Returns
-    the rendered pixels and the divisor the render divided by, so a caller reporting what was
-    applied reads the same number the render used rather than deriving its own; ``None`` for a
-    ``uint8`` raster, which applies no stretch at all.
+    stretch), one denominator for the whole array. ``bounds`` carries the sampled ``(minimum,
+    maximum)`` a float raster's denominator comes from when the pixels in hand are one region of
+    it. Returns the rendered pixels and the divisor the render divided by; ``None`` for a ``uint8``
+    raster.
     """
     import numpy as np
 
@@ -517,25 +494,23 @@ def serve_image(
 ) -> Response:
     """Serve a JPEG of a raster, whole or of one region of it.
 
-    ``x0/y0/x1/y1`` (all four or none) name a half-open region in the raster's own
-    full-resolution pixel grid; omitting them serves the whole frame. ``max_width`` is the width
-    the result is served at, at most, and defaults to the platform's display edge bound: a request
-    is never upscaled, and the output is never more than the display area bound (a whole-view
-    request scales to fit it, an explicit region over it is refused, naming the cap).
+    ``x0/y0/x1/y1`` (all four or none) name a half-open region in the raster's own full-resolution
+    pixel grid; omitting them serves the whole frame. ``max_width`` is the width the result is
+    served at, at most, and defaults to the platform's display edge bound: a request is never
+    upscaled, and the output is never more than the display area bound (a whole-view request scales
+    to fit it, an explicit region over it is refused, naming the cap).
 
-    With no ``bands`` selection a 1/3/4-band raster serves as its own plain RGB, with no
-    data-range stretch: a single band replicated, a fourth band dropped. A ``bands`` selection, a
+    With no ``bands`` selection a 1/3/4-band raster serves as its own plain RGB, with no data-range
+    stretch: a single band replicated, a fourth band dropped. A ``bands`` selection, a
     ``.bandgroup``-grouped capture, or any other band count composites three bands through the
     shared display stretch instead. Whole-view stretch bounds come from the served pixels
     themselves; a region's come from the raster's seeded per-band sample, so two regions of one
     raster render alike. Both are reported back in ``X-TCIP-Stats-Source`` and, where bounds were
-    applied, ``X-TCIP-Display-Bounds``; a bound the raster's own pixels left non-finite (a NaN or
-    an infinity) reports as ``null`` rather than a JSON token no client parses.
+    applied, ``X-TCIP-Display-Bounds``; a non-finite bound reports as ``null``.
 
     A scaled read of a raster larger than the display area bound needs the reduced-resolution
-    overviews GDAL serves it from; without them the request is refused, naming
-    ``POST /api/images/overviews`` (``X-TCIP-Image-Error: overviews_required``), since decoding it
-    natively is what the bound exists to prevent.
+    overviews GDAL serves it from; without them the request is refused, naming ``POST
+    /api/images/overviews`` (``X-TCIP-Image-Error: overviews_required``).
 
     An ETag keyed on the file's identity and every requested render param lets the browser
     revalidate with a cheap 304.
@@ -580,8 +555,6 @@ def serve_image(
     composite_requested = bands is not None or isinstance(source, BandGroupRef)
     try:
         probed = probe_channels(source)
-    except HTTPException:
-        raise
     except Exception as exc:
         # A truncated or otherwise unreadable file fails its header probe here, before any
         # raster is opened: the request's own fault, answered as one.
@@ -732,29 +705,21 @@ def get_bands(path: str = Query(...)) -> dict:
     """Band count + per-band stats for ``path``: the picker's symbology data, and the one fact
     (``band_count > 3``) the frontend uses to decide whether to show the picker at all.
 
-    Resolves the same way ``serve_image`` does: ``path`` may be a plain raster or a
-    ``.bandgroup`` manifest naming a grouped multi-band capture. ``band_count`` is always cheap
-    (``probe_channels`` never decodes pixels for a photographic format, and reads only the TIFF
-    header when possible); the per-band stats below only run when they can actually tell the
-    picker something new: a plain (non-grouped) raster at ``band_count <= 3`` is an ordinary
-    photographic image with no real per-band symbology to report, so that case reads no pixels at
-    all. A ``.bandgroup``-grouped capture always gets the full per-band stats even at exactly 3
-    bands: its bands are real, independently named/wavelength-tagged captures the picker
-    legitimately shows, not RGB color channels.
+    ``path`` may be a plain raster or a ``.bandgroup`` manifest naming a grouped multi-band
+    capture. ``band_count`` never decodes pixels for a photographic format. A plain (non-grouped)
+    raster at ``band_count <= 3`` reads no pixels at all; a ``.bandgroup``-grouped capture always
+    gets the full per-band stats, even at exactly 3 bands.
 
-    The stats never come from a whole decode, so a raster too large to decode is still
-    describable, and the response says which read produced them. A raster whose pixels fit the
-    native-sampling budget carries ``sampled``, ``pixel_fraction`` and ``seed``: ``sampled`` is
-    false exactly when the sample covered every pixel (``pixel_fraction`` 1.0), where the numbers
-    are the raster's own exact bounds. A larger one is read once off an overview level instead and
-    carries ``sampled`` false with ``overview_scale``, the served/native resolution ratio it was
-    read at; those bounds are narrower than the raster's own, since an overview pixel averages
-    native ones, and they describe display scale only. Either way they are the same numbers this
-    raster's region renders stretch through.
+    The stats never come from a whole decode, and the response says which read produced them. A
+    raster whose pixels fit the native-sampling budget carries ``sampled``, ``pixel_fraction`` and
+    ``seed``: ``sampled`` is false exactly when the sample covered every pixel (``pixel_fraction``
+    1.0), where the numbers are the raster's own exact bounds. A larger one is read once off an
+    overview level instead and carries ``sampled`` false with ``overview_scale``, the served/native
+    resolution ratio it was read at; those bounds describe display scale only. Either way they are
+    the same numbers this raster's region renders stretch through.
 
     A band carries ``interpretation`` (``red``, ``alpha``, and the rest) where the backend reads it
-    from the file, which is what lets a caller tell an ordinary RGBA frame from a genuinely
-    multi-band capture that happens to hold four bands. The key is absent where nothing knows.
+    from the file; the key is absent where nothing knows.
     """
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, BandGroupRef
     from tcip_mcp.pipelines.derivations import probe_channels
@@ -837,11 +802,9 @@ def _overview_summary(job: OverviewJob) -> dict:
 def _overview_worker(job: OverviewJob) -> None:
     """Build the pyramid, recording progress and whatever stopped it.
 
-    A refusal to rebuild over a pyramid that already exists is the outcome the caller wanted (a
-    build for the same raster finished first); anything else that stops the build is a failure.
-    Asking whether one exists can fail in its own right, on a raster GDAL cannot open at all: that
-    answers the question (there is no pyramid) rather than ending the job's thread, which would
-    leave a caller polling a job that never reaches a terminal state.
+    A refusal to rebuild over a pyramid that already exists is a completed outcome; anything else
+    that stops the build is a failure. A raster GDAL cannot open at all answers that there is no
+    pyramid.
     """
     from tcip_mcp.pipelines.overviews import build_overviews, has_overviews
 

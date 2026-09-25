@@ -1,24 +1,17 @@
-"""Plant-aware group-key derivation for ``draw_splits``, over per-stem georeferenced rasters.
+r"""Plant-aware group-key derivation for ``draw_splits``, over per-stem georeferenced rasters.
 
-A train/val split that groups only by tile prefix (``draw_splits``' default) never notices
-that two differently-named images from two different capture dates are photos of the *same*
-physical plant: nothing in either stem says so. When a dataset's images are themselves individually
-georeferenced rasters (e.g. per-plant/per-region GeoTIFF chips cut from a larger orthomosaic, which
-keep the parent's georeferencing tags), this script derives the real group key instead: each image's
-own center pixel resolves to a (lat, lon) via its GeoTIFF tags, then to the nearest plant in a
-plant-locations CSV, so every capture of one physical plant across every date lands in the same
-split side.
+When a dataset's images are themselves individually georeferenced rasters (e.g.
+per-plant/per-region GeoTIFF chips cut from a larger orthomosaic, which keep the parent's
+georeferencing tags), this script derives the group key from location: each image's own center
+pixel resolves to a (lat, lon) via its GeoTIFF tags, then to the nearest plant in a plant-locations
+CSV, so every capture of one physical plant across every date lands in the same split side.
 
-Composes three existing pieces without reimplementing any of them: ``read_plant_csvs`` (the plant
-CSV parser), ``OrthomosaicGeoreference.pixel_to_wgs84`` (GeoTIFF pixel -> WGS84), and
-``_nearest_plant`` (GPS nearest-neighbour match). It then hands the resulting ``{identity:
-group_key}`` map to ``draw_splits(group_key_map=...)``, which already refuses loudly (via
-``resolve_group_key_fn``) if the map doesn't cover every member it needs. ``identity`` is
-``<date>/<stem>`` (the same identity ``draw_splits`` keys its own draw by), since a stem is
-unique only within one capture date.
+Uses ``read_plant_csvs``, ``OrthomosaicGeoreference.pixel_to_wgs84`` and ``_nearest_plant``, then
+hands the resulting ``{identity: group_key}`` map to ``draw_splits(group_key_map=...)``.
+``identity`` is ``<date>/<stem>``, since a stem is unique only within one capture date.
 
-``--subject`` is required: ``draw_splits`` draws its samples through the platform's own
-per-subject admission and refuses to write a selection without one.
+``--subject`` is required: ``draw_splits`` draws its samples through the platform's own per-subject
+admission and refuses to write a selection without one.
 
 Usage:
     tcip plant-aware-group-splits <dataset_root> --plant-csv <plants.csv> \
@@ -27,8 +20,8 @@ Usage:
         [--tolerance-m 5.0] [--output-path <dir>]
 
 ``--train-ratio``, ``--val-ratio`` and ``--calibration-ratio`` all have no default and are
-required: the three must sum to 1.0, and a selection write (``--output-path``) additionally
-refuses any of them being zero, by name.
+required: the three must sum to 1.0, and a selection write (``--output-path``) additionally refuses
+any of them being zero, by name.
 """
 
 from __future__ import annotations
@@ -56,24 +49,17 @@ def derive_plant_group_key_map(
     nn_tolerance_m: float | None = None,
 ) -> dict[str, str]:
     """``{identity: plot_name}`` for every key in ``stem_to_raster``, resolved by GPS
-    nearest-neighbour. ``stem_to_raster``'s keys are opaque to this function; the caller passes
-    plain stems or ``<date>/<stem>`` identities depending on what it is building the map for.
+    nearest-neighbor.
 
-    Each raster's own center pixel is its representative location (mirroring how
-    ``assign_detections_to_plants`` uses a detection box's own centroid), converted to WGS84 via
-    that raster's own :class:`OrthomosaicGeoreference` (built per file, since two stems can carry
+    Each raster's own center pixel is its representative location, converted to WGS84 via that
+    raster's own :class:`OrthomosaicGeoreference` (built per file, since two stems can carry
     different tiepoints or even different CRSes), then matched to the nearest plant in ``plants``.
 
-    ``nn_tolerance_m`` defaults to the same derivation ``plant_mapping.build_mapping`` and
-    ``orthomosaic_mapping.assign_detections_to_plants`` already use: ``grid_pitch_m(plants) / 6``,
-    or the honest ``NN_TOLERANCE_METERS`` fallback when the plant layout has too few georeferenced
-    plants to derive a pitch from.
+    ``nn_tolerance_m`` resolves through ``plant_mapping.resolve_nn_tolerance_m``.
 
-    Every stem must resolve: a stem whose raster can't be georeferenced, or whose nearest plant
-    falls outside tolerance, is a real gap in this map, not something to silently drop and let
-    ``draw_splits``' generic "group_key_map is missing N stems" surface downstream instead. Raises
-    ``ValueError`` naming every such stem and its specific cause once all stems have been checked,
-    rather than stopping at the first.
+    Every stem must resolve: raises ``ValueError`` naming every stem whose raster can't be
+    georeferenced or whose nearest plant falls outside tolerance, with its cause, once all stems
+    have been checked.
     """
     import tifffile
 
@@ -83,17 +69,14 @@ def derive_plant_group_key_map(
         RotatedRasterError,
     )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        NN_TOLERANCE_METERS,
         _nearest_plant,
-        grid_pitch_m,
+        resolve_nn_tolerance_m,
     )
 
     if not plants:
         raise ValueError("no plant records to match against (the plant CSV(s) parsed to zero rows)")
 
-    if nn_tolerance_m is None:
-        pitch = grid_pitch_m(plants)
-        nn_tolerance_m = (pitch / 6) if pitch > 0 else NN_TOLERANCE_METERS
+    tolerance_m = resolve_nn_tolerance_m(plants, nn_tolerance_m)["value"]
 
     group_key_map: dict[str, str] = {}
     failures: list[str] = []
@@ -108,11 +91,11 @@ def derive_plant_group_key_map(
             continue
 
         plant, distance_m = _nearest_plant(lat, lon, plants)
-        if plant is None or distance_m is None or distance_m > nn_tolerance_m:
+        if plant is None or distance_m is None or distance_m > tolerance_m:
             observed = f"{distance_m:.1f}m" if distance_m is not None else "no plants in the CSV"
             failures.append(
                 f"{stem} ({path}): nearest plant is {observed} away, outside tolerance "
-                f"{nn_tolerance_m:.1f}m (lat={lat:.6f}, lon={lon:.6f})"
+                f"{tolerance_m:.1f}m (lat={lat:.6f}, lon={lon:.6f})"
             )
             continue
         if not plant.plot_name:

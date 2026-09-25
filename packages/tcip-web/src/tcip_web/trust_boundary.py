@@ -1,18 +1,16 @@
 """The network trust boundary: which connections the backend serves and which names it answers to.
 
 Exposure is a property of the accepted connection, never of a configured bind host. The ASGI
-``scope["server"]`` is the local address the connection arrived on (uvicorn fills it from the
-accepted socket's own ``getsockname``), so a connection through a loopback address is local, one
-through a routable address is exposed, and one the backend cannot classify is refused. An exposed
-arrival is served only when the operator has opted in with ``TCIP_WEB_ALLOW_INSECURE=1``, because
-an exposed GUI hands an unauthenticated network client filesystem reads and writes and the
-interactive agent terminal.
+``scope["server"]`` is the local address the connection arrived on, so a connection through a
+loopback address is local, one through a routable address is exposed, and one the backend cannot
+classify is refused. An exposed arrival is served only when the operator has opted in with
+``TCIP_WEB_ALLOW_INSECURE=1``.
 
 One canonical authority parser serves the arrival, the Host header, the Origin header and the
-operator's advertised list (``TCIP_WEB_ADVERTISED_HOSTS``, comma-separated ``host[:port]``
-entries for a name clients reach this machine by that it does not know itself, such as a DNS
-alias or a same-machine reverse proxy). Advertising a name declares that network clients reach
-this backend, so the list is consulted only under the opt-in. There is no wildcard anywhere.
+operator's advertised list (``TCIP_WEB_ADVERTISED_HOSTS``, comma-separated ``host[:port]`` entries
+for a name clients reach this machine by that it does not know itself, such as a DNS alias or a
+same-machine reverse proxy), which is consulted only under the opt-in. There is no wildcard
+anywhere.
 """
 
 from __future__ import annotations
@@ -265,16 +263,10 @@ def _parse_origin(origin: str) -> tuple[str, Authority] | None:
 def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:
     """Whether an Origin is one this backend serves for the connection it arrived on.
 
-    Applied by :class:`TrustBoundaryMiddleware` to every WebSocket scope and to an ``http``
-    scope whose method is in :data:`STATE_CHANGING_METHODS`. Only an absent Origin (``None``)
-    is a non-browser client (the MCP tools send none) and is allowed: this check is a
-    browser-side mitigation against a cross-site page reading GUI state or driving a mutation,
-    not authentication. A present Origin, empty included, is checked like any other and refused
-    if it does not parse as a bare authority; this is a behaviour change on the socket path,
-    whose handlers today read an empty header (``if not origin``) as missing. A present Origin
-    must be exactly the request's own origin (the validated Host at the request scheme), or a
-    loopback host at any port on a local arrival (the Vite dev server proxies from its own
-    port), or an advertised authority under the opt-in.
+    Only an absent Origin (``None``) is a non-browser client and is allowed. A present Origin,
+    empty included, is refused if it does not parse as a bare authority. A present Origin must be
+    exactly the request's own origin (the validated Host at the request scheme), or a loopback host
+    at any port on a local arrival, or an advertised authority under the opt-in.
     """
     if origin is None:
         return True
@@ -296,16 +288,14 @@ def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:
 class TrustBoundaryMiddleware:
     """Refuse connections the backend must not serve, before any route runs.
 
-    Applies to ``http`` and ``websocket`` scopes only; a ``lifespan`` scope carries no arrival.
-    An arrival the backend cannot classify, and an exposed arrival without the opt-in, are refused
-    with the exposure message; a Host the backend does not answer to is refused as an invalid
-    host. After the Host check, every WebSocket scope and every ``http`` scope whose method is
-    in :data:`STATE_CHANGING_METHODS` must also carry an Origin :func:`origin_allowed` admits; a
-    duplicated Origin header is refused the same way a duplicated Host is. On a loopback
-    arrival every loopback origin at every port is admitted, so another local server's page
-    passes this check too; only the JSON-body guard's unanswered preflight
-    (``routes/_body_common.py``) stops its browser from mutating. A refused exposed arrival is
-    logged once per client and arrival address pair so the operator sees it.
+    Applies to ``http`` and ``websocket`` scopes only; a ``lifespan`` scope carries no arrival. An
+    arrival the backend cannot classify, and an exposed arrival without the opt-in, are refused
+    with the exposure message; a Host the backend does not answer to is refused as an invalid host.
+    After the Host check, every WebSocket scope and every ``http`` scope whose method is in
+    :data:`STATE_CHANGING_METHODS` must also carry an Origin :func:`origin_allowed` admits; a
+    duplicated Origin header is refused the same way a duplicated Host is. On a loopback arrival
+    every loopback origin at every port is admitted. A refused exposed arrival is logged once per
+    client and arrival address pair.
     """
 
     def __init__(self, app: Callable[[Scope, Receive, Send], Awaitable[None]]) -> None:
@@ -332,10 +322,8 @@ class TrustBoundaryMiddleware:
         await self.app(scope, receive, send)
 
     def _origin_ok(self, scope: Mapping[str, Any]) -> bool:
-        """Whether this scope's Origin header, if any, is one :func:`origin_allowed` admits.
-
-        A duplicated Origin header is refused outright, the same way a duplicated Host is
-        (:func:`request_authority`), rather than resolved to either of its values.
+        """Whether this scope's Origin header, if any, is one :func:`origin_allowed` admits; a
+        duplicated Origin is refused.
         """
         values = _header_values(scope, b"origin")
         if len(values) > 1:

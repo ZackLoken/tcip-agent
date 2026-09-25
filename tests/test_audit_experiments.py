@@ -187,15 +187,22 @@ class TestAuditLogging:
 
 class TestExperiments:
     def setup_method(self):
+        import tcip_mcp.experiments as exp
+
         self.tmpdir = Path(tempfile.mkdtemp())
+        self._experiments_dir = exp.EXPERIMENTS_DIR
+        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
     def teardown_method(self):
+        import tcip_mcp.experiments as exp
+
+        # Restored here, not at each test's end, so a failing test cannot leave the next one
+        # reading this test's experiments.
+        exp.EXPERIMENTS_DIR = self._experiments_dir
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_create_experiment(self):
         import tcip_mcp.experiments as exp
-        original = exp.EXPERIMENTS_DIR
-        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
         result = exp.create_experiment("exp-001", {"model": "resnet50"})
         assert result["experiment_id"] == "exp-001"
@@ -208,23 +215,15 @@ class TestExperiments:
         assert ts.exists(exp.lineage_key("exp-001"))
         assert ts.exists(exp.artifacts_key("exp-001"))
 
-        exp.EXPERIMENTS_DIR = original
-
     def test_create_duplicate_experiment(self):
         import tcip_mcp.experiments as exp
-        original = exp.EXPERIMENTS_DIR
-        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
         exp.create_experiment("exp-001", {"model": "resnet50"})
         result = exp.create_experiment("exp-001", {"model": "resnet50"})
         assert "error" in result
 
-        exp.EXPERIMENTS_DIR = original
-
     def test_log_metrics(self):
         import tcip_mcp.experiments as exp
-        original = exp.EXPERIMENTS_DIR
-        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
         exp.create_experiment("exp-002", {})
         exp.log_metrics("exp-002", 0, {"loss": 1.5, "mAP50": 0.2})
@@ -235,12 +234,8 @@ class TestExperiments:
         assert rows[0]["epoch"] == 0
         assert rows[1]["mAP50"] == 0.5
 
-        exp.EXPERIMENTS_DIR = original
-
     def test_update_status(self):
         import tcip_mcp.experiments as exp
-        original = exp.EXPERIMENTS_DIR
-        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
         exp.create_experiment("exp-003", {})
         exp.update_status("exp-003", "running")
@@ -253,12 +248,8 @@ class TestExperiments:
         assert status["state"] == "completed"
         assert status["ended"] is not None
 
-        exp.EXPERIMENTS_DIR = original
-
     def test_record_artifact(self):
         import tcip_mcp.experiments as exp
-        original = exp.EXPERIMENTS_DIR
-        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
         exp.create_experiment("exp-004", {})
         exp.record_artifact("exp-004", "model_weights", "/path/to/model.pt")
@@ -267,12 +258,8 @@ class TestExperiments:
         assert "model_weights" in artifacts
         assert artifacts["model_weights"]["path"] == "/path/to/model.pt"
 
-        exp.EXPERIMENTS_DIR = original
-
     def test_get_experiment(self):
         import tcip_mcp.experiments as exp
-        original = exp.EXPERIMENTS_DIR
-        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
         exp.create_experiment("exp-005", {"backbone": "resnet50"})
         exp.log_metrics("exp-005", 0, {"loss": 1.0})
@@ -283,22 +270,14 @@ class TestExperiments:
         assert result["n_epochs"] == 1
         assert len(result["metrics"]) == 1
 
-        exp.EXPERIMENTS_DIR = original
-
     def test_get_experiment_not_found(self):
         import tcip_mcp.experiments as exp
-        original = exp.EXPERIMENTS_DIR
-        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
         result = exp.get_experiment("nonexistent")
         assert "error" in result
 
-        exp.EXPERIMENTS_DIR = original
-
     def test_list_experiments(self):
         import tcip_mcp.experiments as exp
-        original = exp.EXPERIMENTS_DIR
-        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
         exp.create_experiment("exp-a", {})
         exp.create_experiment("exp-b", {})
@@ -309,32 +288,26 @@ class TestExperiments:
         names = {e["experiment_id"] for e in listing}
         assert names == {"exp-a", "exp-b"}
 
-        exp.EXPERIMENTS_DIR = original
-
     def test_compare_experiments(self):
         import tcip_mcp.experiments as exp
-        original = exp.EXPERIMENTS_DIR
-        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
-        exp.create_experiment("exp-x", {"model_source": {"builder": "my_models:resnet50_det"}})
-        exp.create_experiment("exp-y", {"model_source": {"builder": "my_models:effb0_cls"}})
+        exp.create_experiment("exp-x", {"model_source": {"builder": "my_models:resnet50_det",
+                                                         "task": "detection"}})
+        exp.create_experiment("exp-y", {"model_source": {"builder": "my_models:effb0_cls",
+                                                         "task": "classification"}})
         exp.log_metrics("exp-x", 0, {"mAP50": 0.6})
         exp.log_metrics("exp-y", 0, {"mAP50": 0.7})
 
-        result = exp.compare_experiments(["exp-x", "exp-y"])
+        result = exp.compare_experiments(["exp-x", "exp-y"], stale_seconds=600.0)
         assert result["count"] == 2
         exps = {e["experiment_id"]: e for e in result["experiments"]}
         assert exps["exp-x"]["model"] == "my_models:resnet50_det"
         assert exps["exp-y"]["last_logged_metrics"]["mAP50"] == 0.7
 
-        exp.EXPERIMENTS_DIR = original
-
     # -- overwrite_config_if_pristine --------------------------
 
     def test_overwrite_config_if_pristine_rewrites_when_pristine(self):
         import tcip_mcp.experiments as exp
-        original = exp.EXPERIMENTS_DIR
-        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
         exp.create_experiment("exp-006", {"a": 1})
         result = exp.overwrite_config_if_pristine("exp-006", {"a": 2, "seed": 7})
@@ -342,12 +315,8 @@ class TestExperiments:
         config = ts.read(exp.config_key("exp-006"))
         assert config == {"a": 2, "seed": 7}
 
-        exp.EXPERIMENTS_DIR = original
-
     def test_overwrite_config_if_pristine_refuses_once_metrics_exist(self):
         import tcip_mcp.experiments as exp
-        original = exp.EXPERIMENTS_DIR
-        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
         exp.create_experiment("exp-007", {"a": 1})
         exp.log_metrics("exp-007", 0, {"loss": 1.0})
@@ -356,12 +325,8 @@ class TestExperiments:
         config = ts.read(exp.config_key("exp-007"))
         assert config == {"a": 1}  # untouched
 
-        exp.EXPERIMENTS_DIR = original
-
     def test_overwrite_config_if_pristine_refuses_when_terminal(self):
         import tcip_mcp.experiments as exp
-        original = exp.EXPERIMENTS_DIR
-        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
         exp.create_experiment("exp-008", {"a": 1})
         exp.update_status("exp-008", "running")
@@ -371,12 +336,8 @@ class TestExperiments:
         config = ts.read(exp.config_key("exp-008"))
         assert config == {"a": 1}
 
-        exp.EXPERIMENTS_DIR = original
-
     def test_log_metrics_stamps_the_status_record_before_its_append(self):
         import tcip_mcp.experiments as exp
-        original = exp.EXPERIMENTS_DIR
-        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
         exp.create_experiment("exp-009", {"a": 1})
         assert "metrics_logged" not in ts.read(exp.status_key("exp-009"))
@@ -384,16 +345,12 @@ class TestExperiments:
         exp.log_metrics("exp-009", 0, {"loss": 1.0})
         assert ts.read(exp.status_key("exp-009"))["metrics_logged"] is True
 
-        exp.EXPERIMENTS_DIR = original
-
     def test_overwrite_config_if_pristine_reads_the_marker_not_the_log(self):
         """The predicate now decides pristineness from the status record's own field, not by
         re-scanning the log: an experiment whose marker is set (with no rows at all, a state the
         real log_metrics can never produce alone, manufactured here to isolate what the
         predicate actually reads) still refuses."""
         import tcip_mcp.experiments as exp
-        original = exp.EXPERIMENTS_DIR
-        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
         exp.create_experiment("exp-010", {"a": 1})
         assert exp.read_metrics("exp-010") == []
@@ -408,12 +365,8 @@ class TestExperiments:
         config = ts.read(exp.config_key("exp-010"))
         assert config == {"a": 1}
 
-        exp.EXPERIMENTS_DIR = original
-
     def test_get_experiment_lineage(self):
         import tcip_mcp.experiments as exp
-        original = exp.EXPERIMENTS_DIR
-        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
         exp.create_experiment("exp-l", {"data": {"images_dir": "/data/images", "task": "detection"}},
                              data_source="/data/images")
@@ -423,8 +376,6 @@ class TestExperiments:
         assert result["lineage"]["data_source"] == "/data/images"
         assert result["lineage"]["predictions"] == "/preds/best"
         assert result["lineage"]["data_config"]["task"] == "detection"
-
-        exp.EXPERIMENTS_DIR = original
 
 
 # ── model registry replace-by-name is audited ──

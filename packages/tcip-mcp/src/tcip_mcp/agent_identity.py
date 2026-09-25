@@ -1,19 +1,15 @@
 """Which agent harness this MCP server process is serving, and the session it minted for it.
 
-A stdio MCP server runs one process per connected client, and the client declares what it is in
-the initialize handshake (``client_info``: a name and a version, such as ``claude-code 2.1.238``
-or ``codex-mcp-client 0.147.0``). This module keeps that declaration for the life of one server
-run, beside a session id the server mints itself, and projects the pair onto every record the
-process writes: the audit line, the statement records, and the headers of the one HTTP push the
-tools make. The in-app terminal's own session id, when the web backend passed it down through
+A stdio MCP server runs one process per connected client, and the client declares what it is in the
+initialize handshake (``client_info``: a name and a version, such as ``claude-code 2.1.238`` or
+``codex-mcp-client 0.147.0``). This module keeps that declaration for the life of one server run,
+beside a session id the server mints itself, and projects the pair onto every record the process
+writes: the audit line, the statement records, and the headers of the one HTTP push the tools make.
+The in-app terminal's own session id, when the web backend passed it down through
 ``TCIP_TERMINAL_SESSION``, rides along as a correlation.
 
-Every value here is a declaration by software, recorded as declared. Nothing verifies it,
-nothing refuses on it, and none of it says who the person at the keyboard was; that stays a
-declared name until authentication exists. What it does say, honestly, is which harness a record
-came in through in ordinary use and which records one session wrote. A process that never
-completed a handshake (the web backend importing the tools, a script, a test) has no identity,
-and its records carry none rather than a guessed one.
+Every value here is a declaration by software, recorded as declared; nothing verifies it or refuses
+on it. A process that never completed a handshake has no identity, and its records carry none.
 """
 
 from __future__ import annotations
@@ -101,11 +97,8 @@ _current: AgentIdentity | None = None
 def begin(client_name: str, client_version: str) -> AgentIdentity:
     """Record the handshake's declaration and mint this run's session id.
 
-    The holder is process-wide because the server runs on stdio, one connection per process, and
-    a record may be written from any thread of it (a tool body on a worker thread, the training
-    envelope on its own background thread). The first handshake of a run therefore holds for the
-    whole run: a record written by a thread that started under it is never re-attributed
-    midway. A later handshake in the same run has no meaning on stdio and is logged, not applied.
+    The first handshake of a run holds for the whole run; a later handshake in the same run is
+    logged, not applied.
     """
     global _current
     if _current is not None:
@@ -148,8 +141,7 @@ def audit_fields() -> dict[str, Any]:
 
 
 def statement_fields() -> dict[str, Any]:
-    """What a statement record carries: every field, ``None`` where nothing was declared, because
-    a statement's field set is fixed by its tuple and hashed by the confirmation."""
+    """What a statement record carries: every field, ``None`` where nothing was declared."""
     if _current is None:
         return {field: None for field in RECORD_FIELDS}
     return _current.fields()
@@ -168,9 +160,6 @@ def http_headers() -> dict[str, str]:
 def fields_from_headers(headers: Mapping[str, str]) -> dict[str, Any]:
     """The identity a request declared through :data:`HEADERS`, ``None`` per field not sent,
     decoded from the percent-encoding :func:`http_headers` applies.
-
-    Read by the backend. A header is a declaration by the sender like everything else here; the
-    backend records it as sent and never acts on it.
     """
     return {
         field: unquote(headers.get(header) or "") or None for field, header in HEADERS.items()
@@ -180,15 +169,9 @@ def fields_from_headers(headers: Mapping[str, str]) -> dict[str, Any]:
 async def record_connecting_client(
     ctx: ServerRequestContext[Any, Any], call_next: CallNext
 ) -> HandlerResult:
-    """Server middleware: take the client's declaration on the first message that carries it.
-
-    The session carries ``client_params`` from the end of ``initialize`` on. The first message
-    after that is ``notifications/initialized`` for a client that follows the protocol's ordering,
-    but the SDK serves a request that arrives before the notification (the spec says SHOULD NOT,
-    not MUST NOT), and Antigravity was observed to make its tool calls without the identity ever
-    being taken by a notification-only capture. So the capture is keyed on the declaration being
-    present and not yet taken, whatever the method, and is in place before any record is written.
-    A client that initialized without declaring itself leaves no identity.
+    """Server middleware: take the client's declaration on the first message that carries it,
+    whatever the method, before any record is written. A client that initialized without declaring
+    itself leaves no identity.
     """
     if _current is None and ctx.session.client_params is not None:
         info = ctx.session.client_params.client_info

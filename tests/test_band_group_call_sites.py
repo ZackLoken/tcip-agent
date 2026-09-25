@@ -128,7 +128,7 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
     manifest = write_band_group_manifest(images_dir, "cap", {"Green": band_a, "Red": band_b})
     band_b.unlink()  # the manifest now references a sibling that no longer exists
 
-    sample = Sample(source=str(manifest), ground_truth=str(tmp_path / "cap.json"),
+    sample = Sample(member="cap", source=str(manifest), ground_truth=str(tmp_path / "cap.json"),
                     group="g", side="train", confirmation_bucket="bud")
     with pytest.raises(BandGroupIncomplete):
         _band_count([sample])

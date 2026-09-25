@@ -19,7 +19,7 @@ def _wait_terminal(experiment_id: str, seconds: float = 120) -> dict:
     status: dict = {}
     while time.monotonic() < deadline:
         status = monitor_training(experiment_id)
-        if status.get("status") in ("completed", "failed", "cancelled"):
+        if status.get("status") in ("completed", "failed", "canceled"):
             return status
         time.sleep(0.5)
     pytest.fail(f"the training subprocess never reached a terminal state: {status}")

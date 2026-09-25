@@ -1,28 +1,20 @@
 """What a trait's delivered number means, recorded per project and confirmed by the breeder.
 
-``crops.yml`` gives a breeder's field criterion for each delivered phenotype, which is not
-something a model can realize on its own: which object, what visual call, and what a fraction is a
-fraction of are all unstated there. This module holds the per-project record that states those
-things, the one check a delivery door runs before it writes, and the confirmation writer the web
-backend calls.
+``crops.yml`` gives a breeder's field criterion for each delivered phenotype; which object, what
+visual call, and what a fraction is a fraction of are unstated there. This module holds the
+per-project record that states those things, the check a delivery door runs before it writes, and
+the confirmation writer.
 
-The record never copies a ``TraitSpec`` value as an operative one. Every consumer of
-``positive_value``, ``count_objective`` and the rest keeps reading the spec, unchanged. What
-the record stores is a snapshot of the fields the confirmation covered, read for one purpose:
-detecting that they moved since.
+The record never copies a ``TraitSpec`` value as an operative one. It stores a snapshot of the
+fields the confirmation covered, read to detect that they moved since.
 
-Two writers, two identities. :func:`state_operationalization` records what the agent and the
-breeder worked out and stamps the surface it came through; :func:`confirm_trait_operationalization`
-is called only by the web backend, from a route the breeder's own action posts. No MCP tool writes
-a confirmation field, and a statement write refuses a payload carrying one.
-
-Nothing here authenticates anybody. ``confirmed_by`` holds a name the request supplied, and the
-record is an ordinary file. What this buys is that a delivered number names the definition it rests
-on and the person recorded as confirming it, not that either one is verified.
+:func:`state_operationalization` records what the agent and the breeder worked out and stamps the
+surface it came through; :func:`confirm_trait_operationalization` records the breeder's
+confirmation. A statement write refuses a payload carrying a confirmation field. ``confirmed_by``
+holds a name the request supplied; nothing here authenticates it.
 
 Every refusal text below names the trait, the delivery kind, which half is missing and the
-primitive that fixes it, and none of them proposes a positive class, a crossing fraction or a
-mechanism: a suggested answer becomes the answer, and the meaning is the breeder's to give.
+primitive that fixes it.
 """
 
 from __future__ import annotations
@@ -140,11 +132,8 @@ is evidence of who the person was, and anyone writing the file directly can writ
 
 
 def constituting_fields(delivery_kind: str) -> tuple[str, ...]:
-    """The ``TraitSpec`` fields a confirmation of ``delivery_kind`` covers.
-
-    A pure function of the record's own key, called by the statement writer, the confirmation
-    writer and the precondition alike, so a stater cannot narrow the set and a reader cannot widen
-    it.
+    """The ``TraitSpec`` fields a confirmation of ``delivery_kind`` covers, a pure function of the
+    record's own key.
     """
     fields = _CONSTITUTING_FIELDS.get(delivery_kind)
     if fields is None:
@@ -158,11 +147,9 @@ def aggregate_delivery_kind(measurement_document: str) -> str:
     """The delivery kind a per-plant aggregate resting on ``measurement_document`` is recorded and
     confirmed under.
 
-    The three aggregate kinds rest on three different spec floors, and which one applies is decided
-    by the sidecar document the delivery's own records stated they rest on, never by the record's
-    reader and never by a caller-supplied task string. A document outside the set a per-plant
-    aggregate may rest on (``classifier_operating_point``, ``resolve_scale``, or an undeclared name)
-    raises rather than falling back to a kind the delivery would not rest on.
+    Decided by the sidecar document the delivery's own records stated they rest on. A document
+    outside the set a per-plant aggregate may rest on (``classifier_operating_point``,
+    ``resolve_scale``, or an undeclared name) raises.
     """
     if measurement_document not in _AGGREGATE_KIND_BY_DOCUMENT:
         raise ValueError(
@@ -177,11 +164,8 @@ def resolve_trait_for_phenotype(
 ) -> str:
     """The registered trait whose spec delivers ``delivered_phenotype``, for this project.
 
-    A per-plant CSV ships under a crop-vocabulary phenotype name, while the record that says what
-    that number means is keyed by the registry trait. The two namespaces are genuinely different: a
-    spec's own name need not be a vocabulary name, and the unit cross-check reads the vocabulary
-    name. This binds them by reading the specs' own ``delivers``, and refuses when no registered
-    trait delivers the phenotype or when more than one does.
+    Reads the specs' own ``delivers``, and refuses when no registered trait delivers the phenotype
+    or when more than one does.
     """
     from tcip_mcp.traits import load_trait_specs
 
@@ -219,9 +203,8 @@ _STATE_RELPATH = Path(".tcip") / "state"
 def operationalizations_scope(project_root: str | Path | None = None) -> Path:
     """Where a project's operationalization records live: ``<root>/.tcip/state``.
 
-    The one implementation of that placement, beside the trait specs the records reference.
-    ``project_root`` names the project explicitly, for a caller serving more than one project per
-    process; omitting it resolves against this process's pinned platform root.
+    ``project_root`` names the project explicitly; omitting it resolves against this process's
+    pinned platform root.
     """
     if project_root is not None:
         return Path(project_root) / _STATE_RELPATH
@@ -231,11 +214,7 @@ def operationalizations_scope(project_root: str | Path | None = None) -> Path:
 
 
 def operationalization_key(scope: str | Path, trait: str, delivery_kind: str) -> Key:
-    """One trait's record for one delivery kind.
-
-    ``cas``: the statement writer and the confirmation writer are two processes writing the same
-    record, so an unconditional write would drop whichever one landed first.
-    """
+    """One trait's record for one delivery kind, written compare-and-swap."""
     return Key(OPERATIONALIZATIONS_STORE, str(scope), (trait, delivery_kind))
 
 
@@ -250,11 +229,7 @@ class ResolvedOperationalization(NamedTuple):
 def resolve_trait_and_record(
     trait: str, delivery_kind: str, *, project_root: str | Path | None = None
 ) -> ResolvedOperationalization:
-    """The one way a door obtains a spec and its operationalization record.
-
-    Both come from one call so they cannot come from two different roots: the backend pins a
-    process-wide platform root at startup and repins it on project adoption, so a request naming
-    its own project can otherwise write a confirmation to one file and look for it in another.
+    """A spec and its operationalization record, resolved under one root.
 
     Raises ``TraitUnknownError`` when the trait is not registered for this project, and
     ``ValueError`` for an unknown delivery kind. The record's value is ``None`` when nothing is
@@ -280,8 +255,7 @@ class OperationalizationBasis:
 
     A door checks once, does its work, and checks again immediately before its first write, passing
     what the first check returned. The record's version token catches a restatement or a
-    withdrawal; the canonical constituting values catch a spec edit. Two keys in two stores cannot
-    be read atomically together on the file backend, so this is what closes the window instead.
+    withdrawal; the canonical constituting values catch a spec edit.
     """
 
     record_version: Version
@@ -292,11 +266,10 @@ class OperationalizationBasis:
 class OperationalizationCheck:
     """The precondition's answer: which failure state applies, its refusal, and its basis.
 
-    ``registry_problem`` is a separate refusal reason from the numbered states: a state-crossing
-    confirmation whose positive class the delivered dataset's registry no longer declares is not a
-    moved spec field (``superseded`` stays for that), and re-confirming does not clear it, since
-    nothing the breeder confirms changes the registry. It clears only once the registry declares
-    the class again, or the operationalization is restated against a dataset whose registry does.
+    ``registry_problem`` is a separate refusal reason from the numbered states, for a
+    state-crossing confirmation whose positive class the delivered dataset's registry no longer
+    declares. Re-confirming does not clear it; it clears only once the registry declares the class
+    again, or the operationalization is restated against a dataset whose registry does.
     """
 
     trait: str
@@ -327,11 +300,10 @@ class OperationalizationCheck:
 
 class OperationalizationRefused(ValueError):
     """A count-delivery core's own meaning-door refusal, carrying the failed
-    :class:`OperationalizationCheck` and no counts: a number with no confirmed meaning has nothing
-    counts-bearing to report. Raised from a core's own pre-check (before a bucket is touched) or
-    from a writer's post-gate re-check (a confirmation withdrawn, or a spec field moved, between
-    the two), never from the delivery gate itself, which carries its own refusal
-    (``resolution.DeliveryRefused``)."""
+    :class:`OperationalizationCheck` and no counts. Raised from a core's own pre-check (before a
+    bucket is touched) or from a writer's post-gate re-check (a confirmation withdrawn, or a spec
+    field moved, between the two).
+    """
 
     def __init__(self, check: "OperationalizationCheck") -> None:
         super().__init__(check.message)
@@ -351,11 +323,7 @@ def _live_constituting(spec: TraitSpec, delivery_kind: str) -> dict[str, Any]:
 def _moved_fields(
     spec: TraitSpec, record: Mapping[str, Any], delivery_kind: str
 ) -> tuple[dict[str, Any], ...]:
-    """Every constituting field whose live value differs from the one the confirmation covered.
-
-    The one comparison behind both failure state 3 and the edit-time supersession signal, so the
-    refusal and the convenience report cannot disagree about what moved.
-    """
+    """Every constituting field whose live value differs from the one the confirmation covered."""
     confirmed = record.get("confirmed_fields") or {}
     live = _live_constituting(spec, delivery_kind)
     moved = []
@@ -380,31 +348,21 @@ def check_operationalization(
     """Whether this trait's delivered number has a confirmed meaning, and what to say if not.
 
     The six failure states are checked in the order they are numbered and the first one reports
-    alone, because a number with no defined meaning has nothing for a later check to test. This
-    answers whether there is a defined quantity at all; ``check_delivery_gate`` answers whether the
-    quantity's error is characterized against a reference. The two refusals are never blurred.
+    alone. ``check_delivery_gate`` separately answers whether the quantity's error is characterized
+    against a reference.
 
     ``delivered_phenotype``, ``value_keys`` and ``counted_subjects`` are what a door knows about
     the file it is about to write, and each is checked only where the delivered artifact carries
-    it. ``counted_subjects`` maps a prediction bucket to the object classes its detections are
-    of: a classified bucket's own scope subject for a classified stamp, its recorded map's keys
-    otherwise (never the map's keys for a classified bucket, whose keys are attribute values, not
-    object classes). ``registry``
-    is the delivered dataset's subject registry, checked only for a ``state_crossing_dates`` delivery:
-    when given, a registry that no longer declares the confirmed positive class for the confirmed
-    measured subject is reported through ``registry_problem``, never folded into ``superseded``,
-    since what changed is the definition's binding to the dataset, not a spec field the breeder's
-    confirmation covers, and re-confirming (which only re-stamps the live spec's constituting
-    values) cannot clear it. The door refuses exactly as it refuses any other unconfirmed statement.
-    A door with no registry to give (the count and aggregate doors, which never deliver a crossing
-    kind) passes ``None``, and every other delivery kind ignores it regardless. ``basis`` is what an
-    earlier call returned: pass it on the re-check immediately before the first write, and a record
-    or spec that moved in between refuses with state 6 rather than delivering against a confirmation
-    nobody gave.
+    it. ``counted_subjects`` maps a prediction bucket to the object classes its detections are of:
+    a classified bucket's own scope subject for a classified stamp, its recorded map's keys
+    otherwise. ``registry`` is the delivered dataset's subject registry, checked only for a
+    ``state_crossing_dates`` delivery: when given, a registry that no longer declares the confirmed
+    positive class for the confirmed measured subject is reported through ``registry_problem``,
+    never folded into ``superseded``. ``None`` skips that check, and every other delivery kind
+    ignores it. ``basis`` is what an earlier call returned: pass it on the re-check immediately
+    before the first write, and a record or spec that moved in between refuses with state 6.
 
-    An acknowledgement is deliberately not a parameter here. An acknowledged provisional number
-    whose meaning is stated is honest and ships stamped false; an acknowledged number whose meaning
-    is unstated is not a number.
+    Takes no acknowledgment: an acknowledged number whose meaning is unstated still refuses.
     """
     trait = spec.name
     stated = record.value
@@ -708,13 +666,7 @@ def _state_6_text(
 
 
 def record_seen_hash(record: Mapping[str, Any]) -> str:
-    """A content hash over every field a statement owns, in canonical form.
-
-    The confirmation carries this back, so a breeder's click confirms the record they read rather
-    than whatever an agent rewrote while the card was open. It covers all eight statement fields:
-    leaving the statement text alone while changing the measured subject or the value keys would
-    otherwise harvest a click for content nobody saw.
-    """
+    """A content hash over all eight statement fields, in canonical form."""
     return content_hash(record, STATEMENT_FIELDS)
 
 
@@ -745,23 +697,18 @@ def state_operationalization(
     """Record what a trait's delivered number means for one delivery kind, unconfirmed.
 
     Refuses with :class:`~tcip_mcp.traits.TraitSpecUnconfirmed` when this trait's own trait-spec
-    statement, the breeder's account of what the trait itself measures, is not both confirmed and
-    current: the breeder confirms what a trait is before the agent states what its delivered
-    number means. Checked right after the spec and record are resolved and before any
-    delivery-kind-specific validation, so a caller sees the trait-spec door before that.
+    statement is not both confirmed and current, checked right after the spec and record are
+    resolved and before any delivery-kind-specific validation.
 
-    The writer behind the ``state_trait_operationalization`` tool, and the only path that writes a
-    statement. It stamps ``stated_by`` and ``stated_at`` itself and refuses any further payload
-    key, naming the confirmation fields when one of those is what arrived: a writer that could fill
-    a confirmation field would make honest attribution depend on the agent choosing not to.
+    Stamps ``stated_by`` and ``stated_at`` itself and refuses any further payload key, naming the
+    confirmation fields when one of those is what arrived.
 
-    ``registry`` is an explicit keyword, never a payload key: a ``state_crossing_dates`` statement
-    names a positive class, which is not a mechanism a model can realize on its own unless the
-    delivered dataset's registry actually declares that class for the measured subject, so it is
-    required for that kind and refused as missing by name when absent. Every other kind ignores it.
+    ``registry`` is an explicit keyword, never a payload key: required for a
+    ``state_crossing_dates`` statement, whose positive class the delivered dataset's registry must
+    declare for the measured subject, and refused as missing by name when absent. Every other kind
+    ignores it.
 
-    Restating clears the confirmation. A changed definition is unconfirmed by construction, and the
-    breeder confirms the new one on the surface where the confirming act happens.
+    Restating clears the confirmation.
     """
     if payload:
         offered = sorted(payload)
@@ -862,12 +809,10 @@ def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> S
 
     ``dataset_root`` given: that dataset's own registry. Empty: the project root's own registry,
     served when ``project_root`` is unambiguously the one dataset the project uses (its own
-    ``subjects.json`` exists, and the project's dataset registry names at most one dataset), the
-    common single-dataset project layout. Otherwise refuses by name, naming the registered
-    datasets and the ``dataset_root`` parameter, rather than guess which dataset a multi-dataset
-    project means.
+    ``subjects.json`` exists, and the project's dataset registry names at most one dataset).
+    Otherwise refuses by name, naming the registered datasets and the ``dataset_root`` parameter.
     """
-    from tcip_mcp.subject_registry import read_registry, retired_document
+    from tcip_mcp.subject_registry import read_registry
     from tcip_mcp.dataset_layout import subjects_path
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
@@ -875,13 +820,6 @@ def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> S
         try:
             return read_registry(subjects_path(dataset_root))
         except FileNotFoundError as exc:
-            stale = retired_document(dataset_root)
-            if stale is not None:
-                raise ValueError(
-                    f"dataset_root {dataset_root!r} carries only the retired registry at {stale}; "
-                    "rename it to subjects.json by hand before a statement's classes can be "
-                    "checked against it."
-                ) from exc
             raise ValueError(
                 f"dataset_root {dataset_root!r} carries no subject registry of its own. Write one "
                 "(write_subject_registry) before a statement's classes can be checked against it."
@@ -889,7 +827,7 @@ def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> S
 
     registered = read_datasets(project_root)
     # The resolved root, never the registry's own stored spelling ("." for the project's own tree).
-    roots = [str(dataset_entry_path(project_root, d)) for d in registered if d.get("path")]
+    roots = [str(dataset_entry_path(project_root, d)) for d in registered]
     if len(registered) > 1:
         raise ValueError(
             f"project {project_root!r} registers {len(registered)} datasets {roots}, so which one "
@@ -898,13 +836,6 @@ def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> S
     try:
         return read_registry(subjects_path(project_root))
     except FileNotFoundError as exc:
-        stale = retired_document(project_root)
-        if stale is not None:
-            raise ValueError(
-                f"project root {project_root!r} carries only the retired registry at {stale}; "
-                "rename it to subjects.json by hand before a statement's classes can be "
-                "checked against it."
-            ) from exc
         raise ValueError(
             f"project root {project_root!r} carries no subject registry of its own (registered "
             f"datasets: {roots}). Pass dataset_root naming the dataset this statement's classes "
@@ -940,11 +871,9 @@ def confirm_trait_operationalization(
 ) -> dict[str, Any]:
     """Record that the breeder confirmed what is on file, or withdraw a confirmation.
 
-    Exposed by no MCP tool and called only by the web backend, from a route the breeder's own GUI
-    action posts. ``record_seen`` is :func:`record_seen_hash` over the record the surface rendered,
-    compared against what is on file now, so a click cannot land on text the breeder never read.
-    ``identity_from_request`` says whether the confirming request carried a name or the backend
-    fell back to its process environment; the caller passes it because only the caller observed it.
+    ``record_seen`` is :func:`record_seen_hash` over the record the surface rendered, compared
+    against what is on file now. ``identity_from_request`` says whether the confirming request
+    carried a name or the backend fell back to its process environment.
 
     ``confirmed=False`` withdraws, clearing exactly the four confirmation fields and leaving the
     statement intact.
@@ -992,10 +921,7 @@ def superseded_confirmations(
     project_root: str | Path, trait: str, *, spec: TraitSpec | None = None
 ) -> list[dict[str, Any]]:
     """Every confirmed record of ``trait`` a spec edit has just moved out from under, and how.
-
-    A convenience for the spec writer's return value, never enforcement: the precondition's
-    read-time comparison is the one place a superseded confirmation stops a delivery. This exists
-    so the agent learns at edit time rather than at the next refusal.
+    Reports only; the precondition's read-time comparison is what stops a delivery.
     """
     scope = operationalizations_scope(project_root)
     superseded: list[dict[str, Any]] = []

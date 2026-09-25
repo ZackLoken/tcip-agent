@@ -28,14 +28,14 @@ describe("subjectColor collision-free registry slots", () => {
     expect(derivedSubjectColor("fruit")).toBe(derivedSubjectColor("leaf"));
   });
 
-  it("gives two colliding names in one registry two different colours", () => {
+  it("gives two colliding names in one registry two different colors", () => {
     setSubjectColorRegistry(["fruit", "leaf"]);
     expect(subjectColor("fruit")).not.toBe(subjectColor("leaf"));
     expect(SUBJECT_COLORS).toContain(subjectColor("fruit"));
     expect(SUBJECT_COLORS).toContain(subjectColor("leaf"));
   });
 
-  it("leaves a lone subject on its own hash colour", () => {
+  it("leaves a lone subject on its own hash color", () => {
     setSubjectColorRegistry(["solo"]);
     expect(subjectColor("solo")).toBe(derivedSubjectColor("solo"));
   });

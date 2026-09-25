@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-// Review symbology colours (color = outcome; line style = source). User-customisable and
+// Review symbology colors (color = outcome; line style = source). User-customizable and
 // persisted, so a reviewer can retune TP/FP/FN/under-review to their imagery. Shared here so the
 // canvas symbology and the status-bar counts read one palette and stay in lock-step.
 export interface ReviewColors {
@@ -34,13 +34,13 @@ function saveReviewColors(colors: ReviewColors): void {
   try {
     localStorage.setItem(REVIEW_COLORS_KEY, JSON.stringify(colors));
   } catch {
-    /* storage disabled, colours just won't persist */
+    /* storage disabled, colors just won't persist */
   }
   window.dispatchEvent(new CustomEvent<ReviewColors>(REVIEW_COLORS_EVENT, { detail: colors }));
 }
 
 /** Shared review palette. Every component using this hook re-renders when the palette changes
- *  (via a same-tab custom event), so recolouring TP in the legend also recolours the TP count. */
+ *  (via a same-tab custom event), so recoloring TP in the legend also recolors the TP count. */
 export function useReviewColors(): [
   ReviewColors,
   (next: ReviewColors | ((prev: ReviewColors) => ReviewColors)) => void,

@@ -1,15 +1,8 @@
 """What a value must be before a store will carry it, and how a producer says it is not.
 
-The canonical JSON codecs refuse two things rather than spelling them silently: an object
-JSON has no type for, and a number that is not finite. Both refusals happen at encode time,
-where the message can name only the store and the key. A payload assembled from a caller's
-own dict needs the refusal earlier and more precisely, naming the field inside it, which is
-what :func:`check_json_value` is for.
-
-:func:`stored_number` is the other half. A non-finite number is real information (a diverged
-loss, a trial that never produced a metric, an undefined correlation), so the record keeps
-it as a JSON null beside a sibling field naming the state, rather than losing it to a
-substituted zero or a magic sentinel a later reader cannot tell from a measurement.
+:func:`check_json_value` refuses, naming the field, an object JSON has no type for or a non-finite
+number, before the canonical codec's own encode-time refusal. :func:`stored_number` keeps a
+non-finite number as a JSON null beside a sibling field naming the state.
 """
 
 from __future__ import annotations
@@ -38,10 +31,8 @@ def non_finite_state(value: float) -> str | None:
 def stored_number(field: str, value: Any) -> dict[str, Any]:
     """One numeric field as a record carries it, with a state field when it is not a number.
 
-    A finite number, or None, is carried as itself: None already means "not measured" and
-    needs no further explanation. A non-finite one becomes null plus ``<field>_state``, so a
-    reader sees a value it can compare and, beside it, the reason there is nothing to
-    compare.
+    A finite number, or None, is carried as itself. A non-finite one becomes null plus
+    ``<field>_state``.
     """
     if isinstance(value, float) and (state := non_finite_state(value)) is not None:
         return {field: None, f"{field}{NOT_FINITE_SUFFIX}": state}
@@ -74,11 +65,8 @@ def finite_or_none(value: Any) -> Any:
 def check_json_value(value: Any, *, path: str = "value") -> None:
     """Refuse a payload the canonical codec cannot encode, naming the field and the type.
 
-    Raises ``TypeError`` for an object JSON has no type for and ``ValueError`` for a
-    non-finite number, the same two exceptions ``json.dumps`` itself raises, so a caller
-    already handling either is unaffected and only the message improves. ``path`` names the
-    position inside the payload, so the caller is told which field to fix rather than that
-    something somewhere did not encode.
+    Raises ``TypeError`` for an object JSON has no type for and ``ValueError`` for a non-finite
+    number. ``path`` names the position inside the payload.
     """
     if isinstance(value, Mapping):
         for key, item in value.items():

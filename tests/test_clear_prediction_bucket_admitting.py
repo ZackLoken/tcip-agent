@@ -100,7 +100,7 @@ def test_admitting_round_trip_clears_and_admits_republication(tmp_path, monkeypa
     assert find_prediction(live_reference) is None
 
     # project_roots names the cleared bucket's own path, once the dataset is registered.
-    from tcip_mcp.store_catalogue import project_roots
+    from tcip_mcp.store_catalog import project_roots
     from tcip_mcp.tools.project_tools import register_dataset
 
     registered = register_dataset(str(dataset_root), "black_locust")

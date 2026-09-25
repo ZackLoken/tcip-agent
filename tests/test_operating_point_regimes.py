@@ -1,6 +1,6 @@
 """What a prediction bucket's stamp records, and where each number's provenance comes from.
 
-Behaviour, not surface: the agent's export door and the GUI's own inference worker record the same
+Behavior, not surface: the agent's export door and the GUI's own inference worker record the same
 facts about what produced a bucket's counts, a bucket's stamps are never read as image records, and
 a detection cap carries the provenance of whoever actually produced it.
 """

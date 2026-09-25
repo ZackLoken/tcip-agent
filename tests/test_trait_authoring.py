@@ -12,6 +12,8 @@ authored the same way as any other, through this module's ``pytestmark`` request
 
 from __future__ import annotations
 
+from tests._trait_fixtures import complete_spec_record
+
 from pathlib import Path
 
 import pytest
@@ -35,14 +37,13 @@ from tests._population import mapped_plants
 # ── config-driven authoring, crops.yml-cross-checked ────────────────────────
 
 def _write_spec(directory: Path, name: str, spec: dict) -> None:
-    """Write a raw trait-spec record, stamped at the current schema ceiling: most call sites here
-    exercise validation the config parser itself performs, which needs a stamped record on read
-    to reach at all, not the version-conform rail (:func:`traits.trait_spec_unconformed`)."""
+    """Write a raw trait-spec record, stamped at the current schema ceiling, so each call site
+    exercises the validation the config parser itself performs."""
     import tcip_store as ts
 
     ts.replace(
         traits.trait_spec_key(directory, name),
-        {"name": name, "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION, **spec},
+        complete_spec_record({"name": name, "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION, **spec}),
         expect=ts.Version.ABSENT,
     )
 
@@ -62,13 +63,15 @@ def test_config_spec_off_vocab_delivers_is_rejected(tmp_path: Path):
     # A fabricated phenotype (not in crops.yml) must not register: the anti-fabrication anchor.
     specs_dir = tmp_path / "trait_specs"
     _write_spec(specs_dir, "unicorn", {"delivers": ["unicorn_horn_length"]})
-    assert load_trait_specs(specs_dir=specs_dir) == []
+    with pytest.raises(ValueError, match="unicorn.json"):
+        load_trait_specs(specs_dir=specs_dir)
 
 
 def test_config_spec_empty_delivers_is_rejected(tmp_path: Path):
     specs_dir = tmp_path / "trait_specs"
-    _write_spec(specs_dir, "vague", {"count_objective": "presence"})  # no delivers
-    assert load_trait_specs(specs_dir=specs_dir) == []
+    _write_spec(specs_dir, "vague", {"count_objective": "presence"})  # delivers left empty
+    with pytest.raises(ValueError, match="vague.json"):
+        load_trait_specs(specs_dir=specs_dir)
 
 
 def test_load_trait_specs_with_errors_names_the_broken_file_and_why(tmp_path: Path):
@@ -112,7 +115,8 @@ def test_load_trait_specs_with_errors_reports_malformed_json(tmp_path: Path):
 def test_config_spec_unknown_field_is_rejected(tmp_path: Path):
     specs_dir = tmp_path / "trait_specs"
     _write_spec(specs_dir, "typo", {"delivers": ["leaf_length"], "not_a_field": 3})
-    assert load_trait_specs(specs_dir=specs_dir) == []
+    with pytest.raises(ValueError, match="not_a_field"):
+        load_trait_specs(specs_dir=specs_dir)
 
 
 def test_config_spec_stamped_with_schema_version_still_loads(tmp_path: Path):
@@ -122,26 +126,6 @@ def test_config_spec_stamped_with_schema_version_still_loads(tmp_path: Path):
     specs = load_trait_specs(specs_dir=specs_dir)
     assert [s.name for s in specs] == ["leaf"]
     assert specs[0].delivers == ("leaf_length",)
-
-
-def test_config_spec_unstamped_is_reported_unconformed(tmp_path: Path):
-    """No schema_version key names a record that predates the subject-registry rename; the
-    reason names the field rename, the stamp a hand-authored file needs, and
-    author_trait_spec as the door that restates a stored record. Coverage, not a guard:
-    every fixture in this module already carries the field rename."""
-    import tcip_store as ts
-
-    specs_dir = tmp_path / "trait_specs"
-    ts.replace(
-        traits.trait_spec_key(specs_dir, "leaf"),
-        {"name": "leaf", "delivers": ["leaf_length"]},
-        expect=ts.Version.ABSENT,
-    )
-    specs, errors = load_trait_specs_with_errors(specs_dir=specs_dir)
-    assert specs == []
-    assert errors[0]["kind"] == "unconformed"
-    assert "schema_version" in errors[0]["reason"]
-    assert "author_trait_spec" in errors[0]["reason"]
 
 
 # ── count_objective is validated against the registry, not a hardcoded whitelist ─
@@ -271,7 +255,8 @@ def test_write_trait_spec_fields_refuses_a_spec_still_carrying_the_deleted_prove
     loader, the same refusal any other unrecognized field gets: no special-cased tolerance for it."""
     specs_dir = tmp_path / "trait_specs"
     _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"], "provenance": ["name: vocabulary_derived"]})
-    assert load_trait_specs(specs_dir=specs_dir) == []
+    with pytest.raises(ValueError, match="provenance"):
+        load_trait_specs(specs_dir=specs_dir)
     specs, errors = load_trait_specs_with_errors(specs_dir=specs_dir)
     assert specs == []
     assert "provenance" in errors[0]["reason"]
@@ -332,7 +317,7 @@ def test_a_spec_write_that_lost_the_race_is_refused_rather_than_silently_winning
     traits.write_trait_spec_fields("leaf", {"count_bias_tolerance_frac": 1.0}, specs_dir=specs_dir)
 
     with pytest.raises(ts.VersionConflict):
-        ts.replace(key, {"name": "leaf", "delivers": ["leaf_length"]}, expect=stale)
+        ts.replace(key, complete_spec_record({"name": "leaf", "delivers": ["leaf_length"]}), expect=stale)
 
     assert load_trait_specs(specs_dir=specs_dir)[0].count_bias_tolerance_frac == 1.0
 
@@ -353,7 +338,7 @@ def test_get_trait_load_trait_specs_and_registered_traits_agree_on_a_record_conf
     data = {k: (list(v) if isinstance(v, tuple) else v)
             for k, v in dataclasses.asdict(BUD_OPENING).items()}
     data["schema_version"] = traits.TRAIT_SPEC_SCHEMA_VERSION
-    ts.replace(traits.trait_spec_key(specs_dir, "bud_opening"), data, expect=ts.Version.ABSENT)
+    ts.replace(traits.trait_spec_key(specs_dir, "bud_opening"), complete_spec_record(data), expect=ts.Version.ABSENT)
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
 
     assert get_trait("bud_opening") == BUD_OPENING
@@ -371,7 +356,7 @@ def test_bud_opening_config_semantics_match_reference_fixture():
     assert t.localization_tolerance_frac == 0.5
     assert t.sliver_frac == 0.5
     assert t.majority_milestone == "95per"
-    assert t.majority_provisional is True
+    assert t.crossing_unconfirmed is True
     assert t.count_bias_tolerance_frac is None  # not yet authored by the domain expert
     assert set(t.delivers) == {"leaf_out_05per_date", "leaf_out_50per_date"}
 

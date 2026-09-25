@@ -5,7 +5,7 @@ import {
   bandSetSignature,
   compositeParams,
   defaultBandSelection,
-  isPlainColourFrame,
+  isPlainColorFrame,
   showsBandPicker,
 } from "@/lib/bandSelection";
 
@@ -29,23 +29,23 @@ const FOUR_SPECTRAL: ImageBandInfo[] = [
   { name: "NIR", wavelength_nm: 840, dtype: "uint16", min: 0, max: 65535 },
 ];
 
-describe("isPlainColourFrame", () => {
-  it("recognises an 8-bit RGBA frame, which has no band choice to make", () => {
-    expect(isPlainColourFrame(bandsResponse(RGBA))).toBe(true);
+describe("isPlainColorFrame", () => {
+  it("recognizes an 8-bit RGBA frame, which has no band choice to make", () => {
+    expect(isPlainColorFrame(bandsResponse(RGBA))).toBe(true);
   });
 
   it("leaves a four-band spectral capture to the picker", () => {
-    expect(isPlainColourFrame(bandsResponse(FOUR_SPECTRAL))).toBe(false);
+    expect(isPlainColorFrame(bandsResponse(FOUR_SPECTRAL))).toBe(false);
   });
 
   it("decides on what the file says, not on the band count", () => {
-    const unlabelled = RGBA.map(({ interpretation: _drop, ...band }) => band);
-    expect(isPlainColourFrame(bandsResponse(unlabelled))).toBe(false);
+    const unlabeled = RGBA.map(({ interpretation: _drop, ...band }) => band);
+    expect(isPlainColorFrame(bandsResponse(unlabeled))).toBe(false);
   });
 
-  it("does not take a four-band 16-bit capture for a colour frame", () => {
+  it("does not take a four-band 16-bit capture for a color frame", () => {
     const deep = RGBA.map((band) => ({ ...band, dtype: "uint16", max: 65535 }));
-    expect(isPlainColourFrame(bandsResponse(deep))).toBe(false);
+    expect(isPlainColorFrame(bandsResponse(deep))).toBe(false);
   });
 });
 
@@ -98,7 +98,7 @@ describe("compositeParams", () => {
     });
   });
 
-  it("carries nothing for a plain colour frame, even with a selection in hand", () => {
+  it("carries nothing for a plain color frame, even with a selection in hand", () => {
     const rgbaSelection = { r: "red", g: "green", b: "blue", stretch: "minmax" as const };
     expect(compositeParams(bandsResponse(RGBA), rgbaSelection)).toEqual({});
   });
@@ -121,7 +121,7 @@ describe("showsBandPicker", () => {
     expect(showsBandPicker(bandsResponse(FOUR_SPECTRAL), selection)).toBe(true);
   });
 
-  it("hides for a plain colour frame", () => {
+  it("hides for a plain color frame", () => {
     const rgbaSelection = { r: "red", g: "green", b: "blue", stretch: "minmax" as const };
     expect(showsBandPicker(bandsResponse(RGBA), rgbaSelection)).toBe(false);
   });

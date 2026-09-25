@@ -5,14 +5,14 @@ promotion that merges into an existing stamp is held to, through ``update_sideca
 rather than a second check in this route. A bucket a producer already stamped carries its pair
 forward through the promotion untouched.
 
-A stamp lacking the pair, or one that will not decode, predates the writer rail: no live
-producer mints either shape, and ``/api/review/action`` itself now refuses to record a fresh
-verdict against one (``_review_scope``'s own strict read). Its verdict is therefore seeded
-straight through the review store, the same posture ``test_repair_classified_predictions.py``
-takes for a bucket the rail would otherwise refuse to build.
+A stamp that will not decode is one no live producer mints, and ``/api/review/action`` itself
+refuses to record a fresh verdict against one (``_review_scope``'s own strict read), so its
+verdict is seeded straight through the review store.
 """
 
 from __future__ import annotations
+
+from tests._trait_fixtures import complete_spec_record
 
 import dataclasses
 from pathlib import Path
@@ -47,7 +47,7 @@ TRAIT = TraitSpec(
     milestone_fractions=(0.05, 0.50, 0.95),
     milestone_on="positive_fraction",
     majority_milestone="95per",
-    majority_provisional=True,
+    crossing_unconfirmed=True,
     phenology_prefix="bud",
     majority_label="opening",
     sliver_policy="class_avg_size",
@@ -67,7 +67,7 @@ def seed_bud_trait_spec(tmp_path: Path, _pin_platform_root):
     data = {k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(TRAIT).items()}
     data["schema_version"] = traits.TRAIT_SPEC_SCHEMA_VERSION
     specs_dir = tmp_path / ".tcip" / "state" / "trait_specs"
-    ts.replace(traits.trait_spec_key(specs_dir, SUBJECT), data, expect=ts.Version.ABSENT)
+    ts.replace(traits.trait_spec_key(specs_dir, SUBJECT), complete_spec_record(data), expect=ts.Version.ABSENT)
 
 
 def _image(dataset_root: Path) -> Path:
@@ -139,27 +139,6 @@ def _damage_stamp(bucket: Path) -> None:
                     (b"{not json", key.store, encode_parts(key.parts)))
     finally:
         conn.close()
-
-
-@pytest.mark.usefixtures("seed_bud_trait_spec")
-def test_promotion_over_a_neither_key_stamp_refuses_naming_the_repair_command(
-    client: TestClient, tmp_path: Path,
-) -> None:
-    dataset_root = tmp_path / "data"
-    _image(dataset_root)
-    _stage(dataset_root)
-    bucket = Path(prediction_dir(dataset_root, "detector", DATE))
-    neither_key = {k: v for k, v in _tiled_stamp().items() if k not in ("subject", "attribute")}
-    _write_stamp(bucket, neither_key)
-    _seed_accepted_verdict(dataset_root, bucket)
-
-    resp = client.post("/api/review/validate_reference", json={
-        "dataset_root": str(dataset_root), "trait": SUBJECT, "pred_dir": str(bucket),
-        "subject": SUBJECT})
-
-    assert resp.status_code == 400
-    assert "repair-classified-predictions" in resp.json()["detail"]
-    assert "subject" not in (read_operating_point_sidecar(bucket) or {})
 
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")

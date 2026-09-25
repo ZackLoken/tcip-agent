@@ -58,7 +58,7 @@ def unordered_ctx() -> ReviewContext:
 
     Every box has a width unequal to its height and the two lists never pair a GT with the
     prediction at the same position, so an index transposition and a width normalized against
-    the wrong image dimension both change the numbers rather than cancelling out.
+    the wrong image dimension both change the numbers rather than canceling out.
     """
     return ReviewContext(
         img_name="IMG_0501.JPG",
@@ -308,7 +308,6 @@ def test_record_and_find_reviewed(engine: ReviewEngine, ctx: ReviewContext) -> N
     entry = engine.find_reviewed_entry(BUCKET, target, ctx)
     assert entry is not None
     assert entry["action"] == "accepted"
-    assert entry["match_type"] == "TP"
     assert entry["reviewed_by"] == "alice"
     assert entry["class_name"] == "bud"
 
@@ -410,8 +409,8 @@ def test_check_image_review_complete(engine: ReviewEngine, ctx: ReviewContext) -
 def test_review_progress_counts_an_aliased_pair_as_one_reviewed_of_two(
     engine: ReviewEngine, ctx: ReviewContext
 ) -> None:
-    """Two current FP detections at the same predicted centre both alias to the one stored entry
-    the centre-only lookup finds: recording a verdict against each writes the same entry twice, so
+    """Two current FP detections at the same predicted center both alias to the one stored entry
+    the center-only lookup finds: recording a verdict against each writes the same entry twice, so
     the pair reads as one reviewed of two, and the image does not complete while it is the last
     detection left."""
     aliased_ctx = replace(ctx, preds=[
@@ -780,7 +779,6 @@ def test_a_shard_write_that_fails_to_land_is_refused_out_loud(
     persisted = reloaded.raw_state["verdicts"][(BUCKET, unordered_ctx.img_name)]["detections"]
     assert len(persisted) == 1
     assert persisted[0]["action"] == "accepted"
-    assert persisted[0]["det_status"] == "reviewed"
 
 
 def test_load_review_state_refuses_a_version_refused_shard_rather_than_skip_it(

@@ -1,26 +1,12 @@
 """Moving a root's existing record and log files into a database, atomically or not at all.
 
-The file layout came first, so the first database a root ever sees must be built from what is
-already on disk rather than beside it. Adoption reads every file a store's locator claims,
-decodes it through that store's own codec, and publishes a database holding exactly those
-entries, stamped as already exported so a file-reading tool is current the moment adoption
-returns.
-
-Two rules make it safe to run against live state. It refuses before it writes: a file that
-will not decode, or one whose owning store cannot be told apart from another's, stops the whole
-root. And it publishes exclusively: the per-root transition lock is held from before the
-preflight through the install, and the built database is installed with a no-clobber primitive,
-so a crash leaves temp artifacts rather than a half-loaded database.
-
-Which entries a store owns in a root is the one thing a locator cannot answer on its own,
-because locator shapes collide: thirteen stores place a single json document under
-``.tcip/state``. That inventory is :mod:`tcip_store.layout_claims`, the same claims the conform
-rail refuses on, so the files a rail calls unconformed are exactly the files a plan takes in.
-
-A root that already holds a database is not finished with adoption. A store whose files arrived
-after that database was built is a store the database has never held, and this module loads
-exactly those, in one transaction under the same lock, leaving every store the database already
-carries alone.
+Adoption reads every file a store's locator claims (:mod:`tcip_store.layout_claims`), decodes it
+through that store's own codec, and publishes a database holding exactly those entries, stamped as
+already exported. A file that will not decode, or one whose owning store cannot be told apart from
+another's, refuses the whole root before anything is written. The per-root transition lock is held
+from before the preflight through the install, and the built database is installed with a
+no-clobber primitive. A root that already holds a database is supplemented only with the stores it
+has never held.
 """
 
 from __future__ import annotations
@@ -95,12 +81,9 @@ class AdoptionResult:
 def plan_root(root: str, layout: str) -> AdoptionPlan:
     """Which store owns each record or log file under ``root``, or a refusal naming the tie.
 
-    The candidate set and the matching are the conform rail's own, so a file the rail refuses
-    is a file this plans. Among the stores claiming one file, the one whose template says the
-    most about it wins, and two saying equally much is a refusal rather than a coin toss. A
-    file whose bytes state their own key (a shard whose filename had a separator sanitized out
-    of it) is held under the key the bytes state, through the same recovery hook enumeration
-    uses, so adoption and ``keys`` cannot disagree.
+    Among the stores claiming one file, the one whose template says the most about it wins, and two
+    saying equally much refuses. A file whose bytes state their own key (a shard whose filename had
+    a separator sanitized out of it) is held under the key the bytes state.
     """
     directory = require_absolute_root(root)
     if not directory.is_dir():
@@ -134,12 +117,8 @@ def plan_root(root: str, layout: str) -> AdoptionPlan:
 def _refuse_ambiguous(
     root: str, layout: str, pending: tuple[PlanEntry, ...], held: set[str]
 ) -> None:
-    """Refuse to take in a file whose claimants this database cannot be read to agree about.
-
-    A directory serves whatever stores a caller roots there, so a path can be a legal entry of
-    two stores under two layouts. Where the database holds state for one of them and none for
-    the other, no marker says whose the file is, and adopting it under the planner's winner
-    would attribute one store's document to another.
+    """Refuse to take in a file claimed by two stores when the database holds state for one of them
+    and none for the other.
     """
     in_play = layouts_in_play(sorted(held), (layout,))
     ambiguous = []
@@ -189,11 +168,8 @@ def _true_parts(store: str, path: Path, parts: tuple[str, ...]) -> tuple[str, ..
 
 
 def unaccounted_files(plans: tuple[AdoptionPlan, ...]) -> tuple[Path, ...]:
-    """Record or log files some locator claims that no plan adopts, across every root planned.
-
-    A file left behind would read as absent under a database backend while still sitting on
-    disk, which for a confirmed negative means an annotated image training as empty. A file
-    that belongs to a neighbouring root shows up here until that root is planned too.
+    """Record or log files some locator claims that no plan adopts, across every root planned. A
+    file that belongs to a neighboring root shows up here until that root is planned too.
     """
     adopted = {os.path.normcase(str(entry.path)) for plan in plans for entry in plan.entries}
     left: dict[str, Path] = {}
@@ -213,16 +189,13 @@ def adopt_root(
 ) -> AdoptionResult:
     """Move this root's record and log files into its database, exclusively and atomically.
 
-    The transition lock is taken before anything is read and held through the install, so no
-    write can land in the layout between the decode and the publication. Every adopted file is
-    re-checked against the size and content hash the preflight saw, immediately before the
-    install, so a load that went stale under a writer that got in first is refused rather than
-    published. The published file and the directory entry naming it are both flushed, so the
-    database a crash leaves behind is either absent or complete.
+    The transition lock is taken before anything is read and held through the install. Every
+    adopted file is re-checked against the size and content hash the preflight saw, immediately
+    before the install, and a stale load is refused. The published file and the directory entry
+    naming it are both flushed.
 
-    A root that already holds a database is supplemented rather than rebuilt: only the stores
-    that database has never held are loaded, in one transaction, so a served store's export
-    files are left where they are and its rows are untouched.
+    A root that already holds a database is supplemented rather than rebuilt: only the stores that
+    database has never held are loaded, in one transaction.
     """
     db_path = database_file(root)
     with transition_lock(root):
@@ -253,15 +226,9 @@ def _supplement(
 ) -> AdoptionResult:
     """Load the files of the stores this root's database has never held, and nothing else.
 
-    Held is what the database itself says: rows, a tombstone, or an export stamp. That is what
-    separates a store whose files arrived after adoption from a served store's ordinary export,
-    which must be left alone rather than read back in on top of the rows it came from.
-
-    A file more than one store could own, where the database holds state for some of them and
-    none for the others, is excluded rather than attributed, and refuses outright if it is one
-    of the files this run would take in: under a directory that serves two kinds of root, whose
-    file it is cannot be told from markers, and loading it under the wrong store would count
-    another store's document as this one's.
+    Held is what the database itself says: rows, a tombstone, or an export stamp. A file more than
+    one store could own, where the database holds state for some of them and none for the others,
+    is excluded, and refuses outright if it is one of the files this run would take in.
     """
     conn = open_verified(db_path)
     try:
@@ -302,15 +269,11 @@ class _Loaded:
 
 
 def _preflight(plan: AdoptionPlan) -> tuple[_Loaded, ...]:
-    """Read and decode every file the plan adopts, refusing the whole root on the first that
-    will not decode.
+    """Read and decode every file the plan adopts, refusing the whole root on the first that will
+    not decode.
 
-    A record decodes whole; a log decodes line by line, because one unreadable line in an
-    append-only file is the entry that would silently vanish from the database. This decode
-    runs below the storage seam's own (``codec.decode`` directly, not ``file_backend._decode``),
-    so it runs the schema_version check itself, reporting an unsupported version as the same
-    plan refusal an undecodable file gets, naming the version: a soft rail, since adoption reads
-    and reports rather than acting on the document's content.
+    A record decodes whole; a log decodes line by line. Runs the schema_version check, reporting an
+    unsupported version as a plan refusal naming the version.
     """
     loaded: list[_Loaded] = []
     for entry in plan.entries:
@@ -347,11 +310,8 @@ def _preflight(plan: AdoptionPlan) -> tuple[_Loaded, ...]:
 
 
 def preflight_decode(plans: tuple[AdoptionPlan, ...]) -> None:
-    """Decode-check every entry across ``plans``, refusing on the first that will not decode.
-
-    The same read-and-decode :func:`adopt_root` runs before it publishes anything, exposed for a
-    caller that needs the refusal without building a database (the import door's file-backend
-    leg, which decodes every claimed file but adopts none of them into one).
+    """Decode-check every entry across ``plans``, refusing on the first that will not decode: the
+    decode :func:`adopt_root` runs, without building a database.
     """
     for plan in plans:
         _preflight(plan)
@@ -376,11 +336,7 @@ def _revalidate(loaded: tuple[_Loaded, ...]) -> None:
 def _build(
     temp: Path, plan: AdoptionPlan, loaded: tuple[_Loaded, ...]
 ) -> tuple[dict[str, int], dict[str, int]]:
-    """Load every entry into a fresh rollback-journal database and close it.
-
-    Never WAL while building: a WAL database holds its commits in a sidecar the install does
-    not carry, so the file published would be missing the rows it was just given.
-    """
+    """Load every entry into a fresh rollback-journal (not WAL) database and close it."""
     conn = sqlite3.connect(str(temp), isolation_level=None)
     try:
         mode = conn.execute("pragma journal_mode = delete").fetchone()[0]

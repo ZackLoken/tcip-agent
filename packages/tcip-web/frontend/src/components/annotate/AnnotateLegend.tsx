@@ -11,14 +11,14 @@ import { useStore } from "@/store";
 
 /** Legend, anchored lower-left of the canvas: reveals on hover, on keyboard focus within it, or
  *  by toggling the Legend button (click, Enter, Space). Lists the dataset's subjects (outline
- *  colour = subject, GUI-local) plus the selected-shape blue, the same grammar as Review. In box
+ *  color = subject, GUI-local) plus the selected-shape blue, the same grammar as Review. In box
  *  mode, an extra row explains the dashed boxes: a polygon's own read-only bounds, not a second
- *  editable annotation. A subject row opens this browser's colour picker. */
+ *  editable annotation. A subject row opens this browser's color picker. */
 export function AnnotateLegend() {
   const registry = useStore((s) => s.registry.subjects);
   const mode = useStore((s) => s.gui.mode);
   const names = Object.keys(registry);
-  useSubjectColors(); // re-render on a recolour so the swatches below never show a stale colour
+  useSubjectColors(); // re-render on a recolor so the swatches below never show a stale color
   const [pickerSubject, setPickerSubject] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const panelId = "annotate-legend-panel";
@@ -58,7 +58,7 @@ export function AnnotateLegend() {
               <button
                 type="button"
                 onClick={() => setPickerSubject(name)}
-                title={`Change ${name}'s colour (this browser only)`}
+                title={`Change ${name}'s color (this browser only)`}
                 className="flex w-full items-center gap-2.5 rounded text-[12px] hover:bg-tcip-hover"
               >
                 <span
@@ -96,7 +96,7 @@ export function AnnotateLegend() {
       </div>
       {pickerSubject && (
         <ColorPickerModal
-          title={`${pickerSubject}'s colour (this browser only; derives from the name elsewhere)`}
+          title={`${pickerSubject}'s color (this browser only; derives from the name elsewhere)`}
           initialColor={subjectColor(pickerSubject)}
           onSubmit={(hex) => {
             setSubjectColorOverride(pickerSubject, hex);

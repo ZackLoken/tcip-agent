@@ -1,9 +1,4 @@
-"""Which backend a process binds, decided once at its entry point.
-
-This lives beside both backends rather than inside either: the SQLite backend composes the
-file backend for blobs, so a selector inside the file backend would point it back at the
-module that imports it.
-"""
+"""Which backend a process binds, decided once at its entry point."""
 
 from __future__ import annotations
 
@@ -31,15 +26,9 @@ on this default touches it. ``tcip export-store`` writes the files back out, whi
 def bind_default(*, lock_timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> FileBackend | SqliteBackend:
     """Bind this process's backend at its entry point and return it.
 
-    Every entry point calls this: the MCP server, the web backend, a training subprocess, a
-    test fixture. Constructing the backend is what refuses with ``BackendUnavailable`` when
-    cross-process exclusion is unavailable, so a process that cannot lock stops here rather
-    than writing without one. The instance is returned so an entry point that owns the
-    process's lifetime can close it.
-
-    An unrecognized value in the environment is a ``ValueError`` rather than a fallback: a
-    misspelled name that quietly bound the other backend would send a process's writes
-    somewhere its operator did not choose.
+    Constructing the backend refuses with ``BackendUnavailable`` when cross-process exclusion is
+    unavailable. The instance is returned so an entry point that owns the process's lifetime can
+    close it. An unrecognized value in the environment is a ``ValueError``.
     """
     name = os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND
     if name == FILE_BACKEND:
@@ -56,12 +45,7 @@ def bind_default(*, lock_timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> FileBacke
 
 
 def is_database_backend() -> bool:
-    """Whether this process's currently bound backend is the database one.
-
-    Checks the actual bound instance, not the environment: a caller (a test, a door deciding
-    whether to build a database) may bind directly rather than through :func:`bind_default`, and
-    the two must never disagree about which backend is live.
-    """
+    """Whether the bound instance, not the environment, is the database backend."""
     return isinstance(_backend(), SqliteBackend)
 
 

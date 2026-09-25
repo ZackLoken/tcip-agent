@@ -434,7 +434,7 @@ def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path,
 
     captured: dict = {}
 
-    def _fake_diagnostic(ckpt, model, loader, device, task, output_dir, **kw):
+    def _fake_diagnostic(ckpt, model, loader, device, output_dir, **kw):
         captured["diagnostic_max_dets"] = kw.get("max_dets")
         return {"tiled": False, "eval_regime": "tile-level"}
 
@@ -457,7 +457,7 @@ def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path,
         monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp))
         ckpt = registered_checkpoint(tmp, project_root=tmp)
 
-        TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
+        TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
                           subject="bud")
     finally:
         runners.run_test_evaluation = orig_diag
@@ -494,6 +494,7 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
             pass
 
     class _StubPredictor:
+        task = "detection"
         train_tile_size = 64
         train_overlap = 0.0
         in_chans = 3
@@ -523,7 +524,7 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
 
     def _run(dataset, **kw):
         images_dir, labels_dir, ckpt = dataset
-        r = TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
+        r = TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
                               subject="bud", **kw)
         assert "error" not in r, r
         return ts.read(evaluation_results_key(Path(ckpt).parent))

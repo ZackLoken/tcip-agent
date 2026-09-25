@@ -164,16 +164,14 @@ def test_resume_restores_rng_state_not_just_reseeds(tmp_path):
 
     resumed = train(create_run(cfg, str(tmp_path / "out2"), id="auto-run-58"), build_loader(),
                     task="classification", resume_from=str(ckpt))
-    assert resumed.rng_state_restored is True
     resumed_epoch2_loss = resumed.metrics_history[0]["train_loss"]  # the one epoch this run ran
 
     assert resumed_epoch2_loss == pytest.approx(baseline_epoch2_loss)
 
 
-def test_resume_from_checkpoint_without_rng_state_degrades_gracefully(tmp_path):
-    """A checkpoint predating RNG capture must resume via the fresh seed (old behavior), not
-    crash, and must honestly record rng_state_restored=False rather than claiming a restore
-    that didn't happen."""
+def test_resume_from_a_checkpoint_missing_a_resume_key_refuses_naming_it(tmp_path):
+    """A checkpoint lacking a key the resume reads fails the run naming that key, rather than
+    resuming from a guessed default."""
     images_dir, csv_path = _classification_data(tmp_path)
     ds = dataset_over("classification", images_dir, csv_path)
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
@@ -182,14 +180,100 @@ def test_resume_from_checkpoint_without_rng_state_degrades_gracefully(tmp_path):
     train(create_run(cfg, str(tmp_path / "out"), id="auto-run-59"), loader, task="classification")
     ckpt_path = tmp_path / "out" / "checkpoint_epoch_1.pt"
     ckpt = torch.load(ckpt_path, weights_only=False)
-    for key in ("torch_rng_state", "numpy_rng_state", "python_rng_state", "cuda_rng_state"):
-        ckpt.pop(key, None)
-    torch.save(ckpt, ckpt_path)  # simulate a checkpoint saved before RNG state was captured
+    del ckpt["torch_rng_state"]
+    torch.save(ckpt, ckpt_path)
 
-    run2 = create_run(cfg, str(tmp_path / "out2"), id="auto-run-60")
-    run2 = train(run2, loader, task="classification", resume_from=str(ckpt_path))
-    assert run2.status == "completed"
-    assert run2.rng_state_restored is False
+    run2 = train(create_run(cfg, str(tmp_path / "out2"), id="auto-run-60"), loader,
+                 task="classification", resume_from=str(ckpt_path))
+    assert run2.status == "failed"
+    assert "torch_rng_state" in run2.error
+
+
+def test_resume_from_a_checkpoint_missing_its_scheduler_state_refuses_naming_it(tmp_path):
+    images_dir, csv_path = _classification_data(tmp_path)
+    ds = dataset_over("classification", images_dir, csv_path)
+    loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
+    cfg = _cfg([{"freeze_to": -1, "epochs": 2}])
+
+    train(create_run(cfg, str(tmp_path / "out"), id="auto-run-61"), loader, task="classification")
+    ckpt_path = tmp_path / "out" / "checkpoint_epoch_1.pt"
+    ckpt = torch.load(ckpt_path, weights_only=False)
+    ckpt.pop("scheduler_state_dict", None)
+    torch.save(ckpt, ckpt_path)
+
+    run2 = train(create_run(cfg, str(tmp_path / "out2"), id="auto-run-62"), loader,
+                 task="classification", resume_from=str(ckpt_path))
+    assert run2.status == "failed"
+    assert "scheduler_state_dict" in run2.error
+
+
+def test_a_resume_whose_optimizer_restore_raises_fails_the_run(tmp_path, monkeypatch):
+    images_dir, csv_path = _classification_data(tmp_path)
+    ds = dataset_over("classification", images_dir, csv_path)
+    loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
+    cfg = _cfg([{"freeze_to": -1, "epochs": 2}])
+
+    train(create_run(cfg, str(tmp_path / "out"), id="auto-run-63"), loader, task="classification")
+
+    def _refuse(self, state_dict):
+        raise ValueError("optimizer state does not fit")
+
+    monkeypatch.setattr(torch.optim.AdamW, "load_state_dict", _refuse)
+    run2 = train(create_run(cfg, str(tmp_path / "out2"), id="auto-run-64"), loader,
+                 task="classification",
+                 resume_from=str(tmp_path / "out" / "checkpoint_epoch_1.pt"))
+    assert run2.status == "failed"
+    assert "optimizer state does not fit" in run2.error
+
+
+def _draws() -> tuple:
+    """One draw from each of the four generator streams a checkpoint carries."""
+    import random
+
+    import numpy as np
+
+    return (random.random(), float(np.random.rand()), float(torch.rand(1)),
+            float(torch.rand(1, device="cuda")))
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA device")
+def test_a_cuda_resume_restores_the_rng_streams(tmp_path, monkeypatch):
+    """The streams a CUDA resume continues from are the ones the checkpoint captured: the draws
+    taken just after the trainer's restore equal the draws the captured states yield when set
+    through the four RNG APIs directly, independent of the restore under test."""
+    import tcip_mcp.pipelines.training.generic_trainer as trainer
+
+    images_dir, csv_path = _classification_data(tmp_path)
+    ds = dataset_over("classification", images_dir, csv_path)
+    loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
+    cfg = _cfg([{"freeze_to": -1, "epochs": 2}], device="cuda")
+
+    train(create_run(cfg, str(tmp_path / "out"), id="auto-run-65"), loader, task="classification")
+    ckpt_path = tmp_path / "out" / "checkpoint_epoch_1.pt"
+    real_restore = trainer.restore_rng_state
+    after_restore: list = []
+
+    def _observing_restore(state):
+        real_restore(state)
+        after_restore.append(_draws())
+        real_restore(state)  # the run continues from the restored streams, not the drawn ones
+
+    monkeypatch.setattr(trainer, "restore_rng_state", _observing_restore)
+    run2 = train(create_run(cfg, str(tmp_path / "out2"), id="auto-run-66"), loader,
+                 task="classification", resume_from=str(ckpt_path))
+    assert run2.status == "completed", run2.error
+    assert run2.current_epoch == 2
+
+    import random
+
+    import numpy as np
+
+    captured = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    random.setstate(captured["python_rng_state"])
+    np.random.set_state(captured["numpy_rng_state"])
+    torch.set_rng_state(captured["torch_rng_state"])
+    torch.cuda.set_rng_state_all(captured["cuda_rng_state"])
+    assert after_restore == [_draws()]
 
 
 def test_seeded_loader_kwargs_reproducible_shuffle():

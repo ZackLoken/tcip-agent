@@ -226,10 +226,10 @@ export function ReviewTab() {
     setAdmissionRule(null);
     setAdmissionReason("");
     if (!dataset.predictions_dir) return;
-    let cancelled = false;
+    let canceled = false;
     void api.review.generationConf(dataset.predictions_dir).then(
       (res) => {
-        if (cancelled) return;
+        if (canceled) return;
         setGenerationConf(res.generation_conf);
         setAdmissionRule(res.admission_rule);
         setAdmissionReason(res.admission_reason);
@@ -240,7 +240,7 @@ export function ReviewTab() {
       },
     );
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, [dataset.predictions_dir]);
   // A detector scope only: a classified review judges values, never a count the gate floors.
@@ -297,11 +297,11 @@ export function ReviewTab() {
 
   useEffect(() => {
     if (!pqJobId || pqStatus !== "running") return;
-    let cancelled = false;
+    let canceled = false;
     const poll = async () => {
       try {
         const body = await api.review.priorityQueueJob(pqJobId);
-        if (cancelled) return;
+        if (canceled) return;
         if (body.status === "completed") {
           setPqStatus("completed");
           setPqQueue(body.queue);
@@ -318,7 +318,7 @@ export function ReviewTab() {
     void poll();
     const t = setInterval(() => void poll(), 1000);
     return () => {
-      cancelled = true;
+      canceled = true;
       clearInterval(t);
     };
   }, [pqJobId, pqStatus]);
@@ -401,11 +401,11 @@ export function ReviewTab() {
     baseFacts,
     composite,
   });
-  // User-tunable symbology colours (persisted + shared with the status bar); legend swatches
-  // open a picker. Changing TP here recolours the TP count in the bottom toolbar too.
+  // User-tunable symbology colors (persisted + shared with the status bar); legend swatches
+  // open a picker. Changing TP here recolors the TP count in the bottom toolbar too.
   const [reviewColors, setReviewColors] = useReviewColors();
   const registry = useStore((s) => s.registry.subjects);
-  const colorTick = useSubjectColors(); // bumps on a recolour, so swatches recompute below
+  const colorTick = useSubjectColors(); // bumps on a recolor, so swatches recompute below
   const subjectSwatches = useMemo(() => {
     void colorTick; // read only to force recompute; subjectColor() itself needs no argument for it
     return Object.keys(registry).map((name) => ({ name, color: subjectColor(name) }));
@@ -614,7 +614,7 @@ export function ReviewTab() {
     const datasetRoot = dataset.dataset_root;
     const imageList = dataset.image_list;
     if (!datasetRoot || imageList.length === 0) return;
-    let cancelled = false;
+    let canceled = false;
     void (async () => {
       try {
         const res = await api.review.imageStatuses({
@@ -622,7 +622,7 @@ export function ReviewTab() {
           gt_dir: reviewDirs.gtDir,
           pred_dir: reviewDirs.predDir,
         });
-        if (cancelled) return;
+        if (canceled) return;
         const stems = new Set(res.detection_stems);
         // res.unreadable names label document paths, not stems; a stem this names stays
         // navigable (the breeder can still reach and see it), never silently skipped.
@@ -638,7 +638,7 @@ export function ReviewTab() {
         }
         setReviewImageStatuses(byImage, has, res.unreadable);
       } catch (e) {
-        if (cancelled) return;
+        if (canceled) return;
         // A prior dataset's facts must never gate navigation in this one: clear rather than
         // leave them in place, and name the failure so the breeder knows nav is unfiltered.
         setReviewImageStatuses({}, {}, []);
@@ -648,7 +648,7 @@ export function ReviewTab() {
       }
     })();
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, [
     dataset.dataset_root,
@@ -1005,7 +1005,7 @@ export function ReviewTab() {
 
   /** Confirm every admitted, unreviewed detection on this image in sequence through the existing
    *  accept route, each one carrying ``rule_admitted: true``: one button, one accept
-   *  implementation. Holds ``actionPending`` for the whole run (defence in depth against a
+   *  implementation. Holds ``actionPending`` for the whole run (defense in depth against a
    *  slipped-through verdict) and ``confirmRun`` (React state) so every other verdict, stamp and
    *  navigation control disables through ``runBlocked`` while it runs. */
   async function confirmAdmitted() {
@@ -1982,7 +1982,7 @@ export function ReviewTab() {
             admissionConf != null && showPred
               ? {
                   text:
-                    "Corner mark at a prediction's top-left corner, in its outcome colour: " +
+                    "Corner mark at a prediction's top-left corner, in its outcome color: " +
                     "pre-admitted by this bucket's validated count operating point (conf at or " +
                     `above ${admissionConf.toFixed(2)}, the bucket's own generation confidence, ` +
                     "the floor its predictions were exported at). Unmarked boxes take their own verdict.",
@@ -2129,7 +2129,7 @@ export function ReviewTab() {
 
       {colorEditKey && (
         <ColorPickerModal
-          title={`${COLOR_LABELS.find((c) => c.key === colorEditKey)?.label ?? "Colour"}`}
+          title={`${COLOR_LABELS.find((c) => c.key === colorEditKey)?.label ?? "Color"}`}
           initialColor={reviewColors[colorEditKey]}
           onSubmit={(c) => {
             setReviewColors((prev) => ({ ...prev, [colorEditKey]: c }));

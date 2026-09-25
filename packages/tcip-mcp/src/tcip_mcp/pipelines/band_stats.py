@@ -1,13 +1,11 @@
-"""Display band statistics, the 8-bit stretch every band render goes through, and the RGB
-composite it stacks into.
+"""Display band statistics, the 8-bit stretch every band render goes through, and the RGB composite
+it stacks into.
 
 Every number here is in the raster's own dtype units: a uint16 band's minimum is a raw digital
 number, and a ``percent_clip`` bound is one too. That is a different unit system from
 ``derivations.band_normalization_stats``, whose per-band mean/std are the [0, 1] tensor units a
 detector normalizes with, and the two never stand in for each other: these describe what a viewer
 sees on screen, those describe what the model is fed.
-
-Heavy deps (numpy, the raster backends) are imported lazily so this stays cheap to import.
 """
 
 from __future__ import annotations
@@ -84,17 +82,13 @@ def full_scale_denominator(band, source_dtype, *, sampled_maximum: float | None 
     """The divisor that puts a band on its own full scale with no data-range stretch applied.
 
     An integer raster divides by its dtype's maximum, the scale ``image_utils.pil_to_tensor``
-    applies for training; a float raster has no such ceiling and divides by its own maximum, so a
-    mixed-sign band (a vegetation index, say) renders and reports bounds against its own range.
-    A band with no positive data divides by the magnitude of its minimum instead, so it lands on a
-    positive scale rather than flipping the sign of every pixel; a band whose whole range is
-    exactly zero still divides by 1.0, so an empty float band renders black instead of raising.
+    applies for training; a float raster has no such ceiling and divides by its own maximum. A band
+    with no positive data divides by the magnitude of its minimum instead; a band whose whole range
+    is exactly zero divides by 1.0.
 
-    ``sampled_maximum``/``sampled_minimum`` are read from somewhere other than ``band``: the
-    caller's own sampled statistics for the whole raster, which a caller rendering one region of a
-    float raster passes so every region divides by the same numbers instead of by its own local
-    range. They never displace the dtype ceiling an integer raster divides by, whose value does
-    not depend on the pixels in hand at all.
+    ``sampled_maximum``/``sampled_minimum`` are the whole raster's sampled statistics, used in
+    place of ``band``'s own range for a float raster. They never displace the dtype ceiling an
+    integer raster divides by.
     """
     import numpy as np
 
@@ -114,9 +108,7 @@ def full_scale_denominator(band, source_dtype, *, sampled_maximum: float | None 
 def _stretch_between(raw, low: float, high: float):
     """``raw`` (float64) rescaled so ``low``..``high`` spans the 8-bit display range.
 
-    The one place a span stretch's arithmetic is written: ``minmax`` and ``percent_clip`` differ
-    only in the bounds they hand this. A band with no spread (``high <= low``) renders black rather
-    than dividing by zero.
+    A band with no spread (``high <= low``) renders black rather than dividing by zero.
     """
     import numpy as np
 
@@ -130,17 +122,14 @@ def stretch_band(band, mode: str, source_dtype, bounds: tuple[float, float] | No
 
     ``minmax`` spans the band's own data range, ``percent_clip`` spans
     :data:`DISPLAY_CLIP_PERCENTILES` of it, and ``none`` applies no data-range stretch at all,
-    scaling by :func:`full_scale_denominator` so a band's absolute level survives instead of being
-    normalized away. ``source_dtype`` is the raster's own dtype, which only ``none`` reads.
+    scaling by :func:`full_scale_denominator`. ``source_dtype`` is the raster's own dtype, which
+    only ``none`` reads.
 
-    ``bounds`` is the ``(low, high)`` those same modes would otherwise derive from ``band``, read
-    from somewhere with a wider view of the raster than this band: pass it to render one region of
-    a raster against the whole raster's bounds instead of against the region's own, so two regions
-    of one raster are stretched alike. ``minmax`` and ``percent_clip`` take the pair as their span;
-    ``none`` reads both ends, as the sampled minimum and maximum a float raster's divisor comes
-    from, and an integer raster ignores the pair entirely for its dtype ceiling. Omitting it
-    derives the same bounds from ``band`` and stretches between exactly those, so the two forms
-    agree by construction.
+    ``bounds`` is the ``(low, high)`` those same modes would otherwise derive from ``band``, taken
+    from a wider view of the raster (the whole raster's bounds when rendering one region).
+    ``minmax`` and ``percent_clip`` take the pair as their span; ``none`` reads both ends as the
+    sampled minimum and maximum a float raster's divisor comes from, and an integer raster ignores
+    the pair for its dtype ceiling. Omitting it derives the bounds from ``band``.
     """
     import numpy as np
 
@@ -165,17 +154,11 @@ def composite_display_rgb(pixels, band_indices, stretch: str,
                           bounds: list[tuple[float, float]] | None = None):
     """Three of ``pixels``' bands stretched independently and stacked into ``uint8 [H, W, 3]``.
 
-    The one implementation of the band-select-stretch-stack composite, shared by everything that
-    displays a raster whose bands a viewer chose: what a viewer is served and what a rendered
-    artifact shows are then the same pixels by construction rather than by two matching
-    expressions. Serving a 1/3/4-band raster as plain RGB is a different path and not this
-    function: that one applies no stretch at all and keeps the file's own pixels.
-
     ``pixels`` is ``[H, W, C]`` (a 2-D array reads as one band) and ``band_indices`` names exactly
     three of its bands, in display order, repeats allowed; the stretch reads the array's own dtype,
-    so an integer array's ``none`` mode divides by that dtype's ceiling. ``bounds`` is one
-    ``(low, high)`` pair per selected band, in the same order, passed through to
-    :func:`stretch_band`; omitting it derives each band's bounds from the array in hand.
+    so an integer array's ``none`` mode divides by that dtype's ceiling. ``bounds`` is one ``(low,
+    high)`` pair per selected band, in the same order, passed through to :func:`stretch_band`;
+    omitting it derives each band's bounds from the array in hand.
     """
     import numpy as np
 
@@ -234,16 +217,14 @@ def sampled_band_ranges(source: "str | Path | BandGroupRef", num_channels: int, 
 
     Reads through ``raster_source.open_raster``, so a raster far too large to decode whole is
     described from the windows ``raster_source.sample_windows`` picks and from nothing else. One
-    walk of those windows produces both bounds a display stretch can ask for: each band's min/max,
-    and each band's ``percentiles`` cut points off a bounded reservoir of the pixels walked. The
-    result is a sample's bounds, never the raster's, and says so through its own
-    :class:`SampledBandRanges` type and the returned sampling record; a caller that needs the exact
-    range calls :func:`band_ranges` on the decoded pixels instead.
+    walk of those windows produces each band's min/max and each band's ``percentiles`` cut points
+    off a bounded reservoir of the pixels walked. The result is a sample's bounds, never the
+    raster's, and says so through its :class:`SampledBandRanges` type and the returned sampling
+    record; :func:`band_ranges` gives the exact range of decoded pixels.
 
-    ``seed`` and ``reservoir_size`` have no defaults, so what was sampled, and how precisely the
-    cut points were read, are always the caller's own stated choices; the reservoir holds at most
-    ``reservoir_size`` x ``num_channels`` values whatever the raster's size. Two calls with the
-    same seed over the same raster return the same numbers.
+    ``seed`` and ``reservoir_size`` are required; the reservoir holds at most ``reservoir_size`` x
+    ``num_channels`` values whatever the raster's size. Two calls with the same seed over the same
+    raster return the same numbers.
     """
     import numpy as np
 

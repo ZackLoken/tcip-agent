@@ -115,7 +115,7 @@ def test_serve_image_bands_param_changes_the_composite(client: TestClient, group
     manifest = grouped_dataset / "images" / "2026-05-01" / "cap_001.bandgroup"
     # stretch="none" (absolute, by dtype max) so each band's distinct base level survives:
     # min-max stretch would remove it entirely (every band shares the same gradient shape),
-    # cancelling the very difference this test means to detect.
+    # canceling the very difference this test means to detect.
     r1 = client.get("/api/images", params={
         "path": str(manifest), "bands": "Green,Red,NIR", "stretch": "none"})
     r2 = client.get("/api/images", params={

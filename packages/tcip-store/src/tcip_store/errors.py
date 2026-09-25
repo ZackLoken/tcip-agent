@@ -1,9 +1,4 @@
-"""Every refusal the storage seam raises.
-
-A typed refusal is the whole point: the layer under it never degrades quietly. Absence and
-corruption are different errors, a lost update is an error rather than a silence, and a
-guarantee the bound backend cannot provide is refused instead of claimed.
-"""
+"""Every refusal the storage seam raises."""
 
 from __future__ import annotations
 
@@ -35,22 +30,17 @@ class NotFound(StoreError):
 
 
 class DecodeError(StoreError):
-    """The entry exists but its bytes do not decode, or a backend's own bookkeeping file
-    holds bytes it cannot make sense of.
+    """The entry exists but its bytes do not decode, or a backend's own bookkeeping file holds
+    bytes it cannot make sense of.
 
-    Distinct from ``NotFound`` on purpose: an unreadable measurement record must never
-    present as an absent one. The file backend also raises it out of ``append`` and
-    ``clear_log``, never only out of a read, when a clear-base watermark file it needs to
-    settle does not hold a decimal integer.
+    Distinct from ``NotFound``. The file backend also raises it out of ``append`` and ``clear_log``
+    when a clear-base watermark file it needs to settle does not hold a decimal integer.
     """
 
 
 class SchemaVersionRefused(StoreError):
-    """A document's ``schema_version`` is outside what this reader's descriptor accepts.
-
-    Deliberately not a ``DecodeError`` subclass: the bytes decoded perfectly well, and an
-    unsupported version is a policy fact about a document from a newer writer, never
-    corruption. A softener written to catch ``DecodeError`` must not absorb this by accident.
+    """A document's ``schema_version`` is outside what this reader's descriptor accepts; not a
+    ``DecodeError`` subclass.
     """
 
 
@@ -59,10 +49,7 @@ class PolicyViolation(StoreError):
 
 
 class ListingUnsupported(StoreError):
-    """The store's descriptor declares no enumeration, so ``keys`` has no answer.
-
-    Raised rather than returning an empty list, which would read as "none".
-    """
+    """The store's descriptor declares no enumeration, so ``keys`` has no answer."""
 
 
 class CapabilityUnavailable(StoreError):

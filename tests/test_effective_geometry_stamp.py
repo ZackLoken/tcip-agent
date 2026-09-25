@@ -116,48 +116,26 @@ def test_stamp_untiled_mixed_frames_record_nothing(tmp_path):
 # ── the durable experiment record mirror ──────────────────────────────
 
 
-def _write_experiment_config(tmp_path, monkeypatch, data):
+def test_a_mirrored_untiled_section_drops_stale_geometry(tmp_path, monkeypatch):
+    """The resolved data section is mirrored whole, so an untiled run's record keeps no stale
+    requested tile_size from the config it was launched with."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     import tcip_store as ts
-    from tcip_mcp.experiments import config_key
 
-    key = config_key("exp1")
-    ts.replace(key, {"model_source": {"builder": "x:y"}, "data": data})
-    return key
+    from tcip_mcp.experiments import config_key, create_experiment
+    from tcip_mcp.pipelines.training.subprocess_worker import _mirror_data_section
 
+    create_experiment("exp1", {"model_source": {"builder": "x:y"},
+                               "data": {"images_dir": "img",
+                                        "tiling": {"enabled": True, "tile_size": 640}}})
+    _mirror_data_section("exp1", {"images_dir": "img", "tiling": {"enabled": False},
+                                  "train_native_size": [64, 48]})
 
-def test_patch_experiment_tiling_replace_drops_stale_geometry(tmp_path, monkeypatch):
-    """update()-merging an untiled record would leave the stale requested tile_size in the
-    durable experiment config; replace mode must not."""
-    import tcip_store as ts
-
-    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_tiling
-
-    key = _write_experiment_config(
-        tmp_path, monkeypatch,
-        {"images_dir": "img", "tiling": {"enabled": True, "tile_size": 640}})
-    _patch_experiment_config_tiling("exp1", {"enabled": False}, replace=True,
-                                    train_native_size=[64, 48])
-
-    cfg = ts.read(key)
+    cfg = ts.read(config_key("exp1"))
     assert cfg["data"]["tiling"] == {"enabled": False}
     assert cfg["data"]["train_native_size"] == [64, 48]
-    assert cfg["data"]["images_dir"] == "img"  # a patch of the data section, not a rewrite
+    assert cfg["data"]["images_dir"] == "img"
     assert cfg["model_source"] == {"builder": "x:y"}
-
-
-def test_patch_experiment_tiling_default_still_merges(tmp_path, monkeypatch):
-    import tcip_store as ts
-
-    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_tiling
-
-    key = _write_experiment_config(
-        tmp_path, monkeypatch, {"tiling": {"enabled": True, "sliver_frac": 0.4}})
-    _patch_experiment_config_tiling("exp1", {"tile_size": 224, "overlap": 0.2})
-
-    tiling = ts.read(key)["data"]["tiling"]
-    assert tiling == {"enabled": True, "sliver_frac": 0.4, "tile_size": 224,
-                      "overlap": pytest.approx(0.2)}
 
 
 # ── the HPO trial records the same truth in its resolved-config snapshot ──

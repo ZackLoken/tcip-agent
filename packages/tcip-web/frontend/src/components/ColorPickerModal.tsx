@@ -35,8 +35,8 @@ interface Props {
   initialColor: string;
   onSubmit: (color: string) => void;
   onCancel: () => void;
-  /** Reverts to a caller-defined default (e.g. a subject's derived colour) instead of picking one;
-   *  omitted where there is no such default (e.g. Review's outcome colours). */
+  /** Reverts to a caller-defined default (e.g. a subject's derived color) instead of picking one;
+   *  omitted where there is no such default (e.g. Review's outcome colors). */
   onReset?: () => void;
 }
 
@@ -100,7 +100,7 @@ export function ColorPickerModal({ title, initialColor, onSubmit, onCancel, onRe
           />
           <input
             ref={hexRef}
-            aria-label="hex colour"
+            aria-label="hex color"
             className="tcip-input w-24 font-mono"
             value={hexDraft}
             onChange={(e) => setHexDraft(e.target.value)}

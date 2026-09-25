@@ -676,7 +676,7 @@ def test_capture_live_canvas_miss_case_also_answers_divergence(tmp_path, monkeyp
     assert res["divergence"]["bound_root"] == str(other)
 
 
-def test_capture_live_canvas_render_last_known_renders_labelled_not_live(
+def test_capture_live_canvas_render_last_known_renders_labeled_not_live(
     tmp_path, monkeypatch, tmp_path_factory,
 ):
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))

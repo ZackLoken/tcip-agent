@@ -25,7 +25,7 @@ pinning this shape.
 
 Each stage has its own epoch count and freeze depth. Learning rate is not per-stage: the
 top-level `optimizer` block's `backbone_lr`/`head_lr` apply uniformly across every stage (a
-per-stage `lr` key is accepted but ignored; `preflight_config` warns if you set one). The
+per-stage `lr` key is refused by name). The
 optimizer is rebuilt between stages.
 
 ## Early Stopping
@@ -129,7 +129,7 @@ naming why. Whole-frame training and whole-decode sources gain nothing from it; 
 | `monitor_training(sweep_id=...)` | Check one sweep's manifest and per-trial state from disk, exactly one of `experiment_id`/`sweep_id` |
 | `list_experiments(launched_only=True)` | List all runs in session |
 | `cancel_training` | Request graceful cancellation of a running run; stops at the next batch/epoch boundary, still saves `model_final.pt` |
-| `cancel_hyperparameter_search` | Request cooperative cancellation of a running sweep: the running trial stops at its next batch boundary and reports the losing side, new trials report without training, the manifest records `cancelled`; Ray's hard stop is only the fallback after the heartbeat window |
+| `cancel_hyperparameter_search` | Request cooperative cancellation of a running sweep: the running trial stops at its next batch boundary and reports the losing side, new trials report without training, the manifest records `canceled`; Ray's hard stop is only the fallback after the heartbeat window |
 | `run_hyperparameter_search` | HPO on Ray Tune, you pick the search algorithm + trial scheduler |
 | `tcip render-failure-cases` (logged command) | Surface + render images ranked by count-mismatch (not IoU-matched, see evaluation skill) |
 | `create_experiment` | Track training run with full lineage |
@@ -149,10 +149,14 @@ task/data; match them to the space and budget; the defaults are a starting point
 
 ```python
 run_hyperparameter_search(base_config=config, n_trials=20, search_alg="optuna", scheduler="asha",
-        output_dir="runs/hpo_1")
+        output_dir="runs/hpo_1", search_seed=17)
 ```
-- `search_alg`: `random`/`grid` (native), plus `optuna`, `bayesopt`, `hyperopt`, `nevergrad`,
-  `ax`, all installed by default. An uninstalled pick errors clearly (never silently swapped).
+- `search_seed` (required) seeds the search algorithm itself, native or backend, and is recorded
+  on the sweep's manifest so a relaunch replays it; it is distinct from `data.split.seed`. The
+  `17` above is an arbitrary example value.
+- `search_alg`: `random`/`grid` (native), plus `optuna`, `bayesopt`, `hyperopt`, all
+  installed by default. An uninstalled or unoffered pick errors clearly (never silently swapped),
+  and so does `split_draws` above one with a backend pick.
   Call `hpo.available_search_algs()` for the live list on this box.
 - `scheduler`: `asha`, `hyperband`, `pbt`, `median`, or `none` to run every trial to
   completion. `grace_period`/`reduction_factor` tune the halving schedulers.
@@ -173,7 +177,7 @@ run_hyperparameter_search(base_config=config, n_trials=20, search_alg="optuna", 
 ## Dataset Selections
 
 Use `draw_splits` to draw a train/val/calibration selection: `draw_splits` has no `test_ratio`
-parameter at all, no launch path honours a held-out test list (a separate, within-image
+parameter at all, no launch path honors a held-out test list (a separate, within-image
 mechanism, `reserve_calibration_fraction` on the spatial_strip route, not this one). The samples
 are drawn through the same admission a training run uses, and which admission that is depends on
 where the dataset's ground truth lives. Writing a selection over the per-image label tree
@@ -226,8 +230,8 @@ drawn split's own parameters (`group_by`, `group_key_map`, `val_ratio`, `seed`,
 `stratify_foreground`, `test_ratio`, `reserve_calibration_fraction`). The loaders read the
 selection's `train` and `val` samples as recorded, admitting nothing afresh; its `calibration`
 samples build neither loader. The run's `split.json` then records the bound membership plus a
-`selection_binding` block (the selection's directory, the counts it bound, the dataset
-fingerprint it was drawn over and its digest, never a second copy of the sample list).
+`selection_binding` block (the selection's directory, its digest and whether the run redrew
+inside it, never a second copy of the sample list).
 
 `data.split.redraw_within_selection: true` beside `selection_dir` and `seed` admits `seed` (the
 one conflict key it lifts) and redraws train and val fresh inside the selection's own

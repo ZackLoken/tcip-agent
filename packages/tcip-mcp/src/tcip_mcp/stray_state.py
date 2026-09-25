@@ -1,46 +1,11 @@
 """What a stray file under a project's ``.tcip/state`` root is, and whether one path may be
-deleted: one predicate, read by the doctor's own listing and by :func:`delete_stray_state_file`
-(``tools/project_tools.py``), so the two cannot disagree (CLAUDE.md: when two code paths must
-agree, call one from the other).
+deleted.
 
-A stray is a file under ``<project>/.tcip/state`` that
-:func:`~tcip_mcp.tools.bundle.account_for`'s layout-aware accounting calls unaccounted: no
-store's own template claims it (``tcip_store.layout_claims.claimants_of`` is not used here, since
-it filters by no layout and would call the commonest stray, a loose ``.json`` directly under
-``.tcip/state``, claimed by a one-segment wildcard template meant for a different root entirely),
-it is not the storage backend's own bookkeeping (a lock file, a temp file, the database and its
-WAL sidecars), and it is not a recognized blob. The state root's own database
-(``<project>/.tcip/state/.tcip/store.db``) is excluded a second way, by location, since nothing
-under it is ever a stray whatever the accounting says.
-
-``project_root`` is resolved (:meth:`Path.resolve`) before the accounting runs, and every
-membership test below compares :func:`os.path.normcase` of the target against the same
-normalization of the accounting's own paths, exactly the rule ``account_for`` applies internally:
-a case-different or junction-aliased ``project_root`` spelling cannot make a real stray misclassify
-as claimed, or a claimed file misclassify as a stray. The target itself is joined onto that
-resolved root and normalized lexically rather than resolved, so the path classified is the path
-the caller named; a link on any segment below the state root is refused, never followed.
-
-The accounting itself can refuse: :class:`~tcip_mcp.tools.bundle.AnchorMisplaced` (a split or
-curated manifest sitting somewhere the derivation excludes) and ``tcip_store.StoreError`` (one
-root's own plan in which two stores claim the same file, from
-:func:`~tcip_store.adoption.plan_root`). Both are caught here and
-answered as a refusal naming the exception, never left to escape as a traceback: a project whose
-tree the accounting cannot classify at all should not crash a tool call or a doctor run over it,
-and the caller already has a real door (fixing the misplaced anchor, or the layout claim) to clear
-before either of those two would recur.
-
-``accounting.collisions`` is a different fact and nothing here reads it: it holds a path that two
-derived roots' separate plans each claim, each unambiguously, rather than the two-stores-in-one-plan
-case the paragraph above names. Such a path needs no branch of its own, since it is present in
-more than one plan's entries and the same "which plan's entries name this path" walk that answers
-a plainly claimed file finds it too, refusing under whichever store the iteration reaches first.
-Stated here rather than left to look arbitrary: a path two roots claim is exactly as unsafe to
-delete under either name, so naming only one of them is not a defect in the refusal, only in the
-claim tables that let two roots agree on one file.
-
-No staleness gate is taken over this predicate: see :func:`~tcip_mcp.cli.doctor.check_stray_state_files`'s
-own docstring for why.
+A stray is a file under ``<project>/.tcip/state`` that :func:`~tcip_mcp.tools.bundle.account_for`'s
+layout-aware accounting calls unaccounted: no store's own template claims it, it is not the storage
+backend's own bookkeeping (a lock file, a temp file, the database and its WAL sidecars), and it is
+not a recognized blob. The state root's own database home (``<project>/.tcip/state/.tcip/``) is
+never a stray.
 """
 
 from __future__ import annotations
@@ -50,10 +15,7 @@ from pathlib import Path
 
 
 def _under_normcased(path: Path, root: Path) -> bool:
-    """Whether ``path`` is ``root`` itself or sits under it, compared by
-    :func:`os.path.normcase` rather than :meth:`Path.relative_to`, the same comparison
-    ``bundle.account_for`` applies to its own classification, so a case-different root spelling
-    cannot make this disagree with the accounting."""
+    """Whether ``path`` is ``root`` itself or sits under it, compared by :func:`os.path.normcase`."""
     p, r = os.path.normcase(str(path)), os.path.normcase(str(root))
     return p == r or p.startswith(r + os.sep)
 
@@ -64,8 +26,7 @@ def stray_state_files(project_root: "Path | str") -> tuple[Path, ...]:
     and not under the state root's own ``.tcip`` (its database home).
 
     Raises :class:`~tcip_mcp.tools.bundle.AnchorMisplaced` or ``tcip_store.StoreError`` when the
-    accounting itself refuses; callers that must never raise (the doctor) catch these themselves,
-    the same way :func:`stray_state_file_refusal` does for a single path.
+    accounting itself refuses.
     """
     from tcip_mcp.tools import bundle
 
@@ -80,9 +41,7 @@ def stray_state_files(project_root: "Path | str") -> tuple[Path, ...]:
 
 
 def _is_link_or_junction(path: Path) -> bool:
-    """A symbolic link (POSIX) or a Windows junction/reparse point: never deleted by name here,
-    since deleting the link entry while the accounting classified its target is not the single,
-    unambiguous act this door promises."""
+    """A symbolic link or a Windows junction/reparse point."""
     import stat
 
     try:
@@ -97,10 +56,6 @@ def _is_link_or_junction(path: Path) -> bool:
 def _first_link_on(target: Path, state_root: Path) -> "Path | None":
     """The first link or junction on ``target``'s own path below ``state_root``, target included,
     or ``None`` when every segment is a real directory or file.
-
-    Walked segment by segment rather than compared against :meth:`Path.resolve`'s answer, because
-    resolving is what must not happen: a resolved path names the file a link points at, and this
-    door deletes only the path its caller named and its audit line records.
     """
     walked = state_root
     for segment in target.relative_to(state_root).parts:
@@ -117,18 +72,17 @@ def stray_state_file_refusal(
     when it is a stray and the deletion may proceed; always paired with the resolved target path.
 
     The target path is joined onto the state root and normalized lexically
-    (:func:`os.path.normpath`), never resolved: :meth:`Path.resolve` answers the file a link
-    points at, and this door acts on the path its caller named and its audit line records, so a
-    link anywhere on that path is refused instead of followed.
+    (:func:`os.path.normpath`), never resolved, so a link anywhere on that path is refused instead
+    of followed.
 
     Checked in this order: an empty, absolute (either grammar,
     :func:`~tcip_mcp.registry_paths.is_external_form`) or ``..``-carrying ``relative_path``, or one
-    that normalizes outside the state root (traversal, so a ``../hpo/<study>/result.json`` never
-    reaches the accounting); a path under the state root's own ``.tcip`` (the database home,
-    named as such); a link or junction on any segment below the state root, the target itself
-    included (:func:`_first_link_on`); a path that does not exist; a directory; then the
-    accounting itself (see the module docstring for its two caught raises): bookkeeping refuses as
-    the backend's own artifact, a path in a plan's entries refuses naming that entry's store, a
+    that normalizes outside the state root; a path under the state root's own ``.tcip`` (the
+    database home, named as such); a link or junction on any segment below the state root, the
+    target itself included (:func:`_first_link_on`); a path that does not exist; a directory; then
+    the accounting itself, whose :class:`~tcip_mcp.tools.bundle.AnchorMisplaced` or
+    ``tcip_store.StoreError`` answers as a refusal naming the exception: bookkeeping refuses as the
+    backend's own artifact, a path in a plan's entries refuses naming that entry's store, a
     recognized blob refuses as a blob home's, and a path in ``accounting.unaccounted`` is a stray
     and answers ``None``.
     """

@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 describe("subjectColorOverride", () => {
-  it("is null for a subject nobody has recoloured", () => {
+  it("is null for a subject nobody has recolored", () => {
     expect(subjectColorOverride("bush")).toBeNull();
   });
 

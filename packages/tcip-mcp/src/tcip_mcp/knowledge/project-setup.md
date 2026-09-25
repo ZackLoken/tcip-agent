@@ -148,7 +148,7 @@ rather than guessing, and every training, calibration and review reader reads th
 
 Draw a leakage-free train/val/calibration selection with `draw_splits` (group-aware, keeps
 sibling tiles of one source image in the same split; there is no held-out test list, and no
-launch path honours one). It copies nothing: a selection lists, per sample, the image source, the
+launch path honors one). It copies nothing: a selection lists, per sample, the image source, the
 label document, a group key and a side, so a draw spanning capture dates trains in place. Nothing
 is written without `output_path` (a stats dict only). Writing a selection requires all three
 ratios stated non-zero, and `subject` whenever its ground truth is per-image label documents,

@@ -69,14 +69,9 @@ function fingerprintNote(experiments: CompareExperiment[]): string {
     return `not comparable: ${unreadable.join(", ")} could not be read`;
   }
   const noRecord = experiments.filter((e) => !e.dataset_fingerprint).map((e) => e.experiment_id);
-  const predatesFormula = experiments
-    .filter((e) => e.fingerprint_formula_unrecorded)
-    .map((e) => e.experiment_id);
-  const parts: string[] = [];
-  if (noRecord.length > 0) parts.push(`${noRecord.join(", ")} carry no fingerprint`);
-  if (predatesFormula.length > 0)
-    parts.push(`${predatesFormula.join(", ")} predate the fingerprint formula`);
-  return parts.length > 0 ? `not comparable: ${parts.join("; ")}` : "not comparable";
+  return noRecord.length > 0
+    ? `not comparable: ${noRecord.join(", ")} carry no fingerprint`
+    : "not comparable";
 }
 
 // The rank chooser and the logged-metrics table share this one filter (numericMetricKeys) so a
@@ -112,7 +107,7 @@ function notRankedNoMetricStamped(metric: string): string {
   return `not ranked: no ${metric} stamped`;
 }
 
-/** Side-by-side detail for two to four marked runs: one column per run labelled by the record it
+/** Side-by-side detail for two to four marked runs: one column per run labeled by the record it
  * came from, an overlay chart, and one rank control over the platform's best-model derivation. */
 export function RunComparison({
   marked,
@@ -139,24 +134,24 @@ export function RunComparison({
   const [higherIsBetterByMetric, setHigherIsBetterByMetric] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    let cancelled = false;
+    let canceled = false;
     trainingApi
       .metricDirections()
       .then((r) => {
-        if (!cancelled) setHigherIsBetterByMetric(r.higher_is_better);
+        if (!canceled) setHigherIsBetterByMetric(r.higher_is_better);
       })
       .catch(() => {
-        if (!cancelled) setHigherIsBetterByMetric({});
+        if (!canceled) setHigherIsBetterByMetric({});
       });
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, []);
 
   const markedKey = marked.map((m) => m.experimentId).join(",");
 
   useEffect(() => {
-    let cancelled = false;
+    let canceled = false;
     const ids = marked.map((m) => m.experimentId);
     // The marked set just changed identity: the previous answer, and any rank computed from it,
     // must not linger as if they already described the new set.
@@ -170,18 +165,18 @@ export function RunComparison({
     async function refresh() {
       try {
         const r = await trainingApi.compare(ids);
-        if (!cancelled) {
+        if (!canceled) {
           setResult(r);
           setCompareError(null);
         }
       } catch (e) {
-        if (!cancelled) setCompareError(e instanceof Error ? e.message : String(e));
+        if (!canceled) setCompareError(e instanceof Error ? e.message : String(e));
       }
     }
     void refresh();
     const t = setInterval(() => void refresh(), RUN_REFRESH_MS);
     return () => {
-      cancelled = true;
+      canceled = true;
       clearInterval(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1,13 +1,9 @@
-"""Georeferencing for a whole-mosaic GeoTIFF.
+"""Georeferencing for a whole-mosaic GeoTIFF: a drone orthomosaic covers many plants in one raster,
+so mapping a detection to a real-world plant reads the GeoTIFF's own georeferencing tags to turn a
+pixel location into a real-world coordinate.
 
-A drone orthomosaic covers many plants in one raster (unlike every other image loader in this
-package, which assumes one file per plant), so mapping a detection to a real-world plant needs
-something no other module here does: reading the GeoTIFF's own georeferencing tags to turn a pixel
-location into a real-world coordinate.
-
-:class:`OrthomosaicGeoreference` resolves that pixel <-> real-world mapping, reading the raster's
-own tags rather than assuming a CRS or zone: a rotated/sheared raster, or one whose CRS this module
-can't determine, is refused rather than silently mis-georeferenced (see
+:class:`OrthomosaicGeoreference` resolves that pixel <-> real-world mapping from the raster's own
+tags: a rotated/sheared raster, or one whose CRS this module can't determine, is refused (see
 :class:`RotatedRasterError` / :class:`GeoreferencingError`). Reading the pixels themselves is
 ``pipelines.raster_source``'s job (:class:`~tcip_mcp.pipelines.raster_source.GdalSource` for a
 raster too large to decode whole).
@@ -218,12 +214,8 @@ class OrthomosaicGeoreference:
         return pixel_to_native(self.transform, pixel_x, pixel_y)
 
     def pixel_to_wgs84(self, pixel_x: float, pixel_y: float) -> tuple[float, float]:
-        """(lat, lon) in WGS84 for raster pixel ``(pixel_x, pixel_y)``.
-
-        Returned as (lat, lon) to match ``plant_mapping``'s ``PlantRecord``/``haversine_m``
-        convention; ``pyproj.Transformer.transform`` with ``always_xy=True`` itself returns
-        (lon, lat), so the swap happens once here rather than leaving every caller to remember
-        which order this particular coordinate pair is in.
+        """(lat, lon) in WGS84 for raster pixel ``(pixel_x, pixel_y)``, the order
+        ``plant_mapping``'s ``PlantRecord``/``haversine_m`` use.
         """
         import pyproj
 
@@ -256,33 +248,25 @@ class OrthomosaicGeoreference:
 # files: meaningless here, since every detection in one static mosaic frame is simultaneous, so
 # there is no "row run" or timestamp order to segment. This is pure point-in/point-out: resolve
 # each detection's own pixel location to (lat, lon) via OrthomosaicGeoreference, then the same
-# nearest-neighbour primitives plant_mapping already owns (_nearest_plant/haversine_m/
-# grid_pitch_m), reused directly rather than reimplemented.
+# nearest-neighbor primitives plant_mapping already owns (_nearest_plant/haversine_m/
+# resolve_nn_tolerance_m), reused directly rather than reimplemented.
 
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (  # noqa: E402
-    NN_TOLERANCE_METERS,
     PlantRecord,
     _nearest_plant,
-    grid_pitch_m,
 )
 
 
 @dataclass
 class DetectionAssignment:
-    """The plant a single detection resolves to, by nearest-neighbour GPS distance.
+    """The plant a single detection resolves to, by nearest-neighbor GPS distance.
 
-    ``detection_index`` is the detection's position in the source ``predict_tiled``-shaped
-    result's ``boxes``/``scores``/``labels`` lists, so a caller joins this back to the detection
-    it came from; ``pixel_x``/``pixel_y`` (the box centroid, in the same full-mosaic pixel space)
-    is carried alongside for a caller that wants the location without re-deriving it.
+    ``detection_index`` is the detection's position in the source ``predict_tiled``-shaped result's
+    ``boxes``/``scores``/``labels`` lists; ``pixel_x``/``pixel_y`` (the box centroid, in the same
+    full-mosaic pixel space) is carried alongside.
 
-    ``source`` is ``"nearest_neighbour"`` (a plant lies within tolerance) or ``"unmapped"`` (none
-    does): unlike ``plant_mapping.Assignment.source``, there is no ``"sequence"`` case, since a
-    single static mosaic frame carries no capture order to anchor on. Mirrors ``Assignment``'s own
-    honesty: no plant within tolerance is recorded as unmapped, never force-assigned to the
-    nearest one regardless of distance, and no fabricated 0-1 confidence, only ``distance_m``
-    (``plant_mapping``'s module docstring states the rule: ``distance_m`` plus ``source``, never a
-    score read as a probability).
+    ``source`` is ``"nearest_neighbor"`` (a plant lies within tolerance) or ``"unmapped"`` (none
+    does, never force-assigned). No 0-1 confidence, only ``distance_m``.
     """
 
     detection_index: int
@@ -292,7 +276,7 @@ class DetectionAssignment:
     lon: float
     plot_name: str | None
     accession_name: str | None
-    source: str  # "nearest_neighbour" | "unmapped"
+    source: str  # "nearest_neighbor" | "unmapped"
     distance_m: float | None
 
     plant_attribution: ClassVar[str] = "detection"
@@ -304,11 +288,7 @@ class DetectionAssignment:
 
 def detection_location(box: Sequence[float]) -> tuple[float, float]:
     """A detection's own location: its box centroid ``((x1+x2)/2, (y1+y2)/2)``, in the same pixel
-    space the box itself is stated in, the point the detector's own geometry most directly stands
-    for. The one centroid computation :func:`assign_detections_to_plants` and
-    :func:`~tcip_mcp.pipelines.postprocessing.segment_attribution.assign_detections_to_segments`
-    both call, so per-detection nearest-neighbour attribution and per-detection segment
-    containment can never silently disagree about where a detection "is".
+    space the box itself is stated in.
     """
     x1, y1, x2, y2 = box
     return (x1 + x2) / 2.0, (y1 + y2) / 2.0
@@ -318,16 +298,9 @@ def plants_in_frame(
     plants: list[PlantRecord], georef: OrthomosaicGeoreference, *, width: int, height: int,
 ) -> tuple[list[PlantRecord], list[PlantRecord]]:
     """``(in_frame, outside)``: ``plants`` partitioned by whether their projected pixel position
-    falls inside this raster's own frame, the half-open test ``0 <= px < width`` and
-    ``0 <= py < height`` on the position :meth:`OrthomosaicGeoreference.wgs84_to_pixel` projects.
-
-    ``width``/``height`` come from the raster's own verified recorded identity, never assumed:
-    the one partition both attribution regimes share, so a registry point the raster does not
-    picture is treated the same way whichever regime reads it. The nearest-neighbour delivery
-    regime's own candidate list is the in-frame plants only, so a detection near a raster edge
-    cannot map to a registry point outside the raster; the canopy segment tie's own containment
-    test is meaningless for a plant the raster never pictures, so it partitions the same way
-    before testing containment at all.
+    falls inside this raster's own frame, the half-open test ``0 <= px < width`` and ``0 <= py <
+    height`` on the position :meth:`OrthomosaicGeoreference.wgs84_to_pixel` projects.
+    ``width``/``height`` come from the raster's own verified recorded identity.
     """
     in_frame: list[PlantRecord] = []
     outside: list[PlantRecord] = []
@@ -340,62 +313,34 @@ def plants_in_frame(
     return in_frame, outside
 
 
-def resolve_nn_tolerance_m(
-    plants: list[PlantRecord], nn_tolerance_m: float | None = None,
-) -> dict:
-    """The match tolerance (metres) :func:`assign_detections_to_plants` matches a detection to a
-    plant within, and where it came from: ``{"value": float, "source": str}``.
-
-    ``source`` is ``"stated"`` when the caller names a tolerance, ``"grid_pitch"`` when it is
-    derived from the plant layout's own spacing (``grid_pitch_m(plants) / 6``), or ``"fallback"``
-    (:data:`NN_TOLERANCE_METERS`) when the layout carries too few georeferenced plants (< 2) to
-    derive a pitch from.
-
-    A single-detection-per-object mosaic frame accepts a match at the tolerance itself, never
-    ``plant_mapping.build_mapping``'s own sequence-anchored ceiling (a stated override capped at a
-    sixth of the grid pitch): the two doors' match semantics differ enough that a stated override
-    is never capped here, so this stays its own derivation rather than sharing ``build_mapping``'s.
-    """
-    if nn_tolerance_m is not None:
-        return {"value": nn_tolerance_m, "source": "stated"}
-    pitch = grid_pitch_m(plants)
-    if pitch > 0:
-        return {"value": pitch / 6, "source": "grid_pitch"}
-    return {"value": NN_TOLERANCE_METERS, "source": "fallback"}
-
-
 def assign_detections_to_plants(
     detections: dict,
     georeference: OrthomosaicGeoreference,
     plants: list[PlantRecord],
     *,
-    nn_tolerance_m: float | None = None,
+    nn_tolerance_m: float,
 ) -> list[DetectionAssignment]:
     """One :class:`DetectionAssignment` per box in a ``predict_tiled``-shaped ``detections`` result
-    (``{"boxes": [[x1, y1, x2, y2], ...], ...}`` in full-mosaic pixel space, as returned by
-    :meth:`GenericPredictor.predict_tiled` for either of its source kinds).
+    (``{"boxes": [[x1, y1, x2, y2], ...], ...}`` in full-mosaic pixel space).
 
-    Each detection's own location is its box centroid ``((x1+x2)/2, (y1+y2)/2)``: the point the
-    detector's own geometry most directly stands for, resolved to (lat, lon) via
+    Each detection's :func:`detection_location` is resolved to (lat, lon) via
     ``georeference.pixel_to_wgs84``, then matched to the nearest plant in ``plants``.
-
-    ``nn_tolerance_m`` resolves through :func:`resolve_nn_tolerance_m`; ``None`` (the default)
-    derives it from the plant layout rather than pinning a constant. A detection farther than the
-    tolerance from every plant is unmapped rather than force-assigned to the nearest one.
+    ``nn_tolerance_m`` is the resolved tolerance
+    (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.resolve_nn_tolerance_m`); a detection
+    farther than it from every plant is unmapped.
     """
     boxes = detections.get("boxes") or []
-    tolerance_m = resolve_nn_tolerance_m(plants, nn_tolerance_m)["value"]
 
     out: list[DetectionAssignment] = []
     for i, box in enumerate(boxes):
         cx, cy = detection_location(box)
         lat, lon = georeference.pixel_to_wgs84(cx, cy)
         plant, distance_m = _nearest_plant(lat, lon, plants) if plants else (None, None)
-        if plant is not None and distance_m is not None and distance_m <= tolerance_m:
+        if plant is not None and distance_m is not None and distance_m <= nn_tolerance_m:
             out.append(DetectionAssignment(
                 detection_index=i, pixel_x=cx, pixel_y=cy, lat=lat, lon=lon,
                 plot_name=plant.plot_name, accession_name=plant.accession_name,
-                source="nearest_neighbour", distance_m=distance_m,
+                source="nearest_neighbor", distance_m=distance_m,
             ))
         else:
             out.append(DetectionAssignment(

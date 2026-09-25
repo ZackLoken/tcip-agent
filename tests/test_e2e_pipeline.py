@@ -56,7 +56,7 @@ def project_dir(tmp_path: Path) -> Path:
         root / "subjects.json",
         SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
 
-    # 5 synthetic images (640x480 grey) with GT labels and predictions
+    # 5 synthetic images (640x480 gray) with GT labels and predictions
     for i in range(5):
         name = f"img_{i:03d}"
         img = Image.new("RGB", (640, 480), color=(100 + i * 20, 100, 100))
@@ -104,11 +104,11 @@ class TestE2EPipeline:
         assert ds["labels_count"] == 5
         assert ds["predictions_count"] == 5
         assert ds["paired_images"] == 5
-        assert ds["unlabelled_images"] == 0
+        assert ds["unlabeled_images"] == 0
 
         # ── Step 4: Validate data quality ────────────────────────────
         findings: list[tuple[str, str]] = []
-        doctor.check_data_quality(Path(root), findings)
+        doctor.check_data_quality(Path(root), findings, census=doctor._census(Path(root), findings, set()))
         assert not [f for f in findings if f[0] == "error"]
 
         # ── Step 5: Load annotations for one image ───────────────────
@@ -197,12 +197,12 @@ class TestE2EPipelineEdgeCases:
     """Edge-case scenarios for the pipeline."""
 
     def test_empty_project(self, tmp_path: Path):
-        """Pipeline tools handle an uninitialised project gracefully."""
+        """Pipeline tools handle an uninitialized project gracefully."""
         status = inspect_project(str(tmp_path))
         assert status["initialized"] is False
 
     def test_dataset_with_missing_labels(self, tmp_path: Path):
-        """scan_dataset reports unlabelled images correctly."""
+        """scan_dataset reports unlabeled images correctly."""
         images = tmp_path / "images"
         images.mkdir()
         labels = tmp_path / "annotations"
@@ -220,7 +220,7 @@ class TestE2EPipelineEdgeCases:
         ds = scan_dataset(str(tmp_path))
         assert ds["image_count"] == 3
         assert ds["labels_count"] == 1
-        assert ds["unlabelled_images"] == 2
+        assert ds["unlabeled_images"] == 2
 
     def test_evaluate_no_predictions(self, tmp_path: Path):
         """score_predictions handles images with no predictions."""

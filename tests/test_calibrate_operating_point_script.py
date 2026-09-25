@@ -12,6 +12,7 @@ The script also threads the floor ``set_detector_operating_point`` actually appl
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -113,7 +114,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
     ckpt.write_bytes(b"x")
     img = tmp_path / "a.png"
     Image.new("RGB", (100, 100)).save(img)
-    run_inference(str(ckpt), image_paths=[str(img)], device="cpu", tile=False)
+    run_inference(str(ckpt), images_dir=str(Path(str(img)).parent), device="cpu", tile=False)
 
     assert len(max_dets_calls) == 2
     script_cap, mcp_cap = max_dets_calls
@@ -353,19 +354,6 @@ def test_script_prints_and_exits_cleanly_for_fewer_than_two_labeled_stems(monkey
 
     assert rc == 2
     assert "Need >=2 labeled stems" in capsys.readouterr().err
-
-
-def test_script_selection_dir_requires_subject(tmp_path):
-    """--selection-dir needs --subject to check the selection's own subject against; this
-    refuses before touching a checkpoint or a dataset."""
-    from tcip_mcp.cli.calibrate_operating_point import main
-
-    rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
-              "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
-              "--dataset-root", str(tmp_path), "--project-root", str(tmp_path),
-              "--selection-dir", str(tmp_path / "m")])
-
-    assert rc == 2
 
 
 def test_script_selection_dir_conflicts_with_group_by(tmp_path):

@@ -81,22 +81,22 @@ export function useCoverageTracking(args: {
       return;
     }
     tracker.reset({ imagePath, datasetRoot, subject, date }, grid, cells);
-    let cancelled = false;
+    let canceled = false;
     void api.coverage.get(imagePath, subject, date).then(
       (record) => {
-        if (cancelled) return;
+        if (canceled) return;
         tracker.hydrate(record);
       },
       (err: unknown) => {
         // A missing record resolves as null above; a rejection here is a real refusal, so it
         // surfaces rather than accumulating silently as if nothing were stored.
-        if (cancelled) return;
+        if (canceled) return;
         const detail = err instanceof Error ? err.message : String(err);
         useStore.getState().pushToast(`Could not read the stored coverage record: ${detail}`);
       },
     );
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, [tracker, imagePath, datasetRoot, subject, date, grid, cells]);
 

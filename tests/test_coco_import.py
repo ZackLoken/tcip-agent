@@ -39,12 +39,12 @@ def _dataset(tmp_path: Path, stems=STEMS) -> Path:
     raw.mkdir()
     for index, stem in enumerate(stems):
         Image.new("RGB", (IMG, IMG), color=(40 + index, 60, 50)).save(raw / f"{stem}.png")
-    root = tmp_path / "chestnut_bur_count"
+    root = tmp_path / "fruit_count"
     ingested = ingest_images(source=str(raw), name=root.name, site="the import test's block",
                              project_path=str(root), date_from=DATE)
     assert "error" not in ingested, ingested
     registered = write_subject_registry(str(root), subjects={
-        SUBJECT: {"description": "one chestnut bur"}, "leaf": {"description": "one leaf"}})
+        SUBJECT: {"description": "one fruit"}, "leaf": {"description": "one leaf"}})
     assert "error" not in registered, registered
     return root
 
@@ -90,7 +90,7 @@ def _loader(task: str, root: Path):
 def _targets(task: str, root: Path) -> dict:
     """Each admitted image's target, read off the loader the ordinary producer builds."""
     loader = _loader(task, root)
-    return {loader.member_stem_of(key): loader[i][1] for i, key in enumerate(loader.stems)}
+    return {loader.member_of(key): loader[i][1] for i, key in enumerate(loader.stems)}
 
 
 def test_an_imported_documents_images_train_with_the_boxes_it_stated(tmp_path: Path):
@@ -111,6 +111,32 @@ def test_an_imported_documents_images_train_with_the_boxes_it_stated(tmp_path: P
     assert sorted(targets) == ["tree_01", "tree_02"]
     assert targets["tree_01"]["boxes"].tolist() == [[x, y, x + w, y + h]]
     assert targets["tree_02"]["boxes"].tolist() == [[30.0, 30.0, 50.0, 54.0]]
+
+
+def test_a_flat_dataset_imports_its_documents_beside_its_flat_images(tmp_path: Path):
+    """A dataset whose images sit in the flat ``images/`` root (no capture bucket; placed by hand,
+    since ingestion always buckets) gets its documents in the flat ``annotations/`` root, where
+    every reader of that dataset's labels looks, never under a date its images were not filed
+    under."""
+    from PIL import Image
+
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
+
+    root = tmp_path / "flat_bur_count"
+    (root / "images").mkdir(parents=True)
+    for index, stem in enumerate(STEMS):
+        Image.new("RGB", (IMG, IMG), color=(40 + index, 60, 50)).save(
+            root / "images" / f"{stem}.png")
+    registered = write_subject_registry(str(root), subjects={
+        SUBJECT: {"description": "one fruit"}, "leaf": {"description": "one leaf"}})
+    assert "error" not in registered, registered
+
+    result = _import(_document(tmp_path / "external.json"), root)
+
+    assert "error" not in result, result
+    assert sorted(result["written"]) == sorted(
+        str(root / "annotations" / f"{stem}.json") for stem in ("tree_01", "tree_02"))
+    assert not (root / "annotations" / DATE).exists()
 
 
 def test_an_imported_documents_images_train_with_the_polygons_it_stated(tmp_path: Path):

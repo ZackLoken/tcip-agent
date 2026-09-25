@@ -1,4 +1,4 @@
-/** A legend row whose colour swatch is a button: click it to retune that symbology colour. */
+/** A legend row whose color swatch is a button: click it to retune that symbology color. */
 export function LegendRow({
   color,
   dashed,
@@ -15,8 +15,8 @@ export function LegendRow({
       <button
         type="button"
         onClick={onEdit}
-        title="Click to change this colour"
-        aria-label={`Change ${label} colour`}
+        title="Click to change this color"
+        aria-label={`Change ${label} color`}
         className="inline-block w-6 shrink-0 rounded-sm hover:opacity-70"
         style={{ borderTop: `2.5px ${dashed ? "dashed" : "solid"} ${color}` }}
       />

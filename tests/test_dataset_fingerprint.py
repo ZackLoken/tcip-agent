@@ -178,7 +178,7 @@ def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_
         tmp_path / "subjects.json",
         SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
 
-    assert dataset_fingerprint(tmp_path) == "v1:2b72f04cd064379a"
+    assert dataset_fingerprint(tmp_path) == "2b72f04cd064379a"
 
 
 def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(tmp_path):

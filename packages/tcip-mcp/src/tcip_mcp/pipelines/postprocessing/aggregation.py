@@ -6,10 +6,8 @@ Aggregation strategies (per-plant summary of a per-image value):
   - mean:     Arithmetic mean (continuous traits)
   - sum:      Sum of values (area traits)
 
-A trait's own phenology milestones (percentile-crossing dates of its positive-state fraction,
-e.g. a 5/50/95% schedule) are intentionally not here: that is interpolated crossing time, a
-different shape of computation than a per-image summary statistic, implemented once in
-``postprocessing/phenology.py`` for whichever trait is registered.
+A trait's phenology milestones (percentile-crossing dates of its positive-state fraction) are
+``postprocessing/phenology.py``'s.
 
 Usage:
     results = aggregate_per_plant(image_results, strategy="count")
@@ -29,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.resolution import Acknowledgement
+    from tcip_mcp.pipelines.resolution import Acknowledgment
 
 logger = logging.getLogger(__name__)
 
@@ -43,33 +41,25 @@ def aggregate_per_plant(
 ) -> list[dict]:
     """Aggregate per-image results to per-plant summaries.
 
-    Plant identity is never guessed from a filename. Every record's ``plant_id`` must come from an
-    explicit ``plant_id_key`` value or ``plant_id_fn(image)``, a record for which neither resolves
-    raises, naming ``build_plant_mapping`` (the real GNSS+capture-sequence resolver,
-    ``tcip_mcp.pipelines.postprocessing.plant_mapping``) as what to use instead. Filenames rarely
-    carry a plant id at all; real identity resolution in this domain is RTK/GNSS + capture sequence
-    or a zbar/QR code physically tied to the plant, never a filename heuristic.
+    Every record's ``plant_id`` must come from an explicit ``plant_id_key`` value or
+    ``plant_id_fn(image)``; a record for which neither resolves raises, naming
+    ``build_plant_mapping`` (``tcip_mcp.pipelines.postprocessing.plant_mapping``).
 
     When a record carries ``plant_id_source``/``plant_id_distance_m`` (as ``build_plant_mapping``'s
-    own ``Assignment`` records do, the real, honest uncertainty signal that mapping already
-    produces), it is summarized per plant so identity confidence reaches the delivery CSV instead of
-    stopping at the mapping step's own boundary.
+    ``Assignment`` records do), it is summarized per plant.
 
-    Every record also states, via ``measurement_document``, which sidecar document (``operating_
-    point``, ``ordinal_operating_point`` or ``regression_operating_point``) answers for the value it
-    carries, and optionally ``scale_document`` (``"resolve_scale"``) when a per-pixel physical scale
-    produced it. Both are carried onto the per-plant summary and a plant whose own images disagree on
-    either refuses (see :func:`_agreed_statement_field`): a statement that disagrees with itself is
-    not a statement, and ``export_aggregated_csv`` reads these fields to decide which validity
-    dimension it reconciles, never a caller-supplied task string. A record's own ``plant_attribution``
-    (the granularity objects were attributed to plants at, e.g. ``plant_mapping.MappingBuild``'s
-    ``"image"`` or ``orthomosaic_mapping.DetectionAssignment``'s ``"detection"``) is carried the
-    same disagreement-refusing way, never collapsed to ``"mixed"`` the way ``plant_id_source`` is,
-    since a granularity cannot mix.
+    Every record also states, via ``measurement_document``, which sidecar document
+    (``operating_point``, ``ordinal_operating_point`` or ``regression_operating_point``) answers
+    for the value it carries, and optionally ``scale_document`` (``"resolve_scale"``) when a
+    per-pixel physical scale produced it. Both are carried onto the per-plant summary, and so is a
+    record's ``plant_attribution`` (the granularity objects were attributed to plants at, e.g.
+    ``plant_mapping.MappingBuild``'s ``"image"`` or ``orthomosaic_mapping.DetectionAssignment``'s
+    ``"detection"``); a plant whose own images disagree on any of the three refuses (see
+    :func:`_agreed_statement_field`).
 
     Args:
         image_results: List of dicts, each with at least an 'image' key, a plant_id_key or a value
-                      plant_id_fn can resolve, and a value field (e.g., 'count', 'class', 'value').
+            plant_id_fn can resolve, and a value field (e.g., 'count', 'class', 'value').
         strategy: Aggregation strategy, 'count', 'mode', 'mean', 'sum'.
         plant_id_key: Key in each result dict for plant identification.
         value_key: Key in each result dict for the value to aggregate.
@@ -125,12 +115,8 @@ def aggregate_per_plant(
 
 def _agreed_statement_field(items: list[dict], key: str, plant_id: str) -> Any:
     """One plant's own value for a statement field (``measurement_document``, ``scale_document``,
-    or ``plant_attribution``), refusing rather than collapsing when its images disagree: a
-    statement that disagrees with itself is not a statement, so this never collapses to
-    ``"mixed"`` the way ``plant_id_source`` does above. Always returns a value (``None`` when
-    every item omits the field), unlike ``plant_id_source``'s conditional presence, since
-    ``export_aggregated_csv`` reads every one of these three fields off every result
-    unconditionally.
+    or ``plant_attribution``), refusing when its images disagree. ``None`` when every item omits
+    the field.
     """
     values = {r.get(key) for r in items}
     if len(values) > 1:
@@ -207,57 +193,35 @@ _STRATEGIES = {
 
 _PROVENANCE_COLUMNS = ["producer_model_sha256", "producing_experiment_id", "produced_at",
                        "operating_point_validated", "unvalidated_dimensions", "validation_record",
-                       "acknowledged_by", "acknowledgement_reason"]
-
-
-def _unit_from_value_key(value_key: str) -> tuple[str, str] | None:
-    """``(display_unit, linear_basis)`` a value_key implies (``area_mm2`` -> ``("mm2", "mm")``,
-    ``principal_axis_extent_cm`` -> ``("cm", "cm")``), or None for a key with no physical-unit suffix
-    (``count``, a plain ``value``, a px-suffixed key, or a trailing token outside crops.yml's own
-    declared unit vocabulary). Delegates to :func:`mask_geometry.unit_from_value_key`, the single
-    owner of the naming convention, vocabulary-driven rather than a field-name whitelist, so a
-    bespoke agent-composed measurement (an arc length, a landmark distance) is recognized the same
-    way mask_geometry's own fields are, rather than re-deriving the pattern with a local regex."""
-    from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
-
-    return unit_from_value_key(value_key)
-
-
-def _is_pixel_space_key(value_key: str) -> bool:
-    """Whether ``value_key`` explicitly names pixel space (a trailing ``_px``, or the bare key
-    ``"px"``), as opposed to one that simply carries no unit suffix at all: a stated pixel-space key
-    never inherits a trait's declared physical unit, under any measurement document."""
-    _root, _sep, trailing = value_key.rpartition("_")
-    return value_key == "px" or trailing == "px"
+                       "acknowledged_by", "acknowledgment_reason"]
 
 
 def _resolve_units(
     delivered_phenotype: str, results: list[dict], measurement_document: str
 ) -> tuple[str, str | None]:
-    """``(display_unit, linear_basis)`` implied by the aggregated values' own value_key, crops.yml's
-    declared unit is a cross-check only, never a fallback source under ``operating_point``. A
-    value_key with no recognized physical-unit suffix (px, count, or a trailing token outside
-    crops.yml's declared unit vocabulary) yields ``("", None)`` under ``operating_point``, exactly
-    like a count trait already does: it never inherits crops.yml's declared unit unopposed, or a
-    pixel-space value would ship labeled with the trait's declared mm/cm/m because nothing derived
-    a unit to check it against.
+    """``(display_unit, linear_basis)`` implied by the aggregated values' own value_key;
+    crops.yml's declared unit is a cross-check only under ``operating_point``. A value_key with no
+    recognized physical-unit suffix (px, count, or a trailing token outside crops.yml's declared
+    unit vocabulary) yields ``("", None)`` under ``operating_point``.
 
     Under a scalar head (``ordinal_operating_point``/``regression_operating_point``), a value_key
     with no unit suffix at all (a bare ``value`` or the trait's own bare name, e.g.
-    ``fruit_diameter``) is not px-space, it states nothing about units either way: a calibrated head
-    predicts in the trait's declared unit by construction, so the units column is that declared unit
-    rather than blank. A value_key that explicitly ends in ``_px`` (or is bare ``"px"``) states pixel
-    space outright and never inherits the declared unit, under either document. A value_key that does
-    imply a physical unit is still cross-checked against the declared one below, the same as under
-    ``operating_point``.
+    ``fruit_diameter``) takes the trait's declared unit. A value_key that explicitly ends in
+    ``_px`` (or is bare ``"px"``) never inherits the declared unit, under either document. A
+    value_key that does imply a physical unit is cross-checked against the declared one under
+    either document.
 
-    ``display_unit``'s returned unit is squared for an area (``"mm2"``, not ``"mm"``);
-    ``linear_basis`` is always linear (crops.yml has no squared-unit vocabulary) and is what the
-    cross-check below, and the physical-scale reconciliation's own ``unit`` argument, compare
-    against."""
+    ``display_unit`` is squared for an area (``"mm2"``, not ``"mm"``); ``linear_basis`` is always
+    linear (crops.yml has no squared-unit vocabulary) and is what the cross-check, and the
+    physical-scale reconciliation's own ``unit`` argument, compare against.
+    """
+    from tcip_mcp.pipelines.measurement.mask_geometry import (
+        is_pixel_space_key,
+        unit_from_value_key,
+    )
     from tcip_mcp.traits import crops_units
 
-    implied_pairs = {p for p in (_unit_from_value_key(r.get("value_key", "")) for r in results) if p}
+    implied_pairs = {p for p in (unit_from_value_key(r.get("value_key", "")) for r in results) if p}
     if len(implied_pairs) > 1:
         implied_units = {display for display, _linear_basis in implied_pairs}
         raise ValueError(
@@ -268,7 +232,7 @@ def _resolve_units(
     declared = crops_units().get(delivered_phenotype)
     pair = next(iter(implied_pairs), None)
     if pair is None:
-        explicitly_px = any(_is_pixel_space_key(r.get("value_key", "")) for r in results)
+        explicitly_px = any(is_pixel_space_key(r.get("value_key", "")) for r in results)
         if measurement_document in ("ordinal_operating_point", "regression_operating_point") \
                 and declared is not None and not explicitly_px:
             return declared, declared
@@ -298,94 +262,60 @@ def export_aggregated_csv(
     scale_capture_id: str | None = None,
     door: str = "export_aggregated_csv",
     plant_mapping: dict | None = None,
-    acknowledgement: Acknowledgement | None = None,
+    acknowledgment: Acknowledgment | None = None,
     project_root: str | Path | None = None,
 ) -> tuple[str, dict, bool]:
     """Export per-plant aggregated results to a delivery CSV.
 
-    Follows the per-plant CSV schema from the delivery skill, the ``fieldnames`` list below is the
-    authority for it: plant_id, crop, delivered_phenotype, value, units, value_key, measurement_document,
-    scale_document, confidence, n_images, pipeline_version, plant_id_source, plant_attribution,
-    plant_id_distance_m_max, then ``_PROVENANCE_COLUMNS`` (producer_model_sha256,
-    producing_experiment_id, produced_at, operating_point_validated, unvalidated_dimensions,
-    validation_record, acknowledged_by, acknowledgement_reason) so the final per-plant value is
-    traceable to the exact model that produced it and carries its own validity stamp. Those cells
-    are built by ``delivered_tail`` from the verification the gate already ran,
-    so a producer this delivery cannot corroborate is reported unknown rather than repeated from
-    the stamp that asserted it, ``produced_at`` is the write's own timestamp rather than one the
-    caller asserts, and ``validation_record`` names the record a reader can open to see what the
-    claim was earned against.
+    The ``fieldnames`` list below is the schema: plant_id, crop, delivered_phenotype, value, units,
+    value_key, measurement_document, scale_document, confidence, n_images, pipeline_version,
+    plant_id_source, plant_attribution, plant_id_distance_m_max, then ``_PROVENANCE_COLUMNS``
+    (producer_model_sha256, producing_experiment_id, produced_at, operating_point_validated,
+    unvalidated_dimensions, validation_record, acknowledged_by, acknowledgment_reason). Those
+    cells are built by ``delivered_tail`` from the verification the gate ran: a producer this
+    delivery cannot corroborate reads unknown, ``produced_at`` is the write's own timestamp, and
+    ``validation_record`` names the record the claim was earned against.
 
-    The statement, and how the door reads it. Each result (``aggregate_per_plant``'s own output)
-    states ``measurement_document``, which sidecar document answers for the measurement that
-    produced the value (``operating_point``, ``ordinal_operating_point`` or
-    ``regression_operating_point``; ``classifier_operating_point`` and ``resolve_scale`` are refused
-    here, no per-plant aggregate this door delivers rests on either alone), and optionally
-    ``scale_document`` (``"resolve_scale"``) when a per-pixel physical scale produced it. Every
-    result must state the same ``measurement_document`` and agree on ``scale_document`` (present on
-    all or none); a delivery whose records disagree, or state nothing, refuses naming the field.
-    This is what decides which validity dimension the door reconciles, not a caller-supplied task
-    string: there is no ``task`` parameter here, the records themselves say how their number was
-    produced.
+    Each result (``aggregate_per_plant``'s own output) states ``measurement_document``, which
+    sidecar document answers for the measurement that produced the value (``operating_point``,
+    ``ordinal_operating_point`` or ``regression_operating_point``; ``classifier_operating_point``
+    and ``resolve_scale`` are refused here), and optionally ``scale_document``
+    (``"resolve_scale"``) when a per-pixel physical scale produced it. Every result must state the
+    same ``measurement_document`` and agree on ``scale_document`` (present on all or none); a
+    delivery whose records disagree, or state nothing, refuses naming the field. The statement
+    decides which validity dimension the door reconciles.
 
-    The final per-plant CSV is a delivery door: it refuses a *bare* write (an unvalidated phenotype
-    with no acknowledgement) via the shared ``check_delivery_gate`` and stamps the reconciled
-    validity into every row. Pass ``pred_dirs`` (the prediction buckets the values came from) so the
-    stated document's own sidecar is reconciled from each bucket and floored against
-    ``operating_point_validated`` (never trusted from the string alone). Under ``operating_point``, a
-    tiled bucket also gates on its ``tile_size``: the tile edge scales the per-image counts this
-    per-plant value aggregates, so a run with no persisted training geometry, no recoverable
-    native-frame edge, and no explicit caller override refuses here; untiled buckets are never
-    gated on it, and neither is an ordinal/regression delivery, which rests on a per-image scalar
-    prediction no tile geometry produced. ``pred_dirs`` empty/omitted has no on-disk validity
-    producer at all and floors to unvalidated unconditionally. ``acknowledgement`` is the breeder's
-    own act of shipping this delivery unvalidated (the web results route's per-plant count export
-    is the one surface that builds one), or ``None`` for every MCP-tool call, which still refuses a
-    bare unvalidated write here exactly as before.
+    The door refuses a bare write (an unvalidated phenotype with no acknowledgment) via
+    ``check_delivery_gate`` and stamps the reconciled validity into every row. ``pred_dirs`` (the
+    prediction buckets the values came from) has the stated document's own sidecar reconciled from
+    each bucket and floored against ``operating_point_validated``. Under ``operating_point``, a
+    tiled bucket also gates on its ``tile_size``; untiled buckets and ordinal/regression deliveries
+    never do. ``pred_dirs`` empty/omitted floors to unvalidated. ``acknowledgment`` is the
+    breeder's own act of shipping this delivery unvalidated, or ``None``.
 
     The physical-scale dimension is reconciled when and only when the results state
     ``scale_document`` and ``pred_dirs`` is given. A stated scale with a value_key implying no
-    physical unit refuses (a scale cannot answer for a non-dimensional value), whether or not
-    ``pred_dirs`` is given; a stated scale with no ``pred_dirs`` at all also refuses, since nothing on
-    disk can answer for the claim. With ``pred_dirs`` given, a value_key implying a physical unit
-    with no stated scale is admitted only under a scalar head (``ordinal_operating_point``/
-    ``regression_operating_point``, whose predictions are in the trait's declared unit by
-    construction) and refuses under ``operating_point``, since a dimensional number from a detection
-    or segmentation bucket with no scale behind it has nothing answering for its unit; with no
-    ``pred_dirs``, the delivery has no on-disk validity producer at all regardless of unit, and
-    floors to unvalidated exactly as the operating_point dimension does; nothing an acknowledgement
-    clears fixes a scale claim with nothing on disk to reconcile it from, since this refusal
-    precedes the gate. When operative, each bucket's ``resolve_scale.json`` is
-    reconciled the same floor-from-disk way the operating_point dimension is, checked against the
-    delivered unit and the delivered trait (``reconcile_scale_validity``), which recomputes the
+    physical unit refuses, whether or not ``pred_dirs`` is given; a stated scale with no
+    ``pred_dirs`` also refuses, ahead of the gate. With ``pred_dirs`` given, a value_key implying a
+    physical unit with no stated scale is admitted only under a scalar head and refuses under
+    ``operating_point``. When operative, each bucket's ``resolve_scale.json`` is reconciled against
+    the delivered unit and the delivered trait (``reconcile_scale_validity``), recomputing the
     claim's imagery digest from ``images_dir`` (required whenever ``scale_document`` is stated
-    alongside ``pred_dirs``). ``scale_capture_id`` scopes that reconciliation to one capture when
-    the delivery's physical scale is itself capture-scoped (a handheld standoff that can vary image
-    to image).
+    alongside ``pred_dirs``). ``scale_capture_id`` scopes that reconciliation to one capture.
 
     Under ``operating_point``, a trait declaring a physical unit (crops.yml) whose delivered
-    value_key implies none also refuses, naming both: a px-space value delivered under a
-    unit-declared trait is not that trait's number. A count trait with no declared unit is
-    unaffected; a scalar-head delivery is exempt (its declared unit may legitimately not appear in
-    a bare ``value`` key).
+    value_key implies none refuses, naming both. A count trait with no declared unit is unaffected;
+    a scalar-head delivery is exempt.
 
-    A bucket whose sidecar records a claim scope (which raster its predictions were produced on,
-    written by the whole-raster export regime) also gates on that dimension, whatever the
-    measurement document: an operating point calibrated on one mosaic says nothing about a bucket
-    produced on another, so a recorded scope that cleared nothing floors this delivery the same way
-    an uncalibrated conf does. A bucket recording no claim scope never acquires the dimension.
+    A bucket whose sidecar records a claim scope (which raster its predictions were produced on)
+    also gates on that dimension, whatever the measurement document; a bucket recording no claim
+    scope never acquires the dimension.
 
-    Meaning door: the delivered value has to have a recorded, breeder-confirmed meaning before it
-    ships. ``delivered_phenotype`` is the crop-vocabulary phenotype the CSV column carries and the
-    unit cross-check reads; the record that says what the number means is keyed by the registered
-    trait whose spec delivers that phenotype, resolved here, refusing when no registered trait
-    delivers it and when more than one does. Which of the three aggregate kinds is confirmed follows
-    from ``measurement_document``, since a count, an ordinal and a regression aggregate rest on
-    three different floors. Every delivered row carries a value key, and every one must be inside
-    the confirmed set: a row with no stated quantity has nothing to check against what the breeder
-    confirmed. A plant whose own value is ``None`` (no observation carried the value_key at all)
-    refuses, naming the plant: a missing measurement must never ship as an empty cell beside a
-    validated stamp.
+    The delivered value needs a breeder-confirmed operationalization: ``delivered_phenotype``
+    resolves to the registered trait whose spec delivers it (refusing when none or more than one
+    does), and the aggregate kind confirmed follows from ``measurement_document``. Every delivered
+    row carries a value key inside the confirmed set. A plant whose own value is ``None`` refuses,
+    naming the plant.
 
     Args:
         results: Output from aggregate_per_plant().
@@ -396,8 +326,7 @@ def export_aggregated_csv(
         pipeline_version: Pipeline identifier.
         provenance: Optional producing-model stamp added as trailing columns.
         operating_point_validated: Honored only when ``pred_dirs`` is also given (floors the
-            on-disk validity, never raises it). Ignored, not a delivery path, when ``pred_dirs`` is
-            empty, see the note above.
+            on-disk validity, never raises it).
         pred_dirs: Prediction buckets to reconcile validity from: the results' own stated
             ``measurement_document``, and ``scale_document`` when stated; floored against
             ``operating_point_validated``.
@@ -405,43 +334,30 @@ def export_aggregated_csv(
             (with ``pred_dirs`` given) to recompute a scale claim's imagery digest.
         scale_capture_id: The capture this delivery's physical scale must match, when the scale is
             capture-scoped; a bucket's sidecar recording a different capture floors to unvalidated.
-        door: The name the recorded delivery event carries. A caller with its own door name (e.g.
-            ``deliver_orthomosaic_plant_counts``, which composes this CSV rather than calling it
-            directly) passes it here instead of also recording its own event for the same export,
-            which would otherwise record one CSV as two shipments.
+        door: The name the recorded delivery event carries.
         plant_mapping: The delivery's own plant-mapping binding, recorded onto the delivery event
-            unchanged: either the shape ``plant_mapping.MappingBuild.delivery_disclosure`` composes
-            for a walked capture mapping (its identity, its unverified-input disclosures, and this
-            delivery's own unattributed-capture count), or the shape
-            ``deliver_orthomosaic_plant_counts`` composes for a whole-raster frame with no such
-            mapping (the registry it read, the raster identity, the matched tolerance, and this
-            delivery's own unattributed-detection count). ``None`` when the caller names no mapping
-            or has not verified one against the buckets this delivery reads. Never a bare name or
-            digest on its own, since the stored record's own schema (``PlantMappingDisclosure`` /
-            ``PlantRegistryDisclosure``) validates the whole shape or nothing.
-        acknowledgement: The breeder's own act of shipping this delivery unvalidated, or ``None``
-            for an ordinary validated export or an MCP-tool call, which never builds one.
+            unchanged: the shape ``plant_mapping.MappingBuild.delivery_disclosure`` composes for a
+            walked capture mapping, or the shape ``deliver_orthomosaic_plant_counts`` composes for
+            a whole-raster frame (validated whole by ``PlantMappingDisclosure`` /
+            ``PlantRegistryDisclosure``). ``None`` when the caller names no verified mapping.
+        acknowledgment: The breeder's own act of shipping this delivery unvalidated, or ``None``.
         project_root: The project this delivery's meaning-record reads and delivery event belong
-            to. ``None`` (every MCP-tool call) resolves against this process's pinned platform
-            root; a web route already holding its own guarded, resolved root passes it explicitly.
+            to. ``None`` resolves against this process's pinned platform root.
 
     Returns:
         ``(path, tail, event_recorded)``: the path to the written CSV, the ``_PROVENANCE_COLUMNS``
-        tail ``delivered_tail`` composed and wrote into every row (so a caller that needs one of
-        those cells back reads the value actually written rather than re-deriving or re-asserting
-        it a second time), and whether the best-effort delivery-event write landed
-        (``record_delivery_binding_event``'s own return).
+        tail ``delivered_tail`` composed and wrote into every row, and whether the best-effort
+        delivery-event write landed (``record_delivery_binding_event``'s own return).
 
     Raises:
-        DeliveryRefused: the gate refused (an unvalidated dimension with no acknowledgement that
+        DeliveryRefused: the gate refused (an unvalidated dimension with no acknowledgment that
             clears it); carries the ``DeliveryGateResult`` and every operative reconciler's binding
             notes.
         OperationalizationRefused (``tcip_mcp.operationalization``): ``delivered_phenotype``'s
             operationalization is unrecorded, not breeder-confirmed, or was withdrawn since the
-            first check; carries the failed check and no counts, so a caller must not read a
-            delivered value off this raise.
-        ValueError: any other refusal (a statement or unit problem the results carry); never
-            carries a gate result, so a caller must not read a delivered count off this raise.
+            first check; carries the failed check and no counts.
+        ValueError: any other refusal (a statement or unit problem the results carry); carries no
+            gate result.
         AuditEntryNotWritten (``tcip_mcp.audit``): the dataset-scoped delivery-event audit line
             could not be appended, raised by ``record_delivery_binding_event`` after the CSV was
             already written to ``output_path``.
@@ -485,7 +401,7 @@ def export_aggregated_csv(
         raise ValueError(
             "export_aggregated_csv: results state scale_document with no pred_dirs; nothing on "
             "disk can answer for a physical-scale claim without a bucket to reconcile it from, "
-            "and no acknowledgement clears a scale claim with nothing on disk to reconcile it "
+            "and no acknowledgment clears a scale claim with nothing on disk to reconcile it "
             "from regardless. Pass pred_dirs for the buckets behind these results."
         )
     if pred_dirs and units and scale_document is None and measurement_document == "operating_point":
@@ -565,7 +481,7 @@ def export_aggregated_csv(
         flags["scale"] = scale_recon["validated"]
     if claim_scope_recon is not None and claim_scope_recon["operative"]:
         flags["claim_scope"] = claim_scope_recon["validated"]
-    gate = check_delivery_gate(flags, acknowledgement=acknowledgement)
+    gate = check_delivery_gate(flags, acknowledgment=acknowledgment)
     if not gate.ok:
         notes = " ".join(filter(None, (
             binding_notes_text((operating_point_recon or {}).get("binding_notes", {})),
@@ -630,8 +546,8 @@ def export_aggregated_csv(
             else {}
         ),
         dimension_reconciliations=dimension_reconciliations,
-        measurement_documents=[measurement_document], scale_document=scale_document,
-        acknowledgement=gate.effective_acknowledgement(), trait=trait, delivery_kind=delivery_kind,
+        measurement_documents=[measurement_document],
+        acknowledgment=gate.effective_acknowledgment(), trait=trait, delivery_kind=delivery_kind,
         project_root=project_root, plant_mapping=plant_mapping)
     return output_path, stamp, event_recorded
 
@@ -679,9 +595,8 @@ def _resolve_statement(
 def _resolve_plant_attribution(results: list[dict]) -> str:
     """The delivery's own ``plant_attribution``, read off ``results`` the way
     :func:`_resolve_statement` reads ``measurement_document``: every row states one, and they
-    agree. Never collapses to ``"mixed"`` on disagreement (:func:`aggregate_per_plant` already
-    refuses there, per plant), since a granularity is a statement, not an identity signal that can
-    legitimately vary within one delivery."""
+    agree.
+    """
     values = {r.get("plant_attribution") for r in results}
     if len(values) > 1 or None in values:
         raise ValueError(

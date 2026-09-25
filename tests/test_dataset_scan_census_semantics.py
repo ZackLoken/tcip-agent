@@ -2,7 +2,7 @@
 
 The tool's whole output is a census, so a count that quietly measures a different collection
 than its name claims (labels counted as images, a stamp counted as a prediction, the
-unlabelled remainder taken off the wrong total) is invisible to the reader.
+unlabeled remainder taken off the wrong total) is invisible to the reader.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ def _lopsided_dataset(root: Path) -> Path:
     """Five images, three label files, two of which pair with an image.
 
     Deliberately asymmetric: the image count, the label count, the paired count and the
-    unlabelled remainder are four different numbers, and the frame is not square, so a count
+    unlabeled remainder are four different numbers, and the frame is not square, so a count
     computed off the wrong collection cannot coincide with the right one.
     """
     images_dir = root / "images" / DATE
@@ -48,8 +48,8 @@ def _lopsided_dataset(root: Path) -> Path:
 
 
 def test_scan_reports_four_distinct_counts_over_a_lopsided_dataset(tmp_path: Path):
-    """image_count, labels_count, paired_images and unlabelled_images each measure their own
-    collection: the unlabelled remainder is the images no label pairs with, never the labels
+    """image_count, labels_count, paired_images and unlabeled_images each measure their own
+    collection: the unlabeled remainder is the images no label pairs with, never the labels
     no image pairs with."""
     root = _lopsided_dataset(tmp_path / "ds")
 
@@ -58,7 +58,7 @@ def test_scan_reports_four_distinct_counts_over_a_lopsided_dataset(tmp_path: Pat
     assert result["image_count"] == 5
     assert result["labels_count"] == 3
     assert result["paired_images"] == 2
-    assert result["unlabelled_images"] == 3
+    assert result["unlabeled_images"] == 3
     assert result["image_stems_sample"] == [
         "plotA_0_0", "plotA_0_1", "plotB_0_0", "plotB_0_1", "plotC_0_0",
     ]

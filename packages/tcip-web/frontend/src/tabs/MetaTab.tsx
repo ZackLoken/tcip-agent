@@ -59,7 +59,8 @@ export function MetaTab() {
 
   const [reports, setReports] = useState<FrictionReport[]>([]);
   const [retros, setRetros] = useState<Retrospective[]>([]);
-  const [sessions, setSessions] = useState<SessionEntry[]>([]);
+  // null once a load has failed: the panel then says so instead of claiming no sessions exist.
+  const [sessions, setSessions] = useState<SessionEntry[] | null>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -71,12 +72,13 @@ export function MetaTab() {
       const [r, rt, sess] = await Promise.all([
         metaApi.reports(projectRoot),
         metaApi.retrospectives(projectRoot),
-        sessionsApi.load(projectRoot).catch(() => ({ sessions: [] as SessionEntry[] })),
+        sessionsApi.load(projectRoot),
       ]);
       setReports(r.reports);
       setRetros(rt.retrospectives);
-      setSessions(sess.sessions ?? []);
+      setSessions(sess.sessions);
     } catch (e) {
+      setSessions(null);
       setError(String(e));
     } finally {
       setLoading(false);
@@ -92,7 +94,7 @@ export function MetaTab() {
   // happened" signal. Zero new annotation records is not, since confirming a negative and
   // reviewing an existing label are both real effort that adds no record.
   const shownSessions = useMemo(
-    () => sessions.filter((s) => Object.keys(s.images ?? {}).length > 0),
+    () => (sessions ?? []).filter((s) => Object.keys(s.images).length > 0),
     [sessions],
   );
 
@@ -173,11 +175,15 @@ export function MetaTab() {
       <CollapsibleSection
         className="tcip-panel p-4"
         title="Annotation sessions"
-        right={`${shownSessions.length} recorded`}
+        right={sessions === null ? "not loaded" : `${shownSessions.length} recorded`}
         storageKey="tcip.meta.sessionsOpen"
         defaultOpen
       >
-        {shownSessions.length > 0 ? (
+        {sessions === null ? (
+          <div className="text-[11px] text-tcip-fp">
+            Annotation sessions could not be loaded: {error}
+          </div>
+        ) : shownSessions.length > 0 ? (
           <table className="w-full text-[11px]">
             <thead>
               <tr className="border-b border-tcip-border">

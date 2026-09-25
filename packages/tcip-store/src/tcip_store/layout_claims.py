@@ -1,21 +1,12 @@
-"""Which store could own which path under a root, as data rather than as locator inversion.
+"""Which store could own which path under a root.
 
-A locator answers "where does this key go" and inverts that placement, but it cannot answer
-"which store owns this file": locator shapes collide, and thirteen stores place a single json
-document under ``.tcip/state``. What tells them apart is the constant text each store's key
-constructor spells and the directory chain its locator puts it under. That is stated here, one
-claim per record and log store, as path templates a reader matches without importing the owning
-module and without a live registry.
+One claim per record and log store, as path templates (the constant text each store's key
+constructor spells and the directory chain its locator puts it under) a reader matches without
+importing the owning module and without a live registry.
 
-Two callers share the one matching implementation, so the rail and the planner cannot disagree
-about which files a root still holds. The conform rail asks whether any claim of the root's
-layout matches a file under it; the adoption planner asks the same question and then attributes
-each match to the store whose template says the most about it. Parts recovery is not a claim's
-job and stays with the locators.
-
-The walk is template-directed: it descends only the constant segments a layout's templates
-spell and lists a directory only where a template allows a varying segment, so checking a
-dataset root reads ``.tcip`` rather than the image tree.
+The walk is template-directed: it descends only the constant segments a layout's templates spell
+and lists a directory only where a template allows a varying segment, so checking a dataset root
+reads ``.tcip`` rather than the image tree.
 """
 
 from __future__ import annotations
@@ -93,12 +84,10 @@ LAYOUTS = (
 class PartPattern:
     """What one part of a store's key looks like across every entry the store holds.
 
-    A part is either a constant the store's key constructor spells (``literal``), a varying
-    value with a fixed opening the constructor puts there (``starts_with``), a varying value a
-    compiled expression fully matches (``regex``, for a caller-chosen name held to a shape,
-    e.g. :data:`NAME_SEGMENT`), or free. ``regex`` constrains a set of names the way ``literal``
-    constrains a single one, so it carries the same specificity: no other shipped claim contests
-    the paths a name-holding store's regex form covers.
+    A part is either a constant the store's key constructor spells (``literal``), a varying value
+    with a fixed opening the constructor puts there (``starts_with``), a varying value a compiled
+    expression fully matches (``regex``, for a caller-chosen name held to a shape, e.g.
+    :data:`NAME_SEGMENT`), or free. ``regex`` carries the same specificity as ``literal``.
     """
 
     literal: str | None = None
@@ -235,9 +224,8 @@ def template_specificity(template: Template) -> int:
 def _anchors(segment: Segment) -> bool:
     """Whether this segment carries constant text an ordinary file would not share.
 
-    A wholly constant segment anchors, and so does constant text around or inside the part.
-    An extension alone does not: every ordinary file of that type carries it, so a template
-    anchored on one would match every such file anywhere.
+    A wholly constant segment anchors, and so does constant text around or inside the part. An
+    extension alone does not.
     """
     if isinstance(segment, Constant):
         return True
@@ -449,12 +437,9 @@ _effective: tuple[int, Mapping[str, Claim]] | None = None
 
 
 def effective_claims() -> Mapping[str, Claim]:
-    """The platform table plus the declared claim of every registered store outside it.
-
-    A store registered at runtime states its own claim in its descriptor, and that claim is
-    in force for exactly as long as the store is registered, which is the lifetime in which
-    its files can exist. The answer is recomputed whenever a declared claim has joined the
-    catalogue, so nothing serves a claim set that has since grown.
+    """The platform table plus the declared claim of every registered store outside it, in force
+    for as long as the store is registered. Recomputed whenever a declared claim has joined the
+    catalog.
     """
     global _effective
     generation = claim_generation()
@@ -471,11 +456,8 @@ def effective_claims() -> Mapping[str, Claim]:
 
 
 def claim_of(store: str) -> Claim:
-    """Where this store's entries can sit, or the refusal a store that never says earns.
-
-    A record or log store with no claim cannot be placed under any layout, so which files under
-    a root would be its own has no answer, and the rail refuses naming the declaration it owes
-    rather than serving against a guess.
+    """Where this store's entries can sit; a record or log store with no claim refuses, naming the
+    declaration it owes.
     """
     claim = effective_claims().get(store)
     if claim is None:
@@ -489,12 +471,7 @@ def claim_of(store: str) -> Claim:
 
 
 def layouts_of(stores: Sequence[str]) -> tuple[str, ...]:
-    """The layouts these stores hang off, sorted and without repeats.
-
-    More than one is ordinary: a directory serves whatever stores a caller roots there, and
-    the shipped platform has directories that are a curated output and a dataset root at once.
-    Each layout is what the rail then checks the root against, one at a time.
-    """
+    """The layouts these stores hang off, sorted and without repeats."""
     return tuple(sorted({claim_of(store).layout for store in stores}))
 
 
@@ -507,10 +484,8 @@ def claimed_files(
 ) -> tuple[ClaimedFile, ...]:
     """Every file under ``root`` that a claim of ``layout`` matches, with what could own it.
 
-    The walk follows the templates rather than the tree: it stats the constant segments they
-    spell and lists a directory only where some template allows a varying segment, so a
-    dataset root costs its ``.tcip`` directory rather than its imagery. ``limit`` stops once
-    that many are found, for a caller that only needs to know whether any exist.
+    The walk stats the constant segments the templates spell and lists a directory only where some
+    template allows a varying segment. ``limit`` stops once that many are found.
     """
     directory = require_absolute_root(root)
     if not directory.is_dir():
@@ -529,12 +504,9 @@ def claimed_files(
 
 
 def layouts_in_play(held: Sequence[str], serving: Sequence[str]) -> frozenset[str]:
-    """The kinds of root a directory demonstrably serves, for reasoning about what sits in it.
-
-    A directory serves whatever stores a caller roots there, and which kinds those are is
-    answered by the stores a database already holds plus the ones the operation is serving now.
-    A held store nothing in this process declares contributes nothing, since where its files
-    would sit is exactly what an unstated claim cannot say.
+    """The kinds of root a directory demonstrably serves: the layouts of the stores a database
+    already holds plus the ones the operation is serving now. A held store nothing in this process
+    declares contributes nothing.
     """
     claims = effective_claims()
     found = {claims[store].layout for store in held if store in claims}
@@ -544,14 +516,8 @@ def layouts_in_play(held: Sequence[str], serving: Sequence[str]) -> frozenset[st
 def contested_claimants(
     root: str, path: Path, in_play: frozenset[str]
 ) -> tuple[str, ...]:
-    """The stores that could equally own this file, among the layouts this root serves.
-
-    Claim templates collide across layouts: a free directory's ``metrics.jsonl`` is an
-    experiment's metrics log under one layout and a trial's under another, and at a directory
-    serving both, nothing about the file says which. Only the claims that say the most about it
-    are contenders, the way the planner picks a winner and refuses only a tie, and only the
-    layouts this root actually serves are considered, so a shape some other kind of root would
-    have claimed is not held against a directory that is not one.
+    """The stores that could equally own this file: the most-specific claims matching it among the
+    layouts this root serves.
     """
     claims = effective_claims()
     contenders = [
@@ -568,13 +534,7 @@ def contested_claimants(
 def claimants_of(
     root: str, path: Path, *, claims: Mapping[str, Claim] | None = None
 ) -> tuple[Claimant, ...]:
-    """Every store, under any layout, whose claim matches this file under this root.
-
-    One directory serves whatever stores a caller roots there, and two layouts' templates can
-    describe the same path (a free directory's ``metrics.jsonl`` is an experiment's metrics log
-    under one layout and a trial's under another). Whose file it is cannot be told apart there,
-    which is what the accounting has to notice rather than pick between.
-    """
+    """Every store, under any layout, whose claim matches this file under this root."""
     directory = require_absolute_root(root)
     try:
         segments = path.relative_to(directory).parts
@@ -593,11 +553,8 @@ def claimants_of(
 
 
 def unconformed_files(root: str, layout: str, *, limit: int = 0) -> tuple[Path, ...]:
-    """Files under ``root`` whose state is still the file layout rather than a database.
-
-    Each one is evidence this root holds record or log state a database beside it would not
-    see. Blob files are not evidence: no blob store carries a claim, because a blob's bytes
-    stay a file under every backend.
+    """Files under ``root`` whose state is still the file layout rather than a database. Blob files
+    never count: no blob store carries a claim.
     """
     return tuple(item.path for item in claimed_files(root, layout, limit=limit))
 
@@ -654,12 +611,7 @@ def anchored_matches(
     target: Path, *, claims: Mapping[str, Claim] | None = None
 ) -> tuple[AnchoredMatch, ...]:
     """Every anchored claim an absolute path's own tail satisfies, with the root it implies.
-
-    Asked of a path rather than of a key, because a caller-named output target roots wherever
-    the caller pointed it and a claim's root is whatever sits above the segments it spells.
-    Unanchored templates take no part: a template whose only constant text is an extension
-    matches every ordinary file of that type, so honouring it here would tax every legitimate
-    write.
+    Unanchored templates take no part.
     """
     in_force = effective_claims() if claims is None else claims
     segments = target.parts

@@ -78,7 +78,8 @@ def _install_fake_ray(monkeypatch, results: list) -> None:
         pass
 
     class BasicVariantGenerator(Searcher):
-        pass
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
 
     basic_variant = ModuleType("ray.tune.search.basic_variant")
     basic_variant.BasicVariantGenerator = BasicVariantGenerator
@@ -116,7 +117,7 @@ def _run_search(param_space: dict) -> dict:
         search_alg="random",
         scheduler=None,
         resources_per_trial={"cpu": 1.0, "gpu": 0.0},
-        storage_path=str(Path(os.environ["TCIP_STATE_ROOT"]) / "hpo"),
+        storage_path=str(Path(os.environ["TCIP_STATE_ROOT"]) / "hpo"), seed=0
     )
 
 
@@ -159,7 +160,7 @@ def test_a_never_answered_trial_becomes_an_error_row_not_a_crash(monkeypatch, me
 
 
 def test_a_reported_trial_that_failed_carries_its_cause_on_one_clean_line(monkeypatch):
-    """Ray wraps a trial's exception in a RayTaskError whose text is the worker's whole coloured
+    """Ray wraps a trial's exception in a RayTaskError whose text is the worker's whole colored
     traceback; the durable row keeps the cause's own type and message, nothing more."""
     from ray.exceptions import RayTaskError
 

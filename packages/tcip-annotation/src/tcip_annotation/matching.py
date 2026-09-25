@@ -117,10 +117,8 @@ def _rings_to_shapely(rings: list[list[tuple[float, float]]]):
 
 def box_ring(bbox: BBox) -> list[tuple[float, float]]:
     """``bbox``'s four corners as one closed ring, in a fixed order (x1,y1 -> x2,y1 -> x2,y2 ->
-    x1,y2): the one ring construction a box turns into, shared by every caller that needs a box's
-    own rectangle as a polygon (:func:`_to_shapely` here, and a canopy segment's own box-to-polygon
-    conversion in :mod:`tcip_mcp.pipelines.postprocessing.segment_attribution`), so two calls on
-    the same box can never independently disagree about which corner comes first."""
+    x1,y2).
+    """
     return [(bbox.x1, bbox.y1), (bbox.x2, bbox.y1), (bbox.x2, bbox.y2), (bbox.x1, bbox.y2)]
 
 
@@ -281,14 +279,10 @@ def _project_for_classification(
     ``attribute`` value rather than the object type, for ground truth's side of
     :func:`compute_classified_trait_matches`.
 
-    Position ``i`` of the result corresponds to position ``i`` of ``annotations``, so an index
-    returned by :func:`compute_matches` over this projection still addresses the caller's real,
-    unprojected list. A record outside ``subject``'s scope, or carrying no value under
-    ``attribute`` (never assessed yet, a soft, expected gap, not a confirmed negative, the same
-    rule ``phenology_tools._classification_items`` applies), reads through
+    Position ``i`` of the result corresponds to position ``i`` of ``annotations``. A record outside
+    ``subject``'s scope, or carrying no value under ``attribute``, reads through
     :func:`~tcip_annotation.json_io.classified_value_of` as ``None`` and is stripped to a
-    geometry-less placeholder here so it can neither match nor be scored as either side of a
-    disagreement.
+    geometry-less placeholder that can neither match nor be scored.
     """
     from tcip_annotation.json_io import classified_value_of
 
@@ -310,30 +304,22 @@ def compute_classified_trait_matches(
     conf_threshold: float = 0.25,
 ) -> dict:
     """Match predictions to GT for a classified trait: an object already isolated by ``subject``
-    whose confirmed/predicted *value* along ``attribute`` is under review, not merely its existence.
+    whose confirmed/predicted value along ``attribute`` is under review.
 
     A classified prediction carries the object class in ``subject`` and the classifier's decoded
-    call under ``attributes[attribute]``, the same shape ground truth carries. Every prediction is
-    held positively first, through :func:`~tcip_annotation.json_io.require_classified_record`
-    under ``vocabulary`` (the bucket's own recorded ``id_map`` keys): a record whose ``subject`` is
-    not the object class, which carries no value, or whose value is outside ``vocabulary``,
-    refuses rather than becoming a placeholder, since a classified bucket holds one subject and
-    every record its writer produced carries a value the map declares, so a record that does not is
-    a pre-conform record or a foreign document, never a legitimate gap. Ground truth projects
-    leniently instead (:func:`_project_for_classification`): a record outside ``subject`` or never
-    assessed for ``attribute`` becomes a geometry-less placeholder, so a document's other subjects
-    and unassessed instances stay unmatched as they do for a plain detection review.
+    call under ``attributes[attribute]``. Every prediction is held first through
+    :func:`~tcip_annotation.json_io.require_classified_record` under ``vocabulary`` (the bucket's
+    own recorded ``id_map`` keys): a record whose ``subject`` is not the object class, which
+    carries no value, or whose value is outside ``vocabulary``, refuses. Ground truth projects
+    leniently (:func:`_project_for_classification`).
 
-    Both sides projected to the value vocabulary are matched once through :func:`compute_matches`
-    unchanged: a ``tp`` is a correctly classified instance, an ``fp`` a value predicted where the
-    confirmed value differs (or nothing was confirmed there yet), and an ``fn`` a confirmed value
-    the model didn't predict there. The unmatched remainders (still carrying the object class, not
-    the value, on both sides) are then matched a second time, by geometry alone: a correct object
-    the first pass split into one ``fp``/``fn`` pair (predicted the wrong value) reunites here, and
-    the paired ``fp`` gains the partner's ``gt_idx`` while the paired ``fn`` gains the partner's
-    ``pred_idx`` (both otherwise absent, as a plain :func:`compute_matches` result never carries
-    them), so a caller can act on the object those two halves describe together, not manage two
-    orphaned records for one instance.
+    Both sides projected to the value vocabulary are matched once through :func:`compute_matches`:
+    a ``tp`` is a correctly classified instance, an ``fp`` a value predicted where the confirmed
+    value differs (or nothing was confirmed there yet), and an ``fn`` a confirmed value the model
+    didn't predict there. The unmatched remainders are then matched a second time, by geometry
+    alone: a correct object the first pass split into one ``fp``/``fn`` pair reunites here, and the
+    paired ``fp`` gains the partner's ``gt_idx`` while the paired ``fn`` gains the partner's
+    ``pred_idx``.
     """
     from tcip_annotation.json_io import require_classified_record
 

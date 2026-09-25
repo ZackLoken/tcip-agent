@@ -472,7 +472,7 @@ def _run_with_bundle(tmp_path, monkeypatch, calibration):
     _save_png(image)
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
     return run_inference_verified(
-        str(ckpt), image_paths=[str(image)], images_dir=str(tmp_path), device="cpu", tile=False,
+        str(ckpt), images_dir=str(tmp_path), device="cpu", tile=False,
         trait="bud_opening", calibration_labels_dir=str(tmp_path))
 
 

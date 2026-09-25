@@ -189,7 +189,7 @@ def earn_validated_stamp(bucket: Path, dataset_root: Path, *, trait: str) -> dic
         images_dir=stored.get("images_dir"), raster_path=stored.get("raster_path"),
         produced_at=stored.get("produced_at"),
     )
-    _digest, stamped = seal_validation(
+    stamped = seal_validation(
         draft, dataset_root=dataset_root, bucket_dirs=[bucket], stamp_body=earned_body)
 
     def _merge(current: dict) -> dict:

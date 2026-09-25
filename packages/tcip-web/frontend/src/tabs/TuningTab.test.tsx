@@ -14,11 +14,12 @@ function sweep(overrides: Partial<Sweep> & { sweep_id: string }): Sweep {
   return {
     status: "running",
     error: null,
-    has_result: false,
     has_manifest: true,
     relaunchable: false,
     reason: null,
     cancel_requested: false,
+    relaunched_from: null,
+    split_draws: null,
     ...overrides,
   };
 }
@@ -262,7 +263,7 @@ describe("TuningTab sweep row actions", () => {
           status: "running",
           n_trials: 4,
           split_draws: 2,
-          redraws_within_selection: true,
+          redraw_within_selection: true,
         }),
       ],
     });
@@ -297,16 +298,16 @@ describe("TuningTab sweep row actions", () => {
     expect(screen.queryByText(/draws each/)).not.toBeInTheDocument();
   });
 
-  it("shows one cancelled line, not the manifest stub, for a cancelled sweep's detail", async () => {
+  it("shows one canceled line, not the manifest stub, for a canceled sweep's detail", async () => {
     vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
-      sweeps: [sweep({ sweep_id: "hpo-cxl-detail", status: "cancelled" })],
+      sweeps: [sweep({ sweep_id: "hpo-cxl-detail", status: "canceled" })],
     });
     vi.spyOn(tuningApi, "getSweep").mockResolvedValue(
       sweepDetail({
         sweep_id: "hpo-cxl-detail",
-        status: "cancelled",
-        error: "the sweep was cancelled by request before it could finish",
-        result: { status: "cancelled", study_name: "hpo-cxl-detail" },
+        status: "canceled",
+        error: "the sweep was canceled by request before it could finish",
+        result: { status: "canceled", study_name: "hpo-cxl-detail" },
       }),
     );
     vi.spyOn(tuningApi, "listTrials").mockResolvedValue({ sweep_id: "hpo-cxl-detail", trials: [] });
@@ -316,19 +317,17 @@ describe("TuningTab sweep row actions", () => {
     render(<TuningTab />);
     fireEvent.click(await screen.findByText("hpo-cxl-detail"));
     expect(
-      await screen.findByText(
-        "Cancelled: the sweep was cancelled by request before it could finish",
-      ),
+      await screen.findByText("Canceled: the sweep was canceled by request before it could finish"),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/"status": "cancelled"/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/"status": "canceled"/)).not.toBeInTheDocument();
   });
 
-  it("names a cancelled sweep's own missing reason the same way in the row and the detail", async () => {
+  it("names a canceled sweep's own missing reason the same way in the row and the detail", async () => {
     vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
-      sweeps: [sweep({ sweep_id: "hpo-cxl-noreason", status: "cancelled", error: null })],
+      sweeps: [sweep({ sweep_id: "hpo-cxl-noreason", status: "canceled", error: null })],
     });
     vi.spyOn(tuningApi, "getSweep").mockResolvedValue(
-      sweepDetail({ sweep_id: "hpo-cxl-noreason", status: "cancelled", error: null }),
+      sweepDetail({ sweep_id: "hpo-cxl-noreason", status: "canceled", error: null }),
     );
     vi.spyOn(tuningApi, "listTrials").mockResolvedValue({
       sweep_id: "hpo-cxl-noreason",
@@ -342,7 +341,7 @@ describe("TuningTab sweep row actions", () => {
     expect(screen.getByText("no reason recorded")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("hpo-cxl-noreason"));
-    expect(await screen.findByText("Cancelled: no reason recorded")).toBeInTheDocument();
+    expect(await screen.findByText("Canceled: no reason recorded")).toBeInTheDocument();
   });
 
   it("carries aria-expanded, not aria-pressed, on a sweep row's own disclosure toggle", async () => {
@@ -545,14 +544,14 @@ describe("TuningTab sweep detail before a manifest exists", () => {
 describe("TuningTab settled sweep TensorBoard panel", () => {
   it("never shows Starting… once the sweep has settled, even with an attempt still in flight", async () => {
     vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
-      sweeps: [sweep({ sweep_id: "hpo-settled", status: "cancelled" })],
+      sweeps: [sweep({ sweep_id: "hpo-settled", status: "canceled" })],
     });
     vi.spyOn(tuningApi, "getSweep").mockResolvedValue(
       sweepDetail({
         sweep_id: "hpo-settled",
-        status: "cancelled",
-        error: "the sweep was cancelled by request before it could finish",
-        result: { status: "cancelled" },
+        status: "canceled",
+        error: "the sweep was canceled by request before it could finish",
+        result: { status: "canceled" },
       }),
     );
     vi.spyOn(tuningApi, "listTrials").mockResolvedValue({ sweep_id: "hpo-settled", trials: [] });
@@ -563,7 +562,7 @@ describe("TuningTab settled sweep TensorBoard panel", () => {
     render(<TuningTab />);
     fireEvent.click(await screen.findByText("hpo-settled"));
 
-    await screen.findByText("Cancelled: the sweep was cancelled by request before it could finish");
+    await screen.findByText("Canceled: the sweep was canceled by request before it could finish");
     expect(screen.queryByText("Starting…")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Sweep TensorBoard" })).not.toBeInTheDocument();
   });

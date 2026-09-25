@@ -1,26 +1,14 @@
 """Embedded agent terminal: run the real Claude Code CLI in a PTY.
 
-The in-app agent surface is the *actual* ``claude`` interactive TUI, not a chat
-re-implementation: we spawn the fenced CLI inside an interactive shell (PowerShell on
-Windows, bash on POSIX) in a pseudo-terminal (ConPTY via ``pywinpty`` on Windows, the
-stdlib ``pty`` on POSIX) with cwd = the repo root, so it loads ``CLAUDE.md`` /
-``.claude/skills/`` / ``.mcp.json`` and inherits the machine's existing Claude Code auth
-exactly like a terminal session. The shell (not claude) is the PTY's top process, so an
-in-TUI ``/exit`` drops back to a live prompt where the ``claude --resume <id>`` hint stays
-usable. Raw PTY bytes stream to xterm.js in the browser over a WebSocket; keystrokes
-stream back. No translation layer: fidelity is the point, and a translation layer is
-exactly where silent failures hide.
+The in-app agent surface is the actual ``claude`` interactive TUI, spawned fenced and directly (no
+wrapping shell) in a pseudo-terminal (ConPTY via ``pywinpty`` on Windows, the stdlib ``pty`` on
+POSIX) with cwd = the repo root, so it loads ``CLAUDE.md`` / ``.claude/skills/`` / ``.mcp.json``
+and inherits the machine's existing Claude Code auth. Raw PTY bytes stream to xterm.js in the
+browser over a WebSocket; keystrokes stream back.
 
-This module owns the process/PTY concerns; the HTTP/WS surface is
-``routes/terminal.py``. The spawn command is injectable via ``TCIP_TERMINAL_CMD`` so
-tests drive a scripted fake program at the process boundary, and CI (no ``claude``
-installed) cleanly reports unavailable.
-
-Trust boundary: same as every GUI surface (``tcip_web.trust_boundary``: local arrivals
-served, network arrivals refused until the operator opts in, an Origin check the middleware
-applies to this and every other WebSocket connect and to every state-changing request). The
-terminal gives keyboard access to Claude Code, equivalent power to the terminal the operator
-already has on this machine; exposing it is what the opt-in's disclosure names.
+This module owns the process/PTY concerns; the HTTP/WS surface is ``routes/terminal.py``. The spawn
+command can be overridden via ``TCIP_TERMINAL_CMD``; with no override and no ``claude`` on PATH the
+terminal reports unavailable.
 """
 
 from __future__ import annotations
@@ -69,11 +57,10 @@ _UNAVAILABLE_REASON = (
 def _absolutize_guard_command(command: str, python: str, guard_dir: str) -> str:
     """Rewrite ``python <path>/agent_*.py`` → ``"<python>" "<guard_dir>/<script>"``.
 
-    Matches on basename alone (an ``agent_`` prefix, a ``.py`` suffix), the shape of the
-    PreToolUse guards, the SessionEnd learning-capture hook, and the SessionStart
-    ritual-injection hook; a match is rewritten to ``guard_dir/<basename>`` regardless of the
-    directory the original token pointed at. Anything that doesn't match is returned unchanged.
-    Quoted, forward-slashed paths parse under both cmd.exe and POSIX sh.
+    Matches on basename alone (an ``agent_`` prefix, a ``.py`` suffix); a match is rewritten to
+    ``guard_dir/<basename>`` regardless of the directory the original token pointed at. Anything
+    that doesn't match is returned unchanged. Quoted, forward-slashed paths parse under both
+    cmd.exe and POSIX sh.
     """
     for tok in command.split():
         name = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
@@ -85,18 +72,11 @@ def _absolutize_guard_command(command: str, python: str, guard_dir: str) -> str:
 def _materialize_fence_settings() -> Optional[Path]:
     """Write a spawn-time copy of the fence settings with absolute hook commands.
 
-    The committed template stores each PreToolUse guard command repo-relative
-    (``python packages/tcip-web/src/tcip_web/agent_bash_guard.py``) for readability, but a
-    PreToolUse hook runs from an unpredictable cwd: the Bash/PowerShell tool's persistent
-    ``cd`` moves it, so a relative path fails to even *locate* the script: the interpreter
-    exits 2, which Claude Code reads as a *block*, denying every command after a ``cd``.
-    We rewrite each guard command to an
-    absolute ``"<python>" "<guard_dir>/agent_*_guard.py"`` (this process's ``sys.executable``
-    + the guard directory) and hand that file to ``--settings``. Python, not the shell,
-    resolves the path, so there is no cwd dependency and no ``$VAR`` cross-platform hazard.
+    Rewrites each guard command to an absolute ``"<python>" "<guard_dir>/agent_*_guard.py"`` (this
+    process's ``sys.executable`` + the guard directory), so a hook runs whatever the tool's current
+    cwd.
 
-    Returns the materialized file, or ``None`` if the template is missing/unreadable (the
-    caller then falls back to the committed file, so the fence is never silently dropped).
+    Returns the materialized file, or ``None`` if the template is missing/unreadable.
     """
     if not _FENCE_SETTINGS.is_file():
         return None
@@ -123,11 +103,11 @@ def _materialize_fence_settings() -> Optional[Path]:
 
 
 def _resolve_fence() -> tuple[Optional[str], Optional[str]]:
-    """The fenced flags' values: ``(settings_path, workspace_dir)``, or ``(None, None)`` if no fence.
+    """The fenced flags' values: ``(settings_path, workspace_dir)``, or ``(None, None)`` if no
+    fence.
 
     ``--settings`` applies the committed breeder-lane permission profile, materialized with
-    absolute hook paths so the Bash/PowerShell guards survive a ``cd``; ``--add-dir`` grants the
-    out-of-repo workspace. The wrapper below turns these into the fenced ``claude`` invocation.
+    absolute hook paths; ``--add-dir`` grants the out-of-repo workspace.
     """
     if not _FENCE_SETTINGS.is_file():
         return None, None
@@ -176,14 +156,10 @@ def launched_program(argv: list[str]) -> dict:
     """What the terminal launches: ``{"executable", "version"}``, the executable being ``argv[0]``
     and the version what that executable declares to ``--version``.
 
-    Only the resolved CLI (no ``TCIP_TERMINAL_CMD`` override in force) is probed: an override is
-    any argv an operator or a test chose, whose meaning for ``--version`` is unknown, so it is
-    recorded as launched with no version rather than run a second time. The bare executable is
-    probed, not the fenced argv, because the fenced ``claude`` invocation refuses a missing
-    settings file before it answers. Probed once per executable per process with stdin closed and
-    a time bound, ``None`` when it does not answer cleanly. Which agent harness the launched
-    program turns out to be is recorded by the MCP server from that harness's own handshake, not
-    inferred here.
+    Only the resolved CLI (no ``TCIP_TERMINAL_CMD`` override in force) is probed; an override is
+    recorded as launched with no version. The bare executable is probed, not the fenced argv.
+    Probed once per executable per process with stdin closed and a time bound, ``None`` when it
+    does not answer cleanly.
     """
     executable = argv[0]
     if os.environ.get(TERMINAL_CMD_ENV, "").strip():
@@ -210,7 +186,8 @@ def launched_program(argv: list[str]) -> dict:
 
 def spawn_env(session_id: str) -> dict[str, str]:
     """The child's environment: this process's own (Claude Code auth included) plus the terminal
-    session id, which the MCP server the agent launches records as a correlation."""
+    session id.
+    """
     return {**os.environ, TERMINAL_SESSION_ENV: session_id}
 
 
@@ -237,12 +214,8 @@ def _prewarm_blocking() -> None:
 
 
 def prewarm() -> None:
-    """Kick off best-effort cold-cache warming on a daemon thread; never blocks web startup.
-
-    The first ``claude`` spawn is ~4-5s vs ~1s on restart, cold cache, not structure: cold
-    ``tcip_mcp`` import (the MCP server loads it at launch) plus, on Windows, cold PowerShell +
-    .NET. Warm both here so the operator's first terminal open pays only claude/node's own cold
-    cost. All failures are swallowed; the terminal still works if warming does nothing.
+    """Kick off best-effort cold-cache warming on a daemon thread; never blocks web startup. All
+    failures are swallowed.
     """
     threading.Thread(target=_prewarm_blocking, name="terminal-prewarm", daemon=True).start()
 
@@ -269,12 +242,8 @@ def terminal_status() -> dict:
 
 
 def terminal_cwd() -> str:
-    """Where the agent runs: the repo root (so .mcp.json / CLAUDE.md / skills load and the
-    fence's cwd-relative deny paths bind correctly). Overridable via env.
-
-    ``repo_root_from_here`` finds ``.mcp.json`` across every ancestor before falling back to
-    ``CLAUDE.md``, so it climbs past the ``CLAUDE.md`` this file's own package carries instead
-    of stopping there, and resolves from the module rather than the launch cwd.
+    """Where the agent runs: the repo root (so .mcp.json / CLAUDE.md / skills load and the fence's
+    cwd-relative deny paths bind correctly). Overridable via env.
     """
     return os.environ.get(TERMINAL_CWD_ENV, str(repo_root_from_here()))
 
@@ -430,10 +399,8 @@ def spawn_pty(argv: list[str], cwd: str, rows: int, cols: int, env: dict[str, st
 def start_reader(pty, on_output: Callable[[str], None], on_exit: Callable[[], None], name: str) -> threading.Thread:
     """Pump PTY output on a daemon thread until the process exits.
 
-    Catches broadly: pywinpty raises its own exception types (``WinptyError``,
-    ``EOFError``) rather than ``OSError``, and any read failure means the same thing:
-    this PTY is done. The reader owns closing the PTY's OS resources (``pty.close()``)
-    so an fd can never be recycled while a read is still blocked on it.
+    Any read failure ends the pump. The reader owns closing the PTY's OS resources
+    (``pty.close()``) so an fd can never be recycled while a read is still blocked on it.
     """
 
     def _loop() -> None:

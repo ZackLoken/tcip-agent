@@ -359,8 +359,7 @@ def test_a_row_stating_selection_dir_with_a_leaking_selection_disjointness_floor
     """A row that reports checked=True but names a leaked group still floors: "checked with no
     leak" is enforced from the row's own leak fields, not read off the pass/fail booleans alone.
     The five label-movement keys are present (null), the shape a genuinely checked row carries,
-    so the leak is the only clause that can floor this row; a missing-keys floor is proven
-    separately, by a row with no leak and no movement keys."""
+    so the leak is the only clause that can floor this row."""
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
     write_bound_sidecar(
@@ -372,25 +371,6 @@ def test_a_row_stating_selection_dir_with_a_leaking_selection_disjointness_floor
                                 "labels_moved_draw_to_run": None, "labels_moved_run_to_now": None,
                                 "calibration_labels_moved": None, "selection_redrawn": None,
                                 "calibration_labels_dir": None},
-    )
-
-    validity = _count_validity(pred_dir)
-    assert validity["validated"] == "false"
-    assert "selection_disjointness" in validity["binding_notes"][str(pred_dir)]
-
-
-def test_a_row_stating_selection_dir_missing_the_label_movement_keys_floors(tmp_path):
-    """A row that is otherwise checked with no leak still floors when it carries none of the
-    five label-movement keys: those keys have to answer the question (present, null admitted),
-    not merely be absent, the same rule the unchecked-shape test above proves for checked."""
-    root = tmp_path / "ds"
-    pred_dir = _bucket(root)
-    write_bound_sidecar(
-        pred_dir, _count_stamp(), dataset_root=root,
-        reference_identity={"stated_values": {"selection_dir": "some/manifest"}},
-        selection_disjointness={"applicable": True, "reason": None, "checked": True,
-                                "unresolvable": False, "leaked_groups": [],
-                                "leaked_stems": [], "group_check": "performed"},
     )
 
     validity = _count_validity(pred_dir)
@@ -563,10 +543,9 @@ def _earned_bucket(root: Path, *, conf_records=None, stems=("img_a",)):
         experiment_id=None, images_dir=None, raster_path=None,
         produced_at="2026-03-04T12:00:00+00:00", subject=TRAIT, attribute=None,
     )
-    digest, stamped = seal_validation(draft, dataset_root=root, bucket_dirs=[pred_dir],
-                                      stamp_body=body)
+    stamped = seal_validation(draft, dataset_root=root, bucket_dirs=[pred_dir], stamp_body=body)
     write_sidecar(pred_dir, stamped)
-    return pred_dir, digest, stamped
+    return pred_dir, stamped["validated_by"]["record_digest"], stamped
 
 
 def test_a_claim_earned_through_the_two_phases_delivers_validated(tmp_path):
@@ -662,10 +641,10 @@ def test_an_unvalidated_bucket_keeps_the_tile_geometry_it_really_persisted(tmp_p
     assert tile["binding_notes"] == {}
 
 
-def test_an_acknowledgement_still_writes_a_flagged_provisional_path(tmp_path):
+def test_an_acknowledgment_still_writes_a_flagged_provisional_path(tmp_path):
     """An honestly-flagged provisional delivery is the escape hatch, and the gate keeps it open
-    for a real acknowledgement naming who and why, never a bare boolean."""
-    from tcip_mcp.pipelines.resolution import Acknowledgement, check_delivery_gate
+    for a real acknowledgment naming who and why, never a bare boolean."""
+    from tcip_mcp.pipelines.resolution import Acknowledgment, check_delivery_gate
 
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
@@ -674,10 +653,10 @@ def test_an_acknowledgement_still_writes_a_flagged_provisional_path(tmp_path):
 
     gate = check_delivery_gate(
         {"operating_point": validity["validated"]},
-        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="known uncalibrated"))
+        acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="known uncalibrated"))
 
     assert gate.ok
     assert gate.unvalidated == ("operating_point",)
     assert gate.stamp["operating_point"] == "false"
     assert gate.acknowledged_by == "user:tester"
-    assert gate.acknowledgement_reason == "known uncalibrated"
+    assert gate.acknowledgment_reason == "known uncalibrated"

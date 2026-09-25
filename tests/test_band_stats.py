@@ -385,7 +385,7 @@ def test_the_clip_reservoir_holds_at_most_the_size_it_was_given(tmp_path: Path):
     assert sampled.clip_sample_size == 500
 
     # The estimate off 500 of 32000 pixels is not the exact cut point; it lands inside the band's
-    # own neighbouring quantiles rather than at an arbitrary value.
+    # own neighboring quantiles rather than at an arbitrary value.
     for i, (low, high) in enumerate(sampled.clip_bounds):
         band = arr[:, :, i].astype(np.float64)
         assert np.percentile(band, 0.5) <= low <= np.percentile(band, 5.0)

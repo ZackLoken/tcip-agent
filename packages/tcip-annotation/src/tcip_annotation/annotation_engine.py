@@ -2,8 +2,8 @@
 
 GUI-free. Operates on a :class:`tcip_annotation.state.AnnotationState` instance whose
 ``annotations`` is one flat list of :class:`~tcip_annotation.state.Annotation` records (a box or a
-polygon geometry, plus the subject and attribute values it carries). Can be instantiated headlessly
-for programmatic use (AI agents, training pipelines, CLI, web backend).
+polygon geometry, plus the subject and attribute values it carries). Can be instantiated
+headlessly.
 
   * Mutations are in-place so the caller can subscribe by wrapping the engine or polling.
   * File I/O uses explicit paths passed by the caller: one merged per-image JSON, all subjects.

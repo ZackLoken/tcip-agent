@@ -446,7 +446,7 @@ class BrightRegionDetector(nn.Module):
             images = [images[i] for i in range(images.shape[0])]
         confidence = torch.sigmoid(self.logit)
         if self.training and targets is not None:
-            # Fit the reported confidence toward one per labelled object present, so the
+            # Fit the reported confidence toward one per labeled object present, so the
             # parameter answers to the data rather than drifting free.
             present = torch.tensor(
                 [1.0 if len(t.get("boxes", [])) else 0.0 for t in targets],

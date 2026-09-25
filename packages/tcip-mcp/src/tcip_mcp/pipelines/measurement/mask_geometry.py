@@ -1,33 +1,27 @@
 """Mask-geometry: dimensional measurements on a validated binary/instance mask.
 
-From a validated mask compute, in pixels, the area, perimeter, the extents along the PCA
-principal and secondary axes, and the centroid; when a physical ``scale`` (per-pixel, in a
-caller-stated ``unit`` (never assumed to be millimetres) is supplied, the same quantities are also
-returned in that unit. Numpy-first with no heavy imports: the toolkit primitive the agent composes
-for dimensional traits. It measures whatever mask it is given; whether that mask is trustworthy is
-the validation invariant's job, not this module's. :func:`resolve_scale` firewalls a candidate
-physical scale the same way :func:`resolve_binarize_threshold` firewalls the binarization threshold:
+From a mask compute, in pixels, the area, perimeter, the extents along the PCA principal and
+secondary axes, and the centroid; when a physical ``scale`` (per-pixel, in a caller-stated
+``unit``, never assumed to be millimeters) is supplied, the same quantities are also returned in
+that unit. Numpy-first with no heavy imports. :func:`resolve_scale` firewalls a candidate physical
+scale the same way :func:`resolve_binarize_threshold` firewalls the binarization threshold:
 un-shippable until validated against a real reference for its kind.
 
-An axis extent is not an anatomical span. It is the width of the mask's own footprint projected onto
-a data-derived direction: it equals the anatomical dimension only when the structure is straight and
-its long axis is the mask's principal axis. A curved, bent, forked or occlusion-split structure has a
-principal-axis extent shorter than its arc length, and a structure whose visual long axis is not its
-statistically dominant one has the two axes swapped outright. That is why the returned keys name the
-axis rather than a body part: naming them ``length``/``width`` would assert an anatomy this
-computation does not measure. An anatomical span that a chord cannot represent (an arc length, a
-skeleton path, a span between two identified landmarks) is a different computation the agent
-composes, on the same validated mask, and the expert's trait definition decides which of the two the
-trait actually calls for.
+An axis extent is not an anatomical span. It is the width of the mask's own footprint projected
+onto a data-derived direction: it equals the anatomical dimension only when the structure is
+straight and its long axis is the mask's principal axis. A curved, bent, forked or occlusion-split
+structure has a principal-axis extent shorter than its arc length, and a structure whose visual
+long axis is not its statistically dominant one has the two axes swapped outright. The returned
+keys name the axis, not ``length``/``width``.
 
 Conventions:
-- Foreground is ``mask >= threshold`` (default 0.5), so a 0/1, bool, 0/255, or soft-probability mask
-  all binarize correctly.
+- Foreground is ``mask >= threshold`` (default 0.5), so a 0/1, bool, 0/255, or soft-probability
+  mask all binarize correctly.
 - ``principal_axis_extent_px`` / ``secondary_axis_extent_px`` are pixel-inclusive extents along the
   PCA principal / secondary axis (extent + 1 px), so a solid ``W x H`` rectangle reports exactly
   ``W`` and ``H``.
-- ``perimeter_px`` is the 4-connected boundary-edge length (exact for rectilinear masks;
-  a staircase over-estimate on curved boundaries, as any pixel perimeter is).
+- ``perimeter_px`` is the 4-connected boundary-edge length (exact for rectilinear masks; a
+  staircase over-estimate on curved boundaries, as any pixel perimeter is).
 """
 
 from __future__ import annotations
@@ -45,13 +39,12 @@ DEFAULT_MASK_BINARIZE_THRESHOLD = 0.5
 
 
 def resolve_binarize_threshold(value: float | None = None):
-    """The mask-binarization threshold as a firewalled ``ResolvedParam`` (default 0.5, validated=false).
+    """The mask-binarization threshold as a firewalled ``ResolvedParam`` (default 0.5,
+    validated=false).
 
-    Requires validation (``validation_kind="annotations"``, a mask GT reference, the same kind
-    ``conf`` is validated against, just for masks instead of boxes): un-shippable as a bare number
-    until derived/validated against validated masks (``.value`` raises), so a dimensional measurement
-    can't silently freeze 0.5. An explicit ``value`` is honored but still stamped unvalidated until a
-    door validates it.
+    Requires validation (``validation_kind="annotations"``, a mask GT reference): un-shippable as a
+    bare number until derived/validated against validated masks (``.value`` raises). An explicit
+    ``value`` is honored but still stamped unvalidated until a door validates it.
     """
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, ResolvedParam
 
@@ -67,15 +60,12 @@ def resolve_scale(value: float | None = None, *, unit: str, capture_id: str | No
     """A physical per-pixel scale as a firewalled ``ResolvedParam`` (validated=false by default).
 
     Requires validation (``validation_kind="physical"``), shippable only once ``validated_against``
-    names a real physical-measurement reference (``VALIDATED_PHYSICAL_MEASUREMENT``). The derivation
-    method (EXIF-derived geometry, a reference-object measurement, or anything else) is not this
-    function's concern, a capability the agent composes per dataset, not a method this platform
-    picks: it only wraps whatever candidate scale a caller has already derived, in whatever ``unit``
-    that scale is actually in (never assumed to be mm), and refuses to let it ship until validated.
+    names a real physical-measurement reference (``VALIDATED_PHYSICAL_MEASUREMENT``). Wraps
+    whatever candidate scale a caller has already derived, in whatever ``unit`` that scale is
+    actually in (never assumed to be mm).
 
-    ``capture_id`` marks the value as scoped to a single capture (a handheld standoff can vary image
-    to image within one dataset) when the caller has one; no deriver for a stable capture_id exists
-    yet, so most callers pass ``None`` and the scale is scoped no finer than the caller's own choice.
+    ``capture_id`` scopes the value to a single capture when the caller has one; ``None`` leaves it
+    scoped no finer than the caller's own choice.
     """
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, ResolvedParam
 
@@ -201,24 +191,27 @@ def _known_units() -> set[str]:
     return set(crops_units().values())
 
 
+def is_pixel_space_key(key: str) -> bool:
+    """Whether ``key`` explicitly names pixel space: a trailing ``_px``, or the bare key ``"px"``."""
+    return key.rpartition("_")[2] == "px"
+
+
 def unit_from_value_key(key: str) -> tuple[str, str] | None:
-    """``(display_unit, linear_basis)`` if ``key``'s trailing ``_<token>`` names a real physical unit
-    (``"area_mm2"`` -> ``("mm2", "mm")``, ``"principal_axis_extent_cm"`` -> ``("cm", "cm")``), else
-    ``None``.
+    """``(display_unit, linear_basis)`` if ``key``'s trailing ``_<token>`` names a real physical
+    unit (``"area_mm2"`` -> ``("mm2", "mm")``, ``"principal_axis_extent_cm"`` -> ``("cm", "cm")``),
+    else ``None``.
 
     ``display_unit`` is what the units column should say; ``linear_basis`` is what crops.yml's
     declared (always-linear) unit is cross-checked against: the two differ only for a squared
     (area-like) key. A pixel-suffixed key (``"principal_axis_extent_px"``) never implies a unit,
-    pixels are not one, and neither does any trailing token outside crops.yml's real declared units
-    (however plausible it looks: ``"elongated_fraction"`` does not imply a unit called "fraction").
+    and neither does any trailing token outside crops.yml's real declared units
+    (``"elongated_fraction"`` does not imply a unit called "fraction").
 
-    Refuses (raises) rather than silently mislabeling when the key's own name says "area" but its
-    unit isn't squared (``"area_mm"``, missing the ``2``), a real naming bug in the producing code,
-    not a case to guess through: an area is length², and shipping it labeled with a bare linear unit
-    is exactly the kind of silent dimensional mismatch this function exists to catch.
+    Raises when the key's own name says "area" but its unit isn't squared (``"area_mm"``, missing
+    the ``2``).
     """
     root, sep, trailing = key.rpartition("_")
-    if not sep or not trailing or trailing == "px":
+    if not sep or not trailing or is_pixel_space_key(key):
         return None
     known = _known_units()
     squared = {u + "2" for u in known}
@@ -241,12 +234,10 @@ def mask_geometry(mask: Any, *, scale: float | None = None, unit: str,
                   threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD) -> dict:
     """Dimensional geometry of a single validated 2D mask (``[H, W]`` or ``[1, H, W]``).
 
-    ``scale`` is a plain float (per-pixel, in ``unit``), never a ``ResolvedParam``. The firewall
-    belongs at the delivery door that resolves/validates the scale (:func:`resolve_scale`), not
-    inside this primitive.
+    ``scale`` is a plain float (per-pixel, in ``unit``), never a ``ResolvedParam``.
 
-    Returns pixel measurements always, and ``{unit}``-suffixed physical measurements when a scale is
-    given::
+    Returns pixel measurements always, and ``{unit}``-suffixed physical measurements when a scale
+    is given::
 
         {"empty", "area_px", "perimeter_px", "principal_axis_extent_px",
          "secondary_axis_extent_px", "centroid_px", "angle_deg",
@@ -257,8 +248,7 @@ def mask_geometry(mask: Any, *, scale: float | None = None, unit: str,
     The two axis extents are chords of the mask's footprint along its own PCA axes, not anatomical
     spans: see the module docstring before treating one as a trait's length or width.
 
-    An empty mask returns zeros with ``empty=True`` and ``centroid_px=None`` (measurement refuses to
-    invent a location for nothing).
+    An empty mask returns zeros with ``empty=True`` and ``centroid_px=None``.
     """
     import numpy as np
 
@@ -294,13 +284,9 @@ def mask_to_polygon_points(
     mask: Any, *, threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD,
     epsilon_frac: float = DEFAULT_EPSILON_FRAC,
 ) -> list[list[tuple[float, float]]]:
-    """Binary/soft mask -> one simplified polygon ring per connected component (pixel coords).
-
-    The extraction itself is :func:`tcip_annotation.mask_contours.mask_to_polygon_rings`, the same
-    call SAM-assisted labeling makes, so a model's exported prediction and a breeder's SAM-assisted
-    GT describe an occlusion-split object the same way instead of one of them silently keeping only
-    the largest region. This entry point adds only what belongs to the measurement side: the
-    tensor->numpy hop and the platform's mask-binarization threshold default.
+    """Binary/soft mask -> one simplified polygon ring per connected component (pixel coords),
+    through :func:`tcip_annotation.mask_contours.mask_to_polygon_rings`, with the tensor->numpy hop
+    and the platform's mask-binarization threshold default.
     """
     from tcip_annotation.mask_contours import mask_to_polygon_rings
 

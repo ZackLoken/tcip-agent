@@ -1,13 +1,12 @@
-"""Render an image with a labeled reference-grid overlay for spatial referencing, from the
-command line.
+r"""Render an image with a labeled reference-grid overlay for spatial referencing, from the command
+line.
 
-The demoted twin of ``vision_tools.overlay_reference_grid``: square cells of ``--tile-size``
-native pixels named spreadsheet-style ('A1' top-left), rendered in yellow on the cells' true
-boundaries. Every response echoes the full grid geometry (tile_size, overlap, cols, rows,
-width, height): pass the echoed tile_size/overlap to ``segment_prompt(grid_cells=...)`` so a
-cell name resolves against the grid that was actually rendered. It writes an artifact and
-carries an audit line, so it stays a command rather than a bare library call: --project (or
-$TCIP_STATE_ROOT) is required, since the artifact and the audit line land under it.
+Wraps ``vision_tools.overlay_reference_grid``: square cells of ``--tile-size`` native pixels named
+spreadsheet-style ('A1' top-left), rendered in yellow on the cells' true boundaries. Every response
+echoes the full grid geometry (tile_size, overlap, cols, rows, width, height): pass the echoed
+tile_size/overlap to ``segment_prompt(grid_cells=...)`` so a cell name resolves against the grid
+that was actually rendered. --project (or $TCIP_STATE_ROOT) is required, since the artifact and the
+audit line land under it.
 
 Usage:
     tcip overlay-reference-grid --image <path> --project <platform_root> \

@@ -28,11 +28,9 @@ def _entry(name: str, checkpoint_path: str, sha256: str, size: int, **overrides)
     return base
 
 
-def test_on_disk_conform_wraps_and_respells_directly_against_the_extracted_files(tmp_path: Path):
-    """Exercised directly against loose files on disk rather than through the storage seam (a
-    staging tree is always loose files, whatever backend the process is bound to): a bare
-    top-level array wraps into the entries mapping and a stored path that resolves under root
-    with a matching digest respells relative.
+def test_on_disk_conform_respells_directly_against_the_extracted_files(tmp_path: Path):
+    """Exercised directly against loose files on disk rather than through the storage seam: a
+    stored path that resolves under root with a matching digest respells relative.
     """
     import hashlib
 
@@ -44,42 +42,13 @@ def test_on_disk_conform_wraps_and_respells_directly_against_the_extracted_files
     ckpt.write_bytes(content)
     digest = hashlib.sha256(content).hexdigest()
     index_path = registry_index_path(root)
-    index_path.write_text(json.dumps([_entry("m", str(ckpt), digest, len(content))]))
+    index_path.write_text(json.dumps({"entries": [_entry("m", str(ckpt), digest, len(content))]}))
 
     lines = conform_registry_paths_on_disk(root)
 
-    assert any("wrapped the registry index" in ln for ln in lines)
     assert any("respelled" in ln for ln in lines)
     raw = json.loads(index_path.read_text())
-    assert "schema_version" not in raw
     assert raw["entries"][0]["checkpoint_path"] == ".tcip/models/m.pt"
-
-
-def test_on_disk_conform_reports_dropping_a_stray_schema_version_two(tmp_path: Path):
-    """An index already an entries mapping (no bare-array wrap needed) but still carrying a
-    dev-era ``schema_version: 2`` must earn its own outcome line, not be folded silently into
-    "already wrapped, nothing to say": the field vanishes from the write either way, so the drop
-    is the only trace this conform's caller has that anything changed.
-    """
-    import hashlib
-
-    root = tmp_path / "proj"
-    ckpt_dir = root / ".tcip" / "models"
-    ckpt_dir.mkdir(parents=True)
-    content = b"stray schema_version two weights"
-    ckpt = ckpt_dir / "m.pt"
-    ckpt.write_bytes(content)
-    digest = hashlib.sha256(content).hexdigest()
-    index_path = registry_index_path(root)
-    entry = _entry("m", ".tcip/models/m.pt", digest, len(content))
-    index_path.write_text(json.dumps({"schema_version": 2, "entries": [entry]}))
-
-    lines = conform_registry_paths_on_disk(root)
-
-    assert any("dropped a stray schema_version" in ln for ln in lines)
-    assert not any("wrapped the registry index" in ln for ln in lines)
-    raw = json.loads(index_path.read_text())
-    assert "schema_version" not in raw
 
 
 def test_on_disk_conform_over_an_absent_registry_answers_nothing(tmp_path: Path):

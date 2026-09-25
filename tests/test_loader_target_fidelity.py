@@ -85,7 +85,7 @@ def test_a_seam_fragment_is_not_indexed_as_a_whole_object(tmp_path, sliver_frac)
     assert ds.min_box_size > 0
     per_tile = {(e["tile_x"], e["tile_y"]): len(e["boxes"]) for e in ds._index}
     assert len(per_tile) == 20, "five tile columns by four rows over the 300x200 frame"
-    assert per_tile[(64, 0)] == 1, "the stub beside the neighbouring box was indexed as an object"
+    assert per_tile[(64, 0)] == 1, "the stub beside the neighboring box was indexed as an object"
     assert per_tile[(192, 64)] == 0, "the stub above the seam was indexed as an object"
     assert per_tile[(0, 0)] == 1, "the clipped box's own tile lost it"
     assert per_tile[(192, 128)] == 1, "the clipped box's own tile lost it"

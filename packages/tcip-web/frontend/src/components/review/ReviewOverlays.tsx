@@ -69,10 +69,10 @@ export const ReviewOverlays = memo(function ReviewOverlays({
   const lw = 1 / (scale || 1);
   const ACTIVE_COLOR = colors.active;
 
-  /** A filled square at the prediction's own top-left corner, in the detection's outcome colour
-   *  (never the active colour, so the mark keeps its meaning on the focused detection): the
-   *  channel that names a rule pre-admitted this box, distinct from colour, dash and fill. A
-   *  thin white outline keeps it legible on a same-colour corner (a tp's box coinciding with its
+  /** A filled square at the prediction's own top-left corner, in the detection's outcome color
+   *  (never the active color, so the mark keeps its meaning on the focused detection): the
+   *  channel that names a rule pre-admitted this box, distinct from color, dash and fill. A
+   *  thin white outline keeps it legible on a same-color corner (a tp's box coinciding with its
    *  ground truth, or under the focused dash) where the fill alone would vanish into the box. */
   const drawAdmittedMark = (geom: ReviewGeom | null, outcome: string): ReactNode => {
     const anchor = geom ? markAnchor(geom) : null;

@@ -144,7 +144,7 @@ def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path, monkeypatch)
     result = run_inference_verified(ckpt, images_dir=str(images_dir), device="cpu", tile=False)
 
     assert "error" not in result
-    assert result["image_count"] == 1  # one grouped capture, never 2 raw sibling band files
+    assert len(result["results"]) == 1  # one grouped capture, never 2 raw sibling band files
     assert result["results"][0]["image"].endswith("capture_001.bandgroup")
 
 

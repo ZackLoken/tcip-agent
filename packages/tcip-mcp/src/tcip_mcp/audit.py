@@ -1,40 +1,14 @@
 """Audit logging decorator for the platform's mutating doors.
 
-Every call of a mutating door is logged with timestamp, tool name, arguments, status, and
-duration, into an append-only store: entries are added, never rewritten. The bound backend
-decides where those entries sit, one JSON object per line on the file backend. A door that only
-reads (a status poll, a listing, a document served back) carries no decorator and leaves no line:
-the log records what changed state, never what looked at it. ``status`` is ``ok`` when the body
-returned and ``exception`` when it raised; a body that answered a refusal dict returned, and its
-line reads ``ok`` like any other return, the refusal itself being the caller's answer.
+Every call of a mutating door is logged with timestamp, tool name, arguments, status, and duration,
+into an append-only store scoped to a dataset, a project, or the platform (:func:`audit_log_key`).
+``status`` is ``ok`` when the body returned and ``exception`` when it raised. :func:`audited`
+decorates a door; :func:`record_event` / :func:`record_event_or_raise` record for code that is not
+one. An entry's ``scope`` field names the resolved root the entry was filed under when the writer
+passed one (:func:`_stamp_scope`).
 
-One store, ``audit_log``, addressed under three kinds of root: the platform audit log (the
-pinned platform state root, the default when a caller names no other), a dataset's audit log
-(a record that travels with the data), and a project's audit log (a record that is the project's
-own, such as a delivery or a plant-mapping build). A project that has been adopted (see
-``project_paths``) coincides with the platform root, so from then on a project's own log and the
-platform log are one file at one key. Each event is written once, to the one log its scope names:
-:func:`audited` for the platform's mutating doors (the MCP tools in ``tools/`` that change state,
-plus the script-invoked doors demoted from them, keeping ``@audited`` without registering), which name the argument
-carrying the dataset or project location with ``@audited(scope_arg=...)``, and :func:`record_event`
-/ :func:`record_event_or_raise` for code that is neither.
-
-An entry's ``scope`` field is stamped by :func:`_stamp_scope`, the one implementation
-:func:`audited`, :func:`record_event` and :func:`record_event_or_raise` all resolve a caller's
-scope through. When present, ``scope`` names the resolved root the entry was filed under, which
-can be a dataset's, a project's, or the platform's own (a writer that resolved and passed the
-platform root stamps it; presence never means non-platform); its absence means the writer took
-the platform default, never that the line is non-platform. Every line carries no
-``schema_version`` (the frozen version 1: absence is the store's own lazy default, held to it by
-``frozen-formats.json``). Three disclosures for a moved log: a stamped absolute scope travels in a
-shared or imported archive exactly as the log body's other absolute paths already do, unredacted;
-``scope`` records a write-time fact, never a location claim, so a relocated import's lines still
-name the exporting machine's own root and nothing reconciles them against where the archive now
-sits; and a project archive is provenance-preserving, not path-sanitized, by the same standing
-choice.
-
-An append the decorator cannot make is a refusal, not a warning, because the append runs after
-the tool body: see :class:`MutationCommittedWithoutAuditLine`.
+An append the decorator cannot make is a refusal, not a warning, because the append runs after the
+tool body: see :class:`MutationCommittedWithoutAuditLine`.
 """
 
 from __future__ import annotations
@@ -80,17 +54,7 @@ _REDACTED_FIELDS = {"api_key", "token", "password", "secret"}
 
 
 class MutationCommittedWithoutAuditLine(RuntimeError):
-    """A tool body ran to completion and the audit entry that follows it did not land.
-
-    Raised rather than warned because of where the append sits: :func:`audited` writes the entry
-    after the body returns, so by the time an append can fail the state change is already on
-    disk. A caller told only by a log line would read the missing entry as a failed call and
-    blind-retry a mutation that already happened, and the trail would then say neither ran. The
-    caller is told instead, and told which of the two happened.
-
-    The conservative behavior, warning and continuing with no audit line, is the removal of the
-    single ``raise`` of this error in :func:`audited`; the warning beside it stands either way.
-    """
+    """A tool body ran to completion and the audit entry that follows it did not land."""
 
     def __init__(self, tool: str, cause: BaseException) -> None:
         super().__init__(
@@ -105,12 +69,8 @@ class AuditEntryNotWritten(RuntimeError):
     """A call outside ``@audited`` recorded a mutation that already committed, and the append for
     it failed.
 
-    :func:`record_event_or_raise`'s sibling to :class:`MutationCommittedWithoutAuditLine`: the
-    same "committed and unrecorded, do not blind-retry" shape, for a call site with no tool body
-    of its own to have already run. A sibling rather than a subclass, since the two guard different
-    things (a decorator's own control flow around a body versus an explicit call with none), not
-    one specialization of the other. ``arguments`` are the facts the unwritten line would have
-    carried, so a caller can name what committed without reading it back.
+    ``arguments`` are the facts the unwritten line would have carried, so a caller can name what
+    committed without reading it back.
     """
 
     def __init__(self, tool: str, cause: BaseException, *,
@@ -134,11 +94,8 @@ def audit_log_key(scope: str | Path | None = None) -> Key:
 
     ``scope`` is the root the event's subject hangs off: a dataset root when the event changed a
     record that travels with the data, a project root when the event is the project's own outward
-    action or another project's door files a line about it there (a dependent project's own
-    ``dependency_pending_removal`` line, filed by the door removing what it depends on rather
-    than by the dependent itself), the platform root (the default) for everything else. One store
-    under three kinds of root; writers address it through :func:`_stamp_scope`, readers through
-    this function directly, and both are one resolution because the stamper calls this.
+    action or another project's door files a line about it there, the platform root (the default)
+    for everything else.
     """
     root = Path(scope) if scope is not None else platform_audit_scope()
     return Key(AUDIT_LOG_STORE, str(root.resolve()), _AUDIT_PARTS)
@@ -146,13 +103,11 @@ def audit_log_key(scope: str | Path | None = None) -> Key:
 
 def _stamp_scope(entry: dict[str, Any], scope: str | Path | None) -> Key:
     """Stamp ``entry`` from the same Key :func:`audit_log_key` builds, and return that Key: the
-    stamped scope is the key's own root, so the root a line names and the root its Key addresses
-    are one resolved value by construction, never two separately-resolved answers.
+    stamped scope is the key's own root.
 
     ``entry["scope"]`` is stamped only when the caller passed a scope; the value may equal the
-    platform root (a project door after adoption, or a writer that resolved the platform root
-    itself and passed it), so the field means the writer named its root explicitly, and its
-    absence means the writer took the platform default, never that the line is non-platform.
+    platform root, so its absence means the writer took the platform default, never that the line
+    is non-platform.
     """
     key = audit_log_key(scope)
     if scope is not None:
@@ -174,15 +129,11 @@ def _entry(
     status: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """The one shape every audit entry starts from: the clock, the tool, its redacted arguments,
-    a caller's extra facts, and the agent identity this process established at its MCP handshake,
-    if it has one.
+    """The shape every audit entry starts from: the clock, the tool, its redacted arguments, a
+    caller's extra facts, and the agent identity this process established at its MCP handshake, if
+    it has one.
 
-    Shared by the decorator and both plain emitters, so the stamp an entry carries is decided in
-    one place; an emitter building its own dict would be the drift this module exists to prevent.
-    The identity keys are reserved: a caller's ``extra`` cannot set one, whether to override the
-    handshake's value or to supply one the handshake left absent, so an entry's identity is only
-    ever what the handshake established.
+    The identity keys are reserved: a caller's ``extra`` cannot set one.
     """
     entry: dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -197,28 +148,7 @@ def _entry(
 
 
 def _write_entry(entry: dict[str, Any], scope: str | Path | None = None) -> None:
-    """Append one audit entry to the log ``scope`` names (lock-guarded + fsync'd), never raising.
-
-    What :func:`record_event` writes through, for the emitters that are not MCP tools. The GUI's
-    mutation routes all reach :func:`record_event_or_raise` instead, so a lost line there raises
-    rather than staying silent: most through each route's own helper via
-    ``routes/audit_gap.record_committed``, ``routes/coverage.py``'s three routes (grid zoom,
-    coverage, completeness) through their own ``_audit_or_answer_500`` answering a marked 500,
-    and the two confirmation routes in
-    ``routes/results.py`` calling it inline and downgrading a failed append to an
-    ``audit_warning`` on an otherwise ordinary 200. Its remaining callers, named by function
-    rather than by line (a docstring
-    citation the architecture checker does not anchor rots the next time the function moves):
-    the training envelope's open event (``run_training_envelope``) brackets a body already
-    running in a background thread; its close event (``run_training_envelope``, in a ``finally``)
-    does record after its own mutation, ``_finalize_run`` having already closed the run and
-    registered the model, so a lost line there shows in the trail as a run with no close event
-    rather than as a raised error. The worker's crash path
-    (``subprocess_worker.run``) likewise records after its own ``update_status`` call: a lost
-    line there shows as a run marked failed with no matching event, never a raised error, since
-    the crash it names already happened. The web ``phenology_measurement`` view
-    (``routes/results.py``) is a read, with no mutation to leave unrecorded.
-    """
+    """Append one audit entry to the log ``scope`` names (lock-guarded + fsync'd), never raising."""
     try:
         append(_stamp_scope(entry, scope), entry)
     except Exception:
@@ -234,13 +164,8 @@ def record_event(
     scope: str | Path | None = None,
     **extra: Any,
 ) -> None:
-    """Emit one audit line for code that isn't an ``@audited`` MCP tool.
-
-    The one writer of an audit entry: the training envelope brackets the training body (which
-    runs in a background thread, outside any ``@audited`` MCP call) with open/close events,
-    and the GUI routes record the mutations a browser request makes, so a consumer reads one
-    stream rather than several files written by several spellings. ``scope`` names the root
-    whose log the entry belongs in (see :func:`audit_log_key`). Best-effort, never raises.
+    """Emit one best-effort audit line for a caller that is not an ``@audited`` door. ``scope``
+    names the root whose log the entry belongs in (see :func:`audit_log_key`). Never raises.
     """
     _write_entry(_entry(tool, arguments, status, extra), scope)
 
@@ -256,10 +181,9 @@ def record_event_or_raise(
     """Emit one audit line for a confirmation write that must not land silently unrecorded.
 
     Identical shape to :func:`record_event`, for a caller recording a mutation it already made,
-    with no tool body of its own for ``@audited`` to bracket. Unlike :func:`record_event`, a
-    failed append is not swallowed: it is raised as :class:`AuditEntryNotWritten`, naming the
-    mutation that already committed and is now unrecorded, so the caller cannot blind-retry it.
-    :func:`record_event`'s own callers are unaffected; this is a new sibling, not a change to it.
+    with no tool body of its own for ``@audited`` to bracket. A failed append is raised as
+    :class:`AuditEntryNotWritten`, naming the mutation that already committed and is now
+    unrecorded.
     """
     entry = _entry(tool, arguments, status, extra)
     try:
@@ -272,17 +196,13 @@ def record_event_or_raise(
 def dataset_scope_of(value: Any) -> Path | None:
     """The dataset root ``value`` names, or ``None`` when it does not name one.
 
-    ``value`` is whatever a tool's declared scope argument holds: a path inside the dataset
-    (an annotations or predictions directory, an image), or the dataset root itself. A path
-    under a canonical dataset segment resolves through :func:`dataset_layout.dataset_root_of`,
-    the one resolver for that shape. A path that is not under one counts as a root only when it
-    is a directory that actually carries dataset or project state (its own ``.tcip/``, or a
-    subject registry current or retired: a dataset still holding the pre-rename document is
-    dataset-root evidence too, and this reads nothing from either file to decide it); anything
-    else is not evidence of a dataset and yields ``None``, since a guessed root would file the
-    event against a log nobody can trace it back to.
+    ``value`` is whatever a tool's declared scope argument holds: a path inside the dataset (an
+    annotations or predictions directory, an image), or the dataset root itself. A path under a
+    canonical dataset segment resolves through :func:`dataset_layout.dataset_root_of`. A path that
+    is not under one counts as a root only when it is a directory that actually carries dataset or
+    project state (its own ``.tcip/`` or a subject registry); anything else yields ``None``.
     """
-    from tcip_mcp.dataset_layout import RETIRED_SUBJECTS_FILENAME, SUBJECTS_FILENAME, dataset_root_of
+    from tcip_mcp.dataset_layout import SUBJECTS_FILENAME, dataset_root_of
 
     if not isinstance(value, (str, Path)) or not str(value):
         return None
@@ -291,7 +211,6 @@ def dataset_scope_of(value: Any) -> Path | None:
         candidate = Path(value)
         if not candidate.is_dir() or not (
             (candidate / ".tcip").is_dir() or (candidate / SUBJECTS_FILENAME).is_file()
-            or (candidate / RETIRED_SUBJECTS_FILENAME).is_file()
         ):
             return None
         root = candidate
@@ -307,46 +226,31 @@ def audited(
 ) -> Callable:
     """Decorator that logs a mutating door's calls to the audit log their scope names.
 
-    Only a function that changes state carries it: a pure read (a status poll a browser drives
-    once a second, a listing, a knowledge document served back) leaves no line, so the log is
-    the record of mutations and nothing else. Bare (``@audited``), a call is a platform event
-    and is recorded in the platform's log.
-    ``@audited(scope_arg=...)`` declares which of the tool's own arguments carries the dataset
-    or project location the call mutates a record of: that argument's value is resolved at call
-    time (:func:`dataset_scope_of` for a dataset argument; a project argument resolves as the
-    root it names, which after adoption can equal the platform root), and the entry goes to that
-    root's log carrying a ``scope`` field naming it. An argument that is ``None``, absent, or
-    resolves to no root leaves the call a platform event. Exactly one log receives each entry.
+    Bare (``@audited``), a call is a platform event and is recorded in the platform's log.
+    ``@audited(scope_arg=...)`` declares which of the tool's own arguments carries the dataset or
+    project location the call mutates a record of: that argument's value is resolved at call time
+    (:func:`dataset_scope_of` for a dataset argument; a project argument resolves as the root it
+    names), and the entry goes to that root's log carrying a ``scope`` field naming it. An argument
+    that is ``None``, absent, or resolves to no root leaves the call a platform event. Exactly one
+    log receives each entry.
 
-    ``scope_via`` is for a tool whose body canonicalizes that argument before writing through it,
-    such as a relative output path anchored to the platform state root rather than the process
-    cwd. Pass the resolver the body itself calls, so the scope is resolved along the identical
-    path the write takes; a second implementation of that anchoring would file entries at a
-    location the tool never wrote to.
+    ``scope_via`` is the resolver the body itself calls to canonicalize that argument before
+    writing through it, so the scope is resolved along the identical path the write takes.
 
-    The one statement of what a call leaves: a body that returns leaves its ``ok`` line, except a
-    body returning a dict whose ``"error"`` is set, the refusal every tool returns, leaves no line,
-    since a refusal is no act and whatever such a call committed first is recorded by the library
-    that committed it; a body that raises leaves its ``exception`` line.
+    A body that returns leaves its ``ok`` line, except a body returning a dict whose ``"error"`` is
+    set, which leaves no line; a body that raises leaves its ``exception`` line.
 
-    Three outcomes an entry can fail on, and what each does, all decided by the fact that the
-    entry is written after the body:
+    Outcomes when the entry cannot be written:
 
-    - The body returned and the append failed: :class:`MutationCommittedWithoutAuditLine`, so a
-      caller cannot mistake a committed mutation for one it may retry.
-    - The body raised: the body's exception is what the caller gets. The failed audit-of-failure
-      is logged and never allowed to mask it.
-    - A declared scope argument was given and resolving it raised: the call refuses, since
-      rerouting a declared dataset event to the platform log would file it where nobody tracing
-      that dataset looks. A resolution that cleanly answers "no dataset" is not a failure, and
-      leaves the call a platform event as documented above.
+    - The body returned and the append failed: :class:`MutationCommittedWithoutAuditLine`.
+    - The body raised: the body's exception is what the caller gets; the failed audit-of-failure is
+      logged.
+    - A declared scope argument was given and resolving it raised: the call refuses. A resolution
+      that cleanly answers "no dataset" leaves the call a platform event.
 
-    Binds positional args to their parameter names so a caller that invokes the
-    tool positionally, e.g. the training relaunch route, which calls ``launch_training(config)``
-    rather than by keyword, is recorded with the same fidelity as a keyword
-    call, instead of writing an empty ``arguments`` dict. Binding failures never abort the call this
-    decorator only observes; they fall back to the kwargs-only record, and to the platform log,
-    since the scope argument's value is not recoverable from a failed binding.
+    Binds positional args to their parameter names, so a positional call is recorded like a keyword
+    one. Binding failures never abort the call; they fall back to the kwargs-only record, and to
+    the platform log.
     """
     def decorate(func: Callable) -> Callable:
         sig = inspect.signature(func)

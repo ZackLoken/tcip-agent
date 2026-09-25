@@ -1,6 +1,6 @@
-"""build_mapping's own four nn_tolerance_m sources: derived from the grid pitch, the fallback
-constant when the layout carries too few positioned plants to derive one, a stated value at or
-under the derived cap, and a stated value above it capped down to it.
+"""build_mapping's nn_tolerance_m: derived from the grid pitch, a stated value at or under the
+derived cap, a stated value above it capped down to it, and a refusal naming the parameter when
+nothing is stated and the layout carries too few positioned plants to derive one.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-    NN_TOLERANCE_METERS,
+    NoMatchTolerance,
     build_mapping,
     grid_pitch_m,
     read_plant_csvs,
@@ -63,11 +63,17 @@ def test_derives_from_grid_pitch_when_unstated(tmp_path: Path) -> None:
     assert build.nn_tolerance_m["value"] == pytest.approx(pitch / 6)
 
 
-def test_falls_back_when_fewer_than_two_plants_have_positions(tmp_path: Path) -> None:
-    build, pitch = _build(tmp_path, PLANTS[:1], None)
+def test_refuses_naming_the_parameter_when_fewer_than_two_plants_have_positions(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(NoMatchTolerance, match="nn_tolerance_m"):
+        _build(tmp_path, PLANTS[:1], None)
+
+
+def test_honors_a_stated_value_when_the_layout_derives_no_pitch(tmp_path: Path) -> None:
+    build, pitch = _build(tmp_path, PLANTS[:1], 2.0)
     assert pitch == 0.0
-    assert build.nn_tolerance_m["source"] == "fallback"
-    assert build.nn_tolerance_m["value"] == pytest.approx(NN_TOLERANCE_METERS)
+    assert build.nn_tolerance_m == {"value": 2.0, "source": "stated"}
 
 
 def test_honors_a_stated_value_at_or_under_the_cap(tmp_path: Path) -> None:

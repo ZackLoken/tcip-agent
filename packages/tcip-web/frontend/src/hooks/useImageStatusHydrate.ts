@@ -41,7 +41,7 @@ export function useImageStatusHydrate({
   useEffect(() => {
     useStore.getState().clearStaleMarks();
     if (!projectRoot || !subject || imageList.length === 0) return;
-    let cancelled = false;
+    let canceled = false;
     void (async () => {
       try {
         const saved = await subjectsApi.loadImageStatus(
@@ -70,7 +70,7 @@ export function useImageStatusHydrate({
         const staleMarks = Array.from(
           new Set([...contentStale, ...imageList.filter((name) => digestStale.has(name))]),
         ).sort();
-        if (cancelled) return;
+        if (canceled) return;
         if (derivedRes.unreadable.length) {
           useStore
             .getState()
@@ -94,7 +94,7 @@ export function useImageStatusHydrate({
             useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
           }
         }
-        if (cancelled) return;
+        if (canceled) return;
         useStore.getState().setImageStatuses({ ...stored, ...writes }, staleMarks);
         if (staleMarks.length) {
           useStore
@@ -105,13 +105,13 @@ export function useImageStatusHydrate({
             );
         }
       } catch (err) {
-        if (cancelled) return;
+        if (canceled) return;
         console.warn("image-status hydrate failed", err);
         useStore.getState().pushToast("Could not load the image status for this project.");
       }
     })();
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, [projectRoot, subject, datasetRoot, datasetDate, annotationsDir, imageList]);
 }

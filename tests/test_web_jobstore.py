@@ -85,14 +85,6 @@ def test_persist_grouped_writes_state_that_reads_back(tmp_path, monkeypatch):
     assert load("inference_jobs") == [{"job_id": "a", "status": "completed", "platform_root": root}]
 
 
-def test_persist_grouped_refuses_a_summary_carrying_no_platform_root(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    from tcip_web.jobstore import persist_grouped
-
-    with pytest.raises(ValueError, match="no operator door"):
-        persist_grouped("inference_jobs", [{"job_id": "a", "status": "completed"}])
-
-
 def test_load_roundtrips_persist_grouped_and_defaults_empty(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tcip_web.jobstore import load, persist_grouped
@@ -132,10 +124,10 @@ def test_inference_rehydrate_marks_dead_jobs_interrupted(tmp_path, monkeypatch):
 
     root = str(tmp_path.resolve())
     persist_grouped("inference_jobs", [
-        {"job_id": "done", "status": "completed", "done": 3, "total": 3,
-         "images_dir": "i", "output_dir": "o", "error": None, "platform_root": root},
-        {"job_id": "dead", "status": "running", "done": 1, "total": 5,
-         "images_dir": "i", "output_dir": "o", "error": None, "platform_root": root},
+        inference._summary(inference.InferenceJob(
+            job_id=job_id, checkpoint_path="c", images_dir="i", output_dir="o", status=status,
+            done=done, total=total, platform_root=root))
+        for job_id, status, done, total in (("done", "completed", 3, 3), ("dead", "running", 1, 5))
     ])
     inference._registry.jobs.clear()
     try:
@@ -154,9 +146,9 @@ def test_tuning_rehydrate_marks_dead_sweeps_interrupted(tmp_path, monkeypatch):
 
     root = str(tmp_path.resolve())
     persist_grouped("hpo_sweeps", [
-        {"sweep_id": "s_done", "status": "completed", "error": None, "has_result": True,
+        {"sweep_id": "s_done", "status": "completed", "error": None,
          "platform_root": root},
-        {"sweep_id": "s_dead", "status": "running", "error": None, "has_result": False,
+        {"sweep_id": "s_dead", "status": "running", "error": None,
          "platform_root": root},
     ])
     tuning._registry.jobs.clear()
@@ -234,9 +226,7 @@ def test_inference_rehydrate_restores_dropped_nonpositive_boxes(tmp_path, monkey
 
 def test_inference_rehydrate_restores_audit_warning(tmp_path, monkeypatch):
     """``audit_warning`` is written on the persisted row (``_summary``) beside ``warning``, a
-    distinct fact; a restart must serve the recorded gap back, not the field's own null default,
-    and an entry with no such key at all (the pre-existing shape) reads back as null, not a
-    missing-attribute error."""
+    distinct fact; a restart must serve the recorded gap back, not the field's own null default."""
     from tcip_web.routes import inference
 
     job = inference.InferenceJob(
@@ -415,7 +405,7 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, monkeypatch):
 
     res = cancel_job("j1", EmptyBodyPayload())
     assert res["cancel_requested"] is True and job.cancel_event.is_set()
-    # Cancelling a job that was never registered is a client-side miss, so it has to reach the
+    # Canceling a job that was never registered is a client-side miss, so it has to reach the
     # browser as a 404 and name the id: any other status reads to the caller as a real outcome.
     from fastapi import HTTPException
 
@@ -425,12 +415,12 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, monkeypatch):
     assert "missing" in cancel_miss.value.detail
 
     _worker(job)  # honors the pre-set cancel
-    assert job.status == "cancelled"
+    assert job.status == "canceled"
     assert job.done == 0
 
     from tcip_web.jobstore import load
     data = load("inference_jobs")
-    assert any(s["job_id"] == "j1" and s["status"] == "cancelled" for s in data)
+    assert any(s["job_id"] == "j1" and s["status"] == "canceled" for s in data)
 
 
 def test_inference_worker_sets_audit_warning_on_a_lost_audit_line(tmp_path, monkeypatch):
@@ -601,7 +591,7 @@ def test_inference_stream_final_frame_never_precedes_the_audit_attempt(tmp_path,
 
 
 def test_inference_cancel_reaches_a_job_launched_under_a_previous_root(tmp_path, monkeypatch):
-    """Cancelling a run one launched is legitimate work: a repin to another project must not
+    """Canceling a run one launched is legitimate work: a repin to another project must not
     make the job invisible to cancel or stream, only to the list route."""
     from fastapi import HTTPException
 
@@ -647,9 +637,9 @@ def test_rehydrate_bounds_the_whole_dict_across_every_root_it_adopts(tmp_path, m
         proj = workspace.project_path(name)
         (proj / ".tcip").mkdir(parents=True)
         summaries = [
-            {"job_id": f"{name}-{i}", "status": "completed", "done": 1, "total": 1,
-             "images_dir": "i", "output_dir": "o", "error": None,
-             "platform_root": str(proj.resolve())}
+            inference._summary(inference.InferenceJob(
+                job_id=f"{name}-{i}", checkpoint_path="c", images_dir="i", output_dir="o",
+                status="completed", done=1, total=1, platform_root=str(proj.resolve())))
             for i in range(MAX_JOBS)
         ]
         persist_to(job_registry_key("inference_jobs", root=proj), summaries)
@@ -753,8 +743,8 @@ def test_job_registry_register_get_persist_rehydrate_match_the_module_shape(tmp_
     def to_summary(j):
         return {"job_id": j.job_id, "status": j.status, "platform_root": j.platform_root}
 
-    def factory(s, root):
-        return J(s["job_id"], status=s["status"], platform_root=s.get("platform_root") or root)
+    def factory(s):
+        return J(s["job_id"], status=s["status"], platform_root=s["platform_root"])
 
     registry = JobRegistry("inference_jobs", to_summary=to_summary, from_summary=factory)
     job = J("j1", status="completed")
@@ -781,7 +771,7 @@ def test_job_registry_named_registry_refuses_without_a_summary_codec():
     with pytest.raises(ValueError):
         JobRegistry("inference_jobs", to_summary=lambda j: {})
     with pytest.raises(ValueError):
-        JobRegistry("inference_jobs", from_summary=lambda s, root: s)
+        JobRegistry("inference_jobs", from_summary=lambda s: s)
 
 
 def test_job_registry_persist_is_a_no_op_for_an_unpersisted_registry(tmp_path, monkeypatch):
@@ -830,59 +820,13 @@ def test_registered_job_summaries_persist_byte_stable_through_job_registry(tmp_p
     registry = JobRegistry(
         "inference_jobs",
         to_summary=lambda j: {k: getattr(j, k) for k in summary},
-        from_summary=lambda s, root: s,
+        from_summary=lambda s: s,
     )
     registry.jobs["a"] = job
     registry.persist()
 
     after = load("inference_jobs")
     assert after == before
-
-
-def test_inference_rehydrate_refuses_a_summary_carrying_no_platform_root(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.web_client import job_registry_key
-    from tcip_store import replace
-    from tcip_web.routes import inference
-
-    replace(job_registry_key("inference_jobs"), [
-        {"job_id": "old", "status": "completed", "done": 1, "total": 1,
-         "images_dir": "i", "output_dir": "o", "error": None},
-    ], expect=None)
-
-    with pytest.raises(ValueError, match="no operator door"):
-        inference.rehydrate_for_current_root()
-
-
-def test_review_priority_queue_rehydrate_refuses_a_summary_carrying_no_platform_root(
-    tmp_path, monkeypatch,
-):
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.web_client import job_registry_key
-    from tcip_store import replace
-    from tcip_web.routes import review
-
-    replace(job_registry_key("review_priority_jobs"), [
-        {"job_id": "old", "status": "completed", "error": None, "queue": [],
-         "total_candidates": 0, "reviewed_skipped": 0, "marks_unresolved": None},
-    ], expect=None)
-
-    with pytest.raises(ValueError, match="no operator door"):
-        review.rehydrate_for_current_root()
-
-
-def test_tuning_rehydrate_refuses_a_summary_carrying_no_platform_root(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.web_client import job_registry_key
-    from tcip_store import replace
-    from tcip_web.routes import tuning
-
-    replace(job_registry_key("hpo_sweeps"), [
-        {"sweep_id": "old", "status": "completed", "error": None, "has_result": False},
-    ], expect=None)
-
-    with pytest.raises(ValueError, match="no operator door"):
-        tuning.rehydrate_for_current_root()
 
 
 def test_review_priority_queue_summaries_persist_byte_stable_through_job_registry(
@@ -935,43 +879,3 @@ def test_tuning_sweep_summaries_persist_byte_stable_through_job_registry(tmp_pat
     assert load("hpo_sweeps") == before
 
 
-def test_job_registry_persist_refuses_to_overwrite_a_document_it_could_not_fully_rehydrate(
-    tmp_path, monkeypatch,
-):
-    """A rehydrate refused by one bad summary must not let ordinary new-job registration
-    silently rewrite the document down to just the summaries that did load: the stored document
-    survives byte-for-byte, since no operator door repairs the missing key in place."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.web_client import job_registry_key
-    from tcip_store import read, replace
-    from tcip_web.jobstore import JobRegistry, require_platform_root
-
-    root = str(tmp_path.resolve())
-    (tmp_path / ".tcip").mkdir(exist_ok=True)
-
-    class J:
-        def __init__(self, job_id, status, platform_root):
-            self.job_id = job_id
-            self.status = status
-            self.platform_root = platform_root
-
-    def to_summary(j):
-        return {"job_id": j.job_id, "status": j.status, "platform_root": j.platform_root}
-
-    def from_summary(s, root):
-        return J(s["job_id"], s["status"], require_platform_root(s, name="inference_jobs", root=root))
-
-    stored = [
-        {"job_id": "old-good", "status": "completed", "platform_root": root},
-        {"job_id": "old-bad", "status": "completed"},
-    ]
-    replace(job_registry_key("inference_jobs"), stored, expect=None)
-
-    registry = JobRegistry("inference_jobs", to_summary=to_summary, from_summary=from_summary)
-    with pytest.raises(ValueError, match="no operator door"):
-        registry.rehydrate()
-    assert read(job_registry_key("inference_jobs"), default=[]) == stored
-
-    with pytest.raises(ValueError, match="no operator door"):
-        registry.register("new", J("new", "pending", root), job_root=root)
-    assert read(job_registry_key("inference_jobs"), default=[]) == stored

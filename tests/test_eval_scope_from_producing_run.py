@@ -58,13 +58,13 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
 
     captured: dict = {}
 
-    def _fake(ckpt, model, loader, device, task, output_dir, **kw):
+    def _fake(ckpt, model, loader, device, output_dir, **kw):
         captured["ds"] = loader.dataset
         return {"tiled": False, "eval_regime": "tile-level"}
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
 
-    res = evaluate_model(run.id, str(images_dir), str(labels_dir), task="detection")
+    res = evaluate_model(run.id, str(images_dir), str(labels_dir))
     assert "error" not in res, res
 
     dataset = captured["ds"]
@@ -92,13 +92,13 @@ def test_a_caller_supplied_subject_still_wins_over_the_runs_own(
 
     captured: dict = {}
 
-    def _fake(ckpt, model, loader, device, task, output_dir, **kw):
+    def _fake(ckpt, model, loader, device, output_dir, **kw):
         captured["ds"] = loader.dataset
         return {"tiled": False, "eval_regime": "tile-level"}
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
 
-    res = evaluate_model(run.id, str(images_dir), str(labels_dir), task="detection",
+    res = evaluate_model(run.id, str(images_dir), str(labels_dir),
                          subject="bud")
     assert "error" not in res, res
     assert captured["ds"].subject == "bud"

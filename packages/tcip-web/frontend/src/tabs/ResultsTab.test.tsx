@@ -314,7 +314,7 @@ describe("ResultsTab evidence gate", () => {
     fireEvent.click(screen.getByRole("button", { name: /curves csv/i }));
 
     await waitFor(() => expect(downloadCsv).toHaveBeenCalled());
-    expect(downloadCsv.mock.calls[0][0].acknowledgement).toEqual({
+    expect(downloadCsv.mock.calls[0][0].acknowledgment).toEqual({
       reason: "calibration is not ready yet",
     });
   });
@@ -915,7 +915,7 @@ describe("ResultsTab trait-spec authoring statements", () => {
       milestone_fractions: [0.5, 0.95],
       milestone_on: "positive_fraction",
       majority_milestone: "95per",
-      majority_provisional: true,
+      crossing_unconfirmed: true,
       phenology_prefix: "subj_a_col",
       majority_label: "most subject_a open",
       count_objective: "count_unbiased",
@@ -1228,7 +1228,7 @@ describe("ResultsTab delivery events (read-only)", () => {
     output_path: "C:/proj/results_export/subject_a_phenology.csv",
     output_sha256: "a".repeat(64),
     acknowledged_by: null,
-    acknowledgement_reason: null,
+    acknowledgment_reason: null,
     documents: {
       "C:/data/predictions/baseline/2026-01-01": {
         ok: true,
@@ -1249,6 +1249,8 @@ describe("ResultsTab delivery events (read-only)", () => {
         note: "no stamp on this bucket",
       },
     },
+    document_reconciliations: {},
+    dimension_reconciliations: {},
     produced_at: "2026-02-03T12:00:00+00:00",
     plant_mapping: null,
     superseded: null,
@@ -1283,7 +1285,7 @@ describe("ResultsTab delivery events (read-only)", () => {
       ...DELIVERY_EVENT,
       event_id: "acked",
       acknowledged_by: "user:breeder",
-      acknowledgement_reason: "calibration is not ready yet",
+      acknowledgment_reason: "calibration is not ready yet",
     };
     vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [acknowledged] });
 
@@ -1547,11 +1549,6 @@ describe("ResultsTab plant-mapping build: match-tolerance phrase", () => {
     await buildWithTolerance({ value: 0.75, source: "grid_pitch" });
     expect(await screen.findByText(/0\.75 m/)).toBeInTheDocument();
     expect(screen.getByText(/derived from the plot's grid pitch/)).toBeInTheDocument();
-  });
-
-  it("names the fallback for source fallback", async () => {
-    await buildWithTolerance({ value: 10, source: "fallback" });
-    expect(await screen.findByText(/fewer than two plants had positions/)).toBeInTheDocument();
   });
 
   it("names the stated value for source stated", async () => {
@@ -1990,7 +1987,7 @@ describe("ResultsTab count export", () => {
     expect(errorText.textContent).toContain(message);
   });
 
-  it("decodes a delivery_gate refusal and offers the acknowledgement controls", async () => {
+  it("decodes a delivery_gate refusal and offers the acknowledgment controls", async () => {
     useStore.setState({ user: "breeder" });
     const panel = await renderCountPanel();
     vi.spyOn(resultsApi, "downloadCountCsv").mockRejectedValue(

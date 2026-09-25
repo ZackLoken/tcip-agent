@@ -1,32 +1,11 @@
 """SessionStart ritual hook: inject the session-start ritual directive naming the active project.
 
-Fast by design (Anthropic guidance: SessionStart hooks must be quick, they are for context
-loading, never slow work). It spawns no subprocess and imports nothing costly: it reads the
-active-project marker through the platform's own storage seam (``tcip_mcp.workspace``,
-``tcip_store.binding``), not a loose file that the default backend may not even write, and
-injects an ``additionalContext`` directive telling the agent to run the ritual
-(``load_project_memory``/``inspect_project``/``tcip doctor``) as its first actions. A shell hook
-has no MCP client, so it cannot run those calls itself, it makes them salient and dynamic, which
-prose in a large always-on file does not. ``additionalContext`` lands as a fresh session-start
-reminder at the top of context.
+Reads the active-project marker through the platform's own storage seam (``tcip_mcp.workspace``,
+``tcip_store.binding``) with a short lock timeout, and injects an ``additionalContext`` directive
+telling the agent to run the ritual (``load_project_memory``/``inspect_project``/``tcip doctor``)
+as its first actions. It spawns no subprocess and counts no reports or retrospectives.
 
-This hook does not count open reports or retrospectives: the seam's own enumeration of those two
-record kinds lives in ``tcip_mcp.tools.meta_tools``, and importing it pulls in the MCP server's
-full tool registration (several seconds, not the milliseconds a SessionStart hook gets), a budget
-this module's own import test guards. Calling ``tcip_store.keys`` directly needs a store
-descriptor only that same module registers, so doing it here without that import would mean
-re-declaring the report/retrospective file layout a second time, the drift this platform's own
-seam discipline forbids. This hook only names the active project.
-
-Measured on this machine: importing ``tcip_mcp.workspace`` (plus the ``tcip_store`` imports it
-pulls in) costs ~57ms; a fresh process that imports it, binds the backend and reads the marker
-costs 152-168ms wall clock over five runs, against 38-42ms for this hook with no seam read and
-22-28ms for a bare interpreter. The lock timeout below is held well under the store's own
-30-second default for the same reason: a store a writer is holding must not hold session start
-for anywhere near that long.
-
-Best-effort: every path swallows its error and exits 0. A session-start hook must never break the
-session, and must never slow its spawn.
+Best-effort: every path swallows its error and exits 0.
 """
 
 from __future__ import annotations
@@ -47,20 +26,16 @@ def _resolve_active() -> tuple[str, str]:
       - ``"active"``: the marker names a project whose ``.tcip`` exists; ``detail`` is its root.
       - ``"none"``: no marker is set; ``detail`` is empty.
       - ``"unreadable"``: the marker could not be read (a store refusal, e.g. a workspace still
-        holding loose files under the database backend) or names a project that is not
-        adoptable; ``detail`` is ``workspace.marker_problem``'s own text, the one place that
-        tells those cases apart, rather than this hook's own re-encoding of the same fold.
+        holding loose files under the database backend) or names a project that is not adoptable;
+        ``detail`` is ``workspace.marker_problem``'s own text.
       - ``"import_error"``: the platform packages could not be imported from this interpreter;
         ``detail`` is the error.
 
-    Imports ``tcip_mcp.workspace`` and ``tcip_store.binding`` inside this function, never at
-    module scope, so an interpreter that cannot see those packages still reports that fact
-    rather than a false no-project state. Binds the environment's own backend (the same rule
-    every process follows) with a short lock timeout, and reads the marker with
-    ``create=False`` so the read cannot create the workspace root itself. It can still touch
-    disk under an existing ``<workspace>/.tcip/``: opening a database not yet in WAL mode
-    creates that directory (if absent) and a lock file there, and the short timeout bounds
-    only that transition lock, not SQLite's own busy wait on a database another writer holds.
+    Binds the environment's own backend with a short lock timeout, and reads the marker with
+    ``create=False`` so the read cannot create the workspace root itself. It can still touch disk
+    under an existing ``<workspace>/.tcip/``: opening a database not yet in WAL mode creates that
+    directory (if absent) and a lock file there, and the short timeout bounds only that transition
+    lock, not SQLite's own busy wait on a database another writer holds.
     """
     try:
         from tcip_mcp import workspace
@@ -85,18 +60,9 @@ def _resolve_active() -> tuple[str, str]:
 
 
 def _root_divergence_note(proj: str) -> str:
-    """States it when this session's inherited platform-state root names a different
-    project than the active marker: that env var is a copy taken when this terminal was
-    spawned, not a live read (this module's own docstring already calls it unreliable on its
-    own), so the two can disagree until a process that binds from the marker converges.
-
-    The web backend already binds from the marker at its own startup; an MCP server this
-    terminal launches binds from it too, but only the next time that process starts, so a
-    server already running in this terminal keeps the root it inherited until then, and
-    ``inspect_project`` reports that server's actual disagreement in the meantime.
-
-    Reads the variable's name from ``tcip_mcp.project_paths.ENV_VAR`` rather than a literal,
-    since that module is what declares it.
+    """A note when this session's inherited platform-state root
+    (``tcip_mcp.project_paths.ENV_VAR``) names a different project than the active marker; ``None``
+    when they agree.
     """
     from tcip_mcp.project_paths import ENV_VAR
 

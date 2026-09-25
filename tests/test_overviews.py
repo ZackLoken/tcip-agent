@@ -90,7 +90,7 @@ def test_build_refuses_to_rebuild_over_a_valid_sidecar(tmp_path: Path) -> None:
         build_overviews(path)
 
 
-def test_a_cancelled_build_deletes_the_sidecar(tmp_path: Path) -> None:
+def test_a_canceled_build_deletes_the_sidecar(tmp_path: Path) -> None:
     """An interrupted build must not leave a sidecar behind: its unwritten tiles would read back
     as silent zeros on the next open."""
     path, _ = _wide_raster(tmp_path)

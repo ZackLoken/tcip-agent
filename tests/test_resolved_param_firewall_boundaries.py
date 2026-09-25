@@ -25,7 +25,7 @@ from tcip_mcp.pipelines.resolution import (
 )
 
 
-def test_a_resolved_param_cannot_be_relabelled_in_place():
+def test_a_resolved_param_cannot_be_relabeled_in_place():
     """Rewriting the validity fields of a param that already exists would let an unvalidated
     threshold be laundered into a validated one without producing a new resolution at all, so the
     fields refuse assignment and the firewall keeps holding afterwards."""

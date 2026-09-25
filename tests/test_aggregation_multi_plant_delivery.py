@@ -133,7 +133,7 @@ def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
 
 
 def test_continuous_summary_reports_the_mean_beside_its_own_standard_deviation():
-    """A row labelled as a mean carries the arithmetic mean, and the deviation beside it is the
+    """A row labeled as a mean carries the arithmetic mean, and the deviation beside it is the
     sample standard deviation of the same values. Skewed samples, where the mean and the median are
     several units apart, are the ordinary case for a count-derived continuous trait, and a median
     reported under a mean's label travels with a deviation that describes a different estimator."""

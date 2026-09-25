@@ -20,7 +20,7 @@ export type { Banner } from "@/store/slices/banners";
 export type { CanvasState } from "@/store/slices/canvas";
 export type { Toast } from "@/store/slices/toasts";
 
-/** One slice file per labelled group of store state; each slice's own file is the full read of
+/** One slice file per labeled group of store state; each slice's own file is the full read of
  *  that group's state and actions, and this create() call is the only place they compose.
  *  Cross-group reads/writes (e.g. setReviewDetectionIdx writing into gui.review) still work:
  *  every slice shares the same set/get, since they all belong to this one store. */
@@ -38,5 +38,5 @@ export const useStore = create<AppState>()((...a) => ({
   ...createUserSlice(...a),
 }));
 
-// Re-export so callers derive a subject's colour from one source (GUI-local, name-hashed).
+// Re-export so callers derive a subject's color from one source (GUI-local, name-hashed).
 export { subjectColor };

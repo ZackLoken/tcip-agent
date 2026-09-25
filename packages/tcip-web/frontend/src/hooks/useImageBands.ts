@@ -16,17 +16,17 @@ export function useImageBands(imagePath: string | null): ImageBandsResponse | nu
       setResult(null);
       return;
     }
-    let cancelled = false;
+    let canceled = false;
     void api.images.bands(imagePath).then(
       (res) => {
-        if (!cancelled) setResult(res);
+        if (!canceled) setResult(res);
       },
       () => {
-        if (!cancelled) setResult(null);
+        if (!canceled) setResult(null);
       },
     );
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, [imagePath]);
 

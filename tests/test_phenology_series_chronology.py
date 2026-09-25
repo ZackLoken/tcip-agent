@@ -87,7 +87,7 @@ def _write_classifier_sidecar(dir_path: Path, *, dataset_root: Path, trait: str)
 
 
 def test_crossing_uses_the_bracket_that_exists_in_time():
-    """The crossing is read off the two neighbouring captures that straddle the target in calendar
+    """The crossing is read off the two neighboring captures that straddle the target in calendar
     order, so its date lies inside that bracket and the gap it reports is the real number of days
     between them. A series whose fraction order differs from its capture order (the ordinary case
     for a noisy curve) must not be re-ordered into a bracket that never happened.

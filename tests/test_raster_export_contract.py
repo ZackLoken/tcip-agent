@@ -84,6 +84,66 @@ def test_the_whole_mosaic_pass_runs_at_the_cap_its_sidecar_records(tmp_path, mon
     assert not [r for r in rows if r["tool"] == "run_inference"]
 
 
+def test_the_raster_door_runs_at_the_operating_point_its_prepared_pass_states(tmp_path):
+    """The raster door prepares its pass through the one preparation every pass shares, so the
+    operating point it stamps is the one that preparation states for the same checkpoint and the
+    same stated values."""
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.resolution import DEFAULT_TILE_BATCH_SIZE
+    from tcip_mcp.tools.inference_tools import _prepare_pass, run_inference
+    from tests.test_block_calibration import _build_experiment
+
+    exp = _build_experiment(tmp_path)
+    result = run_inference(
+        exp["checkpoint_path"], output_dir=str(tmp_path / "preds"),
+        raster_path=str(exp["raster_path"]), conf_threshold=0.0, tile_size=TILE, overlap=0.2)
+    assert "error" not in result, result
+
+    prepared = _prepare_pass(
+        load_registered_checkpoint(exp["checkpoint_path"]), images_dir=None, conf_threshold=0.0,
+        device=None, tile=True, tile_size=TILE, overlap=0.2, global_nms_iou=None,
+        max_dets=None, postprocess="nms", experiment_id=None,
+        tile_batch_size=DEFAULT_TILE_BATCH_SIZE)
+    assert not isinstance(prepared, str), prepared
+    assert result["operating_point"] == prepared.raw_result()["operating_point"]
+
+
+def test_a_redirected_raster_export_names_the_bucket_the_caller_asked_for(tmp_path):
+    """A raster export into a bucket carrying a review verdict lands in the next free variant,
+    and the response names the bucket the caller asked for beside the one written."""
+    import json
+
+    from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
+    from tcip_annotation.state import Annotation, BBox
+
+    from tcip_mcp.prediction_buckets import bucket_key_of
+    from tcip_mcp.tools.inference_tools import run_inference
+    from tests.test_block_calibration import _build_experiment
+
+    exp = _build_experiment(tmp_path)
+    reviewed = exp["root"] / "predictions" / "preds"
+    reviewed.mkdir(parents=True)
+    (reviewed / "mosaic.json").write_text(
+        json.dumps({"image": "mosaic", "width": 64, "height": 64, "annotations": []}),
+        encoding="utf-8")
+    engine = ReviewEngine(exp["root"] / ".tcip" / "state")
+    ctx = ReviewContext(img_name="mosaic.tif", img_width=64, img_height=64,
+                        preds=[Annotation(subject="bud", geometry=BBox(10.0, 10.0, 30.0, 30.0),
+                                          score=0.9)])
+    det = ReviewDetection(det_type="fp", class_name="bud", conf=0.9, iou=None, gt_idx=None,
+                          pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
+    engine.record_detection_action(bucket_key_of(reviewed), det, ctx, action="accepted")
+
+    result = run_inference(
+        exp["checkpoint_path"], output_dir=str(reviewed), raster_path=str(exp["raster_path"]),
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2)
+
+    assert "error" not in result, result
+    assert result["bucket_redirected"] is True
+    assert Path(result["output_dir"]).name == "preds@r2"
+    assert result["requested_output_dir"] == str(reviewed)
+
+
 def test_a_raster_trait_export_with_no_reserved_region_names_the_audited_delivery_door(tmp_path):
     """The refusal is the agent's only in-code pointer to the door that can still deliver a
     calibrated per-plant count for a mosaic, so it names that tool rather than only the missing

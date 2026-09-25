@@ -249,7 +249,7 @@ def test_a_uint8_raster_serves_its_own_pixels_with_no_stretch(client: TestClient
 
 def test_a_uint16_raster_serves_on_its_dtypes_full_scale(client: TestClient, tmp_path: Path):
     """A plain serve of a non-uint8 raster divides by the dtype's own ceiling, so a half-scale
-    frame reads as mid-grey. A PIL decode of a single-band uint16 frame clips every value at 255
+    frame reads as mid-gray. A PIL decode of a single-band uint16 frame clips every value at 255
     instead, which renders the same raster white."""
     path = tmp_path / "half.tif"
     tifffile.imwrite(str(path), np.full((32, 40), 32768, dtype=np.uint16))
@@ -299,8 +299,8 @@ def test_a_non_positive_float_bands_display_bounds_are_its_own_divisor(
     assert _display_bounds(resp) == [[0.0, float(-arr.min())]]
 
 
-def test_a_single_band_raster_serves_as_replicated_grey(client: TestClient, tmp_path: Path):
-    path = tmp_path / "grey.tif"
+def test_a_single_band_raster_serves_as_replicated_gray(client: TestClient, tmp_path: Path):
+    path = tmp_path / "gray.tif"
     tifffile.imwrite(str(path), np.full((32, 40), 90, dtype=np.uint8))
     served = _served(client.get("/api/images", params={"path": str(path)}))
     assert served.shape == (32, 40, 3)
@@ -624,7 +624,7 @@ def test_a_region_of_an_oversized_raster_reports_the_overview_scale_it_stretched
 def test_get_bands_carries_the_band_interpretations_a_backend_reads(
     client: TestClient, tmp_path: Path,
 ):
-    """What each band holds is the fact that tells an ordinary colour frame from a four-band
+    """What each band holds is the fact that tells an ordinary color frame from a four-band
     capture; it is reported where a backend reads it and absent where nothing does."""
     rgba = tmp_path / "rgba.tif"
     tifffile.imwrite(str(rgba), np.zeros((32, 40, 4), dtype=np.uint8), rowsperstrip=8)
